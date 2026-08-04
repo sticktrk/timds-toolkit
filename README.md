@@ -94,11 +94,12 @@ the `.timds/cache/` directory.
 
 ## Upgrade a client repository
 
-An operator selects the approved release line. Refresh the package and lockfile first,
-then synchronize the repository-local skill and installation record:
+An operator selects the approved release line. Keep the manifest on `0.1.x`,
+refresh its resolved lockfile version, and then synchronize the repository-local
+skill and installation record:
 
 ```bash
-npm install --save-dev @dtconcepts/timds@0.1.x
+npm update @dtconcepts/timds
 npm run timds -- upgrade --root .
 npm run timds -- doctor
 npm run timds -- check

@@ -28,10 +28,11 @@ surface. Work only in the client repository supplied by the user.
 
 1. Use the bounded release line selected by the user or DT Concepts operator.
    For the current package use `0.1.x`; never select unbounded `latest`.
-2. From repository root run:
+2. Confirm `devDependencies["@dtconcepts/timds"]` remains `"0.1.x"`, then run
+   from repository root:
 
 ```bash
-npm install --save-dev @dtconcepts/timds@0.1.x
+npm update @dtconcepts/timds
 npm run timds -- upgrade --root .
 ```
 

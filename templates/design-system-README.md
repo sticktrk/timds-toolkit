@@ -80,11 +80,12 @@ Submission creates a draft pull request. A DT Concepts operator separately contr
 
 The repository selects the bounded TimDS `0.1.x` package line and commits its
 resolved lockfile. It keeps only the repository-local AI skill and installation
-record in Git. When a DT Concepts operator selects a new release line, update
-the package and lockfile before syncing those managed files:
+record in Git. When a DT Concepts operator selects a new release line, keep the
+package requirement at `0.1.x` and update the resolved lockfile before syncing
+those managed files:
 
 ```bash
-npm install --save-dev @dtconcepts/timds@0.1.x
+npm update @dtconcepts/timds
 npm run timds -- upgrade --root .
 ```
 
