@@ -12,14 +12,19 @@ npm run pack:check
 ```
 
 Keep package releases cohesive. A version must carry compatible CLI behavior,
-templates, and skill instructions together. Update or add upgrade tests whenever
-managed-file behavior changes.
+templates, workflows, and skill instructions together. Update or add tests
+whenever managed-file behavior changes.
 
-The upgrade boundary is intentionally limited to `.timds/cli/`,
-`.timds/installation.json`, and
-`.agents/skills/timds-edit-design-system/`. Never extend it to authored source,
-`timds.json`, tokens, `media.json`, framework configuration, or generated
-artifacts without an explicit contract change and migration plan.
+Client repositories select the bounded `0.1.x` package line, commit the exact
+resolved lockfile, and execute `npm run timds --`. They do not vendor package
+source. The managed repository-local boundary is
+`.timds/installation.json`, `.agents/skills/timds-edit-design-system/`, and the
+legacy `.timds/cli/` tree only while removing it during migration. Package and
+lockfile changes select the resolved package release.
+
+Never extend upgrades to authored source, `timds.json`, tokens, `media.json`,
+framework configuration, documentation, or generated artifacts without an
+explicit contract change and migration plan.
 
 Never add client-specific content, credentials, private URLs, access tokens,
 media, or portal-internal implementation to this public repository or npm

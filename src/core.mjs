@@ -471,11 +471,16 @@ async function toolkitPackageIdentity(root = packageRoot) {
   return { name, version };
 }
 
+function toolkitReleaseRange(identity) {
+  const [major, minor] = identity.version.split(".");
+  return `${major}.${minor}.x`;
+}
+
 function managedToolkitPaths(repoRoot, designSystemRoot) {
   return {
     installationPath: path.join(designSystemRoot, ".timds", "installation.json"),
+    legacyVendoredCliRoot: path.join(designSystemRoot, ".timds", "cli"),
     skillDestination: path.join(repoRoot, ".agents", "skills", "timds-edit-design-system"),
-    vendoredCliRoot: path.join(designSystemRoot, ".timds", "cli"),
   };
 }
 
@@ -496,26 +501,15 @@ async function readInstalledToolkitVersion(designSystemRoot) {
 }
 
 async function installManagedToolkit({ designSystemRoot, repoRoot, replace = false }) {
-  await toolkitPackageIdentity();
+  const installedIdentity = await toolkitPackageIdentity();
   const paths = managedToolkitPaths(repoRoot, designSystemRoot);
-  if (path.resolve(packageRoot) !== path.resolve(paths.vendoredCliRoot)) {
-    if (replace) await fs.rm(paths.vendoredCliRoot, { force: true, recursive: true });
-    await fs.mkdir(paths.vendoredCliRoot, { recursive: true });
-    for (const directory of ["bin", "scripts", "skills", "src", "templates"]) {
-      await copyDirectory(path.join(packageRoot, directory), path.join(paths.vendoredCliRoot, directory), { overwrite: replace });
-    }
-    const vendoredPackageJson = path.join(paths.vendoredCliRoot, "package.json");
-    if (replace || !existsSync(vendoredPackageJson)) {
-      await fs.copyFile(path.join(packageRoot, "package.json"), vendoredPackageJson);
-    }
-  }
+  if (replace) await fs.rm(paths.legacyVendoredCliRoot, { force: true, recursive: true });
   if (replace) await fs.rm(paths.skillDestination, { force: true, recursive: true });
   await copyDirectory(
     path.join(packageRoot, "skills", "timds-edit-design-system"),
     paths.skillDestination,
     { overwrite: replace },
   );
-  const installedIdentity = await toolkitPackageIdentity(paths.vendoredCliRoot);
   await fs.mkdir(path.dirname(paths.installationPath), { recursive: true });
   await fs.writeFile(
     paths.installationPath,
@@ -525,10 +519,52 @@ async function installManagedToolkit({ designSystemRoot, repoRoot, replace = fal
   return { ...paths, package: installedIdentity };
 }
 
+async function configurePackageManifest(repoRoot, identity, { force = false } = {}) {
+  const packagePath = path.join(repoRoot, "package.json");
+  const packageJson = await readJsonObject(packagePath, "repository package.json", { required: false });
+  if (!Object.keys(packageJson).length) {
+    packageJson.name = slug(path.basename(repoRoot));
+    packageJson.version = "0.0.0";
+    packageJson.private = true;
+  }
+  const releaseRange = toolkitReleaseRange(identity);
+  const currentDependency = packageJson.devDependencies?.[identity.name] ?? packageJson.dependencies?.[identity.name];
+  const currentScript = packageJson.scripts?.timds;
+  if (!force && currentDependency && currentDependency !== releaseRange) {
+    throw new Error(`${identity.name} is already declared as ${currentDependency}; rerun init with --force to select ${releaseRange}`);
+  }
+  if (!force && currentScript && currentScript !== "timds") {
+    throw new Error(`package.json scripts.timds is already ${JSON.stringify(currentScript)}; rerun init with --force to replace it`);
+  }
+  if (packageJson.dependencies?.[identity.name]) {
+    delete packageJson.dependencies[identity.name];
+    if (!Object.keys(packageJson.dependencies).length) delete packageJson.dependencies;
+  }
+  packageJson.scripts = { ...(packageJson.scripts || {}), timds: "timds" };
+  packageJson.devDependencies = { ...(packageJson.devDependencies || {}), [identity.name]: releaseRange };
+  await fs.writeFile(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`, "utf8");
+  return packagePath;
+}
+
+async function requirePinnedToolkitDependency(repoRoot, identity) {
+  const packageJson = await readJsonObject(path.join(repoRoot, "package.json"), "repository package.json");
+  const selectedVersion = packageJson.devDependencies?.[identity.name] ?? packageJson.dependencies?.[identity.name];
+  const releaseRange = toolkitReleaseRange(identity);
+  if (selectedVersion !== releaseRange) {
+    throw new Error(`package.json must select the ${releaseRange} ${identity.name} release line; run npm install --save-dev ${identity.name}@${releaseRange}`);
+  }
+  if (packageJson.scripts?.timds !== "timds") {
+    throw new Error('package.json scripts.timds must be exactly "timds"');
+  }
+}
+
 export async function initializeRepository(repoRootInput, { force = false, standalone = false } = {}) {
   const repoRoot = await findRepositoryRoot(repoRootInput);
   const designSystemRoot = standalone ? repoRoot : path.join(repoRoot, "design-system");
   const created = [];
+  const identity = await toolkitPackageIdentity();
+  const packagePath = await configurePackageManifest(repoRoot, identity, { force });
+  created.push(packagePath);
   await fs.mkdir(designSystemRoot, { recursive: true });
   const repoSlug = slug(path.basename(repoRoot));
   await writeIfMissing(
@@ -546,7 +582,7 @@ export async function initializeRepository(repoRootInput, { force = false, stand
     (await template("design-system-gitignore")).trim(),
     created,
   );
-  const cliCommand = standalone ? "node .timds/cli/bin/timds.mjs" : "node design-system/.timds/cli/bin/timds.mjs";
+  const cliCommand = "npm run timds --";
   const contractDescription = standalone
     ? "This repository is the editable source and static publication contract for TimDS."
     : "This root `design-system/` directory is the editable source and static publication contract for TimDS.";
@@ -569,12 +605,11 @@ export async function initializeRepository(repoRootInput, { force = false, stand
 
 export async function upgradeRepository(repoRootInput, { force = false } = {}) {
   const workspace = await loadWorkspace(repoRootInput);
+  const identity = await toolkitPackageIdentity();
+  await requirePinnedToolkitDependency(workspace.repoRoot, identity);
   const paths = managedToolkitPaths(workspace.repoRoot, workspace.designSystemRoot);
-  if (path.resolve(packageRoot) === path.resolve(paths.vendoredCliRoot)) {
-    throw new Error(`Run npx --yes ${toolkitPackageName}@<version> upgrade to install a newer TimDS release`);
-  }
   if (!force) {
-    const pathspecs = [paths.vendoredCliRoot, paths.installationPath, paths.skillDestination]
+    const pathspecs = [paths.legacyVendoredCliRoot, paths.installationPath, paths.skillDestination]
       .map((filePath) => path.relative(workspace.repoRoot, filePath).split(path.sep).join("/"));
     const status = await git(["status", "--porcelain", "--untracked-files=all", "--", ...pathspecs], workspace.repoRoot);
     if (status.stdout.trim()) {
@@ -705,6 +740,7 @@ export async function runCli(argv) {
     output(`Agent skill: ${result.skillDestination}`);
     output(`Toolkit: ${result.package.name}@${result.package.version}`);
     if (result.created.length) output(`Created ${result.created.length} contract files.`);
+    output("Run npm install, then npm run timds -- doctor.");
     return result;
   }
   if (command === "upgrade") {

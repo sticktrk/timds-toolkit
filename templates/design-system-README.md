@@ -5,9 +5,13 @@ __CONTRACT_DESCRIPTION__
 ## First local run
 
 ```bash
+npm ci
 __TIMDS_CLI__ doctor
 __TIMDS_CLI__ dev
 ```
+
+`dev` starts the repository-declared authoring server. `preview` serves the
+exact generated static artifact that TimDS will publish.
 
 Declare framework-specific local commands as argument arrays in `timds.json`:
 
@@ -74,14 +78,17 @@ Submission creates a draft pull request. A DT Concepts operator separately contr
 
 ## Toolkit upgrades
 
-The repository pins a vendored TimDS CLI and AI skill so normal local work does
-not depend on a global install. When a DT Concepts operator selects a new
-release, upgrade those managed files with:
+The repository selects the bounded TimDS `0.1.x` package line and commits its
+resolved lockfile. It keeps only the repository-local AI skill and installation
+record in Git. When a DT Concepts operator selects a new release line, update
+the package and lockfile before syncing those managed files:
 
 ```bash
-npx --yes @dtconcepts/timds@VERSION upgrade --root .
+npm install --save-dev @dtconcepts/timds@0.1.x
+npm run timds -- upgrade --root .
 ```
 
-The upgrade does not rewrite this Design System's manifest, tokens, media
-catalog, authored source, framework configuration, or generated artifact.
-Review and commit the resulting tooling diff before using it elsewhere.
+The CLI runs from `node_modules`; do not commit that directory or a copied
+`.timds/cli` tree. The upgrade does not rewrite this Design System's manifest,
+tokens, media catalog, authored source, framework configuration, documentation,
+or generated artifact. Review and commit the tooling diff separately.
