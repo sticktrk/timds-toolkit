@@ -476,6 +476,15 @@ function toolkitReleaseRange(identity) {
   return `${major}.${minor}.x`;
 }
 
+function acceptsToolkitReleaseRange(selectedVersion, identity) {
+  const releaseRange = toolkitReleaseRange(identity);
+  if (selectedVersion === releaseRange) return true;
+  const [major, minor, patch] = identity.version.split(".").map(Number);
+  if (major !== 0) return false;
+  const npmCaret = String(selectedVersion || "").match(/^\^0\.(\d+)\.(\d+)$/);
+  return Boolean(npmCaret && Number(npmCaret[1]) === minor && Number(npmCaret[2]) <= patch);
+}
+
 function managedToolkitPaths(repoRoot, designSystemRoot) {
   return {
     installationPath: path.join(designSystemRoot, ".timds", "installation.json"),
@@ -550,8 +559,8 @@ async function requirePinnedToolkitDependency(repoRoot, identity) {
   const packageJson = await readJsonObject(path.join(repoRoot, "package.json"), "repository package.json");
   const selectedVersion = packageJson.devDependencies?.[identity.name] ?? packageJson.dependencies?.[identity.name];
   const releaseRange = toolkitReleaseRange(identity);
-  if (selectedVersion !== releaseRange) {
-    throw new Error(`package.json must select the ${releaseRange} ${identity.name} release line; run npm install --save-dev ${identity.name}@${releaseRange}`);
+  if (!acceptsToolkitReleaseRange(selectedVersion, identity)) {
+    throw new Error(`package.json must select the ${releaseRange} ${identity.name} release line; keep devDependencies[${JSON.stringify(identity.name)}] at ${JSON.stringify(releaseRange)} and run npm update ${identity.name}`);
   }
   if (packageJson.scripts?.timds !== "timds") {
     throw new Error('package.json scripts.timds must be exactly "timds"');

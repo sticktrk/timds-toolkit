@@ -51,11 +51,12 @@ Treat the approved `@dtconcepts/timds` release line and resolved lockfile,
 workspace commands, and `.github/workflows/timds-design-system.yml` as
 execution policy. Do not change them during ordinary design work.
 
-When a DT Concepts operator selects a toolkit release line, update the package
-and lockfile and then synchronize the managed skill and installation record:
+When a DT Concepts operator selects a toolkit release line, keep the package
+requirement at `0.1.x`, update the resolved lockfile, and then synchronize the
+managed skill and installation record:
 
 ```bash
-npm install --save-dev @dtconcepts/timds@0.1.x
+npm update @dtconcepts/timds
 npm run timds -- upgrade --root .
 ```
 

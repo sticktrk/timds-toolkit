@@ -251,7 +251,7 @@ test("initializes guarded tooling without overwriting the design-system manifest
   await assert.rejects(fs.access(path.join(repoRoot, "design-system", ".timds", "cli")), /ENOENT/);
   assert.deepEqual(
     JSON.parse(await fs.readFile(path.join(repoRoot, "design-system", ".timds", "installation.json"), "utf8")),
-    { name: "@dtconcepts/timds", schemaVersion: 1, version: "0.1.1" },
+    { name: "@dtconcepts/timds", schemaVersion: 1, version: "0.1.2" },
   );
   await fs.access(path.join(repoRoot, "design-system", "media.json"));
   assert.match(await fs.readFile(path.join(repoRoot, "design-system", ".gitignore"), "utf8"), /\.timds\/cache/);
@@ -267,6 +267,10 @@ test("upgrades clean managed records and removes the legacy vendored CLI", async
     schemaVersion: 1,
     version: "0.1.0",
   });
+  const packagePath = path.join(repoRoot, "package.json");
+  const packageJson = JSON.parse(await fs.readFile(packagePath, "utf8"));
+  packageJson.devDependencies["@dtconcepts/timds"] = "^0.1.1";
+  await writeJson(packagePath, packageJson);
   const stalePath = path.join(repoRoot, "design-system", ".timds", "cli", "src", "removed-in-new-release.mjs");
   await fs.mkdir(path.dirname(stalePath), { recursive: true });
   await fs.writeFile(stalePath, "export default true;\n", "utf8");
@@ -281,7 +285,7 @@ test("upgrades clean managed records and removes the legacy vendored CLI", async
 
   const result = await upgradeRepository(repoRoot);
   assert.equal(result.previousVersion, "0.1.0");
-  assert.equal(result.package.version, "0.1.1");
+  assert.equal(result.package.version, "0.1.2");
   await assert.rejects(fs.access(stalePath), /ENOENT/);
   assert.equal(await fs.readFile(skillPath, "utf8"), originalSkill);
 });
