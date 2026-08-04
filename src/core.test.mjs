@@ -245,26 +245,32 @@ test("initializes guarded tooling without overwriting the design-system manifest
   const result = await initializeRepository(repoRoot);
   assert.equal(await fs.readFile(manifestPath, "utf8"), before);
   assert.equal(result.repoRoot, repoRoot);
-  await fs.access(path.join(repoRoot, "design-system", ".timds", "cli", "bin", "timds.mjs"));
+  const packageJson = JSON.parse(await fs.readFile(path.join(repoRoot, "package.json"), "utf8"));
+  assert.equal(packageJson.devDependencies["@dtconcepts/timds"], "0.1.x");
+  assert.equal(packageJson.scripts.timds, "timds");
+  await assert.rejects(fs.access(path.join(repoRoot, "design-system", ".timds", "cli")), /ENOENT/);
   assert.deepEqual(
     JSON.parse(await fs.readFile(path.join(repoRoot, "design-system", ".timds", "installation.json"), "utf8")),
-    { name: "@dtconcepts/timds", schemaVersion: 1, version: "0.1.0" },
+    { name: "@dtconcepts/timds", schemaVersion: 1, version: "0.1.1" },
   );
   await fs.access(path.join(repoRoot, "design-system", "media.json"));
   assert.match(await fs.readFile(path.join(repoRoot, "design-system", ".gitignore"), "utf8"), /\.timds\/cache/);
   await fs.access(path.join(repoRoot, ".agents", "skills", "timds-edit-design-system", "SKILL.md"));
   await fs.access(path.join(repoRoot, ".github", "workflows", "timds-design-system.yml"));
-  execFileSync(
-    "node",
-    [path.join(repoRoot, "design-system", ".timds", "cli", "bin", "timds.mjs"), "doctor", "--root", repoRoot],
-    { cwd: repoRoot, stdio: "ignore" },
-  );
 });
 
-test("upgrades only clean package-managed CLI and skill trees", async (t) => {
+test("upgrades clean managed records and removes the legacy vendored CLI", async (t) => {
   const repoRoot = await createDesignSystemRepo(t);
   await initializeRepository(repoRoot);
-  execFileSync("git", ["add", "design-system/.timds", ".agents/skills/timds-edit-design-system"], { cwd: repoRoot });
+  await writeJson(path.join(repoRoot, "design-system", ".timds", "installation.json"), {
+    name: "@dtconcepts/timds",
+    schemaVersion: 1,
+    version: "0.1.0",
+  });
+  const stalePath = path.join(repoRoot, "design-system", ".timds", "cli", "src", "removed-in-new-release.mjs");
+  await fs.mkdir(path.dirname(stalePath), { recursive: true });
+  await fs.writeFile(stalePath, "export default true;\n", "utf8");
+  execFileSync("git", ["add", "design-system/.timds", ".agents/skills/timds-edit-design-system", "package.json"], { cwd: repoRoot });
   execFileSync("git", ["commit", "-m", "Install TimDS toolkit"], { cwd: repoRoot, stdio: "ignore" });
 
   const skillPath = path.join(repoRoot, ".agents", "skills", "timds-edit-design-system", "SKILL.md");
@@ -273,21 +279,29 @@ test("upgrades only clean package-managed CLI and skill trees", async (t) => {
   await assert.rejects(upgradeRepository(repoRoot), /locally modified TimDS tooling/);
   await fs.writeFile(skillPath, originalSkill, "utf8");
 
-  const stalePath = path.join(repoRoot, "design-system", ".timds", "cli", "src", "removed-in-new-release.mjs");
-  await fs.writeFile(stalePath, "export default true;\n", "utf8");
-  execFileSync("git", ["add", "design-system/.timds/cli/src/removed-in-new-release.mjs"], { cwd: repoRoot });
-  execFileSync("git", ["commit", "-m", "Track stale managed file"], { cwd: repoRoot, stdio: "ignore" });
-
   const result = await upgradeRepository(repoRoot);
   assert.equal(result.previousVersion, "0.1.0");
-  assert.equal(result.package.version, "0.1.0");
+  assert.equal(result.package.version, "0.1.1");
   await assert.rejects(fs.access(stalePath), /ENOENT/);
   assert.equal(await fs.readFile(skillPath, "utf8"), originalSkill);
+});
+
+test("refuses an upgrade outside the running toolkit release line", async (t) => {
+  const repoRoot = await createDesignSystemRepo(t);
+  await initializeRepository(repoRoot);
+  const packagePath = path.join(repoRoot, "package.json");
+  const packageJson = JSON.parse(await fs.readFile(packagePath, "utf8"));
+  packageJson.devDependencies["@dtconcepts/timds"] = "0.2.x";
+  await writeJson(packagePath, packageJson);
+  await assert.rejects(upgradeRepository(repoRoot), /must select the 0\.1\.x @dtconcepts\/timds release line/);
 });
 
 test("plans a scoped branch and draft pull request without writing during submit dry-run", async (t) => {
   const repoRoot = await createDesignSystemRepo(t);
   await initializeRepository(repoRoot);
+  execFileSync("git", ["add", "--all"], { cwd: repoRoot });
+  execFileSync("git", ["commit", "-m", "Initialize TimDS"], { cwd: repoRoot, stdio: "ignore" });
+  await writeJson(path.join(repoRoot, "design-system", "tokens.json"), { color: { gold: "#a8863f" } });
   const result = await submitWorkspace(repoRoot, "Darken marketing gold", { dryRun: true, noBuild: true });
   assert.equal(result.branch, "design-system/darken-marketing-gold");
   assert.deepEqual(result.commands[0], ["git", "switch", "-c", "design-system/darken-marketing-gold"]);
@@ -308,7 +322,7 @@ test("refuses submit when unrelated repository files are dirty", async (t) => {
 test("refuses submit from a branch containing unrelated committed changes", async (t) => {
   const repoRoot = await createDesignSystemRepo(t);
   await initializeRepository(repoRoot);
-  execFileSync("git", ["add", "design-system", ".agents", ".github"], { cwd: repoRoot });
+  execFileSync("git", ["add", "design-system", ".agents", ".github", "package.json"], { cwd: repoRoot });
   execFileSync("git", ["commit", "-m", "Initialize TimDS"], { cwd: repoRoot, stdio: "ignore" });
   execFileSync("git", ["switch", "-c", "feature/unrelated"], { cwd: repoRoot, stdio: "ignore" });
   await fs.writeFile(path.join(repoRoot, "README.md"), "Unrelated committed work\n", "utf8");
@@ -377,9 +391,12 @@ test("initializes the reusable standalone repository shape", async (t) => {
   assert.equal(result.designSystemRoot, repoRoot);
   const manifest = JSON.parse(await fs.readFile(path.join(repoRoot, "timds.json"), "utf8"));
   assert.equal(manifest.artifact.publishRef, "timds-published");
-  assert.match(await fs.readFile(path.join(repoRoot, "README.md"), "utf8"), /node \.timds\/cli\/bin\/timds\.mjs/);
+  assert.match(await fs.readFile(path.join(repoRoot, "README.md"), "utf8"), /npm run timds -- doctor/);
+  const packageJson = JSON.parse(await fs.readFile(path.join(repoRoot, "package.json"), "utf8"));
+  assert.equal(packageJson.devDependencies["@dtconcepts/timds"], "0.1.x");
+  assert.equal(packageJson.scripts.timds, "timds");
   assert.match(
     await fs.readFile(path.join(repoRoot, ".agents", "skills", "timds-edit-design-system", "SKILL.md"), "utf8"),
-    /Standalone/,
+    /standalone Design System/,
   );
 });

@@ -21,7 +21,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: node .timds/cli/bin/timds.mjs check
+      - run: npm run timds -- check
 
   publish:
     if: github.event_name != 'pull_request'
@@ -43,4 +43,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh auth setup-git
-          node .timds/cli/scripts/publish-artifact.mjs
+          npm exec -- timds-publish-artifact
