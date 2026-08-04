@@ -67,30 +67,40 @@ This validates the artifact, creates or uses a `design-system/<change>` branch,
 pushes it, and opens a draft pull request against the default branch. It does
 not merge or publish without separate authorization.
 
-## Large images, video, audio, and B-roll
+## Large public images, video, audio, and B-roll
 
-Full-resolution originals stay out of Git and `dist/`. With a TimDS access token,
-upload the original to managed object storage and commit only its stable
-`media.json` catalog entry:
+Full-resolution files stay out of Git and `dist/`. Put them in the ignored
+`media-local/` workspace and register each file with a stable logical key:
 
 ```bash
-TIMDS_ACCESS_TOKEN=... npm run timds -- assets add /path/to/interview.mov \
-  --rights client-owned \
-  --visibility private \
-  --title "Founder interview master" \
+cp /path/to/interview.mp4 media-local/
+npm run timds -- assets add media-local/interview.mp4 \
+  --key founder-interview \
+  --title "Founder interview" \
   --tags interview,b-roll
 ```
 
-Use `private` for masters and production inputs. Use `public` only for assets
-with confirmed rights that are intentionally served from a stable public CDN.
-Pull a private original into the ignored local cache with:
+The local viewer resolves `founder-interview` to that local file. Authenticate
+once through the operator portal, then upload changed staged files:
 
 ```bash
-TIMDS_ACCESS_TOKEN=... npm run timds -- assets pull ASSET_ID
+npm run timds -- auth login
+npm run timds -- assets publish
 ```
 
-Never commit tokens, storage credentials, object keys, expiring signed URLs, or
-the `.timds/cache/` directory.
+`submit` also publishes staged media before it builds and opens the pull
+request. Only the stable key, checksum, metadata, and public CDN URL are written
+to `media.json`. The raw file and `.timds/local-media.json` remain ignored.
+`TIMDS_ACCESS_TOKEN` can be used for non-interactive CI or agent sessions.
+
+To restore a published asset into a fresh local workspace:
+
+```bash
+npm run timds -- assets pull founder-interview
+```
+
+Never commit tokens, storage credentials, object keys, expiring signed URLs,
+`.timds/local-media.json`, or anything except the README under `media-local/`.
 
 ## Upgrade a client repository
 

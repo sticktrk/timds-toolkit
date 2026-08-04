@@ -1,15 +1,14 @@
 import { createHash } from "node:crypto";
-import { createWriteStream, promises as fs } from "node:fs";
+import { constants as fsConstants, createReadStream, promises as fs } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { Readable } from "node:stream";
-import { pipeline } from "node:stream/promises";
+import { resolveAccessToken } from "./auth.mjs";
 
 const MAX_MEDIA_ASSETS = 5_000;
 const MAX_MEDIA_BYTES = 5 * 1024 ** 4;
 const DEFAULT_MULTIPART_PART_BYTES = 16 * 1024 ** 2;
-const rightsStatuses = new Set(["client-owned", "licensed", "stock", "restricted", "unknown"]);
-const visibilityValues = new Set(["private", "public"]);
+const LOCAL_MEDIA_ROUTE = "/__timds/media/";
 
 const mediaContentTypes = {
   ".ai": "application/postscript",
@@ -46,9 +45,16 @@ function boundedString(value, label, maxLength, { required = false } = {}) {
   return result;
 }
 
+function mediaKey(value, label = "media key") {
+  const key = boundedString(value, label, 80, { required: true }).toLowerCase();
+  if (!/^[a-z0-9][a-z0-9._-]{0,79}$/.test(key)) {
+    throw new Error(`${label} must use lowercase letters, numbers, dots, underscores, or hyphens`);
+  }
+  return key;
+}
+
 function stablePublicUrl(value, label = "media asset publicUrl") {
-  const url = boundedString(value, label, 2_000);
-  if (!url) return "";
+  const url = boundedString(value, label, 2_000, { required: true });
   let parsed;
   try {
     parsed = new URL(url);
@@ -73,59 +79,66 @@ function mediaKind(contentType) {
   return "other";
 }
 
-function normalizedCatalogAsset(value, index) {
-  const asset = objectValue(value, `media.json assets[${index}]`);
-  const id = boundedString(asset.id, `media.json assets[${index}].id`, 100, { required: true });
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{7,99}$/.test(id)) {
-    throw new Error(`media.json assets[${index}].id is invalid`);
-  }
-  const sha256 = boundedString(asset.sha256, `media.json assets[${index}].sha256`, 64, { required: true }).toLowerCase();
-  if (!/^[a-f0-9]{64}$/.test(sha256)) throw new Error(`media.json assets[${index}].sha256 is invalid`);
-  const bytes = Number(asset.bytes);
-  if (!Number.isSafeInteger(bytes) || bytes < 1 || bytes > MAX_MEDIA_BYTES) {
-    throw new Error(`media.json assets[${index}].bytes is invalid`);
-  }
-  const visibility = boundedString(asset.visibility || "private", `media.json assets[${index}].visibility`, 20);
-  if (!visibilityValues.has(visibility)) throw new Error(`media.json assets[${index}].visibility is invalid`);
-  const rights = objectValue(asset.rights || {}, `media.json assets[${index}].rights`);
-  const rightsStatus = boundedString(rights.status, `media.json assets[${index}].rights.status`, 40, { required: true });
-  if (!rightsStatuses.has(rightsStatus)) throw new Error(`media.json assets[${index}].rights.status is invalid`);
-  const publicUrl = stablePublicUrl(asset.publicUrl || "", `media.json assets[${index}].publicUrl`);
-  if (visibility === "public" && !publicUrl) throw new Error(`media.json public asset ${id} requires publicUrl`);
-  const tags = Array.isArray(asset.tags)
-    ? asset.tags.slice(0, 50).map((tag) => boundedString(tag, `media.json assets[${index}].tags`, 80, { required: true }))
+function validatedBytes(value, label) {
+  const bytes = Number(value);
+  if (!Number.isSafeInteger(bytes) || bytes < 1 || bytes > MAX_MEDIA_BYTES) throw new Error(`${label} is invalid`);
+  return bytes;
+}
+
+function validatedSha(value, label) {
+  const sha256 = boundedString(value, label, 64, { required: true }).toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(sha256)) throw new Error(`${label} is invalid`);
+  return sha256;
+}
+
+function normalizedTags(value, label) {
+  const tags = Array.isArray(value)
+    ? value.slice(0, 50).map((tag) => boundedString(tag, label, 80, { required: true }))
     : [];
+  return [...new Set(tags)];
+}
+
+function normalizedCatalogAsset(value, index, schemaVersion) {
+  const label = `media.json assets[${index}]`;
+  const asset = objectValue(value, label);
+  const id = boundedString(asset.id, `${label}.id`, 100, { required: true });
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{7,99}$/.test(id)) throw new Error(`${label}.id is invalid`);
+  const contentType = boundedString(asset.contentType, `${label}.contentType`, 200, { required: true });
+  const legacy = schemaVersion === 1;
+  const publicUrl = legacy && String(asset.visibility || "private") !== "public"
+    ? boundedString(asset.publicUrl, `${label}.publicUrl`, 2_000)
+    : stablePublicUrl(asset.publicUrl, `${label}.publicUrl`);
+  if (publicUrl) stablePublicUrl(publicUrl, `${label}.publicUrl`);
   return {
-    bytes,
-    contentType: boundedString(asset.contentType, `media.json assets[${index}].contentType`, 200, { required: true }),
-    filename: boundedString(asset.filename, `media.json assets[${index}].filename`, 300, { required: true }),
+    bytes: validatedBytes(asset.bytes, `${label}.bytes`),
+    contentType,
+    filename: boundedString(asset.filename, `${label}.filename`, 300, { required: true }),
     id,
-    kind: boundedString(asset.kind || mediaKind(asset.contentType), `media.json assets[${index}].kind`, 40, { required: true }),
+    key: mediaKey(asset.key || (legacy ? id.toLowerCase() : ""), `${label}.key`),
+    kind: boundedString(asset.kind || mediaKind(contentType), `${label}.kind`, 40, { required: true }),
     publicUrl,
-    rights: {
-      attribution: boundedString(rights.attribution, `media.json assets[${index}].rights.attribution`, 1_000),
-      expiresOn: boundedString(rights.expiresOn, `media.json assets[${index}].rights.expiresOn`, 40),
-      notes: boundedString(rights.notes, `media.json assets[${index}].rights.notes`, 2_000),
-      status: rightsStatus,
-    },
-    sha256,
-    tags: [...new Set(tags)],
-    title: boundedString(asset.title, `media.json assets[${index}].title`, 300, { required: true }),
-    visibility,
+    sha256: validatedSha(asset.sha256, `${label}.sha256`),
+    tags: normalizedTags(asset.tags, `${label}.tags`),
+    title: boundedString(asset.title, `${label}.title`, 300, { required: true }),
   };
 }
 
 export function validateMediaCatalog(input) {
   const catalog = objectValue(input, "media.json");
-  const schemaVersion = Number(catalog.schemaVersion ?? 1);
-  if (schemaVersion !== 1) throw new Error(`media.json schemaVersion ${String(catalog.schemaVersion || "")} is unsupported`);
+  const schemaVersion = Number(catalog.schemaVersion ?? 2);
+  if (![1, 2].includes(schemaVersion)) {
+    throw new Error(`media.json schemaVersion ${String(catalog.schemaVersion || "")} is unsupported`);
+  }
   const rawAssets = Array.isArray(catalog.assets) ? catalog.assets : [];
   if (rawAssets.length > MAX_MEDIA_ASSETS) throw new Error(`media.json contains more than ${MAX_MEDIA_ASSETS} assets`);
-  const assets = rawAssets.map(normalizedCatalogAsset);
+  const assets = rawAssets.map((asset, index) => normalizedCatalogAsset(asset, index, schemaVersion));
   const ids = new Set();
+  const keys = new Set();
   for (const asset of assets) {
     if (ids.has(asset.id)) throw new Error(`media.json contains duplicate asset id ${asset.id}`);
+    if (keys.has(asset.key)) throw new Error(`media.json contains duplicate asset key ${asset.key}`);
     ids.add(asset.id);
+    keys.add(asset.key);
   }
   return { assets, schemaVersion };
 }
@@ -135,8 +148,54 @@ export async function readMediaCatalog(designSystemRoot, { required = false } = 
   try {
     return { catalog: validateMediaCatalog(JSON.parse(await fs.readFile(catalogPath, "utf8"))), catalogPath };
   } catch (caught) {
-    if (!required && caught?.code === "ENOENT") return { catalog: { assets: [], schemaVersion: 1 }, catalogPath };
+    if (!required && caught?.code === "ENOENT") return { catalog: { assets: [], schemaVersion: 2 }, catalogPath };
     if (caught instanceof SyntaxError) throw new Error(`media.json is invalid JSON: ${caught.message}`);
+    throw caught;
+  }
+}
+
+function normalizedLocalAsset(value, index) {
+  const label = `.timds/local-media.json assets[${index}]`;
+  const asset = objectValue(value, label);
+  const localPath = boundedString(asset.path, `${label}.path`, 600, { required: true }).replaceAll("\\", "/");
+  if (!localPath.startsWith("media-local/") || localPath.split("/").some((part) => ["", ".", ".."].includes(part))) {
+    throw new Error(`${label}.path must stay inside media-local/`);
+  }
+  const contentType = boundedString(asset.contentType, `${label}.contentType`, 200, { required: true });
+  return {
+    bytes: validatedBytes(asset.bytes, `${label}.bytes`),
+    contentType,
+    filename: boundedString(asset.filename, `${label}.filename`, 300, { required: true }),
+    key: mediaKey(asset.key, `${label}.key`),
+    kind: boundedString(asset.kind || mediaKind(contentType), `${label}.kind`, 40, { required: true }),
+    path: localPath,
+    sha256: validatedSha(asset.sha256, `${label}.sha256`),
+    tags: normalizedTags(asset.tags, `${label}.tags`),
+    title: boundedString(asset.title, `${label}.title`, 300, { required: true }),
+  };
+}
+
+export function validateLocalMediaManifest(input) {
+  const manifest = objectValue(input, ".timds/local-media.json");
+  if (Number(manifest.schemaVersion ?? 1) !== 1) throw new Error(".timds/local-media.json schemaVersion is unsupported");
+  const rawAssets = Array.isArray(manifest.assets) ? manifest.assets : [];
+  if (rawAssets.length > MAX_MEDIA_ASSETS) throw new Error(`Local media contains more than ${MAX_MEDIA_ASSETS} assets`);
+  const assets = rawAssets.map(normalizedLocalAsset);
+  const keys = new Set();
+  for (const asset of assets) {
+    if (keys.has(asset.key)) throw new Error(`Local media contains duplicate asset key ${asset.key}`);
+    keys.add(asset.key);
+  }
+  return { assets, schemaVersion: 1 };
+}
+
+export async function readLocalMediaManifest(designSystemRoot) {
+  const manifestPath = path.join(designSystemRoot, ".timds", "local-media.json");
+  try {
+    return { manifest: validateLocalMediaManifest(JSON.parse(await fs.readFile(manifestPath, "utf8"))), manifestPath };
+  } catch (caught) {
+    if (caught?.code === "ENOENT") return { manifest: { assets: [], schemaVersion: 1 }, manifestPath };
+    if (caught instanceof SyntaxError) throw new Error(`.timds/local-media.json is invalid JSON: ${caught.message}`);
     throw caught;
   }
 }
@@ -159,8 +218,71 @@ async function fileSha256(filePath) {
 
 function contentTypeForFile(filePath, explicit) {
   const supplied = String(explicit || "").trim().toLowerCase();
-  if (supplied) return supplied;
-  return mediaContentTypes[path.extname(filePath).toLowerCase()] || "application/octet-stream";
+  return supplied || mediaContentTypes[path.extname(filePath).toLowerCase()] || "application/octet-stream";
+}
+
+function keyFromFile(filePath) {
+  const stem = path.basename(filePath, path.extname(filePath)).toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, "");
+  return mediaKey(stem || "asset");
+}
+
+function insidePath(filePath, root) {
+  const relative = path.relative(root, filePath);
+  return relative && !relative.startsWith("..") && !path.isAbsolute(relative);
+}
+
+async function writeLocalManifest(manifestPath, manifest) {
+  await fs.mkdir(path.dirname(manifestPath), { recursive: true });
+  await fs.writeFile(manifestPath, `${JSON.stringify({ schemaVersion: 1, assets: manifest.assets }, null, 2)}\n`, "utf8");
+}
+
+export async function stageMediaFile(workspace, filePathInput, options = {}) {
+  const sourcePath = path.resolve(workspace.repoRoot, filePathInput);
+  const info = await fs.stat(sourcePath);
+  if (!info.isFile() || info.size < 1 || info.size > MAX_MEDIA_BYTES) throw new Error("Media input must be a non-empty file smaller than 5 TiB");
+  const key = mediaKey(options.key || keyFromFile(sourcePath));
+  const mediaRoot = path.join(workspace.designSystemRoot, "media-local");
+  await fs.mkdir(mediaRoot, { recursive: true });
+  const sourceRealPath = await fs.realpath(sourcePath);
+  const mediaRealPath = await fs.realpath(mediaRoot);
+  let destination = sourceRealPath;
+  if (!insidePath(sourceRealPath, mediaRealPath)) {
+    destination = path.join(mediaRoot, `${key}${path.extname(sourcePath).toLowerCase()}`);
+    try {
+      const existing = await fs.stat(destination);
+      if (existing.isFile() && await fileSha256(destination) === await fileSha256(sourceRealPath)) {
+        // The exact file was already copied into the ignored local workspace.
+      } else {
+        throw new Error(`media-local/${path.basename(destination)} already exists; choose another --key or remove it explicitly`);
+      }
+    } catch (caught) {
+      if (caught?.code !== "ENOENT") throw caught;
+      await fs.copyFile(sourceRealPath, destination, fsConstants.COPYFILE_EXCL);
+    }
+  }
+  const destinationRealPath = await fs.realpath(destination);
+  if (!insidePath(destinationRealPath, mediaRealPath)) throw new Error("Staged media must stay inside media-local/");
+  const destinationInfo = await fs.stat(destinationRealPath);
+  const contentType = contentTypeForFile(destinationRealPath, options.contentType);
+  const local = normalizedLocalAsset({
+    bytes: destinationInfo.size,
+    contentType,
+    filename: path.basename(destinationRealPath),
+    key,
+    kind: mediaKind(contentType),
+    path: path.relative(workspace.designSystemRoot, destinationRealPath).split(path.sep).join("/"),
+    sha256: await fileSha256(destinationRealPath),
+    tags: String(options.tags || "").split(",").map((tag) => tag.trim()).filter(Boolean),
+    title: String(options.title || path.basename(sourcePath, path.extname(sourcePath))).trim(),
+  }, 0);
+  const { manifest, manifestPath } = await readLocalMediaManifest(workspace.designSystemRoot);
+  const assets = manifest.assets.filter((asset) => asset.key !== key);
+  assets.push(local);
+  assets.sort((left, right) => left.key.localeCompare(right.key));
+  await writeLocalManifest(manifestPath, { assets });
+  return { asset: local, copied: destinationRealPath !== sourceRealPath, manifestPath };
 }
 
 function requestHeaders(token, contentType = "application/json") {
@@ -210,10 +332,7 @@ async function putMultipartFile(fetchImpl, upload, filePath, contentType, token)
       const buffer = Buffer.allocUnsafe(partSize);
       const { bytesRead } = await handle.read(buffer, 0, buffer.length, position);
       if (!bytesRead) break;
-      const signed = await portalJson(fetchImpl, upload.partsUrl, token, {
-        body: { partNumber },
-        method: "POST",
-      });
+      const signed = await portalJson(fetchImpl, upload.partsUrl, token, { body: { partNumber }, method: "POST" });
       const response = await fetchImpl(signed.url, {
         body: buffer.subarray(0, bytesRead),
         headers: { "Content-Type": contentType, ...(signed.headers || {}) },
@@ -235,68 +354,37 @@ async function putMultipartFile(fetchImpl, upload, filePath, contentType, token)
 
 function catalogRecord(asset, local) {
   return normalizedCatalogAsset({
-    bytes: local.bytes,
-    contentType: local.contentType,
-    filename: local.filename,
+    ...local,
     id: asset.id,
-    kind: asset.kind || local.kind,
-    publicUrl: asset.publicUrl || "",
-    rights: local.rights,
-    sha256: local.sha256,
-    tags: local.tags,
-    title: local.title,
-    visibility: local.visibility,
-  }, 0);
+    publicUrl: asset.publicUrl,
+  }, 0, 2);
 }
 
 async function writeCatalog(catalogPath, catalog, asset) {
-  const assets = catalog.assets.filter((entry) => entry.id !== asset.id && entry.sha256 !== asset.sha256);
+  const assets = catalog.assets.filter((entry) => entry.key !== asset.key && entry.id !== asset.id);
   assets.push(asset);
-  assets.sort((left, right) => left.title.localeCompare(right.title) || left.id.localeCompare(right.id));
-  await fs.writeFile(catalogPath, `${JSON.stringify({ schemaVersion: 1, assets }, null, 2)}\n`, "utf8");
+  assets.sort((left, right) => left.key.localeCompare(right.key));
+  const next = { assets, schemaVersion: 2 };
+  await fs.writeFile(catalogPath, `${JSON.stringify(next, null, 2)}\n`, "utf8");
+  return next;
 }
 
-export async function addMediaFile(workspace, filePathInput, options = {}) {
-  const filePath = path.resolve(workspace.repoRoot, filePathInput);
-  const info = await fs.stat(filePath);
-  if (!info.isFile() || info.size < 1 || info.size > MAX_MEDIA_BYTES) throw new Error("Media input must be a non-empty file smaller than 5 TiB");
-  const rightsStatus = String(options.rights || "").trim();
-  if (!rightsStatuses.has(rightsStatus)) {
-    throw new Error("--rights must be client-owned, licensed, stock, restricted, or unknown");
+async function uploadLocalAsset(workspace, local, options) {
+  const filePath = path.join(workspace.designSystemRoot, local.path);
+  const currentInfo = await fs.stat(filePath);
+  if (!currentInfo.isFile() || currentInfo.size !== local.bytes || await fileSha256(filePath) !== local.sha256) {
+    throw new Error(`Local media ${local.key} changed after staging; run assets add again`);
   }
-  const visibility = String(options.visibility || "private").trim();
-  if (!visibilityValues.has(visibility)) throw new Error("--visibility must be private or public");
-  if (visibility === "public" && rightsStatus === "unknown") {
-    throw new Error("Public media requires known usage rights");
-  }
-  const contentType = contentTypeForFile(filePath, options.contentType);
-  const sha256 = await fileSha256(filePath);
-  const tags = String(options.tags || "").split(",").map((tag) => tag.trim()).filter(Boolean);
-  const local = {
-    bytes: info.size,
-    contentType,
-    filename: path.basename(filePath),
-    kind: mediaKind(contentType),
-    rights: {
-      attribution: String(options.attribution || "").trim(),
-      expiresOn: String(options.expiresOn || "").trim(),
-      notes: String(options.rightsNotes || "").trim(),
-      status: rightsStatus,
-    },
-    sha256,
-    tags,
-    title: String(options.title || path.basename(filePath, path.extname(filePath))).trim(),
-    visibility,
-  };
-  const token = String(options.token || process.env.TIMDS_ACCESS_TOKEN || "").trim();
-  if (!token) throw new Error("TIMDS_ACCESS_TOKEN is required for media upload");
   const portalUrl = options.portalUrl || workspace.manifest.media?.portalUrl || process.env.TIMDS_PORTAL_URL || "https://timds.com";
+  const token = await resolveAccessToken(portalUrl, options);
+  if (!token) throw new Error("Sign in with `timds auth login` or set TIMDS_ACCESS_TOKEN before publishing media");
   const fetchImpl = options.fetchImpl || fetch;
   const created = await portalJson(fetchImpl, portalEndpoint(portalUrl, "/api/operator/design-system-assets/uploads"), token, {
     body: {
       ...local,
       sourceId: options.sourceId || process.env.TIMDS_SOURCE_ID || "",
       systemId: workspace.manifest.systemId,
+      visibility: "public",
     },
     method: "POST",
   });
@@ -308,50 +396,121 @@ export async function addMediaFile(workspace, filePathInput, options = {}) {
       partsUrl: created.upload.partsUrl ? portalEndpoint(portalUrl, created.upload.partsUrl) : null,
     };
     let parts = [];
-    if (upload.method === "multipart") {
-      parts = await putMultipartFile(fetchImpl, upload, filePath, contentType, token);
-    } else if (upload.method === "single") {
-      await putSingleFile(fetchImpl, upload, filePath, contentType);
-    } else {
-      throw new Error("TimDS returned an unsupported upload method");
-    }
-    const completed = await portalJson(fetchImpl, upload.completeUrl, token, {
-      body: { parts },
-      method: "POST",
-    });
+    if (upload.method === "multipart") parts = await putMultipartFile(fetchImpl, upload, filePath, local.contentType, token);
+    else if (upload.method === "single") await putSingleFile(fetchImpl, upload, filePath, local.contentType);
+    else throw new Error("TimDS returned an unsupported upload method");
+    const completed = await portalJson(fetchImpl, upload.completeUrl, token, { body: { parts }, method: "POST" });
     asset = completed.asset;
   }
-  if (!asset?.id) throw new Error("TimDS did not return a media asset record");
-  const { catalog, catalogPath } = await readMediaCatalog(workspace.designSystemRoot);
-  const record = catalogRecord(asset, local);
-  await writeCatalog(catalogPath, catalog, record);
-  return { asset: record, catalogPath, reused: Boolean(created.reused) };
+  if (!asset?.id || !asset?.publicUrl) throw new Error("TimDS did not return a public media asset record");
+  return { asset: catalogRecord(asset, local), reused: Boolean(created.reused) };
 }
 
-export async function pullMediaAsset(workspace, assetId, options = {}) {
+export async function publishStagedMedia(workspace, options = {}) {
+  const { manifest } = await readLocalMediaManifest(workspace.designSystemRoot);
+  let { catalog, catalogPath } = await readMediaCatalog(workspace.designSystemRoot);
+  const published = [];
+  const unchanged = [];
+  for (const local of manifest.assets) {
+    const existing = catalog.assets.find((asset) => asset.key === local.key);
+    if (existing?.sha256 === local.sha256 && existing.publicUrl) {
+      unchanged.push(existing);
+      continue;
+    }
+    const result = await uploadLocalAsset(workspace, local, options);
+    catalog = await writeCatalog(catalogPath, catalog, result.asset);
+    published.push(result);
+  }
+  return { catalogPath, published, staged: manifest.assets.length, unchanged };
+}
+
+export async function addMediaFile(workspace, filePathInput, options = {}) {
+  const staged = await stageMediaFile(workspace, filePathInput, options);
+  if (!options.publish) return staged;
+  const result = await publishStagedMedia(workspace, options);
+  return { ...staged, publication: result };
+}
+
+export async function pullMediaAsset(workspace, assetKey, options = {}) {
   const { catalog } = await readMediaCatalog(workspace.designSystemRoot, { required: true });
-  const asset = catalog.assets.find((entry) => entry.id === assetId);
-  if (!asset) throw new Error(`Media asset ${assetId} is not present in media.json`);
-  const token = String(options.token || process.env.TIMDS_ACCESS_TOKEN || "").trim();
-  if (!token) throw new Error("TIMDS_ACCESS_TOKEN is required for media download");
-  const portalUrl = options.portalUrl || workspace.manifest.media?.portalUrl || process.env.TIMDS_PORTAL_URL || "https://timds.com";
+  const asset = catalog.assets.find((entry) => entry.key === assetKey || entry.id === assetKey);
+  if (!asset) throw new Error(`Media asset ${assetKey} is not present in media.json`);
+  if (!asset.publicUrl) throw new Error(`Media asset ${assetKey} does not have a public URL`);
   const fetchImpl = options.fetchImpl || fetch;
-  const handoff = await portalJson(
-    fetchImpl,
-    portalEndpoint(portalUrl, `/api/operator/design-system-assets/${encodeURIComponent(assetId)}/download`),
-    token,
-  );
-  const response = await fetchImpl(handoff.url, { headers: handoff.headers || {} });
+  const response = await fetchImpl(asset.publicUrl);
   if (!response.ok || !response.body) throw new Error(`Media download returned ${response.status}`);
   const destination = options.output
     ? path.resolve(workspace.repoRoot, options.output)
-    : path.join(workspace.designSystemRoot, ".timds", "cache", "media", asset.id, asset.filename);
+    : path.join(workspace.designSystemRoot, "media-local", `${asset.key}${path.extname(asset.filename)}`);
   await fs.mkdir(path.dirname(destination), { recursive: true });
-  await pipeline(Readable.fromWeb(response.body), createWriteStream(destination));
+  const body = Buffer.from(await response.arrayBuffer());
+  await fs.writeFile(destination, body, { flag: options.force ? "w" : "wx" });
   const downloadedSha = await fileSha256(destination);
   if (downloadedSha !== asset.sha256) {
     await fs.unlink(destination).catch(() => {});
-    throw new Error(`Downloaded media hash does not match media.json for ${assetId}`);
+    throw new Error(`Downloaded media hash does not match media.json for ${assetKey}`);
   }
-  return { asset, destination };
+  const staged = await stageMediaFile(workspace, destination, { key: asset.key, tags: asset.tags.join(","), title: asset.title });
+  return { asset, destination, staged };
 }
+
+export async function resolveMediaSource(designSystemRoot, keyInput, options = {}) {
+  const key = mediaKey(keyInput);
+  if (options.development) {
+    const { manifest } = await readLocalMediaManifest(designSystemRoot);
+    const local = manifest.assets.find((asset) => asset.key === key);
+    if (local) return { ...local, local: true, src: `${LOCAL_MEDIA_ROUTE}${encodeURIComponent(key)}` };
+  }
+  const { catalog } = await readMediaCatalog(designSystemRoot, { required: true });
+  const asset = catalog.assets.find((entry) => entry.key === key);
+  if (!asset?.publicUrl) throw new Error(`TimDS media key ${key} is not published; run assets publish before building`);
+  return { ...asset, local: false, src: asset.publicUrl };
+}
+
+function rangeForHeader(value, size) {
+  const match = /^bytes=(\d*)-(\d*)$/.exec(String(value || "").trim());
+  if (!match) return null;
+  let start = match[1] ? Number(match[1]) : null;
+  let end = match[2] ? Number(match[2]) : null;
+  if (start === null) {
+    const suffix = Math.min(Number(end || 0), size);
+    start = size - suffix;
+    end = size - 1;
+  } else {
+    end = end === null ? size - 1 : Math.min(end, size - 1);
+  }
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || start > end || start >= size) return null;
+  return { end, start };
+}
+
+export async function localMediaResponse(request, designSystemRoot) {
+  const url = new URL(request.url);
+  if (!url.pathname.startsWith(LOCAL_MEDIA_ROUTE)) return null;
+  const key = mediaKey(decodeURIComponent(url.pathname.slice(LOCAL_MEDIA_ROUTE.length)));
+  const { manifest } = await readLocalMediaManifest(designSystemRoot);
+  const asset = manifest.assets.find((entry) => entry.key === key);
+  if (!asset) return new Response("Not found", { status: 404 });
+  const mediaRoot = await fs.realpath(path.join(designSystemRoot, "media-local"));
+  const filePath = await fs.realpath(path.join(designSystemRoot, asset.path));
+  if (!insidePath(filePath, mediaRoot)) return new Response("Not found", { status: 404 });
+  const info = await fs.stat(filePath);
+  const requestedRange = request.headers.get("range");
+  const range = requestedRange ? rangeForHeader(requestedRange, info.size) : null;
+  if (requestedRange && !range) {
+    return new Response(null, { headers: { "Content-Range": `bytes */${info.size}` }, status: 416 });
+  }
+  const start = range?.start ?? 0;
+  const end = range?.end ?? info.size - 1;
+  const headers = {
+    "Accept-Ranges": "bytes",
+    "Cache-Control": "no-store",
+    "Content-Length": String(end - start + 1),
+    "Content-Type": asset.contentType,
+    ...(range ? { "Content-Range": `bytes ${start}-${end}/${info.size}` } : {}),
+  };
+  if (request.method === "HEAD") return new Response(null, { headers, status: range ? 206 : 200 });
+  const stream = createReadStream(filePath, { end, start });
+  return new Response(Readable.toWeb(stream), { headers, status: range ? 206 : 200 });
+}
+
+export { LOCAL_MEDIA_ROUTE, mediaKind };

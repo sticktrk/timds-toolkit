@@ -1,6 +1,6 @@
 {
   "name": "@dtconcepts/timds",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Versioned CLI, contracts, templates, and AI skill for repository-owned TimDS design systems.",
   "type": "module",
   "bin": {
@@ -9,6 +9,7 @@
   },
   "exports": {
     ".": "./src/core.mjs",
+    "./auth": "./src/auth.mjs",
     "./core": "./src/core.mjs",
     "./media": "./src/media.mjs"
   },
@@ -21,6 +22,7 @@
     "scripts/publish-artifact.mjs",
     "skills",
     "src/core.mjs",
+    "src/auth.mjs",
     "src/media.mjs",
     "templates"
   ],
