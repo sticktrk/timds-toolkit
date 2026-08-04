@@ -42,22 +42,32 @@ The design system should use the client repository's existing framework. For exa
 
 TimDS consumes only the resulting `__DIST_PATH__`; Astro or another framework remains a repository-owned authoring detail.
 
-## Full-resolution media and B-roll
+## Full-resolution public media and B-roll
 
-Do not add large originals to Git or `dist/`. Upload them directly to TimDS object storage and commit only the stable `media.json` catalog record:
+Do not add large originals to Git or `dist/`. Put them under the ignored
+`media-local/` workspace and give each one a stable logical key:
 
 ```bash
-TIMDS_ACCESS_TOKEN=... __TIMDS_CLI__ assets add ~/Media/interview.mov \
-  --rights client-owned \
-  --visibility private \
-  --title "Founder interview master" \
+__TIMDS_CLI__ assets add media-local/interview.mp4 \
+  --key founder-interview \
+  --title "Founder interview" \
   --tags interview,b-roll
 ```
 
-Use `--visibility public` only when the rights are known and the original is intended for stable public CDN delivery. Private media is downloaded into the ignored local cache when needed:
+The authoring viewer reads the ignored local file. Authenticate once and upload
+the staged file to public TimDS object storage:
 
 ```bash
-TIMDS_ACCESS_TOKEN=... __TIMDS_CLI__ assets pull ASSET_ID
+__TIMDS_CLI__ auth login
+__TIMDS_CLI__ assets publish
+```
+
+`submit` performs the publish step automatically before building and preparing
+the pull request. Git receives only the stable public record in `media.json`.
+On a fresh workstation, restore a published original with:
+
+```bash
+__TIMDS_CLI__ assets pull founder-interview
 ```
 
 ## Before review

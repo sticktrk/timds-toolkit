@@ -17,7 +17,10 @@ import {
 } from "./core.mjs";
 import {
   addMediaFile,
+  localMediaResponse,
+  publishStagedMedia,
   readMediaCatalog,
+  resolveMediaSource,
   validateMediaCatalog,
 } from "./media.mjs";
 
@@ -106,26 +109,26 @@ test("validates stable media catalog records and rejects signed URLs", () => {
     contentType: "image/png",
     filename: "portrait.png",
     id: "asset_12345678",
+    key: "attorney-portrait",
     kind: "image",
     publicUrl: "https://assets.timds.com/clients/example/portrait.png",
-    rights: { status: "client-owned" },
     sha256: "a".repeat(64),
     tags: ["portrait"],
     title: "Attorney portrait",
-    visibility: "public",
   };
-  assert.equal(validateMediaCatalog({ assets: [asset], schemaVersion: 1 }).assets[0].id, asset.id);
+  assert.equal(validateMediaCatalog({ assets: [asset], schemaVersion: 2 }).assets[0].key, asset.key);
   assert.throws(
     () => validateMediaCatalog({
       assets: [{ ...asset, publicUrl: `${asset.publicUrl}?X-Amz-Signature=temporary` }],
-      schemaVersion: 1,
+      schemaVersion: 2,
     }),
     /expiring storage signature/,
   );
 });
 
-test("uploads media outside Git and writes only its stable catalog record", async (t) => {
+test("stages media outside Git then publishes only its stable public record", async (t) => {
   const repoRoot = await createDesignSystemRepo(t);
+  await initializeRepository(repoRoot);
   const filePath = path.join(repoRoot, "full-resolution.png");
   await fs.writeFile(filePath, Buffer.from("full-resolution-image"));
   const workspace = await checkWorkspace(repoRoot, { skipBuild: true });
@@ -134,7 +137,7 @@ test("uploads media outside Git and writes only its stable catalog record", asyn
     calls.push({ method: options.method || "GET", url: String(url) });
     if (String(url).endsWith("/api/operator/design-system-assets/uploads")) {
       return Response.json({
-        asset: { id: "asset_12345678", kind: "image", publicUrl: "" },
+        asset: { id: "asset_12345678", kind: "image", publicUrl: "https://assets.timds.test/test/full-resolution.png" },
         upload: {
           completeUrl: "https://timds.test/api/operator/design-system-assets/uploads/upload-1/complete",
           headers: { "x-amz-meta-sha256": "accepted" },
@@ -145,28 +148,45 @@ test("uploads media outside Git and writes only its stable catalog record", asyn
     }
     if (String(url) === "https://r2.test/object") return new Response(null, { status: 200 });
     if (String(url).endsWith("/complete")) {
-      return Response.json({ asset: { id: "asset_12345678", kind: "image", publicUrl: "" } });
+      return Response.json({ asset: { id: "asset_12345678", kind: "image", publicUrl: "https://assets.timds.test/test/full-resolution.png" } });
     }
     return Response.json({ error: "unexpected" }, { status: 500 });
   };
-  const result = await addMediaFile(workspace, filePath, {
+  const staged = await addMediaFile(workspace, filePath, {
+    key: "full-resolution",
+    title: "Full-resolution image",
+  });
+  assert.equal(staged.asset.key, "full-resolution");
+  assert.equal(calls.length, 0);
+  await fs.access(path.join(repoRoot, "design-system", "media-local", "full-resolution.png"));
+  const localSource = await resolveMediaSource(path.join(repoRoot, "design-system"), "full-resolution", { development: true });
+  assert.equal(localSource.src, "/__timds/media/full-resolution");
+  const rangeResponse = await localMediaResponse(
+    new Request("http://localhost/__timds/media/full-resolution", { headers: { Range: "bytes=0-3" } }),
+    path.join(repoRoot, "design-system"),
+  );
+  assert.equal(rangeResponse.status, 206);
+  assert.equal(await rangeResponse.text(), "full");
+  const result = await publishStagedMedia(workspace, {
     fetchImpl: fakeFetch,
     portalUrl: "https://timds.test",
-    rights: "client-owned",
     token: "test-token",
-    visibility: "private",
   });
-  assert.equal(result.asset.id, "asset_12345678");
+  assert.equal(result.published[0].asset.id, "asset_12345678");
   assert.deepEqual(calls.map((call) => call.method), ["POST", "PUT", "POST"]);
   const { catalog } = await readMediaCatalog(path.join(repoRoot, "design-system"), { required: true });
   assert.equal(catalog.assets[0].filename, "full-resolution.png");
-  assert.equal(catalog.assets[0].publicUrl, "");
+  assert.equal(catalog.assets[0].key, "full-resolution");
+  assert.equal(catalog.assets[0].publicUrl, "https://assets.timds.test/test/full-resolution.png");
   assert.match(catalog.assets[0].sha256, /^[a-f0-9]{64}$/);
-  await assert.rejects(fs.access(path.join(repoRoot, "design-system", "assets", "full-resolution.png")));
+  assert.match(await fs.readFile(path.join(repoRoot, "design-system", ".gitignore"), "utf8"), /media-local\/\*/);
+  const publicSource = await resolveMediaSource(path.join(repoRoot, "design-system"), "full-resolution");
+  assert.equal(publicSource.src, "https://assets.timds.test/test/full-resolution.png");
 });
 
 test("uses bounded multipart handshakes for large-media upload plans", async (t) => {
   const repoRoot = await createDesignSystemRepo(t);
+  await initializeRepository(repoRoot);
   const filePath = path.join(repoRoot, "b-roll.mp4");
   await fs.writeFile(filePath, Buffer.from("video-master"));
   const workspace = await checkWorkspace(repoRoot, { skipBuild: true });
@@ -176,7 +196,7 @@ test("uses bounded multipart handshakes for large-media upload plans", async (t)
     calls.push(call);
     if (call.url.endsWith("/api/operator/design-system-assets/uploads")) {
       return Response.json({
-        asset: { id: "asset_87654321", kind: "video", publicUrl: "" },
+        asset: { id: "asset_87654321", kind: "video", publicUrl: "https://assets.timds.test/test/b-roll.mp4" },
         upload: {
           completeUrl: "/api/operator/design-system-assets/uploads/upload-2/complete",
           method: "multipart",
@@ -192,18 +212,19 @@ test("uses bounded multipart handshakes for large-media upload plans", async (t)
     if (call.url.endsWith("/complete")) {
       const submitted = JSON.parse(options.body);
       assert.deepEqual(submitted.parts, [{ etag: '"part-1"', partNumber: 1 }]);
-      return Response.json({ asset: { id: "asset_87654321", kind: "video", publicUrl: "" } });
+      return Response.json({ asset: { id: "asset_87654321", kind: "video", publicUrl: "https://assets.timds.test/test/b-roll.mp4" } });
     }
     return Response.json({ error: "unexpected" }, { status: 500 });
   };
-  const result = await addMediaFile(workspace, filePath, {
+  await addMediaFile(workspace, filePath, {
+    key: "b-roll",
+  });
+  const result = await publishStagedMedia(workspace, {
     fetchImpl: fakeFetch,
     portalUrl: "https://timds.test",
-    rights: "licensed",
     token: "test-token",
-    visibility: "private",
   });
-  assert.equal(result.asset.id, "asset_87654321");
+  assert.equal(result.published[0].asset.id, "asset_87654321");
   assert.deepEqual(calls.map((call) => call.method), ["POST", "POST", "PUT", "POST"]);
   assert.equal(calls[1].url, "https://timds.test/api/operator/design-system-assets/uploads/upload-2/parts");
 });
@@ -251,10 +272,12 @@ test("initializes guarded tooling without overwriting the design-system manifest
   await assert.rejects(fs.access(path.join(repoRoot, "design-system", ".timds", "cli")), /ENOENT/);
   assert.deepEqual(
     JSON.parse(await fs.readFile(path.join(repoRoot, "design-system", ".timds", "installation.json"), "utf8")),
-    { name: "@dtconcepts/timds", schemaVersion: 1, version: "0.1.2" },
+    { name: "@dtconcepts/timds", schemaVersion: 1, version: "0.1.3" },
   );
   await fs.access(path.join(repoRoot, "design-system", "media.json"));
   assert.match(await fs.readFile(path.join(repoRoot, "design-system", ".gitignore"), "utf8"), /\.timds\/cache/);
+  assert.match(await fs.readFile(path.join(repoRoot, "design-system", ".gitignore"), "utf8"), /media-local\/\*/);
+  await fs.access(path.join(repoRoot, "design-system", "media-local", "README.md"));
   await fs.access(path.join(repoRoot, ".agents", "skills", "timds-edit-design-system", "SKILL.md"));
   await fs.access(path.join(repoRoot, ".github", "workflows", "timds-design-system.yml"));
 });
@@ -285,7 +308,7 @@ test("upgrades clean managed records and removes the legacy vendored CLI", async
 
   const result = await upgradeRepository(repoRoot);
   assert.equal(result.previousVersion, "0.1.0");
-  assert.equal(result.package.version, "0.1.2");
+  assert.equal(result.package.version, "0.1.3");
   await assert.rejects(fs.access(stalePath), /ENOENT/);
   assert.equal(await fs.readFile(skillPath, "utf8"), originalSkill);
 });

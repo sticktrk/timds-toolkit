@@ -15,10 +15,11 @@ __CONTRACT_DESCRIPTION__ Read `timds.json`, this file, and the relevant source b
 ## Media boundary
 
 - Never commit full-resolution images, video masters, B-roll, source audio, or other large originals to Git or `dist/`.
-- Register large media with `npm run timds -- assets add FILE --rights STATUS --visibility private|public`.
-- Keep only the returned stable record in `media.json`. Never place access tokens, R2 credentials, object keys, or expiring signed URLs in repository files.
-- Use `npm run timds -- assets pull ASSET_ID` when a private original is needed locally. The default destination is `.timds/cache/media/`, which is ignored by Git.
-- Record real rights, attribution, and expiration information. Never guess usage rights. Public media requires known rights.
+- This phase supports public assets only. Put originals under ignored `media-local/` and register them with `npm run timds -- assets add FILE --key LOGICAL_KEY`.
+- Use logical keys in viewer source. Local development resolves them from `.timds/local-media.json`; production builds resolve them from committed `media.json` public URLs.
+- Run `npm run timds -- auth login` once, then `npm run timds -- assets publish`. `submit` also publishes changed staged files before validation.
+- Keep only the returned stable record in `media.json`. Never place access tokens, R2 credentials, object keys, expiring signed URLs, `.timds/local-media.json`, or raw `media-local/` files in Git.
+- Use `npm run timds -- assets pull KEY` to restore a published original into the ignored local workspace.
 - Small optimized images, icons, and fonts required to render the viewer may remain in `dist/` within the artifact limits.
 
 ## Local workflow

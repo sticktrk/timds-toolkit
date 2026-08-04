@@ -61,25 +61,33 @@ npm run timds -- upgrade --root .
 
 ## Handle large media outside Git
 
-Never commit full-resolution images, video masters, B-roll, source audio, or
-other large originals to Git or `dist/`. Confirm actual rights, then upload:
+This release supports public media only. Never commit full-resolution images,
+video masters, B-roll, source audio, or other large originals to Git or `dist/`.
+Copy the file into the ignored `media-local/` workspace and register a stable
+logical key:
 
 ```bash
-TIMDS_ACCESS_TOKEN=... npm run timds -- assets add /path/to/file \
-  --rights client-owned \
-  --visibility private \
+npm run timds -- assets add media-local/file.mp4 \
+  --key descriptive-key \
   --title "Descriptive title" \
   --tags b-roll,campaign
 ```
 
-Use `private` for masters and production inputs. Use `public` only when known
-rights allow intentional stable public delivery. Commit the resulting
-`media.json` record. Never commit credentials, object keys, cache files, or
-expiring signed URLs. Retrieve a private original into the ignored cache with:
+Use that logical key in viewer source. The local authoring server resolves it
+from `.timds/local-media.json`; a production build resolves it from the stable
+public URL in `media.json`. Authenticate through the operator portal and upload:
 
 ```bash
-TIMDS_ACCESS_TOKEN=... npm run timds -- assets pull ASSET_ID
+npm run timds -- auth login
+npm run timds -- assets publish
 ```
+
+`submit` publishes changed staged files automatically before validation. Commit
+the resulting `media.json` record, never the raw file or local manifest. Never
+commit credentials, storage keys, or expiring signed URLs. Use
+`npm run timds -- assets pull LOGICAL_KEY` to restore a published asset on a new
+workstation. `TIMDS_ACCESS_TOKEN` is the non-interactive alternative for an AI
+agent or CI job.
 
 ## Verify locally
 

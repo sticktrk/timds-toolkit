@@ -8,9 +8,16 @@ import path from "node:path";
 import process from "node:process";
 import {
   addMediaFile,
+  publishStagedMedia,
   pullMediaAsset,
   readMediaCatalog,
 } from "./media.mjs";
+import {
+  loginWithDevice,
+  readCredentials,
+  removeAccessToken,
+  saveAccessToken,
+} from "./auth.mjs";
 
 const MAX_ARTIFACT_FILE_BYTES = 12_000_000;
 const MAX_ARTIFACT_FILES = 2_000;
@@ -586,11 +593,10 @@ export async function initializeRepository(repoRootInput, { force = false, stand
   );
   await writeIfMissing(path.join(designSystemRoot, "tokens.json"), await template("tokens.json"), created);
   await writeIfMissing(path.join(designSystemRoot, "media.json"), await template("media.json"), created);
-  await ensureGitignoreLine(
-    path.join(designSystemRoot, ".gitignore"),
-    (await template("design-system-gitignore")).trim(),
-    created,
-  );
+  await writeIfMissing(path.join(designSystemRoot, "media-local", "README.md"), await template("media-local-README.md"), created);
+  for (const line of (await template("design-system-gitignore")).split(/\r?\n/).map((entry) => entry.trim()).filter(Boolean)) {
+    await ensureGitignoreLine(path.join(designSystemRoot, ".gitignore"), line, created);
+  }
   const cliCommand = "npm run timds --";
   const contractDescription = standalone
     ? "This repository is the editable source and static publication contract for TimDS."
@@ -686,6 +692,30 @@ function allowedSubmitPath(filePath, layout) {
 }
 
 export async function submitWorkspace(repoRootInput, message, options = {}) {
+  const workspace = await loadWorkspace(repoRootInput);
+  const preflightStatus = await git(["status", "--porcelain", "--untracked-files=all"], workspace.repoRoot);
+  const preflightChangedPaths = preflightStatus.stdout.split("\n").filter(Boolean).map(statusPath);
+  const preflightOutside = preflightChangedPaths.filter((filePath) => !allowedSubmitPath(filePath, workspace.layout));
+  if (preflightOutside.length) {
+    throw new Error(`Refusing to submit with changes outside the TimDS scope:\n${preflightOutside.map((filePath) => `- ${filePath}`).join("\n")}`);
+  }
+  const preflightBaseBranch = await defaultBranch(workspace.repoRoot);
+  const preflightBranch = await currentBranch(workspace.repoRoot);
+  if (preflightBranch && preflightBranch !== preflightBaseBranch) {
+    const remoteBase = await git(["show-ref", "--verify", `refs/remotes/origin/${preflightBaseBranch}`], workspace.repoRoot, { allowFailure: true });
+    const baseRef = remoteBase.code === 0 ? `origin/${preflightBaseBranch}` : preflightBaseBranch;
+    const committed = await git(["diff", "--name-only", `${baseRef}...HEAD`], workspace.repoRoot);
+    const outsideCommittedScope = committed.stdout
+      .split("\n")
+      .filter(Boolean)
+      .filter((filePath) => !allowedSubmitPath(filePath, workspace.layout));
+    if (outsideCommittedScope.length) {
+      throw new Error(`Refusing to submit a branch containing committed changes outside the TimDS scope:\n${outsideCommittedScope.map((filePath) => `- ${filePath}`).join("\n")}`);
+    }
+  }
+  const media = options.dryRun
+    ? { published: [], staged: 0, unchanged: [] }
+    : await publishStagedMedia(workspace, options);
   const checked = await checkWorkspace(repoRootInput, { skipBuild: options.noBuild });
   const status = await git(["status", "--porcelain", "--untracked-files=all"], checked.repoRoot);
   const changedPaths = status.stdout.split("\n").filter(Boolean).map(statusPath);
@@ -724,14 +754,14 @@ export async function submitWorkspace(repoRootInput, message, options = {}) {
       "--body", `## TimDS design-system change\n\n${message}\n\n- Version: ${checked.manifest.version}\n- Artifact files: ${checked.artifact.fileCount}\n- Artifact bytes: ${checked.artifact.totalBytes}\n- Local TimDS validation: passed`,
     ]);
   }
-  if (options.dryRun) return { baseBranch, branch: plannedBranch, commands, dryRun: true };
+  if (options.dryRun) return { baseBranch, branch: plannedBranch, commands, dryRun: true, media };
   for (const command of commands) await execute(command, { cwd: checked.repoRoot });
   branch = plannedBranch;
-  return { baseBranch, branch, commands, dryRun: false };
+  return { baseBranch, branch, commands, dryRun: false, media };
 }
 
 function helpText() {
-  return `TimDS local design-system workflow\n\nUsage:\n  timds init [--root PATH] [--standalone] [--force]\n  timds upgrade [--root PATH] [--force]\n  timds doctor [--root PATH]\n  timds dev [--root PATH]\n  timds check [--root PATH] [--skip-build] [--require-clean-dist]\n  timds preview [--root PATH] [--port 4400] [--no-build]\n  timds diff [--root PATH] [--base origin/main]\n  timds assets list [--root PATH]\n  timds assets add FILE --rights STATUS [--visibility private|public] [--title TEXT] [--tags a,b]\n  timds assets pull ASSET_ID [--output PATH]\n  timds submit --message "Change summary" [--dry-run] [--no-push] [--no-pr]\n\nInstall or upgrade with an explicitly selected @dtconcepts/timds package version. Large media is stored outside Git. The live TimDS version is never changed by this CLI. Submit creates a review branch and draft pull request.`;
+  return `TimDS local design-system workflow\n\nUsage:\n  timds init [--root PATH] [--standalone] [--force]\n  timds upgrade [--root PATH] [--force]\n  timds auth login [--token TOKEN] [--portal-url URL]\n  timds auth status [--portal-url URL]\n  timds auth logout [--portal-url URL]\n  timds doctor [--root PATH]\n  timds dev [--root PATH]\n  timds check [--root PATH] [--skip-build] [--require-clean-dist]\n  timds preview [--root PATH] [--port 4400] [--no-build]\n  timds diff [--root PATH] [--base origin/main]\n  timds assets list [--root PATH]\n  timds assets add FILE [--key LOGICAL_KEY] [--title TEXT] [--tags a,b]\n  timds assets publish [--root PATH]\n  timds assets pull KEY [--output PATH] [--force]\n  timds submit --message "Change summary" [--dry-run] [--no-push] [--no-pr]\n\nLarge public media is copied into ignored media-local/ for authoring. assets publish and submit upload changed media and commit only stable CDN records. Submit creates a review branch and draft pull request.`;
 }
 
 export async function runCli(argv) {
@@ -742,6 +772,40 @@ export async function runCli(argv) {
     return;
   }
   const root = options.root || process.cwd();
+  if (command === "auth") {
+    const [authCommand = "status"] = positional;
+    const portalUrl = options.portalUrl || process.env.TIMDS_PORTAL_URL || "https://timds.com";
+    if (authCommand === "login") {
+      if (options.token) {
+        const result = await saveAccessToken(portalUrl, options.token, options);
+        output(`TimDS access token saved for ${result.portal}.`);
+        return result;
+      }
+      const result = await loginWithDevice(portalUrl, {
+        ...options,
+        onAuthorization(authorization) {
+          output(`Open ${authorization.verificationUrl}`);
+          output(`Enter code: ${authorization.userCode}`);
+          output("Waiting for operator approval...");
+        },
+      });
+      output(`TimDS authorization saved for ${result.portal}.`);
+      return result;
+    }
+    if (authCommand === "status") {
+      const credentials = await readCredentials(options);
+      const portal = new URL(portalUrl).origin;
+      const signedIn = Boolean(credentials.portals[portal]?.accessToken);
+      output(`${portal}: ${signedIn ? "signed in" : "not signed in"}`);
+      return { portal, signedIn };
+    }
+    if (authCommand === "logout") {
+      const result = await removeAccessToken(portalUrl, options);
+      output(`${result.portal}: ${result.removed ? "signed out" : "no saved authorization"}`);
+      return result;
+    }
+    throw new Error(`Unknown auth command ${authCommand}`);
+  }
   if (command === "init") {
     const result = await initializeRepository(root, { force: options.force, standalone: options.standalone });
     output(`TimDS tooling installed for ${result.repoRoot}`);
@@ -829,16 +893,24 @@ export async function runCli(argv) {
         output("No TimDS media assets are registered.");
       } else {
         for (const asset of workspace.mediaCatalog.assets) {
-          output(`${asset.id}\t${asset.visibility}\t${asset.kind}\t${asset.bytes}\t${asset.title}`);
+          output(`${asset.key}\t${asset.kind}\t${asset.bytes}\t${asset.publicUrl}\t${asset.title}`);
         }
       }
       return workspace.mediaCatalog;
     }
-    if (mediaCommand === "add") {
+    if (["add", "stage"].includes(mediaCommand)) {
       if (!mediaArgument) throw new Error("assets add requires a file path");
       const result = await addMediaFile(workspace, mediaArgument, options);
-      output(`${result.reused ? "Reused" : "Uploaded"} media asset ${result.asset.id}: ${result.asset.title}`);
-      output(`Catalog: ${result.catalogPath}`);
+      output(`Staged public media ${result.asset.key}: ${result.asset.title}`);
+      output(`Local source: ${result.asset.path}`);
+      return result;
+    }
+    if (mediaCommand === "publish") {
+      const result = await publishStagedMedia(workspace, options);
+      for (const published of result.published) {
+        output(`${published.reused ? "Reused" : "Uploaded"} ${published.asset.key}: ${published.asset.publicUrl}`);
+      }
+      output(`Media publication complete: ${result.published.length} changed, ${result.unchanged.length} unchanged.`);
       return result;
     }
     if (mediaCommand === "pull") {
