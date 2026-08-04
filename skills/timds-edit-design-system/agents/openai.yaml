@@ -1,0 +1,4 @@
+interface:
+  display_name: "Edit a TimDS Design System"
+  short_description: "Edit, manage media, validate, and submit TimDS changes"
+  default_prompt: "Use $timds-edit-design-system to update this client design system and submit the change for review."

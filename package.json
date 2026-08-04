@@ -1,0 +1,46 @@
+{
+  "name": "@dtconcepts/timds",
+  "version": "0.1.0",
+  "description": "Versioned CLI, contracts, templates, and AI skill for repository-owned TimDS design systems.",
+  "type": "module",
+  "bin": {
+    "timds": "bin/timds.mjs"
+  },
+  "exports": {
+    ".": "./src/core.mjs",
+    "./core": "./src/core.mjs",
+    "./media": "./src/media.mjs"
+  },
+  "scripts": {
+    "test": "node --test src/*.test.mjs",
+    "pack:check": "npm pack --dry-run"
+  },
+  "files": [
+    "bin",
+    "scripts/publish-artifact.mjs",
+    "skills",
+    "src/core.mjs",
+    "src/media.mjs",
+    "templates"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "design-system",
+    "timds",
+    "workflow"
+  ],
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dtconceptsnc/timds-toolkit.git"
+  },
+  "bugs": {
+    "url": "https://github.com/dtconceptsnc/timds-toolkit/issues"
+  },
+  "homepage": "https://github.com/dtconceptsnc/timds-toolkit#readme",
+  "publishConfig": {
+    "access": "public"
+  }
+}

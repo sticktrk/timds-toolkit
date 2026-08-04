@@ -1,0 +1,32 @@
+name: TimDS design system
+
+on:
+  pull_request:
+    paths:
+      - "design-system/**"
+      - ".agents/skills/timds-edit-design-system/**"
+      - ".github/workflows/timds-design-system.yml"
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - "design-system/**"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install design-system dependencies
+        run: |
+          node -e 'const fs=require("node:fs"); const m=JSON.parse(fs.readFileSync("design-system/timds.json","utf8")); const c=m.workspace?.install; if (c) require("node:child_process").execFileSync(c[0],c.slice(1),{cwd:"design-system",stdio:"inherit"});'
+      - name: Validate exact TimDS artifact
+        run: node design-system/.timds/cli/bin/timds.mjs check --require-clean-dist

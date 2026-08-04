@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 2,
+  "systemId": "__SYSTEM_ID__",
+  "name": "__NAME__ Design System",
+  "description": "Repository-owned visual and interface standards.",
+  "version": "0.1.0",
+  "artifact": {
+    "entry": "index.html"__PUBLISH_REF__
+  },
+  "media": {
+    "portalUrl": "https://timds.com"
+  },
+  "workspace": {}
+}
