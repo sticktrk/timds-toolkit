@@ -91,6 +91,9 @@ npm run timds -- assets publish
 `submit` also publishes staged media before it builds and opens the pull
 request. Only the stable key, checksum, metadata, and public CDN URL are written
 to `media.json`. The raw file and `.timds/local-media.json` remain ignored.
+If an object transfer fails, the CLI reports the bounded storage response and
+cancels the server upload lease before returning the error, so correcting the
+problem and rerunning `assets publish` does not wait for a stale lock to expire.
 `TIMDS_ACCESS_TOKEN` can be used for non-interactive CI or agent sessions.
 
 To restore a published asset into a fresh local workspace:

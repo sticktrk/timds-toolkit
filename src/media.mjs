@@ -317,7 +317,10 @@ async function putSingleFile(fetchImpl, upload, filePath, contentType) {
     headers: { "Content-Type": contentType, ...(upload.headers || {}) },
     method: "PUT",
   });
-  if (!response.ok) throw new Error(`Object upload returned ${response.status}`);
+  if (!response.ok) {
+    const detail = String(await response.text().catch(() => "")).replace(/\s+/g, " ").trim().slice(0, 500);
+    throw new Error(`Object upload returned ${response.status}${detail ? `: ${detail}` : ""}`);
+  }
 }
 
 async function putMultipartFile(fetchImpl, upload, filePath, contentType, token) {
@@ -338,7 +341,10 @@ async function putMultipartFile(fetchImpl, upload, filePath, contentType, token)
         headers: { "Content-Type": contentType, ...(signed.headers || {}) },
         method: "PUT",
       });
-      if (!response.ok) throw new Error(`Object upload part ${partNumber} returned ${response.status}`);
+      if (!response.ok) {
+        const detail = String(await response.text().catch(() => "")).replace(/\s+/g, " ").trim().slice(0, 500);
+        throw new Error(`Object upload part ${partNumber} returned ${response.status}${detail ? `: ${detail}` : ""}`);
+      }
       const etag = String(response.headers.get("etag") || "").trim();
       if (!etag) throw new Error(`Object upload part ${partNumber} did not return an ETag`);
       parts.push({ etag, partNumber });
@@ -392,15 +398,31 @@ async function uploadLocalAsset(workspace, local, options) {
   if (created.upload) {
     const upload = {
       ...created.upload,
+      cancelUrl: created.upload.cancelUrl
+        ? portalEndpoint(portalUrl, created.upload.cancelUrl)
+        : created.upload.id
+          ? portalEndpoint(portalUrl, `/api/operator/design-system-assets/uploads/${encodeURIComponent(created.upload.id)}`)
+          : null,
       completeUrl: portalEndpoint(portalUrl, created.upload.completeUrl),
       partsUrl: created.upload.partsUrl ? portalEndpoint(portalUrl, created.upload.partsUrl) : null,
     };
-    let parts = [];
-    if (upload.method === "multipart") parts = await putMultipartFile(fetchImpl, upload, filePath, local.contentType, token);
-    else if (upload.method === "single") await putSingleFile(fetchImpl, upload, filePath, local.contentType);
-    else throw new Error("TimDS returned an unsupported upload method");
-    const completed = await portalJson(fetchImpl, upload.completeUrl, token, { body: { parts }, method: "POST" });
-    asset = completed.asset;
+    try {
+      let parts = [];
+      if (upload.method === "multipart") parts = await putMultipartFile(fetchImpl, upload, filePath, local.contentType, token);
+      else if (upload.method === "single") await putSingleFile(fetchImpl, upload, filePath, local.contentType);
+      else throw new Error("TimDS returned an unsupported upload method");
+      const completed = await portalJson(fetchImpl, upload.completeUrl, token, { body: { parts }, method: "POST" });
+      asset = completed.asset;
+    } catch (caught) {
+      if (upload.cancelUrl) {
+        try {
+          await portalJson(fetchImpl, upload.cancelUrl, token, { method: "DELETE" });
+        } catch {
+          // Preserve the transfer error; the server-side upload lease still expires automatically.
+        }
+      }
+      throw caught;
+    }
   }
   if (!asset?.id || !asset?.publicUrl) throw new Error("TimDS did not return a public media asset record");
   return { asset: catalogRecord(asset, local), reused: Boolean(created.reused) };

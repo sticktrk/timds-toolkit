@@ -229,6 +229,49 @@ test("uses bounded multipart handshakes for large-media upload plans", async (t)
   assert.equal(calls[1].url, "https://timds.test/api/operator/design-system-assets/uploads/upload-2/parts");
 });
 
+test("cancels the server upload lease when object transfer fails", async (t) => {
+  const repoRoot = await createDesignSystemRepo(t);
+  await initializeRepository(repoRoot);
+  const filePath = path.join(repoRoot, "failed-video.mp4");
+  await fs.writeFile(filePath, Buffer.from("video-master"));
+  const workspace = await checkWorkspace(repoRoot, { skipBuild: true });
+  const calls = [];
+  const fakeFetch = async (url, options = {}) => {
+    const call = { method: options.method || "GET", url: String(url) };
+    calls.push(call);
+    if (call.url.endsWith("/api/operator/design-system-assets/uploads") && call.method === "POST") {
+      return Response.json({
+        asset: { id: "asset_failed123", kind: "video", publicUrl: "https://assets.timds.test/test/failed-video.mp4" },
+        upload: {
+          cancelUrl: "/api/operator/design-system-assets/uploads/upload-failed",
+          completeUrl: "/api/operator/design-system-assets/uploads/upload-failed/complete",
+          id: "upload-failed",
+          headers: { "x-amz-meta-sha256": "accepted" },
+          method: "single",
+          url: "https://r2.test/failed-object",
+        },
+      });
+    }
+    if (call.url === "https://r2.test/failed-object") {
+      return new Response("<Error><Code>AccessDenied</Code></Error>", { status: 403 });
+    }
+    if (call.url.endsWith("/upload-failed") && call.method === "DELETE") {
+      return Response.json({ ok: true });
+    }
+    return Response.json({ error: "unexpected" }, { status: 500 });
+  };
+  await addMediaFile(workspace, filePath, { key: "failed-video" });
+  await assert.rejects(
+    publishStagedMedia(workspace, {
+      fetchImpl: fakeFetch,
+      portalUrl: "https://timds.test",
+      token: "test-token",
+    }),
+    /Object upload returned 403: <Error><Code>AccessDenied<\/Code><\/Error>/,
+  );
+  assert.deepEqual(calls.map((call) => call.method), ["POST", "PUT", "DELETE"]);
+});
+
 test("validates exact artifact files and local references", async (t) => {
   const repoRoot = await createDesignSystemRepo(t);
   const result = await checkWorkspace(repoRoot, { skipBuild: true });
@@ -272,7 +315,7 @@ test("initializes guarded tooling without overwriting the design-system manifest
   await assert.rejects(fs.access(path.join(repoRoot, "design-system", ".timds", "cli")), /ENOENT/);
   assert.deepEqual(
     JSON.parse(await fs.readFile(path.join(repoRoot, "design-system", ".timds", "installation.json"), "utf8")),
-    { name: "@dtconcepts/timds", schemaVersion: 1, version: "0.1.3" },
+    { name: "@dtconcepts/timds", schemaVersion: 1, version: "0.1.401" },
   );
   await fs.access(path.join(repoRoot, "design-system", "media.json"));
   assert.match(await fs.readFile(path.join(repoRoot, "design-system", ".gitignore"), "utf8"), /\.timds\/cache/);
@@ -308,7 +351,7 @@ test("upgrades clean managed records and removes the legacy vendored CLI", async
 
   const result = await upgradeRepository(repoRoot);
   assert.equal(result.previousVersion, "0.1.0");
-  assert.equal(result.package.version, "0.1.3");
+  assert.equal(result.package.version, "0.1.401");
   await assert.rejects(fs.access(stalePath), /ENOENT/);
   assert.equal(await fs.readFile(skillPath, "utf8"), originalSkill);
 });
