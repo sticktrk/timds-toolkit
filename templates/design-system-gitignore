@@ -2,4 +2,3 @@
 .timds/local-media.json
 media-local/*
 !media-local/README.md
-dist/

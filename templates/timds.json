@@ -10,5 +10,9 @@
   "media": {
     "portalUrl": "https://timds.com"
   },
-  "workspace": {}
+  "workspace": {
+    "dev": ["node", "scripts/dev.mjs"],
+    "build": ["node", "scripts/build.mjs"],
+    "check": ["node", "scripts/check.mjs"]
+  }
 }

@@ -27,7 +27,7 @@ import {
 async function temporaryDirectory(t) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "timds-cli-"));
   t.after(() => fs.rm(directory, { force: true, recursive: true }));
-  return directory;
+  return fs.realpath(directory);
 }
 
 async function writeJson(filePath, value) {
@@ -279,6 +279,22 @@ test("validates exact artifact files and local references", async (t) => {
   assert.equal(result.artifact.entryPath, "index.html");
 });
 
+test("builds before running the workspace check on a clean artifact", async (t) => {
+  const repoRoot = await createDesignSystemRepo(t);
+  const designSystemRoot = path.join(repoRoot, "design-system");
+  const manifestPath = path.join(designSystemRoot, "timds.json");
+  const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
+  manifest.workspace = {
+    build: ["node", "-e", "require('node:fs').appendFileSync('command-order.txt', 'build\\n')"],
+    check: ["node", "-e", "const fs=require('node:fs'); if(fs.readFileSync('command-order.txt','utf8')!=='build\\n') process.exit(1); fs.appendFileSync('command-order.txt','check\\n')"],
+  };
+  await writeJson(manifestPath, manifest);
+
+  await checkWorkspace(repoRoot);
+
+  assert.equal(await fs.readFile(path.join(designSystemRoot, "command-order.txt"), "utf8"), "build\ncheck\n");
+});
+
 test("accepts trailing-slash links to static route indexes", async (t) => {
   const repoRoot = await createDesignSystemRepo(t);
   const designSystemRoot = path.join(repoRoot, "design-system");
@@ -392,7 +408,7 @@ test("refuses submit when unrelated repository files are dirty", async (t) => {
 test("refuses submit from a branch containing unrelated committed changes", async (t) => {
   const repoRoot = await createDesignSystemRepo(t);
   await initializeRepository(repoRoot);
-  execFileSync("git", ["add", "design-system", ".agents", ".github", "package.json"], { cwd: repoRoot });
+  execFileSync("git", ["add", "design-system", ".agents", ".github", ".gitignore", "package.json"], { cwd: repoRoot });
   execFileSync("git", ["commit", "-m", "Initialize TimDS"], { cwd: repoRoot, stdio: "ignore" });
   execFileSync("git", ["switch", "-c", "feature/unrelated"], { cwd: repoRoot, stdio: "ignore" });
   await fs.writeFile(path.join(repoRoot, "README.md"), "Unrelated committed work\n", "utf8");
@@ -456,17 +472,60 @@ test("loads and validates a standalone repository contract", async (t) => {
 test("initializes the reusable standalone repository shape", async (t) => {
   const repoRoot = await temporaryDirectory(t);
   execFileSync("git", ["init", "-b", "main"], { cwd: repoRoot, stdio: "ignore" });
+  execFileSync("git", ["config", "user.email", "timds-test@example.com"], { cwd: repoRoot });
+  execFileSync("git", ["config", "user.name", "TimDS Test"], { cwd: repoRoot });
 
   const result = await initializeRepository(repoRoot, { standalone: true });
   assert.equal(result.designSystemRoot, repoRoot);
+  assert.equal(result.initializedArtifact.entryPath, "index.html");
   const manifest = JSON.parse(await fs.readFile(path.join(repoRoot, "timds.json"), "utf8"));
   assert.equal(manifest.artifact.publishRef, "timds-published");
+  assert.deepEqual(manifest.workspace.build, ["node", "scripts/build.mjs"]);
   assert.match(await fs.readFile(path.join(repoRoot, "README.md"), "utf8"), /npm run timds -- doctor/);
   const packageJson = JSON.parse(await fs.readFile(path.join(repoRoot, "package.json"), "utf8"));
   assert.equal(packageJson.devDependencies["@dtconcepts/timds"], "0.1.x");
   assert.equal(packageJson.scripts.timds, "timds");
+  await fs.access(path.join(repoRoot, "src", "index.html"));
+  await fs.access(path.join(repoRoot, "scripts", "build.mjs"));
+  await fs.access(path.join(repoRoot, "dist", "index.html"));
+  assert.match(await fs.readFile(path.join(repoRoot, ".gitignore"), "utf8"), /node_modules\//);
+  assert.match(await fs.readFile(path.join(repoRoot, ".gitignore"), "utf8"), /dist\//);
   assert.match(
     await fs.readFile(path.join(repoRoot, ".agents", "skills", "timds-edit-design-system", "SKILL.md"), "utf8"),
     /standalone Design System/,
+  );
+
+  await fs.mkdir(path.join(repoRoot, "node_modules", "example"), { recursive: true });
+  await fs.writeFile(path.join(repoRoot, "node_modules", "example", "ignored.js"), "ignored\n", "utf8");
+  execFileSync("git", ["add", "--all"], { cwd: repoRoot });
+  execFileSync("git", ["commit", "-m", "Initialize TimDS"], { cwd: repoRoot, stdio: "ignore" });
+  assert.equal(execFileSync("git", ["status", "--porcelain", "--untracked-files=all"], { cwd: repoRoot, encoding: "utf8" }), "");
+});
+
+test("initializes an embedded contract with a committed starter artifact", async (t) => {
+  const repoRoot = await temporaryDirectory(t);
+  execFileSync("git", ["init", "-b", "main"], { cwd: repoRoot, stdio: "ignore" });
+  execFileSync("git", ["config", "user.email", "timds-test@example.com"], { cwd: repoRoot });
+  execFileSync("git", ["config", "user.name", "TimDS Test"], { cwd: repoRoot });
+  await fs.writeFile(path.join(repoRoot, "README.md"), "# Existing app\n", "utf8");
+  execFileSync("git", ["add", "README.md"], { cwd: repoRoot });
+  execFileSync("git", ["commit", "-m", "Initial"], { cwd: repoRoot, stdio: "ignore" });
+
+  const result = await initializeRepository(repoRoot);
+  const designSystemRoot = path.join(repoRoot, "design-system");
+  assert.equal(result.initializedArtifact.entryPath, "index.html");
+  await fs.access(path.join(designSystemRoot, "dist", "index.html"));
+  assert.match(await fs.readFile(path.join(repoRoot, ".gitignore"), "utf8"), /node_modules\//);
+  assert.doesNotMatch(await fs.readFile(path.join(designSystemRoot, ".gitignore"), "utf8"), /^dist\/$/m);
+  assert.throws(
+    () => execFileSync("git", ["check-ignore", "design-system/dist/index.html"], { cwd: repoRoot, stdio: "ignore" }),
+  );
+
+  execFileSync("git", ["add", "--all"], { cwd: repoRoot });
+  execFileSync("git", ["commit", "-m", "Add TimDS contract"], { cwd: repoRoot, stdio: "ignore" });
+  assert.equal(execFileSync("git", ["status", "--porcelain"], { cwd: repoRoot, encoding: "utf8" }), "");
+  assert.match(
+    execFileSync("git", ["show", "--name-only", "--format=", "HEAD"], { cwd: repoRoot, encoding: "utf8" }),
+    /design-system\/dist\/index\.html/,
   );
 });
