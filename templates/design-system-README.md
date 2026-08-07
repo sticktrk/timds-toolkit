@@ -5,13 +5,22 @@ __CONTRACT_DESCRIPTION__
 ## First local run
 
 ```bash
-npm ci
+npm install
 __TIMDS_CLI__ doctor
+__TIMDS_CLI__ check
 __TIMDS_CLI__ dev
 ```
 
 `dev` starts the repository-declared authoring server. `preview` serves the
 exact generated static artifact that TimDS will publish.
+
+## Starter viewer
+
+New contracts include a dependency-free starter viewer under `src/` and
+deterministic Node.js commands under `scripts/`. The starter exists so the
+contract builds and validates immediately; replace its neutral tokens and
+examples with approved client foundations rather than treating them as brand
+guidance. Later clones should use `npm ci` with the committed lockfile.
 
 Declare framework-specific local commands as argument arrays in `timds.json`:
 

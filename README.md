@@ -18,6 +18,9 @@ npx --yes @dtconcepts/timds@0.1.x init --standalone --root /path/to/client-desig
 cd /path/to/client-design-system
 npm install
 npm run timds -- doctor
+npm run timds -- check
+git add --all
+git commit -m "Initialize TimDS design system"
 ```
 
 Create an embedded root `design-system/` contract in an existing client app:
@@ -27,10 +30,15 @@ npx --yes @dtconcepts/timds@0.1.x init --root /path/to/client-application
 cd /path/to/client-application
 npm install
 npm run timds -- doctor
+npm run timds -- check
 ```
 
-Commit `package.json`, the lockfile, `.agents/skills/`, the Design System
-contract, and the TimDS workflow. Do not commit `node_modules`.
+New contracts include a small authored viewer, deterministic build/check/dev
+scripts, starter tokens, and a validated initial artifact. The initializer also
+adds the appropriate dependency and artifact ignore rules, so after
+`npm install` creates the exact lockfile, `git add --all` is safe. Commit
+`package.json`, the lockfile, `.agents/skills/`, the Design System contract,
+and the TimDS workflow. Do not commit `node_modules`.
 
 ## Designer workflow
 

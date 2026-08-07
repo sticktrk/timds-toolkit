@@ -366,8 +366,8 @@ async function verifyCleanDist(workspace) {
 export async function checkWorkspace(repoRootInput, options = {}) {
   const workspace = await loadWorkspace(repoRootInput);
   if (!options.skipBuild) {
-    await runWorkspaceCommand(workspace, "check");
     await runWorkspaceCommand(workspace, "build");
+    await runWorkspaceCommand(workspace, "check");
   }
   const artifact = await validateArtifact(workspace.designSystemRoot, workspace.manifest);
   if (options.requireCleanDist) await verifyCleanDist(workspace);
@@ -448,20 +448,21 @@ async function ensureGitignoreLine(filePath, line, created) {
   created.push(filePath);
 }
 
-async function copyDirectory(source, destination, { overwrite = false } = {}) {
+async function copyDirectory(source, destination, { created = null, overwrite = false } = {}) {
   if (path.resolve(source) === path.resolve(destination)) return;
   await fs.mkdir(destination, { recursive: true });
   for (const entry of await fs.readdir(source, { withFileTypes: true })) {
     const sourcePath = path.join(source, entry.name);
     const destinationPath = path.join(destination, entry.name);
     if (entry.isDirectory()) {
-      await copyDirectory(sourcePath, destinationPath, { overwrite });
+      await copyDirectory(sourcePath, destinationPath, { created, overwrite });
       continue;
     }
     if (!entry.isFile()) continue;
     if (!overwrite && existsSync(destinationPath)) continue;
     await fs.mkdir(path.dirname(destinationPath), { recursive: true });
     await fs.copyFile(sourcePath, destinationPath);
+    created?.push(destinationPath);
   }
 }
 
@@ -577,6 +578,8 @@ async function requirePinnedToolkitDependency(repoRoot, identity) {
 export async function initializeRepository(repoRootInput, { force = false, standalone = false } = {}) {
   const repoRoot = await findRepositoryRoot(repoRootInput);
   const designSystemRoot = standalone ? repoRoot : path.join(repoRoot, "design-system");
+  const manifestPath = path.join(designSystemRoot, "timds.json");
+  const createsContract = !existsSync(manifestPath);
   const created = [];
   const identity = await toolkitPackageIdentity();
   const packagePath = await configurePackageManifest(repoRoot, identity, { force });
@@ -584,7 +587,7 @@ export async function initializeRepository(repoRootInput, { force = false, stand
   await fs.mkdir(designSystemRoot, { recursive: true });
   const repoSlug = slug(path.basename(repoRoot));
   await writeIfMissing(
-    path.join(designSystemRoot, "timds.json"),
+    manifestPath,
     (await template("timds.json"))
       .replaceAll("__SYSTEM_ID__", `${repoSlug}/core`)
       .replaceAll("__NAME__", path.basename(repoRoot))
@@ -597,6 +600,8 @@ export async function initializeRepository(repoRootInput, { force = false, stand
   for (const line of (await template("design-system-gitignore")).split(/\r?\n/).map((entry) => entry.trim()).filter(Boolean)) {
     await ensureGitignoreLine(path.join(designSystemRoot, ".gitignore"), line, created);
   }
+  await ensureGitignoreLine(path.join(repoRoot, ".gitignore"), "node_modules/", created);
+  if (standalone) await ensureGitignoreLine(path.join(designSystemRoot, ".gitignore"), "dist/", created);
   const cliCommand = "npm run timds --";
   const contractDescription = standalone
     ? "This repository is the editable source and static publication contract for TimDS."
@@ -608,6 +613,9 @@ export async function initializeRepository(repoRootInput, { force = false, stand
   await writeIfMissing(path.join(designSystemRoot, "AGENTS.md"), renderTemplate(await template("design-system-AGENTS.md")), created);
   await writeIfMissing(path.join(designSystemRoot, "README.md"), renderTemplate(await template("design-system-README.md")), created);
   await writeIfMissing(path.join(designSystemRoot, "CHANGELOG.md"), await template("CHANGELOG.md"), created);
+  if (createsContract) {
+    await copyDirectory(path.join(packageRoot, "templates", "starter"), designSystemRoot, { created });
+  }
   await writeIfMissing(
     path.join(repoRoot, ".github", "workflows", "timds-design-system.yml"),
     await template(standalone ? "timds-standalone.yml" : "timds-design-system.yml"),
@@ -615,7 +623,8 @@ export async function initializeRepository(repoRootInput, { force = false, stand
   );
 
   const installed = await installManagedToolkit({ designSystemRoot, repoRoot, replace: force });
-  return { created, designSystemRoot, repoRoot, ...installed };
+  const initializedArtifact = createsContract ? (await checkWorkspace(repoRoot)).artifact : null;
+  return { created, designSystemRoot, initializedArtifact, repoRoot, ...installed };
 }
 
 export async function upgradeRepository(repoRootInput, { force = false } = {}) {
@@ -813,7 +822,10 @@ export async function runCli(argv) {
     output(`Agent skill: ${result.skillDestination}`);
     output(`Toolkit: ${result.package.name}@${result.package.version}`);
     if (result.created.length) output(`Created ${result.created.length} contract files.`);
-    output("Run npm install, then npm run timds -- doctor.");
+    if (result.initializedArtifact) {
+      output(`Starter artifact: ${result.initializedArtifact.fileCount} files, ${result.initializedArtifact.totalBytes} bytes.`);
+    }
+    output("Run npm install to create the lockfile, then git add --all and commit the validated contract.");
     return result;
   }
   if (command === "upgrade") {
