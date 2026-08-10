@@ -535,4 +535,4 @@ export async function localMediaResponse(request, designSystemRoot) {
   return new Response(Readable.toWeb(stream), { headers, status: range ? 206 : 200 });
 }
 
-export { LOCAL_MEDIA_ROUTE, mediaKind };
+export { LOCAL_MEDIA_ROUTE, mediaKind, portalEndpoint, portalJson, putMultipartFile, putSingleFile };
