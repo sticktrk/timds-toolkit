@@ -24,6 +24,12 @@ import {
   validateMediaCatalog,
 } from "./media.mjs";
 
+// Read from the manifest rather than hardcoding: these assertions describe the
+// version the toolkit installs, which changes on every release.
+const toolkitVersion = JSON.parse(
+  await fs.readFile(new URL("../package.json", import.meta.url), "utf8"),
+).version;
+
 async function temporaryDirectory(t) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "timds-cli-"));
   t.after(() => fs.rm(directory, { force: true, recursive: true }));
@@ -338,7 +344,7 @@ test("initializes guarded tooling without overwriting the design-system manifest
   await assert.rejects(fs.access(path.join(repoRoot, "design-system", ".timds", "cli")), /ENOENT/);
   assert.deepEqual(
     JSON.parse(await fs.readFile(path.join(repoRoot, "design-system", ".timds", "installation.json"), "utf8")),
-    { name: "@dtconcepts/timds", schemaVersion: 1, version: "0.1.401" },
+    { name: "@dtconcepts/timds", schemaVersion: 1, version: toolkitVersion },
   );
   await fs.access(path.join(repoRoot, "design-system", "media.json"));
   assert.match(await fs.readFile(path.join(repoRoot, "design-system", ".gitignore"), "utf8"), /\.timds\/cache/);
@@ -374,7 +380,7 @@ test("upgrades clean managed records and removes the legacy vendored CLI", async
 
   const result = await upgradeRepository(repoRoot);
   assert.equal(result.previousVersion, "0.1.0");
-  assert.equal(result.package.version, "0.1.401");
+  assert.equal(result.package.version, toolkitVersion);
   await assert.rejects(fs.access(stalePath), /ENOENT/);
   assert.equal(await fs.readFile(skillPath, "utf8"), originalSkill);
 });
