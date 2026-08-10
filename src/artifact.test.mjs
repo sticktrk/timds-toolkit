@@ -7,8 +7,10 @@ import test from "node:test";
 import {
   artifactContentType,
   collectIndexAssetFiles,
+  collectMachineDocFiles,
   publishExtractedIndex,
   rewriteIndexForPublish,
+  rewriteLlmsForPublish,
 } from "./artifact.mjs";
 
 const INDEX = {
@@ -103,12 +105,46 @@ test("rewriteIndexForPublish rewrites local references, stamps integrity, and le
   }
 });
 
-test("publishExtractedIndex uploads assets first, then the rewritten index and provenance stamp", async () => {
+test("rewriteLlmsForPublish makes link targets and the index pointer absolute", () => {
+  const source = [
+    "# Client System",
+    "",
+    "Machine-readable index: /design-system/index.json — every page below also exists as `index.md`.",
+    "",
+    "## social",
+    "",
+    "- [Video assets](/design-system/social/video-assets/index.md): The photo registry.",
+  ].join("\n");
+  const rewritten = rewriteLlmsForPublish(source, "https://cdn.example.com/artifact/");
+  assert.match(rewritten, /Machine-readable index: https:\/\/cdn\.example\.com\/artifact\/design-system\/index\.json/);
+  assert.match(rewritten, /\]\(https:\/\/cdn\.example\.com\/artifact\/design-system\/social\/video-assets\/index\.md\)/);
+  assert.doesNotMatch(rewritten, /\]\(\//);
+});
+
+test("collectMachineDocFiles finds page mirrors under the entry directory", async () => {
+  const root = await makeArtifact({
+    "design-system/index.md": "# Root",
+    "design-system/social/video-assets/index.md": "# Video assets",
+    "design-system/photos/elder-hands.webp": "not-markdown",
+  });
+  try {
+    assert.deepEqual(await collectMachineDocFiles(root, "design-system"), [
+      "design-system/index.md",
+      "design-system/social/video-assets/index.md",
+    ]);
+  } finally {
+    await fs.rm(root, { force: true, recursive: true });
+  }
+});
+
+test("publishExtractedIndex uploads assets and mirrors first, then index, llms.txt, and stamp", async () => {
   const designSystemRoot = await fs.mkdtemp(path.join(os.tmpdir(), "timds-publish-test-"));
   try {
     const artifact = {
       "dist/design-system/index.json": `${JSON.stringify(INDEX, null, 2)}\n`,
       "dist/design-system/photos/elder-hands.webp": "webp-bytes",
+      "dist/design-system/social/video-assets/index.md": "# Video assets\n",
+      "dist/design-system/llms.txt": "Machine-readable index: /design-system/index.json\n\n- [Video assets](/design-system/social/video-assets/index.md)\n",
     };
     for (const [relative, content] of Object.entries(artifact)) {
       const target = path.join(designSystemRoot, ...relative.split("/"));
@@ -156,15 +192,30 @@ test("publishExtractedIndex uploads assets first, then the rewritten index and p
     });
 
     assert.equal(published.indexUrl, "https://cdn.example.com/clients/c/design-systems/s/artifact/design-system/index.json");
-    assert.equal(published.uploaded, 2);
+    assert.equal(published.llmsUrl, "https://cdn.example.com/clients/c/design-systems/s/artifact/design-system/llms.txt");
+    assert.equal(published.docCount, 1);
+    assert.equal(published.uploaded, 4);
     assert.equal(published.skipped, 1);
-    assert.equal(published.total, 3);
+    assert.equal(published.total, 5);
 
     assert.equal(sessions.length, 2);
-    assert.deepEqual(sessions[0].files.map((file) => file.path), ["design-system/photos/elder-hands.webp"]);
+    assert.deepEqual(sessions[0].files.map((file) => file.path), [
+      "design-system/photos/elder-hands.webp",
+      "design-system/social/video-assets/index.md",
+    ]);
     assert.equal(sessions[0].systemId, "client/system");
     assert.equal(sessions[0].version, "1.2.3");
-    assert.deepEqual(sessions[1].files.map((file) => file.path).sort(), [".timds-artifact.json", "design-system/index.json"]);
+    assert.deepEqual(sessions[1].files.map((file) => file.path).sort(), [
+      ".timds-artifact.json",
+      "design-system/index.json",
+      "design-system/llms.txt",
+    ]);
+
+    // Page mirrors upload verbatim; llms.txt links resolve on the CDN.
+    assert.equal(puts.get("design-system/social/video-assets/index.md"), "# Video assets\n");
+    const llms = puts.get("design-system/llms.txt");
+    assert.match(llms, /Machine-readable index: https:\/\/cdn\.example\.com\/clients\/c\/design-systems\/s\/artifact\/design-system\/index\.json/);
+    assert.doesNotMatch(llms, /\]\(\//);
 
     const uploadedIndex = JSON.parse(puts.get("design-system/index.json"));
     assert.equal(

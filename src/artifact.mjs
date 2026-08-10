@@ -1,14 +1,16 @@
-// Publish the machine-readable index to the system's public CDN prefix.
+// Publish the machine-readable layer to the system's public CDN prefix.
 //
-// `extract` derives index.json beside the built viewer. That file references
-// artifact-local assets (photos, engravings, logos) by site-absolute path,
-// which only resolves when the whole artifact is served from a domain root.
-// Publishing makes the index consumable from one stable URL: it uploads the
-// referenced files under the system's artifact prefix, rewrites those
-// references to absolute URLs — stamping bytes and sha256 so consumers can
-// detect a changed asset behind an unchanged key — and uploads the rewritten
-// index plus a `.timds-artifact.json` provenance stamp last, so the index
-// never points at files that are not there yet.
+// `extract` derives the machine layer beside the built viewer: index.json for
+// pipelines, and llms.txt plus a Markdown mirror of every page for agents.
+// Those files reference artifact-local assets (photos, engravings, logos) and
+// pages by site-absolute path, which only resolves when the whole artifact is
+// served from a domain root. Publishing makes the layer consumable from one
+// stable URL: it uploads the referenced files and the page mirrors under the
+// system's artifact prefix, rewrites index references to absolute URLs —
+// stamping bytes and sha256 so consumers can detect a changed asset behind an
+// unchanged key — rewrites llms.txt links the same way, and uploads the
+// rewritten index, llms.txt, and a `.timds-artifact.json` provenance stamp
+// last, so no entry point ever precedes the files it names.
 //
 // The portal signs every upload (same operator token as `assets publish`) and
 // owns the key scheme. Contract, mirroring design-system-assets uploads:
@@ -123,6 +125,36 @@ export function rewriteIndexForPublish(index, files, publicBase) {
   return rewritten;
 }
 
+/** The extract-written page mirrors and llms.txt, as artifact-relative paths. */
+export async function collectMachineDocFiles(artifactRoot, entryDirectory) {
+  const baseDirectory = entryDirectory === "." ? artifactRoot : path.join(artifactRoot, ...entryDirectory.split("/"));
+  const found = [];
+  const visit = async (directory) => {
+    for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+      const absolutePath = path.join(directory, entry.name);
+      if (entry.isDirectory()) await visit(absolutePath);
+      else if (entry.isFile() && entry.name.toLowerCase().endsWith(".md")) found.push(absolutePath);
+    }
+  };
+  await visit(baseDirectory);
+  const prefix = entryDirectory === "." ? "" : `${entryDirectory}/`;
+  return found
+    .map((file) => `${prefix}${path.relative(baseDirectory, file).split(path.sep).join("/")}`)
+    .sort();
+}
+
+/**
+ * llms.txt is the agents' directory into the published layer, so its
+ * site-absolute targets — Markdown link destinations and the machine-index
+ * pointer — must resolve against the CDN prefix, not a viewer origin.
+ */
+export function rewriteLlmsForPublish(text, publicBase) {
+  const base = String(publicBase).replace(/\/+$/, "");
+  return String(text)
+    .replace(/\]\(\//g, `](${base}/`)
+    .replace(/^(Machine-readable index: )(\/\S+)/m, (_match, label, target) => `${label}${base}${target}`);
+}
+
 function detectSourceCommit(cwd) {
   const fromCi = String(process.env.GITHUB_SHA || "").trim();
   if (/^[a-f0-9]{40}$/i.test(fromCi)) return fromCi;
@@ -195,8 +227,21 @@ export async function publishExtractedIndex(workspace, options = {}) {
       method: "POST",
     });
 
-  // Referenced files publish first so the index never precedes its assets.
+  // Referenced files and page mirrors publish first, so no entry point ever
+  // precedes the files it names.
   const files = await collectIndexAssetFiles(index, artifactRoot);
+  const docs = await collectMachineDocFiles(artifactRoot, entryDirectory);
+  for (const relative of docs) {
+    if (files.has(relative)) continue;
+    const localPath = path.join(artifactRoot, ...relative.split("/"));
+    const body = await fs.readFile(localPath);
+    files.set(relative, {
+      bytes: body.length,
+      contentType: artifactContentType(relative),
+      localPath,
+      sha256: sha256Of(body),
+    });
+  }
   const assetSession = await requestUploads(
     [...files.entries()].map(([relative, file]) => ({
       bytes: file.bytes,
@@ -216,19 +261,25 @@ export async function publishExtractedIndex(workspace, options = {}) {
     uploaded += 1;
   }
 
+  const llmsRelative = entryDirectory === "." ? "llms.txt" : `${entryDirectory}/llms.txt`;
+  const llmsSource = await fs.readFile(path.join(artifactRoot, ...llmsRelative.split("/")), "utf8").catch(() => null);
+
   const staging = await fs.mkdtemp(path.join(os.tmpdir(), "timds-artifact-"));
   try {
     const rewritten = rewriteIndexForPublish(index, files, publicBase);
     const metaFiles = [
-      { body: Buffer.from(`${JSON.stringify(rewritten, null, 2)}\n`), path: indexRelative },
+      { body: Buffer.from(`${JSON.stringify(rewritten, null, 2)}\n`), contentType: "application/json", path: indexRelative },
+      ...(llmsSource === null
+        ? []
+        : [{ body: Buffer.from(rewriteLlmsForPublish(llmsSource, publicBase)), contentType: "text/plain; charset=utf-8", path: llmsRelative }]),
       {
         body: Buffer.from(`${JSON.stringify({ schemaVersion: 1, sourceCommit, version: workspace.manifest.version }, null, 2)}\n`),
+        contentType: "application/json",
         path: ".timds-artifact.json",
       },
     ].map((file, position) => ({
       ...file,
-      contentType: "application/json",
-      localPath: path.join(staging, `meta-${position}.json`),
+      localPath: path.join(staging, `meta-${position}`),
     }));
     for (const file of metaFiles) await fs.writeFile(file.localPath, file.body);
 
@@ -245,9 +296,11 @@ export async function publishExtractedIndex(workspace, options = {}) {
     await fs.rm(staging, { force: true, recursive: true });
   }
 
-  const total = files.size + 2;
+  const total = files.size + 2 + (llmsSource === null ? 0 : 1);
   return {
+    docCount: docs.length,
     indexUrl: `${publicBase}/${indexRelative}`,
+    llmsUrl: llmsSource === null ? null : `${publicBase}/${llmsRelative}`,
     publicBase,
     skipped: total - uploaded,
     total,
