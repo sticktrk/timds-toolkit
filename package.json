@@ -9,6 +9,7 @@
   },
   "exports": {
     ".": "./src/core.mjs",
+    "./artifact": "./src/artifact.mjs",
     "./auth": "./src/auth.mjs",
     "./core": "./src/core.mjs",
     "./extract": "./src/extract.mjs",
@@ -24,6 +25,7 @@
     "scripts/publish-artifact.mjs",
     "skills",
     "src/core.mjs",
+    "src/artifact.mjs",
     "src/auth.mjs",
     "src/extract.mjs",
     "src/html.mjs",

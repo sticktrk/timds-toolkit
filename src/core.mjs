@@ -18,6 +18,7 @@ import {
   removeAccessToken,
   saveAccessToken,
 } from "./auth.mjs";
+import { publishExtractedIndex } from "./artifact.mjs";
 import { extractArtifact, normalizeMachineConfig } from "./extract.mjs";
 
 const MAX_ARTIFACT_FILE_BYTES = 12_000_000;
@@ -678,7 +679,7 @@ function parseArguments(argv) {
     }
     const [rawName, inlineValue] = value.replace(/^--?/, "").split("=", 2);
     const name = ({ m: "message", p: "port" })[rawName] || rawName.replace(/-([a-z])/g, (_match, letter) => letter.toUpperCase());
-    if (["dryRun", "force", "help", "noBuild", "noOpen", "noPr", "noPush", "requireCleanDist", "skipBuild", "standalone"].includes(name)) {
+    if (["dryRun", "force", "help", "noBuild", "noOpen", "noPr", "noPush", "publish", "requireCleanDist", "skipBuild", "standalone"].includes(name)) {
       options[name] = true;
       continue;
     }
@@ -799,7 +800,7 @@ function machineSummary({ counts }) {
 }
 
 function helpText() {
-  return `TimDS local design-system workflow\n\nUsage:\n  timds init [--root PATH] [--standalone] [--force]\n  timds upgrade [--root PATH] [--force]\n  timds auth login [--token TOKEN] [--portal-url URL]\n  timds auth status [--portal-url URL]\n  timds auth logout [--portal-url URL]\n  timds doctor [--root PATH]\n  timds dev [--root PATH]\n  timds check [--root PATH] [--skip-build] [--require-clean-dist]\n  timds extract [--root PATH] [--skip-build]\n  timds preview [--root PATH] [--port 4400] [--no-build]\n  timds diff [--root PATH] [--base origin/main]\n  timds assets list [--root PATH]\n  timds assets add FILE [--key LOGICAL_KEY] [--title TEXT] [--tags a,b]\n  timds assets publish [--root PATH]\n  timds assets pull KEY [--output PATH] [--force]\n  timds submit --message "Change summary" [--dry-run] [--no-push] [--no-pr]\n\nCheck and extract derive index.json, llms.txt, and per-page Markdown from the built artifact so agents and pipelines can read the system without scraping HTML. Large public media is copied into ignored media-local/ for authoring. assets publish and submit upload changed media and commit only stable CDN records. Submit creates a review branch and draft pull request.`;
+  return `TimDS local design-system workflow\n\nUsage:\n  timds init [--root PATH] [--standalone] [--force]\n  timds upgrade [--root PATH] [--force]\n  timds auth login [--token TOKEN] [--portal-url URL]\n  timds auth status [--portal-url URL]\n  timds auth logout [--portal-url URL]\n  timds doctor [--root PATH]\n  timds dev [--root PATH]\n  timds check [--root PATH] [--skip-build] [--require-clean-dist]\n  timds extract [--root PATH] [--skip-build] [--publish]\n  timds preview [--root PATH] [--port 4400] [--no-build]\n  timds diff [--root PATH] [--base origin/main]\n  timds assets list [--root PATH]\n  timds assets add FILE [--key LOGICAL_KEY] [--title TEXT] [--tags a,b]\n  timds assets publish [--root PATH]\n  timds assets pull KEY [--output PATH] [--force]\n  timds submit --message "Change summary" [--dry-run] [--no-push] [--no-pr]\n\nCheck and extract derive index.json, llms.txt, and per-page Markdown from the built artifact so agents and pipelines can read the system without scraping HTML. Extract --publish uploads the index, a .timds-artifact.json provenance stamp, and the artifact files it references to the system's stable CDN prefix through the portal, so pipelines consume the system from one stable URL. Large public media is copied into ignored media-local/ for authoring. assets publish and submit upload changed media and commit only stable CDN records. Submit creates a review branch and draft pull request.`;
 }
 
 export async function runCli(argv) {
@@ -891,11 +892,21 @@ export async function runCli(argv) {
     if (!options.skipBuild) await runWorkspaceCommand(workspace, "build");
     const result = await extractWorkspace(workspace);
     if (!result.enabled) {
+      if (options.publish) throw new Error("Cannot publish the machine index: extraction is disabled by timds.json machine.enabled");
       output("Machine extraction is disabled by timds.json machine.enabled.");
       return result;
     }
     output(machineSummary(result));
     output(`Wrote ${result.written.length} machine-readable files into the artifact.`);
+    if (options.publish) {
+      const published = await publishExtractedIndex(workspace, {
+        portalUrl: options.portalUrl,
+        sourceCommit: options.sourceCommit,
+        token: options.token,
+      });
+      output(`Published machine index: ${published.indexUrl} (${published.uploaded} uploaded, ${published.skipped} unchanged)`);
+      return { ...result, published };
+    }
     return result;
   }
   if (command === "preview") {
