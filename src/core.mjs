@@ -18,6 +18,7 @@ import {
   removeAccessToken,
   saveAccessToken,
 } from "./auth.mjs";
+import { extractArtifact, normalizeMachineConfig } from "./extract.mjs";
 
 const MAX_ARTIFACT_FILE_BYTES = 12_000_000;
 const MAX_ARTIFACT_FILES = 2_000;
@@ -196,9 +197,13 @@ export function validateManifest(input) {
   const commands = Object.fromEntries(
     workspaceCommandNames.map((commandName) => [commandName, normalizeWorkspaceCommand(workspace[commandName], commandName)]),
   );
+  // Validated with the contract so an unusable selector fails `doctor`/`check`
+  // immediately rather than part-way through a build.
+  const machine = normalizeMachineConfig(manifest.machine);
   return {
     artifact: { entry: artifactEntry, publishRef: artifactPublishRef },
     description: String(manifest.description || "").trim(),
+    machine,
     name,
     media: { portalUrl: mediaPortalUrl },
     schemaVersion,
@@ -363,15 +368,28 @@ async function verifyCleanDist(workspace) {
   }
 }
 
+/** Harvest the built artifact into its machine-readable companions. */
+export async function extractWorkspace(workspace, { write = true } = {}) {
+  return extractArtifact({
+    artifactRoot: path.join(workspace.designSystemRoot, "dist"),
+    manifest: workspace.manifest,
+    mediaCatalog: workspace.mediaCatalog,
+    write,
+  });
+}
+
 export async function checkWorkspace(repoRootInput, options = {}) {
   const workspace = await loadWorkspace(repoRootInput);
   if (!options.skipBuild) {
     await runWorkspaceCommand(workspace, "build");
     await runWorkspaceCommand(workspace, "check");
   }
+  // Machine artifacts are part of the published artifact, so they are written
+  // before validation counts and links the files.
+  const machine = await extractWorkspace(workspace);
   const artifact = await validateArtifact(workspace.designSystemRoot, workspace.manifest);
   if (options.requireCleanDist) await verifyCleanDist(workspace);
-  return { ...workspace, artifact };
+  return { ...workspace, artifact, machine };
 }
 
 async function resolvePreviewFile(artifactRoot, entryPath, requestPath) {
@@ -769,8 +787,19 @@ export async function submitWorkspace(repoRootInput, message, options = {}) {
   return { baseBranch, branch, commands, dryRun: false, media };
 }
 
+function machineSummary({ counts }) {
+  const parts = [
+    `${counts.blocks} blocks`,
+    `${counts.rules} rules`,
+    `${counts.notes} notes`,
+    `${counts.assets} assets (${counts.linkedAssets} joined to media)`,
+  ];
+  const untyped = counts.untyped ? ` · ${counts.untyped} untyped prose records` : "";
+  return `Machine artifacts: ${parts.join(", ")}${untyped}`;
+}
+
 function helpText() {
-  return `TimDS local design-system workflow\n\nUsage:\n  timds init [--root PATH] [--standalone] [--force]\n  timds upgrade [--root PATH] [--force]\n  timds auth login [--token TOKEN] [--portal-url URL]\n  timds auth status [--portal-url URL]\n  timds auth logout [--portal-url URL]\n  timds doctor [--root PATH]\n  timds dev [--root PATH]\n  timds check [--root PATH] [--skip-build] [--require-clean-dist]\n  timds preview [--root PATH] [--port 4400] [--no-build]\n  timds diff [--root PATH] [--base origin/main]\n  timds assets list [--root PATH]\n  timds assets add FILE [--key LOGICAL_KEY] [--title TEXT] [--tags a,b]\n  timds assets publish [--root PATH]\n  timds assets pull KEY [--output PATH] [--force]\n  timds submit --message "Change summary" [--dry-run] [--no-push] [--no-pr]\n\nLarge public media is copied into ignored media-local/ for authoring. assets publish and submit upload changed media and commit only stable CDN records. Submit creates a review branch and draft pull request.`;
+  return `TimDS local design-system workflow\n\nUsage:\n  timds init [--root PATH] [--standalone] [--force]\n  timds upgrade [--root PATH] [--force]\n  timds auth login [--token TOKEN] [--portal-url URL]\n  timds auth status [--portal-url URL]\n  timds auth logout [--portal-url URL]\n  timds doctor [--root PATH]\n  timds dev [--root PATH]\n  timds check [--root PATH] [--skip-build] [--require-clean-dist]\n  timds extract [--root PATH] [--skip-build]\n  timds preview [--root PATH] [--port 4400] [--no-build]\n  timds diff [--root PATH] [--base origin/main]\n  timds assets list [--root PATH]\n  timds assets add FILE [--key LOGICAL_KEY] [--title TEXT] [--tags a,b]\n  timds assets publish [--root PATH]\n  timds assets pull KEY [--output PATH] [--force]\n  timds submit --message "Change summary" [--dry-run] [--no-push] [--no-pr]\n\nCheck and extract derive index.json, llms.txt, and per-page Markdown from the built artifact so agents and pipelines can read the system without scraping HTML. Large public media is copied into ignored media-local/ for authoring. assets publish and submit upload changed media and commit only stable CDN records. Submit creates a review branch and draft pull request.`;
 }
 
 export async function runCli(argv) {
@@ -854,6 +883,19 @@ export async function runCli(argv) {
       skipBuild: options.skipBuild,
     });
     output(`TimDS check passed: ${result.artifact.fileCount} files, ${result.artifact.totalBytes} bytes, entry ${result.artifact.entryPath}`);
+    if (result.machine?.enabled) output(machineSummary(result.machine));
+    return result;
+  }
+  if (command === "extract") {
+    const workspace = await loadWorkspace(root);
+    if (!options.skipBuild) await runWorkspaceCommand(workspace, "build");
+    const result = await extractWorkspace(workspace);
+    if (!result.enabled) {
+      output("Machine extraction is disabled by timds.json machine.enabled.");
+      return result;
+    }
+    output(machineSummary(result));
+    output(`Wrote ${result.written.length} machine-readable files into the artifact.`);
     return result;
   }
   if (command === "preview") {
