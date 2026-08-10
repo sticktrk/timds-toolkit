@@ -173,6 +173,20 @@ npm test
 npm run pack:check
 ```
 
+Cut a release from a clean `master`:
+
+```bash
+npm run release              # bump the patch: 0.1.403 -> 0.1.404
+npm run release -- 0.2.0     # release an explicit version
+npm run release -- --dry-run # run every check, change nothing
+```
+
+The script runs the checks above, bumps `package.json`, tags, pushes, and opens
+the GitHub Release. Publishing to npm is left to
+`.github/workflows/release.yml`, which authenticates through the trusted
+publisher. Never run `npm publish` by hand: it beats CI to the registry and
+leaves that run failing on a version conflict.
+
 Release tags must match `package.json` as `v<version>`. The npm package is
 public; this repository remains `UNLICENSED` until DT Concepts selects an
 open-source license.

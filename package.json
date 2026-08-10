@@ -18,7 +18,8 @@
   },
   "scripts": {
     "test": "node --test src/*.test.mjs",
-    "pack:check": "npm pack --dry-run"
+    "pack:check": "npm pack --dry-run",
+    "release": "./scripts/release.sh"
   },
   "files": [
     "bin",
