@@ -275,8 +275,15 @@ test("cancels the server upload lease when object transfer fails", async (t) => 
 test("validates exact artifact files and local references", async (t) => {
   const repoRoot = await createDesignSystemRepo(t);
   const result = await checkWorkspace(repoRoot, { skipBuild: true });
-  assert.equal(result.artifact.fileCount, 2);
   assert.equal(result.artifact.entryPath, "index.html");
+  // The machine-readable companions are written into, and validated as part of,
+  // the published artifact.
+  const paths = result.artifact.files.map((file) => file.path);
+  assert.ok(paths.includes("index.html"));
+  assert.ok(paths.includes("index.json"));
+  assert.ok(paths.includes("llms.txt"));
+  assert.equal(result.artifact.fileCount, paths.length);
+  assert.ok(result.machine.enabled);
 });
 
 test("builds before running the workspace check on a clean artifact", async (t) => {
@@ -466,7 +473,11 @@ test("loads and validates a standalone repository contract", async (t) => {
   assert.equal(workspace.layout, "standalone");
   assert.equal(workspace.designSystemRoot, repoRoot);
   const checked = await checkWorkspace(repoRoot, { skipBuild: true });
-  assert.equal(checked.artifact.fileCount, 1);
+  assert.deepEqual(
+    checked.artifact.files.map((file) => file.path).sort(),
+    ["index.html", "index.json", "index.md", "llms.txt"],
+  );
+  assert.equal(checked.machine.counts.blocks, 1);
 });
 
 test("initializes the reusable standalone repository shape", async (t) => {

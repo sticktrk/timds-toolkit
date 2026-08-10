@@ -75,6 +75,41 @@ This validates the artifact, creates or uses a `design-system/<change>` branch,
 pushes it, and opens a draft pull request against the default branch. It does
 not merge or publish without separate authorization.
 
+## Machine-readable artifacts
+
+A design system is read by agents and downstream pipelines as well as by people.
+`check` and `extract` derive that view from the built artifact, so no design
+system has to maintain a parallel hand-written JSON file:
+
+```bash
+npm run timds -- extract
+```
+
+Beside the published pages this writes `index.json` (the structured tree, with
+assets joined to their media records), `llms.txt` (the page index), and an
+`index.md` Markdown mirror of every page. Every record carries a stable id such
+as `social/shorts#safe-zones/bottom-band`, so an agent can cite a rule and a
+reviewer can resolve the citation.
+
+Extraction keys on HTML semantics — `main`, `section`, `h1`/`h2`, `table`,
+`figure`, `pre` — and needs no configuration. Content the vocabulary does not
+recognize is captured as untyped prose and counted rather than dropped; a rising
+untyped count is the signal that a page family deserves real markup. A system
+whose markup needs a hint declares one in `timds.json`:
+
+```json
+"machine": {
+  "root": "main.content",
+  "block": "section.block",
+  "note": ".note",
+  "code": "pre.codeblock",
+  "ignore": [".sidenav"]
+}
+```
+
+Selectors are limited to `tag`, `.class`, or `tag.class`. Set `"machine": false`
+to opt out entirely.
+
 ## Large public images, video, audio, and B-roll
 
 Full-resolution files stay out of Git and `dist/`. Put them in the ignored

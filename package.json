@@ -11,6 +11,8 @@
     ".": "./src/core.mjs",
     "./auth": "./src/auth.mjs",
     "./core": "./src/core.mjs",
+    "./extract": "./src/extract.mjs",
+    "./html": "./src/html.mjs",
     "./media": "./src/media.mjs"
   },
   "scripts": {
@@ -23,6 +25,8 @@
     "skills",
     "src/core.mjs",
     "src/auth.mjs",
+    "src/extract.mjs",
+    "src/html.mjs",
     "src/media.mjs",
     "templates"
   ],
