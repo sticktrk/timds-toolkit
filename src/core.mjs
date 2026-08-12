@@ -154,6 +154,34 @@ function normalizeWorkspaceCommand(value, label) {
   return value.map((part) => part.trim());
 }
 
+function normalizeConsumer(value) {
+  if (value === undefined || value === null) return null;
+  const consumer = objectValue(value, "timds.json consumer");
+  const repository = String(consumer.repository || "").trim();
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) {
+    throw new Error("timds.json consumer.repository must be a GitHub OWNER/REPOSITORY name");
+  }
+  const branch = String(consumer.branch || "main").trim();
+  if (
+    !/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/.test(branch)
+    || branch.includes("..")
+    || branch.includes("//")
+    || branch.endsWith("/")
+  ) {
+    throw new Error("timds.json consumer.branch must be a safe Git branch name");
+  }
+  const submodulePath = String(consumer.path || "design-system").trim().replace(/\\/g, "/");
+  if (
+    !submodulePath
+    || submodulePath.startsWith("/")
+    || submodulePath.endsWith("/")
+    || submodulePath.split("/").some((segment) => !segment || segment === "." || segment === "..")
+  ) {
+    throw new Error("timds.json consumer.path must be a relative repository path");
+  }
+  return { branch, path: submodulePath, repository };
+}
+
 export function validateManifest(input) {
   const manifest = objectValue(input, "timds.json");
   const schemaVersion = Number(manifest.schemaVersion ?? manifest.schema_version ?? 1);
@@ -203,6 +231,7 @@ export function validateManifest(input) {
   const machine = normalizeMachineConfig(manifest.machine);
   return {
     artifact: { entry: artifactEntry, publishRef: artifactPublishRef },
+    consumer: normalizeConsumer(manifest.consumer),
     description: String(manifest.description || "").trim(),
     machine,
     name,
@@ -555,14 +584,15 @@ async function installManagedToolkit({ designSystemRoot, repoRoot, replace = fal
   return { ...paths, package: installedIdentity };
 }
 
-async function configurePackageManifest(repoRoot, identity, { force = false } = {}) {
+async function configurePackageManifest(repoRoot, identity, { force = false, initializeRelease = false } = {}) {
   const packagePath = path.join(repoRoot, "package.json");
   const packageJson = await readJsonObject(packagePath, "repository package.json", { required: false });
   if (!Object.keys(packageJson).length) {
     packageJson.name = slug(path.basename(repoRoot));
-    packageJson.version = "0.0.0";
+    packageJson.version = initializeRelease ? "0.1.0" : "0.0.0";
     packageJson.private = true;
   }
+  if (initializeRelease) packageJson.version = "0.1.0";
   const releaseRange = toolkitReleaseRange(identity);
   const currentDependency = packageJson.devDependencies?.[identity.name] ?? packageJson.dependencies?.[identity.name];
   const currentScript = packageJson.scripts?.timds;
@@ -577,6 +607,10 @@ async function configurePackageManifest(repoRoot, identity, { force = false } = 
     if (!Object.keys(packageJson.dependencies).length) delete packageJson.dependencies;
   }
   packageJson.scripts = { ...(packageJson.scripts || {}), timds: "timds" };
+  if (initializeRelease) {
+    packageJson.scripts["check:versions"] = "node scripts/check-versions.mjs";
+    packageJson.scripts.release = "node scripts/release.mjs";
+  }
   packageJson.devDependencies = { ...(packageJson.devDependencies || {}), [identity.name]: releaseRange };
   await fs.writeFile(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`, "utf8");
   return packagePath;
@@ -594,23 +628,49 @@ async function requirePinnedToolkitDependency(repoRoot, identity) {
   }
 }
 
-export async function initializeRepository(repoRootInput, { force = false, standalone = false } = {}) {
+export async function initializeRepository(repoRootInput, {
+  consumerBranch = "main",
+  consumerPath = "design-system",
+  consumerRepository = "",
+  force = false,
+  standalone = false,
+} = {}) {
   const repoRoot = await findRepositoryRoot(repoRootInput);
   const designSystemRoot = standalone ? repoRoot : path.join(repoRoot, "design-system");
   const manifestPath = path.join(designSystemRoot, "timds.json");
   const createsContract = !existsSync(manifestPath);
   const created = [];
   const identity = await toolkitPackageIdentity();
-  const packagePath = await configurePackageManifest(repoRoot, identity, { force });
+  if (consumerRepository && !standalone) {
+    throw new Error("--consumer-repository is only supported with --standalone");
+  }
+  if (!consumerRepository && (consumerBranch !== "main" || consumerPath !== "design-system")) {
+    throw new Error("--consumer-branch and --consumer-path require --consumer-repository");
+  }
+  const packagePath = await configurePackageManifest(repoRoot, identity, {
+    force,
+    initializeRelease: standalone && createsContract,
+  });
   created.push(packagePath);
   await fs.mkdir(designSystemRoot, { recursive: true });
   const repoSlug = slug(path.basename(repoRoot));
+  const consumer = consumerRepository
+    ? normalizeConsumer({
+      branch: consumerBranch,
+      path: consumerPath,
+      repository: consumerRepository,
+    })
+    : null;
+  const consumerConfig = consumer
+    ? `,\n  "consumer": ${JSON.stringify(consumer, null, 2).replaceAll("\n", "\n  ")}`
+    : "";
   await writeIfMissing(
     manifestPath,
     (await template("timds.json"))
       .replaceAll("__SYSTEM_ID__", `${repoSlug}/core`)
       .replaceAll("__NAME__", path.basename(repoRoot))
-      .replaceAll("__PUBLISH_REF__", standalone ? ',\n    "publishRef": "timds-published"' : ""),
+      .replaceAll("__PUBLISH_REF__", standalone ? ',\n    "publishRef": "timds-published"' : "")
+      .replaceAll("__CONSUMER__", consumerConfig),
     created,
   );
   await writeIfMissing(path.join(designSystemRoot, "tokens.json"), await template("tokens.json"), created);
@@ -640,10 +700,17 @@ export async function initializeRepository(repoRootInput, { force = false, stand
     await template(standalone ? "timds-standalone.yml" : "timds-design-system.yml"),
     created,
   );
+  if (standalone) {
+    await writeIfMissing(
+      path.join(repoRoot, ".github", "workflows", "update-consumer-submodule.yml"),
+      await template("update-consumer-submodule.yml"),
+      created,
+    );
+  }
 
   const installed = await installManagedToolkit({ designSystemRoot, repoRoot, replace: force });
   const initializedArtifact = createsContract ? (await checkWorkspace(repoRoot)).artifact : null;
-  return { created, designSystemRoot, initializedArtifact, repoRoot, ...installed };
+  return { consumer, created, designSystemRoot, initializedArtifact, repoRoot, ...installed };
 }
 
 export async function upgradeRepository(repoRootInput, { force = false } = {}) {
@@ -800,7 +867,7 @@ function machineSummary({ counts }) {
 }
 
 function helpText() {
-  return `TimDS local design-system workflow\n\nUsage:\n  timds init [--root PATH] [--standalone] [--force]\n  timds upgrade [--root PATH] [--force]\n  timds auth login [--token TOKEN] [--portal-url URL]\n  timds auth status [--portal-url URL]\n  timds auth logout [--portal-url URL]\n  timds doctor [--root PATH]\n  timds dev [--root PATH]\n  timds check [--root PATH] [--skip-build] [--require-clean-dist]\n  timds extract [--root PATH] [--skip-build] [--publish]\n  timds preview [--root PATH] [--port 4400] [--no-build]\n  timds diff [--root PATH] [--base origin/main]\n  timds assets list [--root PATH]\n  timds assets add FILE [--key LOGICAL_KEY] [--title TEXT] [--tags a,b]\n  timds assets publish [--root PATH]\n  timds assets pull KEY [--output PATH] [--force]\n  timds submit --message "Change summary" [--dry-run] [--no-push] [--no-pr]\n\nCheck and extract derive index.json, llms.txt, and per-page Markdown from the built artifact so agents and pipelines can read the system without scraping HTML. Extract --publish uploads the index, llms.txt, the per-page Markdown mirrors, a .timds-artifact.json provenance stamp, and the artifact files the index references to the system's stable CDN prefix through the portal, so pipelines and agents consume the system from one stable URL. Large public media is copied into ignored media-local/ for authoring. assets publish and submit upload changed media and commit only stable CDN records. Submit creates a review branch and draft pull request.`;
+  return `TimDS local design-system workflow\n\nUsage:\n  timds init [--root PATH] [--standalone] [--consumer-repository OWNER/REPO] [--consumer-branch BRANCH] [--consumer-path PATH] [--force]\n  timds upgrade [--root PATH] [--force]\n  timds auth login [--token TOKEN] [--portal-url URL]\n  timds auth status [--portal-url URL]\n  timds auth logout [--portal-url URL]\n  timds doctor [--root PATH]\n  timds dev [--root PATH]\n  timds check [--root PATH] [--skip-build] [--require-clean-dist]\n  timds extract [--root PATH] [--skip-build] [--publish]\n  timds preview [--root PATH] [--port 4400] [--no-build]\n  timds diff [--root PATH] [--base origin/main]\n  timds assets list [--root PATH]\n  timds assets add FILE [--key LOGICAL_KEY] [--title TEXT] [--tags a,b]\n  timds assets publish [--root PATH]\n  timds assets pull KEY [--output PATH] [--force]\n  timds submit --message "Change summary" [--dry-run] [--no-push] [--no-pr]\n\nCheck and extract derive index.json, llms.txt, and per-page Markdown from the built artifact so agents and pipelines can read the system without scraping HTML. Extract --publish uploads the index, llms.txt, the per-page Markdown mirrors, a .timds-artifact.json provenance stamp, and the artifact files the index references to the system's stable CDN prefix through the portal, so pipelines and agents consume the system from one stable URL. Large public media is copied into ignored media-local/ for authoring. assets publish and submit upload changed media and commit only stable CDN records. Submit creates a review branch and draft pull request.`;
 }
 
 export async function runCli(argv) {
@@ -846,11 +913,21 @@ export async function runCli(argv) {
     throw new Error(`Unknown auth command ${authCommand}`);
   }
   if (command === "init") {
-    const result = await initializeRepository(root, { force: options.force, standalone: options.standalone });
+    const result = await initializeRepository(root, {
+      consumerBranch: options.consumerBranch,
+      consumerPath: options.consumerPath,
+      consumerRepository: options.consumerRepository,
+      force: options.force,
+      standalone: options.standalone,
+    });
     output(`TimDS tooling installed for ${result.repoRoot}`);
     output(`Design system: ${result.designSystemRoot}`);
     output(`Agent skill: ${result.skillDestination}`);
     output(`Toolkit: ${result.package.name}@${result.package.version}`);
+    if (result.consumer) {
+      output(`Consumer: ${result.consumer.repository}@${result.consumer.branch}:${result.consumer.path}`);
+      output("Configure TIMDS_CONSUMER_TOKEN in the Design System repository before releasing.");
+    }
     if (result.created.length) output(`Created ${result.created.length} contract files.`);
     if (result.initializedArtifact) {
       output(`Starter artifact: ${result.initializedArtifact.fileCount} files, ${result.initializedArtifact.totalBytes} bytes.`);
@@ -874,6 +951,9 @@ export async function runCli(argv) {
     output(`Version: ${workspace.manifest.version}`);
     output(`Toolkit: ${await readInstalledToolkitVersion(workspace.designSystemRoot)}`);
     output(`Media assets: ${workspace.mediaCatalog.assets.length}`);
+    if (workspace.manifest.consumer) {
+      output(`Consumer: ${workspace.manifest.consumer.repository}@${workspace.manifest.consumer.branch}:${workspace.manifest.consumer.path}`);
+    }
     output(`Branch: ${branch || "detached"}`);
     output("Contract: valid");
     return workspace;

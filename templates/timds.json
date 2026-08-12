@@ -6,7 +6,7 @@
   "version": "0.1.0",
   "artifact": {
     "entry": "index.html"__PUBLISH_REF__
-  },
+  }__CONSUMER__,
   "media": {
     "portalUrl": "https://timds.com"
   },

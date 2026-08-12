@@ -1,38 +1,96 @@
 name: TimDS design system
 
+# Merges validate. A version without a matching tag is a release: publish the
+# artifact, tag the exact commit, then offer the linked consumer a gitlink PR.
 on:
   pull_request:
   push:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish even when the version is already tagged
+        type: boolean
+        default: false
 
 permissions:
   contents: read
+
+concurrency:
+  group: timds-design-system-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   validate:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm run check:versions
       - run: npm run timds -- check
 
-  publish:
+  gate:
     if: github.event_name != 'pull_request'
     needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      consumer_branch: ${{ steps.check.outputs.consumer_branch }}
+      consumer_path: ${{ steps.check.outputs.consumer_path }}
+      consumer_repository: ${{ steps.check.outputs.consumer_repository }}
+      release: ${{ steps.check.outputs.release }}
+      tag: ${{ steps.check.outputs.tag }}
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Decide whether this commit is a release
+        id: check
+        env:
+          FORCE_PUBLISH: ${{ inputs.publish }}
+        run: |
+          set -euo pipefail
+
+          version="$(node -p "require('./timds.json').version")"
+          tag="v${version}"
+          consumer_repository="$(node -p "require('./timds.json').consumer?.repository || ''")"
+          consumer_branch="$(node -p "require('./timds.json').consumer?.branch || 'main'")"
+          consumer_path="$(node -p "require('./timds.json').consumer?.path || 'design-system'")"
+
+          if ! git rev-parse --verify --quiet "refs/tags/${tag}" >/dev/null; then
+            release=true
+          elif [[ "${FORCE_PUBLISH:-false}" == "true" ]]; then
+            release=true
+          else
+            release=false
+          fi
+
+          {
+            echo "consumer_branch=${consumer_branch}"
+            echo "consumer_path=${consumer_path}"
+            echo "consumer_repository=${consumer_repository}"
+            echo "release=${release}"
+            echo "tag=${tag}"
+            echo "version=${version}"
+          } >> "$GITHUB_OUTPUT"
+
+  publish:
+    needs: gate
+    if: needs.gate.outputs.release == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -44,3 +102,53 @@ jobs:
         run: |
           gh auth setup-git
           npm exec -- timds-publish-artifact
+      - name: Publish machine index to the CDN
+        env:
+          TIMDS_ACCESS_TOKEN: ${{ secrets.TIMDS_ACCESS_TOKEN }}
+        run: |
+          if [[ -z "${TIMDS_ACCESS_TOKEN:-}" ]]; then
+            echo "TIMDS_ACCESS_TOKEN not configured; skipping CDN publication."
+            exit 0
+          fi
+          npm run timds -- extract --skip-build --publish
+
+  tag:
+    needs: [gate, publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Tag the release
+        env:
+          TAG: ${{ needs.gate.outputs.tag }}
+          VERSION: ${{ needs.gate.outputs.version }}
+        run: |
+          set -euo pipefail
+          if git rev-parse --verify --quiet "refs/tags/${TAG}" >/dev/null; then
+            echo "${TAG} already exists; nothing to tag."
+            exit 0
+          fi
+          notes="$(awk -v v="## ${VERSION}" '
+            $0 == v { capture = 1; next }
+            capture && /^## / { exit }
+            capture { print }
+          ' CHANGELOG.md)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag --annotate "${TAG}" --message "Design System ${VERSION}" --message "${notes}"
+          git push origin "refs/tags/${TAG}"
+
+  pin-consumer:
+    needs: [gate, tag]
+    if: needs.gate.outputs.consumer_repository != ''
+    uses: ./.github/workflows/update-consumer-submodule.yml
+    with:
+      branch: ${{ needs.gate.outputs.consumer_branch }}
+      path: ${{ needs.gate.outputs.consumer_path }}
+      repository: ${{ needs.gate.outputs.consumer_repository }}
+      tag: ${{ needs.gate.outputs.tag }}
+    secrets: inherit

@@ -23,6 +23,23 @@ git add --all
 git commit -m "Initialize TimDS design system"
 ```
 
+To link a standalone Design System to a repository that consumes it as a
+submodule, declare the consumer during initialization:
+
+```bash
+npx --yes @dtconcepts/timds@0.1.x init --standalone \
+  --root /path/to/client-design-system \
+  --consumer-repository OWNER/CLIENT-SITE \
+  --consumer-branch main \
+  --consumer-path design-system
+```
+
+Add the Design System to that consumer with a same-host relative URL (for
+example `../client-design-system.git`), then configure the Design System
+repository secret `TIMDS_CONSUMER_TOKEN` with contents and pull-request access
+to the consumer. A release publishes and tags the Design System before opening
+or refreshing a gitlink-update pull request in the consumer.
+
 Create an embedded root `design-system/` contract in an existing client app:
 
 ```bash

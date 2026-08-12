@@ -44,6 +44,9 @@ Use `dev` for the authoring server and `preview` to inspect the exact built arti
 - `npm run timds -- submit` may create a branch, commit, push, and draft pull request only when the user asks.
 - Merging a pull request does not itself authorize live publication.
 - Only a DT Concepts operator may promote or roll back a TimDS version.
+- When `timds.json.consumer` is present, publish and tag the Design System
+  before advancing the consumer's submodule. The automation opens a consumer
+  pull request; it never merges or deploys the consumer.
 
 ## Protected tooling
 
