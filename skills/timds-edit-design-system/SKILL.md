@@ -103,6 +103,21 @@ Inspect both the framework authoring server and the exact generated artifact.
 Check relevant desktop and mobile views, navigation, local assets, typography,
 contrast, overflow, focus states, and the requested change.
 
+## Keep linked consumers release-pinned
+
+When a standalone `timds.json` declares a `consumer`, treat the Design System
+release as the source of the consumer's submodule update. Ordinary merges only
+validate. Cut the release with the repository's `scripts/release.sh`; CI must
+publish and tag the exact Design System commit before its reusable workflow
+opens or refreshes a gitlink-only pull request in the consumer.
+
+The consumer owns its `.gitmodules` record and reviewed gitlink. Prefer a
+same-host relative submodule URL, and never merge the consumer pull request or
+deploy the consumer without separate authorization. If
+`TIMDS_CONSUMER_TOKEN` is not configured with contents and pull-request access
+to the declared consumer repository, report that setup requirement rather than
+copying a workstation credential into GitHub Actions.
+
 ## Submit only when requested
 
 When asked to push or open a pull request, run:

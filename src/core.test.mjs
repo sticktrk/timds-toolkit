@@ -109,6 +109,39 @@ test("rejects unsafe artifact publication refs", () => {
   );
 });
 
+test("validates a linked consumer repository contract", () => {
+  const manifest = validateManifest({
+    artifact: { entry: "index.html", publishRef: "timds-published" },
+    consumer: {
+      branch: "master",
+      path: "design-system",
+      repository: "Acme-Co/acme-site",
+    },
+    name: "WPL Design System",
+    schemaVersion: 2,
+    systemId: "wpl-design-system/core",
+    version: "0.1.0",
+    workspace: {},
+  });
+  assert.deepEqual(manifest.consumer, {
+    branch: "master",
+    path: "design-system",
+    repository: "Acme-Co/acme-site",
+  });
+  assert.throws(
+    () => validateManifest({
+      artifact: { entry: "index.html" },
+      consumer: { repository: "not-a-repository" },
+      name: "Unsafe",
+      schemaVersion: 2,
+      systemId: "unsafe/core",
+      version: "1.0.0",
+      workspace: {},
+    }),
+    /OWNER\/REPOSITORY/,
+  );
+});
+
 test("validates stable media catalog records and rejects signed URLs", () => {
   const asset = {
     bytes: 24,
@@ -500,10 +533,17 @@ test("initializes the reusable standalone repository shape", async (t) => {
   assert.deepEqual(manifest.workspace.build, ["node", "scripts/build.mjs"]);
   assert.match(await fs.readFile(path.join(repoRoot, "README.md"), "utf8"), /npm run timds -- doctor/);
   const packageJson = JSON.parse(await fs.readFile(path.join(repoRoot, "package.json"), "utf8"));
+  assert.equal(packageJson.version, "0.1.0");
   assert.equal(packageJson.devDependencies["@dtconcepts/timds"], "0.1.x");
+  assert.equal(packageJson.scripts["check:versions"], "node scripts/check-versions.mjs");
+  assert.equal(packageJson.scripts.release, "node scripts/release.mjs");
   assert.equal(packageJson.scripts.timds, "timds");
   await fs.access(path.join(repoRoot, "src", "index.html"));
   await fs.access(path.join(repoRoot, "scripts", "build.mjs"));
+  await fs.access(path.join(repoRoot, "scripts", "check-versions.mjs"));
+  await fs.access(path.join(repoRoot, "scripts", "release.mjs"));
+  await fs.access(path.join(repoRoot, "scripts", "release.sh"));
+  await fs.access(path.join(repoRoot, ".github", "workflows", "update-consumer-submodule.yml"));
   await fs.access(path.join(repoRoot, "dist", "index.html"));
   assert.match(await fs.readFile(path.join(repoRoot, ".gitignore"), "utf8"), /node_modules\//);
   assert.match(await fs.readFile(path.join(repoRoot, ".gitignore"), "utf8"), /dist\//);
@@ -517,6 +557,39 @@ test("initializes the reusable standalone repository shape", async (t) => {
   execFileSync("git", ["add", "--all"], { cwd: repoRoot });
   execFileSync("git", ["commit", "-m", "Initialize TimDS"], { cwd: repoRoot, stdio: "ignore" });
   assert.equal(execFileSync("git", ["status", "--porcelain", "--untracked-files=all"], { cwd: repoRoot, encoding: "utf8" }), "");
+});
+
+test("initializes opt-in consumer submodule automation", async (t) => {
+  const repoRoot = await temporaryDirectory(t);
+  execFileSync("git", ["init", "-b", "main"], { cwd: repoRoot, stdio: "ignore" });
+  await writeJson(path.join(repoRoot, "package.json"), {
+    name: "existing-design-system-package",
+    private: true,
+    version: "0.0.0",
+  });
+
+  const initialized = await initializeRepository(repoRoot, {
+    consumerBranch: "master",
+    consumerPath: "design-system",
+    consumerRepository: "Acme-Co/acme-site",
+    standalone: true,
+  });
+  assert.equal(initialized.consumer.repository, "Acme-Co/acme-site");
+
+  const manifest = JSON.parse(await fs.readFile(path.join(repoRoot, "timds.json"), "utf8"));
+  assert.deepEqual(manifest.consumer, {
+    branch: "master",
+    path: "design-system",
+    repository: "Acme-Co/acme-site",
+  });
+  const packageJson = JSON.parse(await fs.readFile(path.join(repoRoot, "package.json"), "utf8"));
+  assert.equal(packageJson.version, manifest.version);
+  const workflow = await fs.readFile(path.join(repoRoot, ".github", "workflows", "timds-design-system.yml"), "utf8");
+  assert.match(workflow, /pin-consumer:/);
+  assert.match(workflow, /update-consumer-submodule\.yml/);
+  const updater = await fs.readFile(path.join(repoRoot, ".github", "workflows", "update-consumer-submodule.yml"), "utf8");
+  assert.match(updater, /TIMDS_CONSUMER_TOKEN/);
+  assert.match(updater, /git update-index --cacheinfo/);
 });
 
 test("initializes an embedded contract with a committed starter artifact", async (t) => {

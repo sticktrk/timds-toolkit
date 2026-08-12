@@ -95,6 +95,21 @@ __TIMDS_CLI__ submit --message "Describe the design-system change"
 
 Submission creates a draft pull request. A DT Concepts operator separately controls live publication and rollback.
 
+## Linked consumer repository
+
+When `timds.json` declares a `consumer`, releases publish and tag this Design
+System first, then open or refresh a pull request that advances the consumer's
+pinned `design-system` gitlink. Configure a `TIMDS_CONSUMER_TOKEN` repository
+secret with contents and pull-request access to that consumer repository.
+
+The consumer owns only its `.gitmodules` record and reviewed gitlink. Prefer a
+same-host relative URL such as `../client-design-system.git`, so authenticated
+HTTPS and SSH clones both resolve within the organization.
+
+Day-to-day changes go under `## Unreleased` in `CHANGELOG.md`. Cut a release
+with `./scripts/release.sh`; the release workflow publishes, tags, and then
+offers the consumer update as separate reviewable work.
+
 ## Toolkit upgrades
 
 The repository selects the bounded TimDS `0.1.x` package line and commits its

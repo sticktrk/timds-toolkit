@@ -1,0 +1,135 @@
+name: Update Design System consumer
+
+on:
+  workflow_call:
+    inputs:
+      branch:
+        required: true
+        type: string
+      path:
+        required: true
+        type: string
+      repository:
+        required: true
+        type: string
+      tag:
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Consumer repository base branch
+        required: true
+        default: main
+        type: string
+      path:
+        description: Submodule path in the consumer repository
+        required: true
+        default: design-system
+        type: string
+      repository:
+        description: Consumer repository as OWNER/REPOSITORY
+        required: true
+        type: string
+      tag:
+        description: Design System release tag to pin
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: update-timds-consumer-${{ inputs.repository }}-${{ inputs.path }}
+  cancel-in-progress: false
+
+env:
+  UPDATE_BRANCH: automation/update-design-system
+
+jobs:
+  update-submodule:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Require consumer repository token
+        env:
+          GH_TOKEN: ${{ secrets.TIMDS_CONSUMER_TOKEN }}
+        run: |
+          if [[ -z "${GH_TOKEN:-}" ]]; then
+            echo "TIMDS_CONSUMER_TOKEN must grant contents and pull-request access to ${{ inputs.repository }}."
+            exit 1
+          fi
+
+      - name: Check out Design System release history
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Resolve release tag
+        id: release
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          git rev-parse --verify --quiet "refs/tags/${INPUT_TAG}" >/dev/null \
+            || { echo "Tag ${INPUT_TAG} not found."; exit 1; }
+          {
+            echo "sha=$(git rev-list -n1 "refs/tags/${INPUT_TAG}")"
+            echo "tag=${INPUT_TAG}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Check out consumer repository
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ inputs.repository }}
+          ref: ${{ inputs.branch }}
+          fetch-depth: 0
+          token: ${{ secrets.TIMDS_CONSUMER_TOKEN }}
+          path: consumer
+
+      - name: Update pinned Design System commit
+        id: update
+        working-directory: consumer
+        env:
+          DESIGN_SYSTEM_SHA: ${{ steps.release.outputs.sha }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          SUBMODULE_PATH: ${{ inputs.path }}
+        run: |
+          set -euo pipefail
+          current_mode="$(git ls-files --stage -- "$SUBMODULE_PATH" | awk '{print $1}')"
+          [[ "$current_mode" == "160000" ]] \
+            || { echo "$SUBMODULE_PATH is not a tracked git submodule."; exit 1; }
+          current_sha="$(git ls-tree HEAD -- "$SUBMODULE_PATH" | awk '{print $3}')"
+          if [[ "$current_sha" == "$DESIGN_SYSTEM_SHA" ]]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch --create "$UPDATE_BRANCH"
+          git update-index --cacheinfo "160000,$DESIGN_SYSTEM_SHA,$SUBMODULE_PATH"
+          git commit -m "chore: update design system to ${RELEASE_TAG}"
+          git fetch origin "$UPDATE_BRANCH:refs/remotes/origin/$UPDATE_BRANCH" || true
+          git push --force-with-lease origin "HEAD:refs/heads/$UPDATE_BRANCH"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Open or refresh submodule update pull request
+        if: steps.update.outputs.changed == 'true'
+        working-directory: consumer
+        env:
+          DESIGN_SYSTEM_SHA: ${{ steps.release.outputs.sha }}
+          GH_TOKEN: ${{ secrets.TIMDS_CONSUMER_TOKEN }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          pr_url="$(gh pr list --repo "${{ inputs.repository }}" --base "${{ inputs.branch }}" --head "$UPDATE_BRANCH" --state open --json url --jq '.[0].url')"
+          if [[ -n "$pr_url" ]]; then
+            echo "Refreshed existing pull request: $pr_url"
+            exit 0
+          fi
+          gh pr create \
+            --repo "${{ inputs.repository }}" \
+            --base "${{ inputs.branch }}" \
+            --head "$UPDATE_BRANCH" \
+            --title "chore: update Design System to ${RELEASE_TAG}" \
+            --body "Advances the pinned \`${{ inputs.path }}\` submodule to \`${RELEASE_TAG}\` (${{ github.repository }}@${DESIGN_SYSTEM_SHA}). The artifact was published before this pull request was opened."
