@@ -83,7 +83,11 @@ npm run timds -- assets publish
 ```
 
 `submit` publishes changed staged files automatically before validation. Commit
-the resulting `media.json` record, never the raw file or local manifest. Never
+the resulting `media.json` record, never the raw file or local manifest. TimDS
+uses `ffprobe` while staging video and audio so the record and published machine
+index include measured duration and video dimensions. For an older catalog,
+run `npm run timds -- assets backfill-metadata` once to measure its stable public
+URLs without uploading the blobs again. Never
 commit credentials, storage keys, or expiring signed URLs. Use
 `npm run timds -- assets pull LOGICAL_KEY` to restore a published asset on a new
 workstation. `TIMDS_ACCESS_TOKEN` is the non-interactive alternative for an AI

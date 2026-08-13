@@ -1,14 +1,17 @@
 import { createHash } from "node:crypto";
+import { execFile } from "node:child_process";
 import { constants as fsConstants, createReadStream, promises as fs } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { Readable } from "node:stream";
+import { promisify } from "node:util";
 import { resolveAccessToken } from "./auth.mjs";
 
 const MAX_MEDIA_ASSETS = 5_000;
 const MAX_MEDIA_BYTES = 5 * 1024 ** 4;
 const DEFAULT_MULTIPART_PART_BYTES = 16 * 1024 ** 2;
 const LOCAL_MEDIA_ROUTE = "/__timds/media/";
+const execFileAsync = promisify(execFile);
 
 const mediaContentTypes = {
   ".ai": "application/postscript",
@@ -91,6 +94,30 @@ function validatedSha(value, label) {
   return sha256;
 }
 
+function optionalPositiveNumber(value, label, { integer = false } = {}) {
+  if (value === undefined || value === null || value === "") return undefined;
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0 || (integer && !Number.isSafeInteger(number))) {
+    throw new Error(`${label} is invalid`);
+  }
+  return number;
+}
+
+function normalizedMediaMetadata(asset, label) {
+  const durationSeconds = optionalPositiveNumber(asset.durationSeconds, `${label}.durationSeconds`);
+  const width = optionalPositiveNumber(asset.width, `${label}.width`, { integer: true });
+  const height = optionalPositiveNumber(asset.height, `${label}.height`, { integer: true });
+  const frameRate = optionalPositiveNumber(asset.frameRate, `${label}.frameRate`);
+  const codec = boundedString(asset.codec, `${label}.codec`, 100);
+  return {
+    ...(durationSeconds === undefined ? {} : { durationSeconds }),
+    ...(width === undefined ? {} : { width }),
+    ...(height === undefined ? {} : { height }),
+    ...(frameRate === undefined ? {} : { frameRate }),
+    ...(codec ? { codec } : {}),
+  };
+}
+
 function normalizedTags(value, label) {
   const tags = Array.isArray(value)
     ? value.slice(0, 50).map((tag) => boundedString(tag, label, 80, { required: true }))
@@ -120,6 +147,7 @@ function normalizedCatalogAsset(value, index, schemaVersion) {
     sha256: validatedSha(asset.sha256, `${label}.sha256`),
     tags: normalizedTags(asset.tags, `${label}.tags`),
     title: boundedString(asset.title, `${label}.title`, 300, { required: true }),
+    ...normalizedMediaMetadata(asset, label),
   };
 }
 
@@ -172,6 +200,7 @@ function normalizedLocalAsset(value, index) {
     sha256: validatedSha(asset.sha256, `${label}.sha256`),
     tags: normalizedTags(asset.tags, `${label}.tags`),
     title: boundedString(asset.title, `${label}.title`, 300, { required: true }),
+    ...normalizedMediaMetadata(asset, label),
   };
 }
 
@@ -228,6 +257,57 @@ function keyFromFile(filePath) {
   return mediaKey(stem || "asset");
 }
 
+function parsedFrameRate(value) {
+  const [numerator, denominator = "1"] = String(value || "").split("/").map(Number);
+  if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || numerator <= 0 || denominator <= 0) return undefined;
+  return Number((numerator / denominator).toFixed(3));
+}
+
+/** Probe deterministic metadata before a timed media file leaves the workstation. */
+export async function probeMediaMetadata(source, contentType, options = {}) {
+  const kind = mediaKind(contentType);
+  if (!["audio", "video"].includes(kind)) return {};
+  if (typeof options.probeMedia === "function") {
+    return normalizedMediaMetadata(await options.probeMedia(source, contentType), "probed media");
+  }
+  const executable = options.ffprobePath || process.env.FFPROBE_PATH || "ffprobe";
+  let stdout;
+  try {
+    ({ stdout } = await execFileAsync(executable, [
+      "-v", "error",
+      "-show_entries", "format=duration:stream=codec_type,codec_name,width,height,avg_frame_rate",
+      "-of", "json",
+      source,
+    ], { maxBuffer: 4 * 1024 * 1024 }));
+  } catch (caught) {
+    if (caught?.code === "ENOENT") {
+      throw new Error(`ffprobe is required to inspect ${kind} media before staging; install ffmpeg or set FFPROBE_PATH`);
+    }
+    const detail = String(caught?.stderr || caught?.message || caught).replace(/\s+/g, " ").trim().slice(0, 500);
+    throw new Error(`Could not inspect timed media ${source}${detail ? `: ${detail}` : ""}`);
+  }
+  let payload;
+  try {
+    payload = JSON.parse(stdout);
+  } catch {
+    throw new Error(`ffprobe returned invalid metadata for ${source}`);
+  }
+  const video = payload.streams?.find((stream) => stream.codec_type === "video");
+  const audio = payload.streams?.find((stream) => stream.codec_type === "audio");
+  const durationSeconds = Number(Number(payload.format?.duration).toFixed(3));
+  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
+    throw new Error(`ffprobe did not return a positive duration for ${source}`);
+  }
+  const frameRate = parsedFrameRate(video?.avg_frame_rate);
+  return normalizedMediaMetadata({
+    durationSeconds,
+    ...(video?.width ? { width: video.width } : {}),
+    ...(video?.height ? { height: video.height } : {}),
+    ...(frameRate ? { frameRate } : {}),
+    ...(video?.codec_name || audio?.codec_name ? { codec: video?.codec_name || audio?.codec_name } : {}),
+  }, "probed media");
+}
+
 function insidePath(filePath, root) {
   const relative = path.relative(root, filePath);
   return relative && !relative.startsWith("..") && !path.isAbsolute(relative);
@@ -266,6 +346,7 @@ export async function stageMediaFile(workspace, filePathInput, options = {}) {
   if (!insidePath(destinationRealPath, mediaRealPath)) throw new Error("Staged media must stay inside media-local/");
   const destinationInfo = await fs.stat(destinationRealPath);
   const contentType = contentTypeForFile(destinationRealPath, options.contentType);
+  const mediaMetadata = await probeMediaMetadata(destinationRealPath, contentType, options);
   const local = normalizedLocalAsset({
     bytes: destinationInfo.size,
     contentType,
@@ -276,6 +357,7 @@ export async function stageMediaFile(workspace, filePathInput, options = {}) {
     sha256: await fileSha256(destinationRealPath),
     tags: String(options.tags || "").split(",").map((tag) => tag.trim()).filter(Boolean),
     title: String(options.title || path.basename(sourcePath, path.extname(sourcePath))).trim(),
+    ...mediaMetadata,
   }, 0);
   const { manifest, manifestPath } = await readLocalMediaManifest(workspace.designSystemRoot);
   const assets = manifest.assets.filter((asset) => asset.key !== key);
@@ -444,6 +526,30 @@ export async function publishStagedMedia(workspace, options = {}) {
     published.push(result);
   }
   return { catalogPath, published, staged: manifest.assets.length, unchanged };
+}
+
+/** Backfill timed metadata for previously published public media without re-uploading blobs. */
+export async function backfillMediaMetadata(workspace, options = {}) {
+  const { catalog, catalogPath } = await readMediaCatalog(workspace.designSystemRoot, { required: true });
+  const assets = [];
+  const updated = [];
+  const unchanged = [];
+  for (const asset of catalog.assets) {
+    const timed = ["audio", "video"].includes(asset.kind);
+    const complete = Boolean(asset.durationSeconds && (asset.kind !== "video" || (asset.width && asset.height)));
+    if (!timed || (complete && !options.force)) {
+      assets.push(asset);
+      unchanged.push(asset);
+      continue;
+    }
+    const metadata = await probeMediaMetadata(asset.publicUrl, asset.contentType, options);
+    const nextAsset = normalizedCatalogAsset({ ...asset, ...metadata }, 0, catalog.schemaVersion);
+    assets.push(nextAsset);
+    updated.push(nextAsset);
+  }
+  const nextCatalog = validateMediaCatalog({ assets, schemaVersion: catalog.schemaVersion });
+  await fs.writeFile(catalogPath, `${JSON.stringify(nextCatalog, null, 2)}\n`, "utf8");
+  return { catalogPath, updated, unchanged };
 }
 
 export async function addMediaFile(workspace, filePathInput, options = {}) {

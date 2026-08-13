@@ -150,11 +150,24 @@ npm run timds -- assets publish
 
 `submit` also publishes staged media before it builds and opens the pull
 request. Only the stable key, checksum, metadata, and public CDN URL are written
-to `media.json`. The raw file and `.timds/local-media.json` remain ignored.
+to `media.json`. Timed media is inspected with `ffprobe` during `assets add`, so
+video and audio records also carry their measured duration; video records carry
+dimensions, frame rate, and codec when available. The raw file and
+`.timds/local-media.json` remain ignored.
 If an object transfer fails, the CLI reports the bounded storage response and
 cancels the server upload lease before returning the error, so correcting the
 problem and rerunning `assets publish` does not wait for a stale lock to expire.
 `TIMDS_ACCESS_TOKEN` can be used for non-interactive CI or agent sessions.
+
+Catalogs created before timed metadata was supported can be repaired in place
+from their stable public URLs without re-uploading the objects:
+
+```bash
+npm run timds -- assets backfill-metadata
+```
+
+Both commands require `ffprobe` from FFmpeg on the workstation. Set
+`FFPROBE_PATH` only when it is installed outside the normal command path.
 
 To restore a published asset into a fresh local workspace:
 

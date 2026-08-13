@@ -73,6 +73,14 @@ __TIMDS_CLI__ assets publish
 
 `submit` performs the publish step automatically before building and preparing
 the pull request. Git receives only the stable public record in `media.json`.
+TimDS uses `ffprobe` during `assets add` to record timed-media duration and video
+dimensions. Backfill an older catalog from its stable public URLs without
+re-uploading objects:
+
+```bash
+__TIMDS_CLI__ assets backfill-metadata
+```
+
 On a fresh workstation, restore a published original with:
 
 ```bash

@@ -17,12 +17,15 @@ import {
 } from "./core.mjs";
 import {
   addMediaFile,
+  backfillMediaMetadata,
   localMediaResponse,
   publishStagedMedia,
   readMediaCatalog,
   resolveMediaSource,
   validateMediaCatalog,
 } from "./media.mjs";
+
+const VIDEO_METADATA = { codec: "h264", durationSeconds: 5.042, frameRate: 24, height: 1080, width: 1920 };
 
 // Read from the manifest rather than hardcoding: these assertions describe the
 // version the toolkit installs, which changes on every release.
@@ -156,6 +159,18 @@ test("validates stable media catalog records and rejects signed URLs", () => {
     title: "Attorney portrait",
   };
   assert.equal(validateMediaCatalog({ assets: [asset], schemaVersion: 2 }).assets[0].key, asset.key);
+  const video = validateMediaCatalog({
+    assets: [{ ...asset, contentType: "video/mp4", filename: "clip.mp4", kind: "video", ...VIDEO_METADATA }],
+    schemaVersion: 2,
+  }).assets[0];
+  assert.deepEqual(
+    { codec: video.codec, durationSeconds: video.durationSeconds, frameRate: video.frameRate, height: video.height, width: video.width },
+    VIDEO_METADATA,
+  );
+  assert.throws(
+    () => validateMediaCatalog({ assets: [{ ...asset, durationSeconds: 0 }], schemaVersion: 2 }),
+    /durationSeconds is invalid/,
+  );
   assert.throws(
     () => validateMediaCatalog({
       assets: [{ ...asset, publicUrl: `${asset.publicUrl}?X-Amz-Signature=temporary` }],
@@ -257,6 +272,7 @@ test("uses bounded multipart handshakes for large-media upload plans", async (t)
   };
   await addMediaFile(workspace, filePath, {
     key: "b-roll",
+    probeMedia: async () => VIDEO_METADATA,
   });
   const result = await publishStagedMedia(workspace, {
     fetchImpl: fakeFetch,
@@ -265,6 +281,10 @@ test("uses bounded multipart handshakes for large-media upload plans", async (t)
   });
   assert.equal(result.published[0].asset.id, "asset_87654321");
   assert.deepEqual(calls.map((call) => call.method), ["POST", "POST", "PUT", "POST"]);
+  const uploadRequest = JSON.parse(calls[0].body);
+  assert.equal(uploadRequest.durationSeconds, VIDEO_METADATA.durationSeconds);
+  assert.equal(uploadRequest.width, VIDEO_METADATA.width);
+  assert.equal(uploadRequest.height, VIDEO_METADATA.height);
   assert.equal(calls[1].url, "https://timds.test/api/operator/design-system-assets/uploads/upload-2/parts");
 });
 
@@ -299,7 +319,7 @@ test("cancels the server upload lease when object transfer fails", async (t) => 
     }
     return Response.json({ error: "unexpected" }, { status: 500 });
   };
-  await addMediaFile(workspace, filePath, { key: "failed-video" });
+  await addMediaFile(workspace, filePath, { key: "failed-video", probeMedia: async () => VIDEO_METADATA });
   await assert.rejects(
     publishStagedMedia(workspace, {
       fetchImpl: fakeFetch,
@@ -309,6 +329,39 @@ test("cancels the server upload lease when object transfer fails", async (t) => 
     /Object upload returned 403: <Error><Code>AccessDenied<\/Code><\/Error>/,
   );
   assert.deepEqual(calls.map((call) => call.method), ["POST", "PUT", "DELETE"]);
+});
+
+test("backfills timed metadata from stable public media without uploading it", async (t) => {
+  const repoRoot = await createDesignSystemRepo(t);
+  await initializeRepository(repoRoot);
+  const designSystemRoot = path.join(repoRoot, "design-system");
+  await writeJson(path.join(designSystemRoot, "media.json"), {
+    schemaVersion: 2,
+    assets: [{
+      bytes: 42,
+      contentType: "video/mp4",
+      filename: "legacy.mp4",
+      id: "asset_legacy123",
+      key: "legacy-video",
+      kind: "video",
+      publicUrl: "https://assets.timds.test/legacy.mp4",
+      sha256: "b".repeat(64),
+      tags: ["b-roll"],
+      title: "Legacy video",
+    }],
+  });
+  const workspace = await loadWorkspace(repoRoot);
+  const result = await backfillMediaMetadata(workspace, {
+    probeMedia: async (source) => {
+      assert.equal(source, "https://assets.timds.test/legacy.mp4");
+      return VIDEO_METADATA;
+    },
+  });
+  assert.equal(result.updated.length, 1);
+  const { catalog } = await readMediaCatalog(designSystemRoot, { required: true });
+  assert.equal(catalog.assets[0].durationSeconds, 5.042);
+  assert.equal(catalog.assets[0].width, 1920);
+  assert.equal(catalog.assets[0].height, 1080);
 });
 
 test("validates exact artifact files and local references", async (t) => {

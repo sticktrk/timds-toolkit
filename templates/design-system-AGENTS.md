@@ -18,6 +18,7 @@ __CONTRACT_DESCRIPTION__ Read `timds.json`, this file, and the relevant source b
 - This phase supports public assets only. Put originals under ignored `media-local/` and register them with `npm run timds -- assets add FILE --key LOGICAL_KEY`.
 - Use logical keys in viewer source. Local development resolves them from `.timds/local-media.json`; production builds resolve them from committed `media.json` public URLs.
 - Run `npm run timds -- auth login` once, then `npm run timds -- assets publish`. `submit` also publishes changed staged files before validation.
+- TimDS measures video and audio metadata with `ffprobe` during `assets add`; use `npm run timds -- assets backfill-metadata` to repair older records from stable public URLs without re-uploading them.
 - Keep only the returned stable record in `media.json`. Never place access tokens, R2 credentials, object keys, expiring signed URLs, `.timds/local-media.json`, or raw `media-local/` files in Git.
 - Use `npm run timds -- assets pull KEY` to restore a published original into the ignored local workspace.
 - Small optimized images, icons, and fonts required to render the viewer may remain in `dist/` within the artifact limits.
