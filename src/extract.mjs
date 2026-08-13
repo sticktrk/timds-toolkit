@@ -374,6 +374,11 @@ export async function extractArtifact({ artifactRoot, manifest, mediaCatalog = {
       contentType: record.contentType,
       bytes: record.bytes,
       sha256: record.sha256,
+      ...(record.durationSeconds ? { durationSeconds: record.durationSeconds } : {}),
+      ...(record.width ? { width: record.width } : {}),
+      ...(record.height ? { height: record.height } : {}),
+      ...(record.frameRate ? { frameRate: record.frameRate } : {}),
+      ...(record.codec ? { codec: record.codec } : {}),
     };
   };
 

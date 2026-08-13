@@ -47,7 +47,7 @@ const PAGE = `<!doctype html><html><body>
 
 const joinMedia = (source) =>
   source.includes("widow-window")
-    ? { key: "b-roll-widow-window", url: source, contentType: "video/mp4", bytes: 42 }
+    ? { key: "b-roll-widow-window", url: source, contentType: "video/mp4", bytes: 42, durationSeconds: 5.042, width: 1920, height: 1080 }
     : { url: source };
 
 const page = extractPage(PAGE, { pageId: "social/shorts", url: "/design-system/social/shorts", joinMedia });
@@ -84,6 +84,8 @@ test("joins figure assets to media records and keeps caption lines", () => {
   const block = page.blocks.find((entry) => entry.id.endsWith("#clips"));
   const [asset] = block.assets;
   assert.equal(asset.media.key, "b-roll-widow-window");
+  assert.equal(asset.media.durationSeconds, 5.042);
+  assert.equal(asset.media.width, 1920);
   assert.equal(asset.name, "`widow-window.mp4`");
   assert.deepEqual(asset.lines, ["Push-in from behind", "Loss and contemplation. Strong hook shot."]);
 });
