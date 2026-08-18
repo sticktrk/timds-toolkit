@@ -41,13 +41,16 @@ Use `dev` for the authoring server and `preview` to inspect the exact built arti
 
 - Use a `design-system/<change>` branch and a pull request.
 - Keep unrelated repository files out of the design-system commit.
-- Update `CHANGELOG.md` and `timds.json.version` when preparing a published version.
+- Record day-to-day changes under `## Unreleased`; standalone CI rolls them
+  into a synchronized patch version after merge.
 - `npm run timds -- submit` may create a branch, commit, push, and draft pull request only when the user asks.
-- Merging a pull request does not itself authorize live publication.
-- Only a DT Concepts operator may promote or roll back a TimDS version.
-- When `timds.json.consumer` is present, publish and tag the Design System
-  before advancing the consumer's submodule. The automation opens a consumer
-  pull request; it never merges or deploys the consumer.
+- In a standalone repository with managed automatic releases, merging is the
+  publication decision: every accepted `main` change becomes a patch release.
+- Only a DT Concepts operator may approve that merge or roll back a TimDS
+  version.
+- When `timds.json.consumer` is present, publish the exact synchronized Design
+  System commit before advancing the consumer's submodule. The automation opens
+  a consumer pull request; it never merges or deploys the consumer.
 
 ## Protected tooling
 

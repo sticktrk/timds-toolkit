@@ -31,6 +31,12 @@ const supportedSchemaVersions = new Set([1, 2]);
 const workspaceCommandNames = ["install", "dev", "build", "check"];
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const toolkitPackageName = "@dtconcepts/timds";
+const standaloneReleaseAutomation = "merge-patch-v1";
+const legacyStandaloneAutomationHashes = new Map([
+  [".github/workflows/timds-design-system.yml", "203ba2218b7e9d9216166707d89707a8740c8e1835f0a1e3bd31e19768c34992"],
+  [".github/workflows/update-consumer-submodule.yml", "a93c345503d5c344b2ab7b3aa37ee901e71d48608ca94df5b145235f21a5ef6f"],
+  ["scripts/release.mjs", "ba1b6ec7e4022a7104d7d0c7e2497fb61a839c37394395ea3bdaa979def1260a"],
+]);
 
 const contentTypes = {
   ".avif": "image/avif",
@@ -566,9 +572,14 @@ async function readInstalledToolkitVersion(designSystemRoot) {
   return "unknown";
 }
 
-async function installManagedToolkit({ designSystemRoot, repoRoot, replace = false }) {
+async function readInstallationMetadata(designSystemRoot) {
+  return readJsonObject(path.join(designSystemRoot, ".timds", "installation.json"), "TimDS installation", { required: false });
+}
+
+async function installManagedToolkit({ designSystemRoot, releaseAutomation, repoRoot, replace = false }) {
   const installedIdentity = await toolkitPackageIdentity();
   const paths = managedToolkitPaths(repoRoot, designSystemRoot);
+  const previousInstallation = await readInstallationMetadata(designSystemRoot);
   if (replace) await fs.rm(paths.legacyVendoredCliRoot, { force: true, recursive: true });
   if (replace) await fs.rm(paths.skillDestination, { force: true, recursive: true });
   await copyDirectory(
@@ -577,12 +588,69 @@ async function installManagedToolkit({ designSystemRoot, repoRoot, replace = fal
     { overwrite: replace },
   );
   await fs.mkdir(path.dirname(paths.installationPath), { recursive: true });
+  const selectedReleaseAutomation = releaseAutomation ?? previousInstallation.releaseAutomation;
+  const installation = { name: installedIdentity.name, schemaVersion: 1, version: installedIdentity.version };
+  if (selectedReleaseAutomation) installation.releaseAutomation = selectedReleaseAutomation;
   await fs.writeFile(
     paths.installationPath,
-    `${JSON.stringify({ name: installedIdentity.name, schemaVersion: 1, version: installedIdentity.version }, null, 2)}\n`,
+    `${JSON.stringify(installation, null, 2)}\n`,
     "utf8",
   );
   return { ...paths, package: installedIdentity };
+}
+
+async function planReleaseAutomationFile(repoRoot, relativePath, templateName, { force = false, legacyHash } = {}) {
+  const destination = path.join(repoRoot, relativePath);
+  const desired = await template(templateName);
+  let current = null;
+  try {
+    current = await fs.readFile(destination, "utf8");
+  } catch (caught) {
+    if (caught?.code !== "ENOENT") throw caught;
+  }
+  if (current === desired) return { destination, desired, needsUpdate: false, relativePath };
+  const currentHash = current === null ? null : createHash("sha256").update(current).digest("hex");
+  if (current !== null && !force && currentHash !== legacyHash) {
+    throw new Error(`Refusing to replace customized release automation at ${relativePath}; review it or rerun with --auto-release --force`);
+  }
+  return { destination, desired, needsUpdate: true, relativePath };
+}
+
+async function migrateStandaloneReleaseAutomation(repoRoot, { force = false } = {}) {
+  const replacements = [
+    [".github/workflows/timds-design-system.yml", "timds-standalone.yml"],
+    [".github/workflows/update-consumer-submodule.yml", "update-consumer-submodule.yml"],
+    ["scripts/release.mjs", "starter/scripts/release.mjs"],
+    ["scripts/prepare-merge-release.mjs", "starter/scripts/prepare-merge-release.mjs"],
+    ["scripts/prepare-merge-release.test.mjs", "starter/scripts/prepare-merge-release.test.mjs"],
+  ];
+  const planned = [];
+  for (const [relativePath, templateName] of replacements) {
+    planned.push(await planReleaseAutomationFile(repoRoot, relativePath, templateName, {
+      force,
+      legacyHash: legacyStandaloneAutomationHashes.get(relativePath),
+    }));
+  }
+
+  const packagePath = path.join(repoRoot, "package.json");
+  const packageJson = await readJsonObject(packagePath, "repository package.json");
+  const expectedTestScript = "node --test scripts/prepare-merge-release.test.mjs";
+  const currentTestScript = packageJson.scripts?.["test:release"];
+  if (currentTestScript && currentTestScript !== expectedTestScript && !force) {
+    throw new Error(`package.json scripts.test:release is already ${JSON.stringify(currentTestScript)}; rerun with --auto-release --force to replace it`);
+  }
+  const changed = [];
+  for (const file of planned.filter(({ needsUpdate }) => needsUpdate)) {
+    await fs.mkdir(path.dirname(file.destination), { recursive: true });
+    await fs.writeFile(file.destination, file.desired, "utf8");
+    changed.push(file.relativePath);
+  }
+  if (currentTestScript !== expectedTestScript) {
+    packageJson.scripts = { ...(packageJson.scripts || {}), "test:release": expectedTestScript };
+    await fs.writeFile(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`, "utf8");
+    changed.push("package.json");
+  }
+  return changed;
 }
 
 async function configurePackageManifest(repoRoot, identity, { force = false, initializeRelease = false } = {}) {
@@ -611,6 +679,7 @@ async function configurePackageManifest(repoRoot, identity, { force = false, ini
   if (initializeRelease) {
     packageJson.scripts["check:versions"] = "node scripts/check-versions.mjs";
     packageJson.scripts.release = "node scripts/release.mjs";
+    packageJson.scripts["test:release"] = "node --test scripts/prepare-merge-release.test.mjs";
   }
   packageJson.devDependencies = { ...(packageJson.devDependencies || {}), [identity.name]: releaseRange };
   await fs.writeFile(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`, "utf8");
@@ -709,15 +778,23 @@ export async function initializeRepository(repoRootInput, {
     );
   }
 
-  const installed = await installManagedToolkit({ designSystemRoot, repoRoot, replace: force });
+  const installed = await installManagedToolkit({
+    designSystemRoot,
+    releaseAutomation: standalone && createsContract ? standaloneReleaseAutomation : undefined,
+    repoRoot,
+    replace: force,
+  });
   const initializedArtifact = createsContract ? (await checkWorkspace(repoRoot)).artifact : null;
   return { consumer, created, designSystemRoot, initializedArtifact, repoRoot, ...installed };
 }
 
-export async function upgradeRepository(repoRootInput, { force = false } = {}) {
+export async function upgradeRepository(repoRootInput, { autoRelease = false, force = false } = {}) {
   const workspace = await loadWorkspace(repoRootInput);
   const identity = await toolkitPackageIdentity();
   await requirePinnedToolkitDependency(workspace.repoRoot, identity);
+  if (autoRelease && workspace.layout !== "standalone") {
+    throw new Error("--auto-release is supported only by standalone TimDS repositories");
+  }
   const paths = managedToolkitPaths(workspace.repoRoot, workspace.designSystemRoot);
   if (!force) {
     const pathspecs = [paths.legacyVendoredCliRoot, paths.installationPath, paths.skillDestination]
@@ -728,12 +805,16 @@ export async function upgradeRepository(repoRootInput, { force = false } = {}) {
     }
   }
   const previousVersion = await readInstalledToolkitVersion(workspace.designSystemRoot);
+  const releaseAutomationChanges = autoRelease
+    ? await migrateStandaloneReleaseAutomation(workspace.repoRoot, { force })
+    : [];
   const installed = await installManagedToolkit({
     designSystemRoot: workspace.designSystemRoot,
+    releaseAutomation: autoRelease ? standaloneReleaseAutomation : undefined,
     repoRoot: workspace.repoRoot,
     replace: true,
   });
-  return { ...workspace, ...installed, previousVersion };
+  return { ...workspace, ...installed, previousVersion, releaseAutomationChanges };
 }
 
 function parseArguments(argv) {
@@ -747,7 +828,7 @@ function parseArguments(argv) {
     }
     const [rawName, inlineValue] = value.replace(/^--?/, "").split("=", 2);
     const name = ({ m: "message", p: "port" })[rawName] || rawName.replace(/-([a-z])/g, (_match, letter) => letter.toUpperCase());
-    if (["dryRun", "force", "help", "noBuild", "noOpen", "noPr", "noPush", "publish", "requireCleanDist", "skipBuild", "standalone"].includes(name)) {
+    if (["autoRelease", "dryRun", "force", "help", "noBuild", "noOpen", "noPr", "noPush", "publish", "requireCleanDist", "skipBuild", "standalone"].includes(name)) {
       options[name] = true;
       continue;
     }
@@ -868,7 +949,7 @@ function machineSummary({ counts }) {
 }
 
 function helpText() {
-  return `TimDS local design-system workflow\n\nUsage:\n  timds init [--root PATH] [--standalone] [--consumer-repository OWNER/REPO] [--consumer-branch BRANCH] [--consumer-path PATH] [--force]\n  timds upgrade [--root PATH] [--force]\n  timds auth login [--token TOKEN] [--portal-url URL]\n  timds auth status [--portal-url URL]\n  timds auth logout [--portal-url URL]\n  timds doctor [--root PATH]\n  timds dev [--root PATH]\n  timds check [--root PATH] [--skip-build] [--require-clean-dist]\n  timds extract [--root PATH] [--skip-build] [--publish]\n  timds preview [--root PATH] [--port 4400] [--no-build]\n  timds diff [--root PATH] [--base origin/main]\n  timds assets list [--root PATH]\n  timds assets add FILE [--key LOGICAL_KEY] [--title TEXT] [--tags a,b]\n  timds assets backfill-metadata [--root PATH] [--force]\n  timds assets publish [--root PATH]\n  timds assets pull KEY [--output PATH] [--force]\n  timds submit --message "Change summary" [--dry-run] [--no-push] [--no-pr]\n\nCheck and extract derive index.json, llms.txt, and per-page Markdown from the built artifact so agents and pipelines can read the system without scraping HTML. Extract --publish uploads the index, llms.txt, the per-page Markdown mirrors, a .timds-artifact.json provenance stamp, and the artifact files the index references to the system's stable CDN prefix through the portal, so pipelines and agents consume the system from one stable URL. Large public media is copied into ignored media-local/ for authoring. assets add measures timed-media duration and dimensions before upload; backfill-metadata repairs older catalogs from their stable public URLs. assets publish and submit upload changed media and commit only stable CDN records. Submit creates a review branch and draft pull request.`;
+  return `TimDS local design-system workflow\n\nUsage:\n  timds init [--root PATH] [--standalone] [--consumer-repository OWNER/REPO] [--consumer-branch BRANCH] [--consumer-path PATH] [--force]\n  timds upgrade [--root PATH] [--auto-release] [--force]\n  timds auth login [--token TOKEN] [--portal-url URL]\n  timds auth status [--portal-url URL]\n  timds auth logout [--portal-url URL]\n  timds doctor [--root PATH]\n  timds dev [--root PATH]\n  timds check [--root PATH] [--skip-build] [--require-clean-dist]\n  timds extract [--root PATH] [--skip-build] [--publish]\n  timds preview [--root PATH] [--port 4400] [--no-build]\n  timds diff [--root PATH] [--base origin/main]\n  timds assets list [--root PATH]\n  timds assets add FILE [--key LOGICAL_KEY] [--title TEXT] [--tags a,b]\n  timds assets backfill-metadata [--root PATH] [--force]\n  timds assets publish [--root PATH]\n  timds assets pull KEY [--output PATH] [--force]\n  timds submit --message "Change summary" [--dry-run] [--no-push] [--no-pr]\n\nCheck and extract derive index.json, llms.txt, and per-page Markdown from the built artifact so agents and pipelines can read the system without scraping HTML. Extract --publish uploads the index, llms.txt, the per-page Markdown mirrors, a .timds-artifact.json provenance stamp, and the artifact files the index references to the system's stable CDN prefix through the portal, so pipelines and agents consume the system from one stable URL. Large public media is copied into ignored media-local/ for authoring. assets add measures timed-media duration and dimensions before upload; backfill-metadata repairs older catalogs from their stable public URLs. assets publish and submit upload changed media and commit only stable CDN records. Submit creates a review branch and draft pull request.`;
 }
 
 export async function runCli(argv) {
@@ -937,10 +1018,13 @@ export async function runCli(argv) {
     return result;
   }
   if (command === "upgrade") {
-    const result = await upgradeRepository(root, { force: options.force });
+    const result = await upgradeRepository(root, { autoRelease: options.autoRelease, force: options.force });
     output(`TimDS tooling upgraded for ${result.repoRoot}`);
     output(`Toolkit: ${result.previousVersion} -> ${result.package.version}`);
     output(`Agent skill: ${result.skillDestination}`);
+    if (result.releaseAutomationChanges.length) {
+      output(`Release automation: ${standaloneReleaseAutomation} (${result.releaseAutomationChanges.length} files updated)`);
+    }
     return result;
   }
   if (command === "doctor") {

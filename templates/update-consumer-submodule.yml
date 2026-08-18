@@ -1,5 +1,7 @@
 name: Update Design System consumer
 
+# Called only after the exact Design System commit has been published. The
+# consumer pins that commit directly; a Git tag is neither created nor required.
 on:
   workflow_call:
     inputs:
@@ -12,7 +14,12 @@ on:
       repository:
         required: true
         type: string
-      tag:
+      sha:
+        description: Exact published Design System commit
+        required: true
+        type: string
+      version:
+        description: Published Design System version
         required: true
         type: string
   workflow_dispatch:
@@ -31,8 +38,12 @@ on:
         description: Consumer repository as OWNER/REPOSITORY
         required: true
         type: string
-      tag:
-        description: Design System release tag to pin
+      sha:
+        description: Exact published Design System commit
+        required: true
+        type: string
+      version:
+        description: Published Design System version
         required: true
         type: string
 
@@ -55,27 +66,38 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.TIMDS_CONSUMER_TOKEN }}
         run: |
+          set -euo pipefail
           if [[ -z "${GH_TOKEN:-}" ]]; then
             echo "TIMDS_CONSUMER_TOKEN must grant contents and pull-request access to ${{ inputs.repository }}."
             exit 1
           fi
 
-      - name: Check out Design System release history
+      - name: Check out the exact published Design System commit
         uses: actions/checkout@v5
         with:
+          ref: ${{ inputs.sha }}
           fetch-depth: 0
 
-      - name: Resolve release tag
+      - name: Verify release metadata
         id: release
         env:
-          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_SHA: ${{ inputs.sha }}
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          git rev-parse --verify --quiet "refs/tags/${INPUT_TAG}" >/dev/null \
-            || { echo "Tag ${INPUT_TAG} not found."; exit 1; }
+          [[ "$INPUT_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+            || { echo "Invalid version ${INPUT_VERSION}."; exit 1; }
+          [[ "$INPUT_SHA" =~ ^[0-9a-f]{40}$ ]] \
+            || { echo "Invalid commit ${INPUT_SHA}."; exit 1; }
+          resolved_sha="$(git rev-parse HEAD)"
+          declared_version="$(node -p "require('./timds.json').version")"
+          [[ "$resolved_sha" == "$INPUT_SHA" ]] \
+            || { echo "Resolved ${resolved_sha}, expected ${INPUT_SHA}."; exit 1; }
+          [[ "$declared_version" == "$INPUT_VERSION" ]] \
+            || { echo "Commit declares ${declared_version}, expected ${INPUT_VERSION}."; exit 1; }
           {
-            echo "sha=$(git rev-list -n1 "refs/tags/${INPUT_TAG}")"
-            echo "tag=${INPUT_TAG}"
+            echo "sha=${resolved_sha}"
+            echo "version=${INPUT_VERSION}"
           } >> "$GITHUB_OUTPUT"
 
       - name: Check out consumer repository
@@ -92,7 +114,7 @@ jobs:
         working-directory: consumer
         env:
           DESIGN_SYSTEM_SHA: ${{ steps.release.outputs.sha }}
-          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          DESIGN_SYSTEM_VERSION: ${{ steps.release.outputs.version }}
           SUBMODULE_PATH: ${{ inputs.path }}
         run: |
           set -euo pipefail
@@ -108,7 +130,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git switch --create "$UPDATE_BRANCH"
           git update-index --cacheinfo "160000,$DESIGN_SYSTEM_SHA,$SUBMODULE_PATH"
-          git commit -m "chore: update design system to ${RELEASE_TAG}"
+          git commit -m "chore: update design system to ${DESIGN_SYSTEM_VERSION}"
           git fetch origin "$UPDATE_BRANCH:refs/remotes/origin/$UPDATE_BRANCH" || true
           git push --force-with-lease origin "HEAD:refs/heads/$UPDATE_BRANCH"
           echo "changed=true" >> "$GITHUB_OUTPUT"
@@ -118,18 +140,24 @@ jobs:
         working-directory: consumer
         env:
           DESIGN_SYSTEM_SHA: ${{ steps.release.outputs.sha }}
+          DESIGN_SYSTEM_VERSION: ${{ steps.release.outputs.version }}
           GH_TOKEN: ${{ secrets.TIMDS_CONSUMER_TOKEN }}
-          RELEASE_TAG: ${{ steps.release.outputs.tag }}
         run: |
           set -euo pipefail
-          pr_url="$(gh pr list --repo "${{ inputs.repository }}" --base "${{ inputs.branch }}" --head "$UPDATE_BRANCH" --state open --json url --jq '.[0].url')"
-          if [[ -n "$pr_url" ]]; then
-            echo "Refreshed existing pull request: $pr_url"
+          pr_number="$(gh pr list --repo "${{ inputs.repository }}" --base "${{ inputs.branch }}" --head "$UPDATE_BRANCH" --state open --json number --jq '.[0].number')"
+          title="chore: update Design System to ${DESIGN_SYSTEM_VERSION}"
+          body="$(printf '%s\n' \
+            "Advances the pinned \`${{ inputs.path }}\` submodule to version \`${DESIGN_SYSTEM_VERSION}\` (${{ github.repository }}@${DESIGN_SYSTEM_SHA})." \
+            "" \
+            "The exact commit was published before this pull request was opened. Reviewing and deploying the consumer remain separate decisions.")"
+          if [[ -n "$pr_number" ]]; then
+            gh api --method PATCH "repos/${{ inputs.repository }}/pulls/${pr_number}" \
+              -f title="$title" -f body="$body" --jq '.html_url'
             exit 0
           fi
           gh pr create \
             --repo "${{ inputs.repository }}" \
             --base "${{ inputs.branch }}" \
             --head "$UPDATE_BRANCH" \
-            --title "chore: update Design System to ${RELEASE_TAG}" \
-            --body "Advances the pinned \`${{ inputs.path }}\` submodule to \`${RELEASE_TAG}\` (${{ github.repository }}@${DESIGN_SYSTEM_SHA}). The artifact was published before this pull request was opened."
+            --title "$title" \
+            --body "$body"

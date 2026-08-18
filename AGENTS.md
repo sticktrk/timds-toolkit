@@ -17,10 +17,14 @@ whenever managed-file behavior changes.
 
 Client repositories select the bounded `0.1.x` package line, commit the exact
 resolved lockfile, and execute `npm run timds --`. They do not vendor package
-source. The managed repository-local boundary is
+source. The always-managed repository-local boundary is
 `.timds/installation.json`, `.agents/skills/timds-edit-design-system/`, and the
-legacy `.timds/cli/` tree only while removing it during migration. Package and
-lockfile changes select the resolved package release.
+legacy `.timds/cli/` tree only while removing it during migration. Standalone
+initialization also owns the stock release workflows and preparation scripts.
+Existing standalone repos enter that expanded boundary only through the
+explicit `upgrade --auto-release` migration; refuse customized files unless
+replacement is forced. Package and lockfile changes select the resolved package
+release.
 
 Never extend upgrades to authored source, `timds.json`, tokens, `media.json`,
 framework configuration, documentation, or generated artifacts without an

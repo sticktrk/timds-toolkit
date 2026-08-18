@@ -38,10 +38,13 @@ npm run timds -- upgrade --root .
 
 3. Never use `--force` without explicit authorization to replace locally
    modified managed tooling.
-4. Confirm the upgrade changed only the package manifest and lockfile, local AI
+4. For an older standalone repository, use `--auto-release` only when the user
+   asks to migrate it to the managed merge-to-patch flow. TimDS preserves
+   customized release automation unless `--force` is also authorized.
+5. Confirm the upgrade changed only the package manifest and lockfile, local AI
    skill, installation record, workflow when intentionally updated, and removal
    of any legacy `.timds/cli` tree.
-5. Run `npm run timds -- doctor` and `npm run timds -- check`. Submit the
+6. Run `npm run timds -- doctor` and `npm run timds -- check`. Submit the
    tooling update separately from ordinary design work.
 
 ## Make the design change
@@ -110,10 +113,11 @@ contrast, overflow, focus states, and the requested change.
 ## Keep linked consumers release-pinned
 
 When a standalone `timds.json` declares a `consumer`, treat the Design System
-release as the source of the consumer's submodule update. Ordinary merges only
-validate. Cut the release with the repository's `scripts/release.sh`; CI must
-publish and tag the exact Design System commit before its reusable workflow
-opens or refreshes a gitlink-only pull request in the consumer.
+release as the source of the consumer's submodule update. Every accepted change
+on `main` becomes a patch release: CI synchronizes the version, publishes the
+exact commit, and only then opens or refreshes a gitlink-only pull request in
+the consumer. Tags are not required. `scripts/release.sh` remains available for
+an intentional explicit version advance.
 
 The consumer owns its `.gitmodules` record and reviewed gitlink. Prefer a
 same-host relative submodule URL, and never merge the consumer pull request or

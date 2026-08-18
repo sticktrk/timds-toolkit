@@ -37,8 +37,10 @@ npx --yes @dtconcepts/timds@0.1.x init --standalone \
 Add the Design System to that consumer with a same-host relative URL (for
 example `../client-design-system.git`), then configure the Design System
 repository secret `TIMDS_CONSUMER_TOKEN` with contents and pull-request access
-to the consumer. A release publishes and tags the Design System before opening
-or refreshing a gitlink-update pull request in the consumer.
+to the consumer. Every accepted change on `main` becomes a patch release: TimDS
+synchronizes the version, publishes that exact commit, then opens or refreshes
+a gitlink-update pull request in the consumer. This flow pins the commit SHA and
+does not depend on a release tag.
 
 Create an embedded root `design-system/` contract in an existing client app:
 
@@ -195,6 +197,18 @@ npm run timds -- check
 modified managed files unless `--force` is explicitly supplied and never
 rewrites `timds.json`, tokens, media records, authored source, framework config,
 documentation, or artifacts.
+
+Standalone repositories created by older TimDS releases can adopt the managed
+merge-to-patch automation explicitly:
+
+```bash
+npm run timds -- upgrade --root . --auto-release
+```
+
+The migration replaces only recognized stock release files, adds the release
+preparation test, and records `merge-patch-v1` in `.timds/installation.json`.
+It stops when release automation was customized; inspect that customization and
+use `--auto-release --force` only when replacing it is intentional.
 
 ## Toolkit development and release
 
