@@ -590,14 +590,26 @@ test("initializes the reusable standalone repository shape", async (t) => {
   assert.equal(packageJson.devDependencies["@dtconcepts/timds"], "0.1.x");
   assert.equal(packageJson.scripts["check:versions"], "node scripts/check-versions.mjs");
   assert.equal(packageJson.scripts.release, "node scripts/release.mjs");
+  assert.equal(packageJson.scripts["test:release"], "node --test scripts/prepare-merge-release.test.mjs");
   assert.equal(packageJson.scripts.timds, "timds");
   await fs.access(path.join(repoRoot, "src", "index.html"));
   await fs.access(path.join(repoRoot, "scripts", "build.mjs"));
   await fs.access(path.join(repoRoot, "scripts", "check-versions.mjs"));
+  await fs.access(path.join(repoRoot, "scripts", "prepare-merge-release.mjs"));
+  await fs.access(path.join(repoRoot, "scripts", "prepare-merge-release.test.mjs"));
   await fs.access(path.join(repoRoot, "scripts", "release.mjs"));
   await fs.access(path.join(repoRoot, "scripts", "release.sh"));
   await fs.access(path.join(repoRoot, ".github", "workflows", "update-consumer-submodule.yml"));
   await fs.access(path.join(repoRoot, "dist", "index.html"));
+  assert.equal(
+    JSON.parse(await fs.readFile(path.join(repoRoot, ".timds", "installation.json"), "utf8")).releaseAutomation,
+    "merge-patch-v1",
+  );
+  const releaseWorkflow = await fs.readFile(path.join(repoRoot, ".github", "workflows", "timds-design-system.yml"), "utf8");
+  assert.match(releaseWorkflow, /prepare-release:/);
+  assert.match(releaseWorkflow, /npm run test:release/);
+  assert.match(releaseWorkflow, /sha: \$\{\{ steps\.commit\.outputs\.sha \}\}/);
+  assert.doesNotMatch(releaseWorkflow, /^  tag:/m);
   assert.match(await fs.readFile(path.join(repoRoot, ".gitignore"), "utf8"), /node_modules\//);
   assert.match(await fs.readFile(path.join(repoRoot, ".gitignore"), "utf8"), /dist\//);
   assert.match(
@@ -640,9 +652,41 @@ test("initializes opt-in consumer submodule automation", async (t) => {
   const workflow = await fs.readFile(path.join(repoRoot, ".github", "workflows", "timds-design-system.yml"), "utf8");
   assert.match(workflow, /pin-consumer:/);
   assert.match(workflow, /update-consumer-submodule\.yml/);
+  assert.match(workflow, /sha: \$\{\{ needs\.prepare-release\.outputs\.sha \}\}/);
+  assert.doesNotMatch(workflow, /tag: \$\{\{/);
   const updater = await fs.readFile(path.join(repoRoot, ".github", "workflows", "update-consumer-submodule.yml"), "utf8");
   assert.match(updater, /TIMDS_CONSUMER_TOKEN/);
   assert.match(updater, /git update-index --cacheinfo/);
+  assert.match(updater, /INPUT_SHA/);
+  assert.match(updater, /declared_version/);
+  assert.doesNotMatch(updater, /Resolve release tag/);
+});
+
+test("migrates standalone release automation only with explicit replacement of customized files", async (t) => {
+  const repoRoot = await temporaryDirectory(t);
+  execFileSync("git", ["init", "-b", "main"], { cwd: repoRoot, stdio: "ignore" });
+  execFileSync("git", ["config", "user.email", "timds-test@example.com"], { cwd: repoRoot });
+  execFileSync("git", ["config", "user.name", "TimDS Test"], { cwd: repoRoot });
+  await initializeRepository(repoRoot, { standalone: true });
+  execFileSync("git", ["add", "--all"], { cwd: repoRoot });
+  execFileSync("git", ["commit", "-m", "Initialize TimDS"], { cwd: repoRoot, stdio: "ignore" });
+
+  const workflowPath = path.join(repoRoot, ".github", "workflows", "timds-design-system.yml");
+  await fs.writeFile(workflowPath, "name: Customized release\n", "utf8");
+  await assert.rejects(
+    upgradeRepository(repoRoot, { autoRelease: true }),
+    /Refusing to replace customized release automation/,
+  );
+  assert.equal(await fs.readFile(workflowPath, "utf8"), "name: Customized release\n");
+
+  const result = await upgradeRepository(repoRoot, { autoRelease: true, force: true });
+  assert.ok(result.releaseAutomationChanges.includes(".github/workflows/timds-design-system.yml"));
+  assert.match(await fs.readFile(workflowPath, "utf8"), /prepare-release:/);
+  assert.equal(
+    JSON.parse(await fs.readFile(path.join(repoRoot, ".timds", "installation.json"), "utf8")).releaseAutomation,
+    "merge-patch-v1",
+  );
+  execFileSync("node", ["--test", "scripts/prepare-merge-release.test.mjs"], { cwd: repoRoot, stdio: "ignore" });
 });
 
 test("initializes an embedded contract with a committed starter artifact", async (t) => {

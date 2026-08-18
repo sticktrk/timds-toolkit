@@ -62,6 +62,6 @@ if (push) {
   git("push", "--set-upstream", "origin", branch);
   execFileSync("gh", ["pr", "create", "--draft", "--base", "main", "--head", branch,
     "--title", `Release ${version}`,
-    "--body", `Bumps the Design System to ${version}. Merging publishes the artifact and tags v${version}.\n\n${entries}`],
+    "--body", `Bumps the Design System to ${version}. Merging publishes this exact commit and offers the linked consumer update.\n\n${entries}`],
   { cwd: root, stdio: "inherit" });
 }

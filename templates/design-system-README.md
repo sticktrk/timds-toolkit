@@ -101,12 +101,15 @@ When asked to submit the reviewed local change:
 __TIMDS_CLI__ submit --message "Describe the design-system change"
 ```
 
-Submission creates a draft pull request. A DT Concepts operator separately controls live publication and rollback.
+Submission creates a draft pull request. In a standalone repository, an
+operator's merge accepts the change for automatic patch publication; rollback
+remains a separate operator decision.
 
 ## Linked consumer repository
 
-When `timds.json` declares a `consumer`, releases publish and tag this Design
-System first, then open or refresh a pull request that advances the consumer's
+When `timds.json` declares a `consumer`, every accepted change on `main`
+becomes a patch release. CI synchronizes the version, publishes that exact
+commit, then opens or refreshes a pull request that advances the consumer's
 pinned `design-system` gitlink. Configure a `TIMDS_CONSUMER_TOKEN` repository
 secret with contents and pull-request access to that consumer repository.
 
@@ -114,9 +117,11 @@ The consumer owns only its `.gitmodules` record and reviewed gitlink. Prefer a
 same-host relative URL such as `../client-design-system.git`, so authenticated
 HTTPS and SSH clones both resolve within the organization.
 
-Day-to-day changes go under `## Unreleased` in `CHANGELOG.md`. Cut a release
-with `./scripts/release.sh`; the release workflow publishes, tags, and then
-offers the consumer update as separate reviewable work.
+Day-to-day changes go under `## Unreleased` in `CHANGELOG.md`. Merging an
+accepted change rolls those notes into the next patch automatically. Use
+`./scripts/release.sh` only when intentionally preparing an explicit minor,
+major, or selected version. Publication and the consumer update remain
+separate, ordered CI work.
 
 ## Toolkit upgrades
 
@@ -130,6 +135,10 @@ those managed files:
 npm update @dtconcepts/timds
 npm run timds -- upgrade --root .
 ```
+
+An older standalone repository adopts the managed automatic release flow with
+`npm run timds -- upgrade --root . --auto-release`. The command refuses
+customized release files unless replacement is explicitly forced.
 
 The CLI runs from `node_modules`; do not commit that directory or a copied
 `.timds/cli` tree. The upgrade does not rewrite this Design System's manifest,
