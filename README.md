@@ -203,6 +203,16 @@ that block owns role labels, structure, CTA templates, and asset-key
 vocabulary, while consumers call `@dtconcepts/timds/video/producer` and render
 with `@dtconcepts/timds/video/remotion`.
 
+The Remotion export includes a complete default component set. A client Design
+System may also export a partial `VideoProjectComponentOverrides` object and
+pass it to `createVideoProjectRoot()`, `createSingleVideoProjectRoot()`, or
+`registerVideoProject()`. `Video`, `Scene`, `Intro`, `Outro`, `Cover`,
+`HorizontalCover`, and `VerticalCover` are independently replaceable; omitted
+components continue to use TimDS defaults, and format-specific covers take
+precedence over the shared `Cover` override. This keeps rendering mechanics in
+TimDS while allowing a reviewed client Design System to own its visual
+compositions.
+
 Each production is a directory with five reviewable phase records:
 `request.json`, `script.json`, `publishing.json`, `captions.json`, and
 `production.json`. There is no per-topic TSX entry and no client-owned copy of

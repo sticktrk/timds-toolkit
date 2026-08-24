@@ -16,9 +16,9 @@ import {
 } from "remotion";
 import {splitGoldHeadline, tieOrphan} from "./text.mjs";
 
-type WordTiming = {text: string; startMs: number; endMs: number};
-type CaptionLine = {id: string; words: WordTiming[]; durationMs: number};
-type Scene = {
+export type VideoProjectWordTiming = {text: string; startMs: number; endMs: number};
+export type VideoProjectCaptionLine = {id: string; words: VideoProjectWordTiming[]; durationMs: number};
+export type VideoProjectScene = {
   id: string;
   eyebrow?: string;
   headline?: string;
@@ -29,7 +29,7 @@ type Scene = {
   intro?: boolean;
   outro?: boolean;
 };
-type Asset = {
+export type VideoProjectAsset = {
   key: string;
   src: string;
   kind?: "image" | "video";
@@ -39,18 +39,76 @@ type Asset = {
   flip?: boolean;
   objectPosition?: string;
 };
-type VideoProject = {
+export type VideoProject = {
   schemaVersion: 1;
   engine: {name: string; version: string};
   contract: any;
-  assets: Record<string, Asset>;
+  assets: Record<string, VideoProjectAsset>;
   records: {
-    captions: {lines: CaptionLine[]};
+    captions: {lines: VideoProjectCaptionLine[]};
     production: any;
     publishing: any;
     request: any;
     script: any;
   };
+};
+
+export type VideoProjectCover = {
+  asset: string;
+  atSeconds?: number;
+  eyebrow?: string;
+  headline?: string;
+  goldPhrase?: string;
+  objectPosition?: string;
+  [key: string]: unknown;
+};
+
+export type VideoProjectIntroProps = {
+  project: VideoProject;
+  question: string;
+  vertical?: boolean;
+};
+
+export type VideoProjectOutroProps = {
+  project: VideoProject;
+  vertical?: boolean;
+};
+
+export type VideoProjectSceneProps = {
+  project: VideoProject;
+  scene: VideoProjectScene;
+  line: VideoProjectCaptionLine;
+  duration: number;
+  lead: number;
+  vertical?: boolean;
+  components?: VideoProjectComponentOverrides;
+};
+
+export type VideoProjectVideoProps = {
+  project: VideoProject;
+  scenes: VideoProjectScene[];
+  ids: string[];
+  pads?: Record<string, {lead?: number; tail?: number}>;
+  audioSrc?: string | null;
+  vertical?: boolean;
+  components?: VideoProjectComponentOverrides;
+};
+
+export type VideoProjectCoverProps = {
+  project: VideoProject;
+  cover: VideoProjectCover;
+  vertical?: boolean;
+};
+
+/** A client Design System may replace any subset of the TimDS defaults. */
+export type VideoProjectComponentOverrides = {
+  Video?: React.ComponentType<VideoProjectVideoProps>;
+  Scene?: React.ComponentType<VideoProjectSceneProps>;
+  Intro?: React.ComponentType<VideoProjectIntroProps>;
+  Outro?: React.ComponentType<VideoProjectOutroProps>;
+  Cover?: React.ComponentType<VideoProjectCoverProps>;
+  HorizontalCover?: React.ComponentType<VideoProjectCoverProps>;
+  VerticalCover?: React.ComponentType<VideoProjectCoverProps>;
 };
 
 type VideoFont = {
@@ -140,7 +198,7 @@ const BrandWatermark: React.FC<{project: VideoProject; vertical?: boolean; scene
   </>;
 };
 
-const Intro: React.FC<{project: VideoProject; question: string; vertical?: boolean}> = ({project, question, vertical}) => {
+const Intro: React.FC<VideoProjectIntroProps> = ({project, question, vertical}) => {
   const brand = project.contract.brand;
   return <AbsoluteFill style={{backgroundColor: brand.colors.background, alignItems: "center", justifyContent: "center", padding: vertical ? "180px 90px" : "100px 220px", textAlign: "center"}}>
     <Img src={staticFile(brand.logo)} style={{width: vertical ? 390 : 420, marginBottom: vertical ? 74 : 46}} />
@@ -149,7 +207,7 @@ const Intro: React.FC<{project: VideoProject; question: string; vertical?: boole
   </AbsoluteFill>;
 };
 
-const Outro: React.FC<{project: VideoProject; vertical?: boolean}> = ({project, vertical}) => {
+const Outro: React.FC<VideoProjectOutroProps> = ({project, vertical}) => {
   const brand = project.contract.brand;
   return <AbsoluteFill style={{backgroundColor: brand.colors.background, alignItems: "center", justifyContent: "center", textAlign: "center"}}>
     <Img src={staticFile(brand.logo)} style={{width: vertical ? 520 : 470}} />
@@ -159,7 +217,7 @@ const Outro: React.FC<{project: VideoProject; vertical?: boolean}> = ({project, 
   </AbsoluteFill>;
 };
 
-const Media: React.FC<{project: VideoProject; scene: Scene; duration: number; vertical?: boolean}> = ({project, scene, duration, vertical}) => {
+const Media: React.FC<{project: VideoProject; scene: VideoProjectScene; duration: number; vertical?: boolean}> = ({project, scene, duration, vertical}) => {
   const frame = useCurrentFrame();
   const keys = scene.assets || (scene.asset ? [scene.asset] : []);
   const fps = project.contract.fps;
@@ -190,21 +248,23 @@ const Media: React.FC<{project: VideoProject; scene: Scene; duration: number; ve
   </AbsoluteFill>;
 };
 
-const CaptionPages: React.FC<{project: VideoProject; line: CaptionLine; lead: number; vertical?: boolean}> = ({project, line, lead, vertical}) => {
+const CaptionPages: React.FC<{project: VideoProject; line: VideoProjectCaptionLine; lead: number; vertical?: boolean}> = ({project, line, lead, vertical}) => {
   const frame = useCurrentFrame();
   const size = project.contract.copy.captionPageWords;
   const pages = useMemo(() => Array.from({length: Math.ceil(line.words.length / size)}, (_value, index) => line.words.slice(index * size, index * size + size)), [line.words, size]);
   const now = Math.max(0, (frame - lead) / project.contract.fps * 1000);
-  const page = pages.find((candidate) => now >= candidate[0]?.startMs && now <= candidate.at(-1)?.endMs + 180) || [];
+  const page = pages.find((candidate) => now >= (candidate[0]?.startMs ?? Infinity) && now <= (candidate.at(-1)?.endMs ?? -Infinity) + 180) || [];
   return <div style={{position: "absolute", left: vertical ? 70 : 150, right: vertical ? 150 : 150, bottom: vertical ? 240 : 76, textAlign: "center", color: project.contract.brand.colors.text, fontFamily: project.contract.brand.fonts.body, fontSize: vertical ? 58 : 42, fontWeight: 700, lineHeight: 1.08, textShadow: `0 3px 22px ${project.contract.brand.colors.background}`}}>
     {page.map((word, index) => <React.Fragment key={`${word.startMs}-${index}`}><span style={{color: now >= word.startMs && now <= word.endMs ? project.contract.brand.colors.accent : project.contract.brand.colors.text}}>{word.text}</span>{index === page.length - 1 ? "" : " "}</React.Fragment>)}
   </div>;
 };
 
-const SceneView: React.FC<{project: VideoProject; scene: Scene; line: CaptionLine; duration: number; lead: number; vertical?: boolean}> = ({project, scene, line, duration, lead, vertical}) => {
+const SceneView: React.FC<VideoProjectSceneProps> = ({project, scene, line, duration, lead, vertical, components}) => {
   const brand = project.contract.brand;
-  if (scene.intro) return <><Intro project={project} question={scene.headline || line.words.map((word) => word.text).join(" ")} vertical={vertical} /><BrandWatermark project={project} vertical={vertical} sceneHasLogo /></>;
-  if (scene.outro) return <><Outro project={project} vertical={vertical} /><BrandWatermark project={project} vertical={vertical} sceneHasLogo /></>;
+  const IntroComponent = components?.Intro ?? Intro;
+  const OutroComponent = components?.Outro ?? Outro;
+  if (scene.intro) return <><IntroComponent project={project} question={scene.headline || line.words.map((word) => word.text).join(" ")} vertical={vertical} /><BrandWatermark project={project} vertical={vertical} sceneHasLogo /></>;
+  if (scene.outro) return <><OutroComponent project={project} vertical={vertical} /><BrandWatermark project={project} vertical={vertical} sceneHasLogo /></>;
   const firstAsset = project.assets[(scene.assets || [scene.asset])[0] || ""];
   const right = firstAsset?.text?.startsWith("right");
   const lower = firstAsset?.text === "lower" || firstAsset?.text?.endsWith("bottom");
@@ -222,8 +282,9 @@ const SceneView: React.FC<{project: VideoProject; scene: Scene; line: CaptionLin
   </AbsoluteFill>;
 };
 
-const Video: React.FC<{project: VideoProject; scenes: Scene[]; ids: string[]; pads?: Record<string, {lead?: number; tail?: number}>; audioSrc?: string | null; vertical?: boolean}> = ({project, scenes, ids, pads = {}, audioSrc, vertical}) => {
+const Video: React.FC<VideoProjectVideoProps> = ({project, scenes, ids, pads = {}, audioSrc, vertical, components}) => {
   let cursor = 0;
+  const SceneComponent = components?.Scene ?? SceneView;
   return <AbsoluteFill style={{backgroundColor: project.contract.brand.colors.background, fontVariantNumeric: "lining-nums"}}>
     {typeof audioSrc === "string" ? <Audio src={staticFile(audioSrc)} /> : null}
     {ids.map((id) => {
@@ -235,21 +296,21 @@ const Video: React.FC<{project: VideoProject; scenes: Scene[]; ids: string[]; pa
       cursor += duration;
       const lead = Number(pads[id]?.lead || 0);
       return <Sequence key={id} from={from} durationInFrames={duration}>
-        <SceneView project={project} scene={scene} line={line} duration={duration} lead={lead} vertical={vertical} />
+        <SceneComponent project={project} scene={scene} line={line} duration={duration} lead={lead} vertical={vertical} components={components} />
         {audioSrc === undefined ? <Sequence from={lead} durationInFrames={frames(line.durationMs, project.contract.fps)}><Audio src={staticFile(`audio/${project.records.production.slug}/${id}.mp3`)} /></Sequence> : null}
       </Sequence>;
     })}
   </AbsoluteFill>;
 };
 
-const Cover: React.FC<{project: VideoProject; cover: any; vertical?: boolean}> = ({project, cover, vertical}) => {
+const Cover: React.FC<VideoProjectCoverProps> = ({project, cover, vertical}) => {
   const brand = project.contract.brand;
   const asset = project.assets[cover.asset];
   if (!asset) throw new Error(`TimDS video: missing cover asset ${cover.asset}`);
   return <AbsoluteFill style={{backgroundColor: brand.colors.background, fontVariantNumeric: "lining-nums"}}>
     {asset.kind === "video"
-      ? <OffthreadVideo muted src={staticFile(asset.src)} startFrom={frames(Number(cover.atSeconds || 0) * 1000, project.contract.fps)} style={{width: "100%", height: "100%", objectFit: "cover", objectPosition: asset.objectPosition || "50% 50%"}} />
-      : <Img src={staticFile(asset.src)} style={{width: "100%", height: "100%", objectFit: "cover", objectPosition: asset.objectPosition || "50% 50%"}} />}
+      ? <OffthreadVideo muted src={staticFile(asset.src)} startFrom={frames(Number(cover.atSeconds || 0) * 1000, project.contract.fps)} style={{width: "100%", height: "100%", objectFit: "cover", objectPosition: cover.objectPosition || asset.objectPosition || "50% 50%"}} />
+      : <Img src={staticFile(asset.src)} style={{width: "100%", height: "100%", objectFit: "cover", objectPosition: cover.objectPosition || asset.objectPosition || "50% 50%"}} />}
     <AbsoluteFill style={{background: vertical ? `linear-gradient(0deg, ${brand.colors.background} 0%, ${brand.colors.background}dd 48%, transparent 82%)` : `linear-gradient(90deg, ${brand.colors.background} 0%, ${brand.colors.background}ee 46%, transparent 82%)`}} />
     <AbsoluteFill style={{justifyContent: vertical ? "flex-end" : "center", alignItems: "flex-start", padding: vertical ? "0 92px 210px" : "0 120px", width: vertical ? "100%" : "68%"}}>
       <div style={{color: brand.colors.accent, fontFamily: brand.fonts.ui, fontSize: vertical ? 28 : 28, fontWeight: 700, letterSpacing: 6, textTransform: "uppercase", marginBottom: 26}}>{cover.eyebrow || brand.series}</div>
@@ -259,21 +320,47 @@ const Cover: React.FC<{project: VideoProject; cover: any; vertical?: boolean}> =
   </AbsoluteFill>;
 };
 
-export function createVideoProjectRoot(project: VideoProject) {
+export const defaultVideoProjectComponents = {
+  Video,
+  Scene: SceneView,
+  Intro,
+  Outro,
+  Cover,
+  HorizontalCover: Cover,
+  VerticalCover: Cover,
+} satisfies Required<VideoProjectComponentOverrides>;
+
+export function resolveVideoProjectComponents(components: VideoProjectComponentOverrides = {}) {
+  return {
+    Video: components.Video ?? Video,
+    Scene: components.Scene ?? SceneView,
+    Intro: components.Intro ?? Intro,
+    Outro: components.Outro ?? Outro,
+    Cover: components.Cover ?? Cover,
+    HorizontalCover: components.HorizontalCover ?? components.Cover ?? Cover,
+    VerticalCover: components.VerticalCover ?? components.Cover ?? Cover,
+  } satisfies Required<VideoProjectComponentOverrides>;
+}
+
+export function createVideoProjectRoot(project: VideoProject, components: VideoProjectComponentOverrides = {}) {
   loadVideoProjectFonts(project);
+  const resolved = resolveVideoProjectComponents(components);
   const prefix = project.records.production.slug.split("-").map((part: string) => `${part[0].toUpperCase()}${part.slice(1)}`).join("");
   const longform = project.records.production.longform;
-  const longIds = longform.scenes.map((scene: Scene) => scene.id);
-  const Long = () => <Video project={project} scenes={longform.scenes} ids={longIds} pads={longform.pads} audioSrc={longform.audioSrc} />;
-  const LongCover = () => <Cover project={project} cover={longform.cover} />;
+  const longIds = longform.scenes.map((scene: VideoProjectScene) => scene.id);
+  const VideoComponent = resolved.Video;
+  const HorizontalCoverComponent = resolved.HorizontalCover;
+  const VerticalCoverComponent = resolved.VerticalCover;
+  const Long = () => <VideoComponent project={project} scenes={longform.scenes} ids={longIds} pads={longform.pads} audioSrc={longform.audioSrc} components={components} />;
+  const LongCover = () => <HorizontalCoverComponent project={project} cover={longform.cover} />;
   return () => {
     useVideoProjectFonts(project);
     return <>
       <Composition id={`${prefix}Long`} component={Long} durationInFrames={totalFrames(project, longIds, longform.pads)} fps={project.contract.fps} width={project.contract.formats.longform.width} height={project.contract.formats.longform.height} />
       <Composition id={`${prefix}Cover`} component={LongCover} durationInFrames={1} fps={project.contract.fps} width={project.contract.formats.cover.width} height={project.contract.formats.cover.height} />
       {project.records.production.shorts.map((short: any, index: number) => {
-        const Short = () => <Video project={project} scenes={short.scenes} ids={short.harvest} pads={short.pads} audioSrc={short.audioSrc} vertical />;
-        const ShortCover = () => <Cover project={project} cover={short.cover} vertical />;
+        const Short = () => <VideoComponent project={project} scenes={short.scenes} ids={short.harvest} pads={short.pads} audioSrc={short.audioSrc} vertical components={components} />;
+        const ShortCover = () => <VerticalCoverComponent project={project} cover={short.cover} vertical />;
         return <React.Fragment key={short.id}>
           <Composition id={`${prefix}Short${index + 1}`} component={Short} durationInFrames={totalFrames(project, short.harvest, short.pads)} fps={project.contract.fps} width={project.contract.formats.short.width} height={project.contract.formats.short.height} />
           <Composition id={`${prefix}Short${index + 1}Cover`} component={ShortCover} durationInFrames={1} fps={project.contract.fps} width={project.contract.formats.short.width} height={project.contract.formats.short.height} />
@@ -283,14 +370,17 @@ export function createVideoProjectRoot(project: VideoProject) {
   };
 }
 
-export function createSingleVideoProjectRoot(project: VideoProject) {
+export function createSingleVideoProjectRoot(project: VideoProject, components: VideoProjectComponentOverrides = {}) {
   loadVideoProjectFonts(project);
+  const resolved = resolveVideoProjectComponents(components);
   const production = project.records.production;
   const vertical = production.outputFormat === "short";
   if (!vertical && production.outputFormat !== "horizontal") throw new Error(`TimDS video: unsupported single production format ${String(production.outputFormat)}`);
-  const ids = production.scenes.map((scene: Scene) => scene.id);
-  const VideoComponent = () => <Video project={project} scenes={production.scenes} ids={ids} pads={production.pads} audioSrc={production.audioSrc} vertical={vertical} />;
-  const CoverComponent = () => <Cover project={project} cover={production.cover} vertical={vertical} />;
+  const ids = production.scenes.map((scene: VideoProjectScene) => scene.id);
+  const ProjectVideoComponent = resolved.Video;
+  const ProjectCoverComponent = vertical ? resolved.VerticalCover : resolved.HorizontalCover;
+  const VideoComponent = () => <ProjectVideoComponent project={project} scenes={production.scenes} ids={ids} pads={production.pads} audioSrc={production.audioSrc} vertical={vertical} components={components} />;
+  const CoverComponent = () => <ProjectCoverComponent project={project} cover={production.cover} vertical={vertical} />;
   const format = vertical ? project.contract.formats.short : project.contract.formats.longform;
   const coverFormat = vertical ? project.contract.formats.short : project.contract.formats.cover;
   return () => {
@@ -316,9 +406,9 @@ export function loadVideoProjectFonts(project: VideoProject) {
   document.head.appendChild(style);
 }
 
-export function registerVideoProject(project: VideoProject) {
+export function registerVideoProject(project: VideoProject, components: VideoProjectComponentOverrides = {}) {
   loadVideoProjectFonts(project);
-  registerRoot(createVideoProjectRoot(project));
+  registerRoot(createVideoProjectRoot(project, components));
 }
 
-export { Cover, Intro, Outro, Video };
+export { Cover, GoldHeadline, Intro, Outro, SceneView, Video };

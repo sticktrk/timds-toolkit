@@ -37,6 +37,11 @@ tooling. Client brand, copy, source authorization, compliance, asset selection,
 production records, and output policy belong under that client's Design System
 and must never enter this package.
 
+TimDS owns the complete default Remotion component set and the typed partial
+override contract. Client Design Systems may implement visual component
+overrides against that contract; keep component discovery, rendering,
+composition registration, media preparation, and other engine behavior here.
+
 Never add client-specific content, credentials, private URLs, access tokens,
 media, or portal-internal implementation to this public repository or npm
 package.

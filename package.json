@@ -20,7 +20,8 @@
     "./video/remotion": "./video/remotion.tsx"
   },
   "scripts": {
-    "test": "node --test src/*.test.mjs video/*.test.mjs",
+    "test": "npm run typecheck && node --test src/*.test.mjs video/*.test.mjs && tsx --test video/*.test.tsx",
+    "typecheck": "tsc --noEmit",
     "pack:check": "npm pack --dry-run",
     "release": "./scripts/release.sh"
   },
@@ -49,6 +50,10 @@
     "remotion": "4.0.484",
     "tsx": "4.21.0",
     "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.18",
+    "typescript": "5.9.3"
   },
   "engines": {
     "node": ">=20"
