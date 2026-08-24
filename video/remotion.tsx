@@ -1,11 +1,9 @@
 import React, { useMemo } from "react";
+import { loadFont } from "@remotion/fonts";
 import { Audio } from "@remotion/media";
 import {
   AbsoluteFill,
-  cancelRender,
   Composition,
-  continueRender,
-  delayRender,
   Img,
   OffthreadVideo,
   Sequence,
@@ -244,16 +242,12 @@ export function createSingleVideoProjectRoot(project: VideoProject) {
 export function loadVideoProjectFonts(project: VideoProject) {
   if (project.schemaVersion !== 1) throw new Error(`TimDS video: unsupported project schema ${String(project.schemaVersion)}`);
   for (const font of project.contract.brand.fontFiles || []) {
-    const handle = delayRender(`Loading ${font.family} ${font.weight}`);
-    const face = new FontFace(font.family, `url(${staticFile(font.path)})`, {style: font.style, weight: font.weight});
-    face.load()
-      .then((loaded) => {
-        document.fonts.add(loaded);
-        continueRender(handle);
-      })
-      .catch((error) => {
-        cancelRender(error);
-      });
+    void loadFont({
+      family: font.family,
+      url: staticFile(font.path),
+      style: font.style,
+      weight: font.weight,
+    });
   }
 }
 
