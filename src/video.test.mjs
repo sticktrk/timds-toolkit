@@ -51,6 +51,7 @@ async function videoFixture(t, overrides = {}) {
     brand: {
       colors: { background: "#000", accent: "#fc0", text: "#fff" },
       fonts: { display: "serif", body: "serif", ui: "sans-serif" },
+      fontFiles: [{ family: "Example Serif", path: "public/example.woff2", style: "normal", weight: "700" }],
       logo: "public/logo.svg",
       series: "Answers",
       site: "example.com",
@@ -106,6 +107,7 @@ async function videoFixture(t, overrides = {}) {
   await writeJson(path.join(designSystemRoot, "video", "productions", "sample-topic", "production.json"), production);
   await fs.mkdir(path.join(designSystemRoot, "public"), { recursive: true });
   await fs.writeFile(path.join(designSystemRoot, "public", "logo.svg"), "<svg xmlns=\"http://www.w3.org/2000/svg\"/>");
+  await fs.writeFile(path.join(designSystemRoot, "public", "example.woff2"), Buffer.from([0x77, 0x4f, 0x46, 0x32]));
   await fs.writeFile(path.join(designSystemRoot, "public", "cover.jpg"), "cover");
   await fs.writeFile(path.join(designSystemRoot, "public", "footage.mp4"), "footage");
   return workspace;
@@ -209,6 +211,9 @@ test("validates and prepares a client-owned production with TimDS provenance", a
   const prepared = await prepareVideoWorkspace(workspace, "sample-topic");
   assert.equal(prepared.project.engine.name, "@dtconcepts/timds");
   assert.equal(prepared.project.records.production.slug, "sample-topic");
+  assert.equal(prepared.project.contract.brand.fontFiles[0].path, "example.woff2");
+  assert.equal(prepared.project.contract.brand.fontFiles[0].format, "woff2");
+  assert.equal(prepared.project.contract.brand.fontFiles[0].dataBase64, "d09GMg==");
   assert.equal(path.extname(prepared.entryPath), ".mjs");
   await fs.access(path.join(prepared.publicRoot, "media", "footage.mp4"));
   const entry = await fs.readFile(prepared.entryPath, "utf8");

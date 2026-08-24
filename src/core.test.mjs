@@ -35,7 +35,7 @@ const toolkitVersion = JSON.parse(
 
 async function temporaryDirectory(t) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "timds-cli-"));
-  t.after(() => fs.rm(directory, { force: true, recursive: true }));
+  t.after(() => fs.rm(directory, { force: true, recursive: true, maxRetries: 5, retryDelay: 50 }));
   return fs.realpath(directory);
 }
 
