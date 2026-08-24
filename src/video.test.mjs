@@ -3,8 +3,10 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import {
   checkVideoWorkspace,
+  initializeVideoComponents,
   normalizeVideoManifest,
   prepareVideoWorkspace,
   validateVideoContract,
@@ -124,6 +126,29 @@ test("normalizes the optional video manifest", () => {
   });
   assert.equal(normalizeVideoManifest({ components: "video/remotion.tsx" }).components, "video/remotion.tsx");
   assert.throws(() => normalizeVideoManifest({ components: "../outside.tsx" }), /must stay inside the Design System/);
+});
+
+test("copies the installed default components into client-owned source exactly once", async (t) => {
+  const workspace = await videoFixture(t);
+  const result = await initializeVideoComponents(workspace);
+  const generated = await fs.readFile(result.components, "utf8");
+  const manifest = JSON.parse(await fs.readFile(workspace.manifestPath, "utf8"));
+  const defaults = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "video", "remotion.tsx"), "utf8");
+  const start = defaults.indexOf("// TIMDS_DEFAULT_COMPONENTS_START");
+  const endMarker = "// TIMDS_DEFAULT_COMPONENTS_END";
+  const snapshot = defaults.slice(start, defaults.indexOf(endMarker) + endMarker.length);
+
+  assert.equal(result.relativePath, "video/remotion.tsx");
+  assert.equal(manifest.video.components, "video/remotion.tsx");
+  assert.match(generated, /This file is now owned by this Design System/u);
+  assert.match(generated, /tieOrphan = \(value: string\)/u);
+  assert.ok(generated.includes(snapshot));
+  assert.match(generated, /export default defaultVideoProjectComponents/u);
+  await assert.rejects(initializeVideoComponents(workspace), /already exist/u);
+
+  await fs.appendFile(result.components, "\n// client change\n", "utf8");
+  await initializeVideoComponents(workspace, { force: true });
+  assert.doesNotMatch(await fs.readFile(result.components, "utf8"), /client change/u);
 });
 
 test("keeps structure policy in the client video contract", () => {

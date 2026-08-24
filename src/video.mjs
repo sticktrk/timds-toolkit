@@ -10,6 +10,64 @@ const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "
 const require = createRequire(import.meta.url);
 const VIDEO_SCHEMA_VERSION = 1;
 const productionFiles = ["request.json", "script.json", "publishing.json", "captions.json", "production.json"];
+const DEFAULT_COMPONENTS_START = "// TIMDS_DEFAULT_COMPONENTS_START";
+const DEFAULT_COMPONENTS_END = "// TIMDS_DEFAULT_COMPONENTS_END";
+const DEFAULT_VIDEO_TEXT_SOURCE = String.raw`// A normal space keeps the font's intended advance width. The following word
+// joiner prevents a line break without relying on the font's NBSP glyph, which
+// can have a zero advance in subsetted webfonts.
+export const tieOrphan = (value: string) => value.replace(/\s+(\S+)\s*$/u, " \u2060$1");
+
+export function splitGoldHeadline(value: string, requestedPhrase?: string) {
+  const headline = tieOrphan(value);
+  const phrase = requestedPhrase || String(value).trim().split(/\s+/u).at(-1) || "";
+  const index = phrase
+    ? headline.toLocaleLowerCase().lastIndexOf(phrase.toLocaleLowerCase())
+    : -1;
+  if (index < 0) return {before: headline, highlighted: "", after: ""};
+  return {
+    before: headline.slice(0, index),
+    highlighted: headline.slice(index, index + phrase.length),
+    after: headline.slice(index + phrase.length),
+  };
+}
+
+const coverWords = (value: string) => String(value).trim().split(/\s+/u).filter(Boolean);
+
+export type CoverHeadlineFitOptions = {
+  width?: number;
+  height?: number;
+  maximum?: number;
+  step?: number;
+  lineHeight?: number;
+  emPerCharacter?: number;
+};
+
+export function fitCoverHeadline(value: string, options: CoverHeadlineFitOptions = {}) {
+  const width = Number(options.width || 896);
+  const height = Number(options.height || 353);
+  const maximum = Number(options.maximum || 120);
+  const step = Number(options.step || 4);
+  const lineHeight = Number(options.lineHeight || 1.01);
+  const emPerCharacter = Number(options.emPerCharacter || 0.44);
+  const words = coverWords(value);
+  const longestWord = words.reduce((longest, word) => Math.max(longest, word.length), 0);
+  for (let size = maximum; size > step; size -= step) {
+    const charactersPerLine = width / (size * emPerCharacter);
+    if (longestWord > charactersPerLine) continue;
+    let rows = 1;
+    let used = 0;
+    for (const word of words) {
+      if (used && used + 1 + word.length > charactersPerLine) {
+        rows += 1;
+        used = word.length;
+      } else {
+        used = used ? used + 1 + word.length : word.length;
+      }
+    }
+    if (rows * size * lineHeight <= height) return size;
+  }
+  return step;
+}`;
 
 const object = (value, label) => {
   if (!value || Array.isArray(value) || typeof value !== "object") throw new Error(`${label} must be a JSON object`);
@@ -348,6 +406,32 @@ async function copyTemplate(source, destination) {
   await fs.copyFile(source, destination);
 }
 
+async function defaultVideoComponentsTemplate() {
+  const remotionSource = await fs.readFile(path.join(packageRoot, "video", "remotion.tsx"), "utf8");
+  const start = remotionSource.indexOf(DEFAULT_COMPONENTS_START);
+  const end = remotionSource.indexOf(DEFAULT_COMPONENTS_END);
+  if (start < 0 || end < start) throw new Error("TimDS default video component snapshot markers are missing");
+  const componentSource = remotionSource.slice(start, end + DEFAULT_COMPONENTS_END.length);
+  return `// Generated once from the installed TimDS defaults. This file is now owned by this Design System.\n// TimDS upgrades do not overwrite it; use \`timds video components init --force\` only to reset it.\nimport React, {useMemo} from "react";\nimport {Audio} from "@remotion/media";\nimport {AbsoluteFill, Img, OffthreadVideo, Sequence, interpolate, staticFile, useCurrentFrame} from "remotion";\nimport type {\n  VideoProject,\n  VideoProjectAsset,\n  VideoProjectCaptionLine,\n  VideoProjectComponentOverrides,\n  VideoProjectCover,\n  VideoProjectCoverProps,\n  VideoProjectIntroProps,\n  VideoProjectOutroProps,\n  VideoProjectScene,\n  VideoProjectSceneProps,\n  VideoProjectVideoProps,\n} from "@dtconcepts/timds/video/remotion";\n\n${DEFAULT_VIDEO_TEXT_SOURCE}\n\n${componentSource}\n\nexport {BrandWatermark, CaptionPages, Cover, CoverVisual, GoldHeadline, HorizontalCover, Intro, Media, Outro, SceneView, VerticalCover, Video};\nexport default defaultVideoProjectComponents;\n`;
+}
+
+export async function initializeVideoComponents(workspace, { force = false } = {}) {
+  if (!workspace.manifest.video) throw new Error("timds.json does not enable the video contract; run timds video init");
+  const rawManifest = await readJson(workspace.manifestPath, "timds.json");
+  const rawVideo = rawManifest.video === true ? {} : object(rawManifest.video, "timds.json video");
+  const relativePath = safeRelativePath(rawVideo.components || "video/remotion.tsx", "timds.json video.components");
+  const destination = path.join(workspace.designSystemRoot, relativePath);
+  if (existsSync(destination) && !force) {
+    throw new Error(`Design System video components already exist at ${destination}; rerun with --force only to reset them to the installed TimDS defaults`);
+  }
+  await fs.mkdir(path.dirname(destination), { recursive: true });
+  await fs.writeFile(destination, await defaultVideoComponentsTemplate(), "utf8");
+  rawVideo.components = relativePath;
+  rawManifest.video = rawVideo;
+  await fs.writeFile(workspace.manifestPath, `${JSON.stringify(rawManifest, null, 2)}\n`, "utf8");
+  return { components: destination, relativePath };
+}
+
 export async function initializeVideoWorkspace(workspace, { force = false } = {}) {
   const manifestPath = workspace.manifestPath;
   const rawManifest = await readJson(manifestPath, "timds.json");
@@ -570,6 +654,6 @@ export async function voiceoverVideoWorkspace(workspace, selectedSlug, options =
   return { outputRoot, production: production.production.slug };
 }
 
-export const VIDEO_HELP = `TimDS video workflow\n\nUsage:\n  timds video init [--root PATH] [--force]\n  timds video doctor [--root PATH]\n  timds video check [SLUG] [--root PATH]\n  timds video prepare SLUG [--root PATH]\n  timds video voiceover SLUG [--root PATH] [--force]\n  timds video studio SLUG [--root PATH]\n  timds video render SLUG [--root PATH] [--date YYYY-MM-DD]\n\nThe client Design System owns video/contract.json, video/assets.json, brand files, and production records. TimDS owns validation, media staging, voiceover orchestration, Remotion compositions, rendering, and review packaging.`;
+export const VIDEO_HELP = `TimDS video workflow\n\nUsage:\n  timds video init [--root PATH] [--force]\n  timds video components init [--root PATH] [--force]\n  timds video doctor [--root PATH]\n  timds video check [SLUG] [--root PATH]\n  timds video prepare SLUG [--root PATH]\n  timds video voiceover SLUG [--root PATH] [--force]\n  timds video studio SLUG [--root PATH]\n  timds video render SLUG [--root PATH] [--date YYYY-MM-DD]\n\nThe client Design System owns video/contract.json, video/assets.json, brand files, production records, and any generated component snapshot. TimDS owns validation, media staging, voiceover orchestration, default components, rendering, and review packaging. Generating components copies the installed defaults once; upgrades never overwrite that client-owned file.`;
 
 export { VIDEO_SCHEMA_VERSION };

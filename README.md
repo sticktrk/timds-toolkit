@@ -204,10 +204,23 @@ vocabulary, while consumers call `@dtconcepts/timds/video/producer` and render
 with `@dtconcepts/timds/video/remotion`.
 
 The Remotion export includes a complete default component set. A client Design
-System may also export a partial `VideoProjectComponentOverrides` object and
-declare that module as `video.components` in `timds.json`; TimDS passes it to
-the same `createVideoProjectRoot()`, `createSingleVideoProjectRoot()`, or
-`registerVideoProject()` APIs available to integrated renderers. `Video`,
+System can fork those exact installed defaults into one complete, editable
+source module:
+
+```bash
+npm run timds -- video components init
+```
+
+The command writes `video/remotion.tsx` and declares it as `video.components`
+in `timds.json`. It is a one-time snapshot: normal TimDS upgrades never modify
+the file, so the client begins source-equivalent to the selected defaults and
+then evolves independently. Running the command again is refused; `--force`
+is an explicit destructive reset to the currently installed defaults.
+
+A Design System may instead hand-author a partial
+`VideoProjectComponentOverrides` object at the declared path. TimDS passes the
+module to the same `createVideoProjectRoot()`, `createSingleVideoProjectRoot()`,
+or `registerVideoProject()` APIs available to integrated renderers. `Video`,
 `Scene`, `Intro`, `Outro`, `Cover`,
 `HorizontalCover`, and `VerticalCover` are independently replaceable; omitted
 components continue to use TimDS defaults, and format-specific covers take
@@ -225,7 +238,8 @@ subsetted client fonts.
 Each production is a directory with five reviewable phase records:
 `request.json`, `script.json`, `publishing.json`, `captions.json`, and
 `production.json`. There is no per-topic TSX entry and no client-owned copy of
-the engine. The generic workflow is:
+the engine; an optional client-owned component snapshot contains only visual
+compositions. The generic workflow is:
 
 ```bash
 npm run timds -- video voiceover TOPIC

@@ -168,6 +168,7 @@ const useVideoProjectFonts = (project: VideoProject) => {
   }, [fonts, handle, project]);
 };
 
+// TIMDS_DEFAULT_COMPONENTS_START
 const frames = (milliseconds: number, fps: number) => Math.max(1, Math.round(milliseconds / 1000 * fps));
 const lineById = (project: VideoProject, id: string) => {
   const line = project.records.captions.lines.find((candidate) => candidate.id === id);
@@ -369,6 +370,7 @@ export const defaultVideoProjectComponents = {
   HorizontalCover,
   VerticalCover,
 } satisfies Required<VideoProjectComponentOverrides>;
+// TIMDS_DEFAULT_COMPONENTS_END
 
 export function resolveVideoProjectComponents(components: VideoProjectComponentOverrides = {}) {
   return {

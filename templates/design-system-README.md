@@ -103,11 +103,20 @@ __TIMDS_CLI__ video studio TOPIC
 __TIMDS_CLI__ video render TOPIC
 ```
 
-TimDS supplies the default Remotion component set. If this client's visual
-language needs different compositions, `video.components` may point to one
-reviewed partial override module in the Design System. Do not create a second
-package, copied Remotion runtime, rendering script, or per-topic TSX file.
-Generated working files and review packages stay under ignored `video-local/`.
+TimDS supplies the default Remotion component set. To begin with an identical
+client-owned copy that can evolve independently, generate one snapshot:
+
+```bash
+__TIMDS_CLI__ video components init
+```
+
+The command writes and declares one complete visual component module in the
+Design System. TimDS upgrades never overwrite it. The command refuses to run
+again unless `--force` is explicitly used to discard client changes and reset
+to the currently installed defaults. A client may instead declare one reviewed
+partial override module at `video.components`. Do not create a second package,
+copied Remotion engine, rendering script, or per-topic TSX file. Generated
+working files and review packages stay under ignored `video-local/`.
 
 ## Before review
 

@@ -23,6 +23,12 @@ If video is not enabled, report that `npm run timds -- video init` is required.
 Do not initialize or migrate the repository unless the user asked for that
 structural change.
 
+When the user asks the Design System to take ownership of the current TimDS
+visual defaults, run `npm run timds -- video components init`. Treat the
+generated module as authored client source from that point forward. Never
+regenerate it during a normal toolkit upgrade, and use `--force` only when the
+user explicitly requests a reset that discards client component changes.
+
 ## Author a production
 
 Create one folder under the configured productions directory. Treat its five

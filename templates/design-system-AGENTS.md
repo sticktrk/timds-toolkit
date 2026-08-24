@@ -43,9 +43,12 @@ When `timds.json` declares `video`, this Design System also owns the client's
 video contract, logical video asset catalog, and five JSON records for each
 production. Read those declared files and use the managed
 `timds-create-video` skill. TimDS supplies the complete default Remotion
-component set. A Design System may declare one reviewed partial component
-override module at `video.components`; it may replace client-facing visual
-compositions but not engine or rendering behavior. Do not add a Remotion
+component set. `npm run timds -- video components init` may copy those exact
+installed defaults into one reviewed module at `video.components`. The copy is
+authored client source and may diverge; toolkit upgrades must never overwrite
+it. A Design System may also declare a hand-authored partial override module.
+Either form may replace client-facing visual compositions but not engine or
+rendering behavior. Do not add a Remotion
 engine, rendering scripts, client-specific agent skill, producer/compiler
 implementation, or per-topic TSX entry here; those are provided by the
 selected `@dtconcepts/timds` release. If the client enables programmatic
@@ -56,6 +59,10 @@ Keep generated audio, prepared media, generated entries, renders, thumbnails,
 and review packages under ignored `video-local/`. Validate committed records
 with `npm run timds -- video check` and use `video studio` or `video render`
 only for an explicitly selected production.
+
+Regenerating components with `video components init --force` discards client
+changes and requires explicit authorization. A normal `timds upgrade` does not
+touch the declared component module.
 
 ## Git and publication
 

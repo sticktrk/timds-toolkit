@@ -3,7 +3,9 @@
 This repository owns the public `@dtconcepts/timds` npm package: its CLI,
 repository contracts, templates, artifact publisher, Design System editing
 skills, and integrated video runtime. Do not split video into another package
-or copy runtime code into client repositories.
+or copy rendering, staging, composition registration, or producer runtime code
+into client repositories. A generated client-owned snapshot of the visual
+Remotion components is source, not copied runtime.
 
 Before committing changes, run:
 
@@ -37,10 +39,13 @@ tooling. Client brand, copy, source authorization, compliance, asset selection,
 production records, and output policy belong under that client's Design System
 and must never enter this package.
 
-TimDS owns the complete default Remotion component set and the typed partial
-override contract. Client Design Systems may implement visual component
-overrides against that contract; keep component discovery, rendering,
-composition registration, media preparation, and other engine behavior here.
+TimDS owns the complete default Remotion component set, the typed partial
+override contract, and the one-time component snapshot generator. Client
+Design Systems may generate a complete editable snapshot or implement partial
+visual overrides against that contract. Never overwrite a generated snapshot
+during `upgrade`; only `video components init --force` intentionally resets it.
+Keep component discovery, rendering, composition registration, media
+preparation, and other engine behavior here.
 
 Never add client-specific content, credentials, private URLs, access tokens,
 media, or portal-internal implementation to this public repository or npm

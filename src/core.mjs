@@ -24,6 +24,7 @@ import { extractArtifact, normalizeMachineConfig } from "./extract.mjs";
 import {
   VIDEO_HELP,
   checkVideoWorkspace,
+  initializeVideoComponents,
   initializeVideoWorkspace,
   normalizeVideoManifest,
   prepareVideoWorkspace,
@@ -981,7 +982,7 @@ export async function runCli(argv) {
   }
   const root = options.root || process.cwd();
   if (command === "video") {
-    const [videoCommand = "help", videoSlug = ""] = positional;
+    const [videoCommand = "help", videoArgument = "", videoExtra = ""] = positional;
     if (options.help || ["help", "--help", "-h"].includes(videoCommand)) {
       output(VIDEO_HELP);
       return;
@@ -994,26 +995,32 @@ export async function runCli(argv) {
       output(`Agent skill: ${result.skillDestination}`);
       return result;
     }
+    if (videoCommand === "components") {
+      if (videoArgument !== "init" || videoExtra) throw new Error("Usage: timds video components init [--root PATH] [--force]");
+      const result = await initializeVideoComponents(workspace, { force: options.force });
+      output(`TimDS default video components copied for client ownership: ${result.components}`);
+      return result;
+    }
     if (videoCommand === "doctor" || videoCommand === "check") {
-      const result = await checkVideoWorkspace(workspace, { slug: videoSlug || undefined });
+      const result = await checkVideoWorkspace(workspace, { slug: videoArgument || undefined });
       output(`TimDS video check passed: ${result.productionCount} production${result.productionCount === 1 ? "" : "s"}.`);
       for (const warning of result.warnings) output(`Warning: ${warning}`);
       return result;
     }
-    if (!videoSlug) throw new Error(`video ${videoCommand} requires a production slug`);
+    if (!videoArgument) throw new Error(`video ${videoCommand} requires a production slug`);
     if (videoCommand === "prepare") {
-      const result = await prepareVideoWorkspace(workspace, videoSlug);
-      output(`Prepared TimDS video ${videoSlug}: ${result.projectPath}`);
+      const result = await prepareVideoWorkspace(workspace, videoArgument);
+      output(`Prepared TimDS video ${videoArgument}: ${result.projectPath}`);
       return result;
     }
     if (videoCommand === "voiceover") {
-      const result = await voiceoverVideoWorkspace(workspace, videoSlug, options);
+      const result = await voiceoverVideoWorkspace(workspace, videoArgument, options);
       output(`Voiceover ready: ${result.outputRoot}`);
       return result;
     }
-    if (videoCommand === "studio") return runVideoStudio(workspace, videoSlug);
+    if (videoCommand === "studio") return runVideoStudio(workspace, videoArgument);
     if (videoCommand === "render") {
-      const result = await renderVideoWorkspace(workspace, videoSlug, options);
+      const result = await renderVideoWorkspace(workspace, videoArgument, options);
       output(`Review package: ${result.outputRoot}`);
       return result;
     }
