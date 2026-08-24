@@ -1,9 +1,11 @@
-import React, { useMemo } from "react";
-import { loadFont } from "@remotion/fonts";
+import React, { useEffect, useMemo, useState } from "react";
 import { Audio } from "@remotion/media";
 import {
   AbsoluteFill,
+  cancelRender,
   Composition,
+  continueRender,
+  delayRender,
   Img,
   OffthreadVideo,
   Sequence,
@@ -57,6 +59,54 @@ type VideoFont = {
   weight?: string;
   dataBase64?: string;
   format?: "woff2" | "woff" | "opentype" | "truetype";
+};
+
+const videoFonts = (project: VideoProject) => (project.contract.brand.fontFiles || []) as VideoFont[];
+const videoFontDeclaration = (font: VideoFont) =>
+  `${font.style || "normal"} ${font.weight || "400"} 16px ${JSON.stringify(font.family)}`;
+
+const videoFontStyles = (project: VideoProject) => videoFonts(project).map((font) => {
+  const url = font.dataBase64
+    ? `data:font/${font.format || "woff2"};base64,${font.dataBase64}`
+    : staticFile(font.path);
+  const format = font.format ? ` format(${JSON.stringify(font.format)})` : "";
+  return `@font-face {
+  font-family: ${JSON.stringify(font.family)};
+  src: url(${JSON.stringify(url)})${format};
+  font-style: ${font.style || "normal"};
+  font-weight: ${font.weight || "400"};
+  font-display: block;
+}`;
+}).join("\n");
+
+const useVideoProjectFonts = (project: VideoProject) => {
+  const fonts = videoFonts(project);
+  // Remotion renderer tabs must own this handle from a mounted component. A
+  // module-level font promise can stay pending even when Chromium has the font.
+  const [handle] = useState(() => fonts.length > 0
+    ? delayRender("Loading TimDS project fonts after mount")
+    : null);
+
+  useEffect(() => {
+    if (handle === null) return;
+    loadVideoProjectFonts(project);
+    const declarations = fonts.map(videoFontDeclaration);
+    let active = true;
+    Promise.all(declarations.map((declaration) => document.fonts.load(declaration)))
+      .then(() => {
+        if (!declarations.every((declaration) => document.fonts.check(declaration))) {
+          throw new Error("TimDS video: project font verification failed");
+        }
+        if (active) continueRender(handle);
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        cancelRender(error instanceof Error ? error : new Error(String(error)));
+      });
+    return () => {
+      active = false;
+    };
+  }, [fonts, handle, project]);
 };
 
 const frames = (milliseconds: number, fps: number) => Math.max(1, Math.round(milliseconds / 1000 * fps));
@@ -214,26 +264,31 @@ const Cover: React.FC<{project: VideoProject; cover: any; vertical?: boolean}> =
 };
 
 export function createVideoProjectRoot(project: VideoProject) {
+  loadVideoProjectFonts(project);
   const prefix = project.records.production.slug.split("-").map((part: string) => `${part[0].toUpperCase()}${part.slice(1)}`).join("");
   const longform = project.records.production.longform;
   const longIds = longform.scenes.map((scene: Scene) => scene.id);
   const Long = () => <Video project={project} scenes={longform.scenes} ids={longIds} pads={longform.pads} audioSrc={longform.audioSrc} />;
   const LongCover = () => <Cover project={project} cover={longform.cover} />;
-  return () => <>
-    <Composition id={`${prefix}Long`} component={Long} durationInFrames={totalFrames(project, longIds, longform.pads)} fps={project.contract.fps} width={project.contract.formats.longform.width} height={project.contract.formats.longform.height} />
-    <Composition id={`${prefix}Cover`} component={LongCover} durationInFrames={1} fps={project.contract.fps} width={project.contract.formats.cover.width} height={project.contract.formats.cover.height} />
-    {project.records.production.shorts.map((short: any, index: number) => {
-      const Short = () => <Video project={project} scenes={short.scenes} ids={short.harvest} pads={short.pads} audioSrc={short.audioSrc} vertical />;
-      const ShortCover = () => <Cover project={project} cover={short.cover} vertical />;
-      return <React.Fragment key={short.id}>
-        <Composition id={`${prefix}Short${index + 1}`} component={Short} durationInFrames={totalFrames(project, short.harvest, short.pads)} fps={project.contract.fps} width={project.contract.formats.short.width} height={project.contract.formats.short.height} />
-        <Composition id={`${prefix}Short${index + 1}Cover`} component={ShortCover} durationInFrames={1} fps={project.contract.fps} width={project.contract.formats.short.width} height={project.contract.formats.short.height} />
-      </React.Fragment>;
-    })}
-  </>;
+  return () => {
+    useVideoProjectFonts(project);
+    return <>
+      <Composition id={`${prefix}Long`} component={Long} durationInFrames={totalFrames(project, longIds, longform.pads)} fps={project.contract.fps} width={project.contract.formats.longform.width} height={project.contract.formats.longform.height} />
+      <Composition id={`${prefix}Cover`} component={LongCover} durationInFrames={1} fps={project.contract.fps} width={project.contract.formats.cover.width} height={project.contract.formats.cover.height} />
+      {project.records.production.shorts.map((short: any, index: number) => {
+        const Short = () => <Video project={project} scenes={short.scenes} ids={short.harvest} pads={short.pads} audioSrc={short.audioSrc} vertical />;
+        const ShortCover = () => <Cover project={project} cover={short.cover} vertical />;
+        return <React.Fragment key={short.id}>
+          <Composition id={`${prefix}Short${index + 1}`} component={Short} durationInFrames={totalFrames(project, short.harvest, short.pads)} fps={project.contract.fps} width={project.contract.formats.short.width} height={project.contract.formats.short.height} />
+          <Composition id={`${prefix}Short${index + 1}Cover`} component={ShortCover} durationInFrames={1} fps={project.contract.fps} width={project.contract.formats.short.width} height={project.contract.formats.short.height} />
+        </React.Fragment>;
+      })}
+    </>;
+  };
 }
 
 export function createSingleVideoProjectRoot(project: VideoProject) {
+  loadVideoProjectFonts(project);
   const production = project.records.production;
   const vertical = production.outputFormat === "short";
   if (!vertical && production.outputFormat !== "horizontal") throw new Error(`TimDS video: unsupported single production format ${String(production.outputFormat)}`);
@@ -242,28 +297,27 @@ export function createSingleVideoProjectRoot(project: VideoProject) {
   const CoverComponent = () => <Cover project={project} cover={production.cover} vertical={vertical} />;
   const format = vertical ? project.contract.formats.short : project.contract.formats.longform;
   const coverFormat = vertical ? project.contract.formats.short : project.contract.formats.cover;
-  return () => <>
-    <Composition id="TimDSVideo" component={VideoComponent} durationInFrames={totalFrames(project, ids, production.pads)} fps={project.contract.fps} width={format.width} height={format.height} />
-    <Composition id="TimDSCover" component={CoverComponent} durationInFrames={1} fps={project.contract.fps} width={coverFormat.width} height={coverFormat.height} />
-  </>;
+  return () => {
+    useVideoProjectFonts(project);
+    return <>
+      <Composition id="TimDSVideo" component={VideoComponent} durationInFrames={totalFrames(project, ids, production.pads)} fps={project.contract.fps} width={format.width} height={format.height} />
+      <Composition id="TimDSCover" component={CoverComponent} durationInFrames={1} fps={project.contract.fps} width={coverFormat.width} height={coverFormat.height} />
+    </>;
+  };
 }
 
 export function loadVideoProjectFonts(project: VideoProject) {
   if (project.schemaVersion !== 1) throw new Error(`TimDS video: unsupported project schema ${String(project.schemaVersion)}`);
-  for (const font of (project.contract.brand.fontFiles || []) as VideoFont[]) {
-    const url = font.dataBase64
-      ? URL.createObjectURL(new Blob([
-        Uint8Array.from(atob(font.dataBase64), (character) => character.charCodeAt(0)).buffer,
-      ]))
-      : staticFile(font.path);
-    void loadFont({
-      family: font.family,
-      url,
-      format: font.format,
-      style: font.style,
-      weight: font.weight,
-    });
-  }
+  if (typeof document === "undefined") return;
+  // Style injection is synchronous; the project root waits for document.fonts
+  // after it mounts so every renderer tab clears its own delayRender handle.
+  const css = videoFontStyles(project);
+  if (!css || Array.from(document.querySelectorAll("style[data-timds-video-fonts]"))
+    .some((element) => element.textContent === css)) return;
+  const style = document.createElement("style");
+  style.dataset.timdsVideoFonts = "true";
+  style.textContent = css;
+  document.head.appendChild(style);
 }
 
 export function registerVideoProject(project: VideoProject) {
