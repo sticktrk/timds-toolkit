@@ -1,7 +1,9 @@
 # TimDS Toolkit
 
 `@dtconcepts/timds` is the public, versioned CLI, repository contract, artifact
-publisher, and AI editing skill for client-owned TimDS Design Systems.
+publisher, AI editing skills, and contract-driven video engine for client-owned
+TimDS Design Systems. Video is part of this package; there is no companion
+runtime package for clients to install or copy.
 
 Client repositories select the bounded `0.1.x` package line in
 `devDependencies`. The lockfile records the exact resolved release. The CLI runs
@@ -180,6 +182,46 @@ npm run timds -- assets pull founder-interview
 Never commit tokens, storage credentials, object keys, expiring signed URLs,
 `.timds/local-media.json`, or anything except the README under `media-local/`.
 
+## Contract-driven video
+
+A client can opt its Design System into the TimDS video runtime:
+
+```bash
+npm run timds -- video init
+npm run timds -- video doctor
+```
+
+The opt-in creates `video/contract.json`, `video/assets.json`, and
+`video/productions/`, and declares their paths in `timds.json`. The client
+Design System owns every brand, content, compliance, media-selection, and
+publishing decision in those records. `@dtconcepts/timds` owns the shared
+schemas, validation, voiceover orchestration, natural-speed footage runtime,
+Remotion compositions, programmatic producer/compiler, render commands,
+packaging, provenance, and managed `timds-create-video` skill. A client that
+serves an automated Video Lab can add a `producer` block to its video contract;
+that block owns role labels, structure, CTA templates, and asset-key
+vocabulary, while consumers call `@dtconcepts/timds/video/producer` and render
+with `@dtconcepts/timds/video/remotion`.
+
+Each production is a directory with five reviewable phase records:
+`request.json`, `script.json`, `publishing.json`, `captions.json`, and
+`production.json`. There is no per-topic TSX entry and no client-owned copy of
+the engine. The generic workflow is:
+
+```bash
+npm run timds -- video voiceover TOPIC
+npm run timds -- video check TOPIC
+npm run timds -- video prepare TOPIC
+npm run timds -- video studio TOPIC
+npm run timds -- video render TOPIC
+```
+
+Prepared media, generated audio, Remotion entry files, and review packages live
+under ignored `video-local/`. Registered source media remains governed by the
+normal TimDS media catalog. The committed production records refer only to
+client-declared logical asset keys; render-time media is always played at its
+natural speed, and a scene fails when its approved footage chain is too short.
+
 ## Upgrade a client repository
 
 An operator selects the approved release line. Keep the manifest on `0.1.x`,
@@ -193,8 +235,9 @@ npm run timds -- doctor
 npm run timds -- check
 ```
 
-`upgrade` removes the legacy `.timds/cli` tree when present. It refuses locally
-modified managed files unless `--force` is explicitly supplied and never
+`upgrade` removes the legacy `.timds/cli` tree when present and synchronizes
+both managed skills. It refuses locally modified managed files unless `--force`
+is explicitly supplied and never
 rewrites `timds.json`, tokens, media records, authored source, framework config,
 documentation, or artifacts.
 

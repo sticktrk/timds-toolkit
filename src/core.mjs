@@ -21,6 +21,16 @@ import {
 } from "./auth.mjs";
 import { publishExtractedIndex } from "./artifact.mjs";
 import { extractArtifact, normalizeMachineConfig } from "./extract.mjs";
+import {
+  VIDEO_HELP,
+  checkVideoWorkspace,
+  initializeVideoWorkspace,
+  normalizeVideoManifest,
+  prepareVideoWorkspace,
+  renderVideoWorkspace,
+  runVideoStudio,
+  voiceoverVideoWorkspace,
+} from "./video.mjs";
 
 const MAX_ARTIFACT_FILE_BYTES = 12_000_000;
 const MAX_ARTIFACT_FILES = 2_000;
@@ -246,6 +256,7 @@ export function validateManifest(input) {
     schemaVersion,
     systemId,
     version,
+    video: normalizeVideoManifest(manifest.video),
     workspace: commands,
   };
 }
@@ -425,8 +436,9 @@ export async function checkWorkspace(repoRootInput, options = {}) {
   // before validation counts and links the files.
   const machine = await extractWorkspace(workspace);
   const artifact = await validateArtifact(workspace.designSystemRoot, workspace.manifest);
+  const video = workspace.manifest.video ? await checkVideoWorkspace(workspace) : null;
   if (options.requireCleanDist) await verifyCleanDist(workspace);
-  return { ...workspace, artifact, machine };
+  return { ...workspace, artifact, machine, video };
 }
 
 async function resolvePreviewFile(artifactRoot, entryPath, requestPath) {
@@ -553,6 +565,7 @@ function managedToolkitPaths(repoRoot, designSystemRoot) {
     installationPath: path.join(designSystemRoot, ".timds", "installation.json"),
     legacyVendoredCliRoot: path.join(designSystemRoot, ".timds", "cli"),
     skillDestination: path.join(repoRoot, ".agents", "skills", "timds-edit-design-system"),
+    videoSkillDestination: path.join(repoRoot, ".agents", "skills", "timds-create-video"),
   };
 }
 
@@ -582,9 +595,15 @@ async function installManagedToolkit({ designSystemRoot, releaseAutomation, repo
   const previousInstallation = await readInstallationMetadata(designSystemRoot);
   if (replace) await fs.rm(paths.legacyVendoredCliRoot, { force: true, recursive: true });
   if (replace) await fs.rm(paths.skillDestination, { force: true, recursive: true });
+  if (replace) await fs.rm(paths.videoSkillDestination, { force: true, recursive: true });
   await copyDirectory(
     path.join(packageRoot, "skills", "timds-edit-design-system"),
     paths.skillDestination,
+    { overwrite: replace },
+  );
+  await copyDirectory(
+    path.join(packageRoot, "skills", "timds-create-video"),
+    paths.videoSkillDestination,
     { overwrite: replace },
   );
   await fs.mkdir(path.dirname(paths.installationPath), { recursive: true });
@@ -797,7 +816,7 @@ export async function upgradeRepository(repoRootInput, { autoRelease = false, fo
   }
   const paths = managedToolkitPaths(workspace.repoRoot, workspace.designSystemRoot);
   if (!force) {
-    const pathspecs = [paths.legacyVendoredCliRoot, paths.installationPath, paths.skillDestination]
+    const pathspecs = [paths.legacyVendoredCliRoot, paths.installationPath, paths.skillDestination, paths.videoSkillDestination]
       .map((filePath) => path.relative(workspace.repoRoot, filePath).split(path.sep).join("/"));
     const status = await git(["status", "--porcelain", "--untracked-files=all", "--", ...pathspecs], workspace.repoRoot);
     if (status.stdout.trim()) {
@@ -865,6 +884,7 @@ function allowedSubmitPath(filePath, layout) {
   return filePath === "design-system"
     || filePath.startsWith("design-system/")
     || filePath.startsWith(".agents/skills/timds-edit-design-system/")
+    || filePath.startsWith(".agents/skills/timds-create-video/")
     || filePath === ".github/workflows/timds-design-system.yml";
 }
 
@@ -921,7 +941,7 @@ export async function submitWorkspace(repoRootInput, message, options = {}) {
   if (!branch || branch === baseBranch) commands.push(["git", "switch", "-c", plannedBranch]);
   commands.push(checked.layout === "standalone"
     ? ["git", "add", "--all"]
-    : ["git", "add", "--", "design-system", ".agents/skills/timds-edit-design-system", ".github/workflows/timds-design-system.yml"]);
+    : ["git", "add", "--", "design-system", ".agents/skills/timds-edit-design-system", ".agents/skills/timds-create-video", ".github/workflows/timds-design-system.yml"]);
   commands.push(["git", "commit", "-m", message]);
   if (!options.noPush) commands.push(["git", "push", "--set-upstream", "origin", plannedBranch]);
   if (!options.noPr && !options.noPush) {
@@ -949,7 +969,7 @@ function machineSummary({ counts }) {
 }
 
 function helpText() {
-  return `TimDS local design-system workflow\n\nUsage:\n  timds init [--root PATH] [--standalone] [--consumer-repository OWNER/REPO] [--consumer-branch BRANCH] [--consumer-path PATH] [--force]\n  timds upgrade [--root PATH] [--auto-release] [--force]\n  timds auth login [--token TOKEN] [--portal-url URL]\n  timds auth status [--portal-url URL]\n  timds auth logout [--portal-url URL]\n  timds doctor [--root PATH]\n  timds dev [--root PATH]\n  timds check [--root PATH] [--skip-build] [--require-clean-dist]\n  timds extract [--root PATH] [--skip-build] [--publish]\n  timds preview [--root PATH] [--port 4400] [--no-build]\n  timds diff [--root PATH] [--base origin/main]\n  timds assets list [--root PATH]\n  timds assets add FILE [--key LOGICAL_KEY] [--title TEXT] [--tags a,b]\n  timds assets backfill-metadata [--root PATH] [--force]\n  timds assets publish [--root PATH]\n  timds assets pull KEY [--output PATH] [--force]\n  timds submit --message "Change summary" [--dry-run] [--no-push] [--no-pr]\n\nCheck and extract derive index.json, llms.txt, and per-page Markdown from the built artifact so agents and pipelines can read the system without scraping HTML. Extract --publish uploads the index, llms.txt, the per-page Markdown mirrors, a .timds-artifact.json provenance stamp, and the artifact files the index references to the system's stable CDN prefix through the portal, so pipelines and agents consume the system from one stable URL. Large public media is copied into ignored media-local/ for authoring. assets add measures timed-media duration and dimensions before upload; backfill-metadata repairs older catalogs from their stable public URLs. assets publish and submit upload changed media and commit only stable CDN records. Submit creates a review branch and draft pull request.`;
+  return `TimDS local design-system workflow\n\nUsage:\n  timds init [--root PATH] [--standalone] [--consumer-repository OWNER/REPO] [--consumer-branch BRANCH] [--consumer-path PATH] [--force]\n  timds upgrade [--root PATH] [--auto-release] [--force]\n  timds auth login [--token TOKEN] [--portal-url URL]\n  timds auth status [--portal-url URL]\n  timds auth logout [--portal-url URL]\n  timds doctor [--root PATH]\n  timds dev [--root PATH]\n  timds check [--root PATH] [--skip-build] [--require-clean-dist]\n  timds extract [--root PATH] [--skip-build] [--publish]\n  timds preview [--root PATH] [--port 4400] [--no-build]\n  timds diff [--root PATH] [--base origin/main]\n  timds assets list [--root PATH]\n  timds assets add FILE [--key LOGICAL_KEY] [--title TEXT] [--tags a,b]\n  timds assets backfill-metadata [--root PATH] [--force]\n  timds assets publish [--root PATH]\n  timds assets pull KEY [--output PATH] [--force]\n  timds video --help\n  timds submit --message "Change summary" [--dry-run] [--no-push] [--no-pr]\n\nCheck and extract derive index.json, llms.txt, and per-page Markdown from the built artifact so agents and pipelines can read the system without scraping HTML. Extract --publish uploads the index, llms.txt, the per-page Markdown mirrors, a .timds-artifact.json provenance stamp, and the artifact files the index references to the system's stable CDN prefix through the portal, so pipelines and agents consume the system from one stable URL. Large public media is copied into ignored media-local/ for authoring. assets add measures timed-media duration and dimensions before upload; backfill-metadata repairs older catalogs from their stable public URLs without re-uploading them. Video-enabled systems keep client rules and production data in the Design System while TimDS owns validation, voiceover orchestration, Remotion rendering, and packaging. Submit creates a review branch and draft pull request.`;
 }
 
 export async function runCli(argv) {
@@ -960,6 +980,45 @@ export async function runCli(argv) {
     return;
   }
   const root = options.root || process.cwd();
+  if (command === "video") {
+    const [videoCommand = "help", videoSlug = ""] = positional;
+    if (options.help || ["help", "--help", "-h"].includes(videoCommand)) {
+      output(VIDEO_HELP);
+      return;
+    }
+    const workspace = await loadWorkspace(root);
+    if (videoCommand === "init") {
+      const result = await initializeVideoWorkspace(workspace, { force: options.force });
+      output(`TimDS video contract initialized: ${result.contract}`);
+      output(`Video asset catalog: ${result.assets}`);
+      output(`Agent skill: ${result.skillDestination}`);
+      return result;
+    }
+    if (videoCommand === "doctor" || videoCommand === "check") {
+      const result = await checkVideoWorkspace(workspace, { slug: videoSlug || undefined });
+      output(`TimDS video check passed: ${result.productionCount} production${result.productionCount === 1 ? "" : "s"}.`);
+      for (const warning of result.warnings) output(`Warning: ${warning}`);
+      return result;
+    }
+    if (!videoSlug) throw new Error(`video ${videoCommand} requires a production slug`);
+    if (videoCommand === "prepare") {
+      const result = await prepareVideoWorkspace(workspace, videoSlug);
+      output(`Prepared TimDS video ${videoSlug}: ${result.projectPath}`);
+      return result;
+    }
+    if (videoCommand === "voiceover") {
+      const result = await voiceoverVideoWorkspace(workspace, videoSlug, options);
+      output(`Voiceover ready: ${result.outputRoot}`);
+      return result;
+    }
+    if (videoCommand === "studio") return runVideoStudio(workspace, videoSlug);
+    if (videoCommand === "render") {
+      const result = await renderVideoWorkspace(workspace, videoSlug, options);
+      output(`Review package: ${result.outputRoot}`);
+      return result;
+    }
+    throw new Error(`Unknown video command ${videoCommand}`);
+  }
   if (command === "auth") {
     const [authCommand = "status"] = positional;
     const portalUrl = options.portalUrl || process.env.TIMDS_PORTAL_URL || "https://timds.com";
@@ -1036,6 +1095,7 @@ export async function runCli(argv) {
     output(`Version: ${workspace.manifest.version}`);
     output(`Toolkit: ${await readInstalledToolkitVersion(workspace.designSystemRoot)}`);
     output(`Media assets: ${workspace.mediaCatalog.assets.length}`);
+    output(`Video: ${workspace.manifest.video ? "enabled" : "disabled"}`);
     if (workspace.manifest.consumer) {
       output(`Consumer: ${workspace.manifest.consumer.repository}@${workspace.manifest.consumer.branch}:${workspace.manifest.consumer.path}`);
     }
@@ -1050,6 +1110,7 @@ export async function runCli(argv) {
     });
     output(`TimDS check passed: ${result.artifact.fileCount} files, ${result.artifact.totalBytes} bytes, entry ${result.artifact.entryPath}`);
     if (result.machine?.enabled) output(machineSummary(result.machine));
+    if (result.video) output(`Video contract: ${result.video.productionCount} production${result.video.productionCount === 1 ? "" : "s"}`);
     return result;
   }
   if (command === "extract") {

@@ -14,7 +14,10 @@
     "./core": "./src/core.mjs",
     "./extract": "./src/extract.mjs",
     "./html": "./src/html.mjs",
-    "./media": "./src/media.mjs"
+    "./media": "./src/media.mjs",
+    "./video": "./src/video.mjs",
+    "./video/producer": "./src/video-producer.mjs",
+    "./video/remotion": "./video/remotion.tsx"
   },
   "scripts": {
     "test": "node --test src/*.test.mjs",
@@ -31,8 +34,22 @@
     "src/extract.mjs",
     "src/html.mjs",
     "src/media.mjs",
+    "src/video-producer.mjs",
+    "src/video-producer.d.mts",
+    "src/video.mjs",
+    "video",
     "templates"
   ],
+  "dependencies": {
+    "@remotion/cli": "4.0.484",
+    "@remotion/media": "4.0.484",
+    "@remotion/media-parser": "4.0.484",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "remotion": "4.0.484",
+    "tsx": "4.21.0",
+    "zod": "4.3.6"
+  },
   "engines": {
     "node": ">=20"
   },

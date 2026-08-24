@@ -437,6 +437,7 @@ test("initializes guarded tooling without overwriting the design-system manifest
   assert.match(await fs.readFile(path.join(repoRoot, "design-system", ".gitignore"), "utf8"), /media-local\/\*/);
   await fs.access(path.join(repoRoot, "design-system", "media-local", "README.md"));
   await fs.access(path.join(repoRoot, ".agents", "skills", "timds-edit-design-system", "SKILL.md"));
+  await fs.access(path.join(repoRoot, ".agents", "skills", "timds-create-video", "SKILL.md"));
   await fs.access(path.join(repoRoot, ".github", "workflows", "timds-design-system.yml"));
 });
 
@@ -455,7 +456,7 @@ test("upgrades clean managed records and removes the legacy vendored CLI", async
   const stalePath = path.join(repoRoot, "design-system", ".timds", "cli", "src", "removed-in-new-release.mjs");
   await fs.mkdir(path.dirname(stalePath), { recursive: true });
   await fs.writeFile(stalePath, "export default true;\n", "utf8");
-  execFileSync("git", ["add", "design-system/.timds", ".agents/skills/timds-edit-design-system", "package.json"], { cwd: repoRoot });
+  execFileSync("git", ["add", "design-system/.timds", ".agents/skills/timds-edit-design-system", ".agents/skills/timds-create-video", "package.json"], { cwd: repoRoot });
   execFileSync("git", ["commit", "-m", "Install TimDS toolkit"], { cwd: repoRoot, stdio: "ignore" });
 
   const skillPath = path.join(repoRoot, ".agents", "skills", "timds-edit-design-system", "SKILL.md");

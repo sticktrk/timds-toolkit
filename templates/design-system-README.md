@@ -87,6 +87,25 @@ On a fresh workstation, restore a published original with:
 __TIMDS_CLI__ assets pull founder-interview
 ```
 
+## Optional video production
+
+When `timds.json` enables `video`, this repository owns the client-specific
+contract, asset choices, scripts, publishing data, captions, and production
+records. The installed `@dtconcepts/timds` package supplies the video engine and
+commands directly. An optional contract-owned `producer` block can supply
+client role labels, structure, CTA copy, and asset vocabulary to TimDS's
+programmatic producer/compiler without adding client runtime code:
+
+```bash
+__TIMDS_CLI__ video doctor
+__TIMDS_CLI__ video check TOPIC
+__TIMDS_CLI__ video studio TOPIC
+__TIMDS_CLI__ video render TOPIC
+```
+
+Do not create a second package, copied Remotion runtime, or per-topic TSX file.
+Generated working files and review packages stay under ignored `video-local/`.
+
 ## Before review
 
 ```bash
@@ -126,7 +145,7 @@ separate, ordered CI work.
 ## Toolkit upgrades
 
 The repository selects the bounded TimDS `0.1.x` package line and commits its
-resolved lockfile. It keeps only the repository-local AI skill and installation
+resolved lockfile. It keeps only the repository-local AI skills and installation
 record in Git. When a DT Concepts operator selects a new release line, keep the
 package requirement at `0.1.x` and update the resolved lockfile before syncing
 those managed files:
