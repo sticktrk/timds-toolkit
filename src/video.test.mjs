@@ -120,7 +120,10 @@ test("normalizes the optional video manifest", () => {
     assets: "video/assets.json",
     productions: "video/productions",
     local: "video-local",
+    components: null,
   });
+  assert.equal(normalizeVideoManifest({ components: "video/remotion.tsx" }).components, "video/remotion.tsx");
+  assert.throws(() => normalizeVideoManifest({ components: "../outside.tsx" }), /must stay inside the Design System/);
 });
 
 test("keeps structure policy in the client video contract", () => {
@@ -218,7 +221,21 @@ test("validates and prepares a client-owned production with TimDS provenance", a
   await fs.access(path.join(prepared.publicRoot, "media", "footage.mp4"));
   const entry = await fs.readFile(prepared.entryPath, "utf8");
   assert.match(entry, /@dtconcepts\/timds\/video\/remotion/);
-  assert.match(entry, /registerRoot\(createVideoProjectRoot\(project\)\)/);
+  assert.match(entry, /const videoProjectComponents = \{\}/);
+  assert.match(entry, /registerRoot\(createVideoProjectRoot\(project, videoProjectComponents\)\)/);
+});
+
+test("imports a Design System Remotion component override into generated entries", async (t) => {
+  const workspace = await videoFixture(t);
+  workspace.manifest.video = normalizeVideoManifest({ components: "video/remotion.tsx" });
+  await fs.writeFile(path.join(workspace.designSystemRoot, "video", "remotion.tsx"), "export default {};\n", "utf8");
+
+  const prepared = await prepareVideoWorkspace(workspace, "sample-topic");
+  const entry = await fs.readFile(prepared.entryPath, "utf8");
+
+  assert.equal(prepared.video.componentsPath, path.join(workspace.designSystemRoot, "video", "remotion.tsx"));
+  assert.match(entry, /import videoProjectComponents from "\.\.\/\.\.\/video\/remotion\.tsx"/);
+  assert.match(entry, /createVideoProjectRoot\(project, videoProjectComponents\)/);
 });
 
 test("rejects footage chains that cannot cover narration at natural 1x speed", async (t) => {

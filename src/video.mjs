@@ -68,6 +68,9 @@ export function normalizeVideoManifest(value) {
     assets: safeRelativePath(video.assets || "video/assets.json", "timds.json video.assets"),
     productions: safeRelativePath(video.productions || "video/productions", "timds.json video.productions"),
     local: safeRelativePath(video.local || "video-local", "timds.json video.local"),
+    components: video.components
+      ? safeRelativePath(video.components, "timds.json video.components")
+      : null,
   };
 }
 
@@ -308,6 +311,12 @@ export async function loadVideoWorkspace(workspace, { slug: selectedSlug } = {})
   const assetsPath = path.join(workspace.designSystemRoot, video.assets);
   const productionsRoot = path.join(workspace.designSystemRoot, video.productions);
   const localRoot = path.join(workspace.designSystemRoot, video.local);
+  const componentsPath = video.components
+    ? path.join(workspace.designSystemRoot, video.components)
+    : null;
+  if (componentsPath && !existsSync(componentsPath)) {
+    throw new Error(`video component override is required at ${componentsPath}`);
+  }
   const contract = validateVideoContract(await readJson(contractPath, "video contract"));
   const assets = validateAssetCatalog(await readJson(assetsPath, "video assets"));
   const entries = selectedSlug
@@ -320,7 +329,7 @@ export async function loadVideoWorkspace(workspace, { slug: selectedSlug } = {})
     productions.push(validateProduction(values, contract, assets, productionSlug));
   }
   if (selectedSlug && !productions.length) throw new Error(`video production ${selectedSlug} was not found`);
-  return { ...workspace, video: { ...video, assets, assetsPath, contract, contractPath, localRoot, productions, productionsRoot } };
+  return { ...workspace, video: { ...video, assets, assetsPath, componentsPath, contract, contractPath, localRoot, productions, productionsRoot } };
 }
 
 export async function checkVideoWorkspace(workspace, options = {}) {
@@ -456,9 +465,12 @@ export async function prepareVideoWorkspace(workspace, selectedSlug) {
   };
   const projectPath = path.join(generatedRoot, `${production.production.slug}.json`);
   const entryPath = path.join(generatedRoot, `${production.production.slug}.mjs`);
+  const componentImport = loaded.video.componentsPath
+    ? `import videoProjectComponents from ${JSON.stringify(path.relative(generatedRoot, loaded.video.componentsPath).replaceAll(path.sep, "/").replace(/^(?!\.)/u, "./"))};\n`
+    : "const videoProjectComponents = {};\n";
   await fs.rm(path.join(generatedRoot, `${production.production.slug}.tsx`), { force: true });
   await fs.writeFile(projectPath, `${JSON.stringify(project, null, 2)}\n`, "utf8");
-  await fs.writeFile(entryPath, `import project from ${JSON.stringify(`./${path.basename(projectPath)}`)};\nimport { registerRoot } from "remotion";\nimport { createVideoProjectRoot, loadVideoProjectFonts } from "@dtconcepts/timds/video/remotion";\nloadVideoProjectFonts(project);\nregisterRoot(createVideoProjectRoot(project));\n`, "utf8");
+  await fs.writeFile(entryPath, `import project from ${JSON.stringify(`./${path.basename(projectPath)}`)};\n${componentImport}import { registerRoot } from "remotion";\nimport { createVideoProjectRoot, loadVideoProjectFonts } from "@dtconcepts/timds/video/remotion";\nloadVideoProjectFonts(project);\nregisterRoot(createVideoProjectRoot(project, videoProjectComponents));\n`, "utf8");
   return { ...loaded, entryPath, project, projectPath, publicRoot, production };
 }
 

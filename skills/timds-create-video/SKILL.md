@@ -13,9 +13,10 @@ content, media, compliance, and publishing decisions.
 
 1. Read the repository instructions and preserve existing work.
 2. Locate `timds.json` and confirm it declares `video`.
-3. Read the declared video contract, asset catalog, relevant production files,
-   and the Design System pages they cite. Do not substitute remembered rules
-   for the repository's current executable contract.
+3. Read the declared video contract, asset catalog, optional `video.components`
+   module, relevant production files, and the Design System pages they cite.
+   Do not substitute remembered rules for the repository's current executable
+   contract.
 4. Run `npm run timds -- video doctor` before authoring.
 
 If video is not enabled, report that `npm run timds -- video init` is required.

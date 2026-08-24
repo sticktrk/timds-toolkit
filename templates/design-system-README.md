@@ -103,7 +103,10 @@ __TIMDS_CLI__ video studio TOPIC
 __TIMDS_CLI__ video render TOPIC
 ```
 
-Do not create a second package, copied Remotion runtime, or per-topic TSX file.
+TimDS supplies the default Remotion component set. If this client's visual
+language needs different compositions, `video.components` may point to one
+reviewed partial override module in the Design System. Do not create a second
+package, copied Remotion runtime, rendering script, or per-topic TSX file.
 Generated working files and review packages stay under ignored `video-local/`.
 
 ## Before review

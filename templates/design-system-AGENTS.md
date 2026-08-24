@@ -42,11 +42,15 @@ Use `dev` for the authoring server and `preview` to inspect the exact built arti
 When `timds.json` declares `video`, this Design System also owns the client's
 video contract, logical video asset catalog, and five JSON records for each
 production. Read those declared files and use the managed
-`timds-create-video` skill. Do not add a Remotion engine, rendering scripts,
-client-specific agent skill, producer/compiler implementation, or per-topic TSX
-entry here; those are provided by the selected `@dtconcepts/timds` release. If
-the client enables programmatic production, keep its role labels, CTA
-templates, and asset-key vocabulary in the contract's `producer` block.
+`timds-create-video` skill. TimDS supplies the complete default Remotion
+component set. A Design System may declare one reviewed partial component
+override module at `video.components`; it may replace client-facing visual
+compositions but not engine or rendering behavior. Do not add a Remotion
+engine, rendering scripts, client-specific agent skill, producer/compiler
+implementation, or per-topic TSX entry here; those are provided by the
+selected `@dtconcepts/timds` release. If the client enables programmatic
+production, keep its role labels, CTA templates, and asset-key vocabulary in
+the contract's `producer` block.
 
 Keep generated audio, prepared media, generated entries, renders, thumbnails,
 and review packages under ignored `video-local/`. Validate committed records

@@ -205,8 +205,10 @@ with `@dtconcepts/timds/video/remotion`.
 
 The Remotion export includes a complete default component set. A client Design
 System may also export a partial `VideoProjectComponentOverrides` object and
-pass it to `createVideoProjectRoot()`, `createSingleVideoProjectRoot()`, or
-`registerVideoProject()`. `Video`, `Scene`, `Intro`, `Outro`, `Cover`,
+declare that module as `video.components` in `timds.json`; TimDS passes it to
+the same `createVideoProjectRoot()`, `createSingleVideoProjectRoot()`, or
+`registerVideoProject()` APIs available to integrated renderers. `Video`,
+`Scene`, `Intro`, `Outro`, `Cover`,
 `HorizontalCover`, and `VerticalCover` are independently replaceable; omitted
 components continue to use TimDS defaults, and format-specific covers take
 precedence over the shared `Cover` override. This keeps rendering mechanics in
