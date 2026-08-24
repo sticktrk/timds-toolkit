@@ -1,6 +1,6 @@
 {
   "name": "@dtconcepts/timds",
-  "version": "0.1.409",
+  "version": "0.1.410",
   "description": "Versioned CLI, contracts, templates, and AI skill for repository-owned TimDS design systems.",
   "type": "module",
   "bin": {
