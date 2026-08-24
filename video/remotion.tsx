@@ -14,6 +14,7 @@ import {
   staticFile,
   useCurrentFrame,
 } from "remotion";
+import {splitGoldHeadline, tieOrphan} from "./text.mjs";
 
 type WordTiming = {text: string; startMs: number; endMs: number};
 type CaptionLine = {id: string; words: WordTiming[]; durationMs: number};
@@ -110,7 +111,6 @@ const useVideoProjectFonts = (project: VideoProject) => {
 };
 
 const frames = (milliseconds: number, fps: number) => Math.max(1, Math.round(milliseconds / 1000 * fps));
-const tieOrphan = (value: string) => value.replace(/\s+(\S+)\s*$/u, "\u00a0$1");
 const lineById = (project: VideoProject, id: string) => {
   const line = project.records.captions.lines.find((candidate) => candidate.id === id);
   if (!line) throw new Error(`TimDS video: missing caption line ${id}`);
@@ -125,12 +125,10 @@ const sceneFrames = (project: VideoProject, id: string, pads: Record<string, {le
 const totalFrames = (project: VideoProject, ids: string[], pads: Record<string, {lead?: number; tail?: number}> = {}) =>
   ids.reduce((sum, id) => sum + sceneFrames(project, id, pads), 0);
 
-const GoldHeadline: React.FC<{scene: Scene; color: string}> = ({scene, color}) => {
-  const headline = tieOrphan(scene.headline || "");
-  const phrase = scene.goldPhrase || headline.split(/\s+/u).at(-1) || "";
-  const index = headline.toLocaleLowerCase().lastIndexOf(phrase.toLocaleLowerCase());
-  if (index < 0) return <>{headline}</>;
-  return <>{headline.slice(0, index)}<span style={{color}}>{headline.slice(index, index + phrase.length)}</span>{headline.slice(index + phrase.length)}</>;
+const GoldHeadline: React.FC<{headline?: string; goldPhrase?: string; color: string}> = ({headline = "", goldPhrase, color}) => {
+  const parts = splitGoldHeadline(headline, goldPhrase);
+  if (!parts.highlighted) return <>{parts.before}</>;
+  return <>{parts.before}<span style={{color}}>{parts.highlighted}</span>{parts.after}</>;
 };
 
 const BrandWatermark: React.FC<{project: VideoProject; vertical?: boolean; sceneHasLogo?: boolean}> = ({project, vertical, sceneHasLogo}) => {
@@ -215,7 +213,7 @@ const SceneView: React.FC<{project: VideoProject; scene: Scene; line: CaptionLin
     <AbsoluteFill style={{alignItems: vertical ? "center" : right ? "flex-end" : "flex-start", justifyContent: vertical ? lower ? "flex-end" : "flex-start" : lower ? "flex-end" : "center", padding: vertical ? lower ? "0 150px 430px 70px" : "240px 150px 0 70px" : "0 120px 150px"}}>
       <div style={{width: vertical ? "100%" : 830, padding: vertical ? 0 : "42px 50px 46px", textAlign: vertical ? "center" : "left", backgroundColor: vertical ? "transparent" : brand.colors.panel, borderLeft: vertical ? undefined : `9px solid ${brand.colors.accent}`, textShadow: vertical ? `0 3px 26px ${brand.colors.background}` : undefined}}>
         {scene.eyebrow ? <div style={{color: brand.colors.accent, fontFamily: brand.fonts.ui, fontSize: vertical ? 26 : 22, fontWeight: 700, letterSpacing: 5, textTransform: "uppercase", marginBottom: 18}}>{scene.eyebrow}</div> : null}
-        <div style={{color: brand.colors.text, fontFamily: brand.fonts.display, fontSize: vertical ? 110 : 72, fontWeight: 700, lineHeight: 0.98, textWrap: "pretty"}}><GoldHeadline scene={scene} color={brand.colors.accent} /></div>
+        <div style={{color: brand.colors.text, fontFamily: brand.fonts.display, fontSize: vertical ? 110 : 72, fontWeight: 700, lineHeight: 0.98, textWrap: "pretty"}}><GoldHeadline headline={scene.headline} goldPhrase={scene.goldPhrase} color={brand.colors.accent} /></div>
         {scene.subline ? <div style={{color: brand.colors.muted, fontFamily: brand.fonts.body, fontSize: 32, marginTop: 20}}>{tieOrphan(scene.subline)}</div> : null}
       </div>
     </AbsoluteFill>
@@ -248,8 +246,6 @@ const Cover: React.FC<{project: VideoProject; cover: any; vertical?: boolean}> =
   const brand = project.contract.brand;
   const asset = project.assets[cover.asset];
   if (!asset) throw new Error(`TimDS video: missing cover asset ${cover.asset}`);
-  const phrase = cover.goldPhrase || cover.headline.split(/\s+/u).at(-1) || "";
-  const index = cover.headline.toLocaleLowerCase().lastIndexOf(phrase.toLocaleLowerCase());
   return <AbsoluteFill style={{backgroundColor: brand.colors.background, fontVariantNumeric: "lining-nums"}}>
     {asset.kind === "video"
       ? <OffthreadVideo muted src={staticFile(asset.src)} startFrom={frames(Number(cover.atSeconds || 0) * 1000, project.contract.fps)} style={{width: "100%", height: "100%", objectFit: "cover", objectPosition: asset.objectPosition || "50% 50%"}} />
@@ -257,7 +253,7 @@ const Cover: React.FC<{project: VideoProject; cover: any; vertical?: boolean}> =
     <AbsoluteFill style={{background: vertical ? `linear-gradient(0deg, ${brand.colors.background} 0%, ${brand.colors.background}dd 48%, transparent 82%)` : `linear-gradient(90deg, ${brand.colors.background} 0%, ${brand.colors.background}ee 46%, transparent 82%)`}} />
     <AbsoluteFill style={{justifyContent: vertical ? "flex-end" : "center", alignItems: "flex-start", padding: vertical ? "0 92px 210px" : "0 120px", width: vertical ? "100%" : "68%"}}>
       <div style={{color: brand.colors.accent, fontFamily: brand.fonts.ui, fontSize: vertical ? 28 : 28, fontWeight: 700, letterSpacing: 6, textTransform: "uppercase", marginBottom: 26}}>{cover.eyebrow || brand.series}</div>
-      <div style={{color: brand.colors.text, fontFamily: brand.fonts.display, fontSize: vertical ? 92 : 116, fontWeight: 700, lineHeight: 0.96, textWrap: "pretty"}}>{tieOrphan(cover.headline.slice(0, index))}<span style={{color: brand.colors.accent}}>{cover.headline.slice(index)}</span></div>
+      <div style={{color: brand.colors.text, fontFamily: brand.fonts.display, fontSize: vertical ? 92 : 116, fontWeight: 700, lineHeight: 0.96, textWrap: "pretty"}}><GoldHeadline headline={cover.headline} goldPhrase={cover.goldPhrase} color={brand.colors.accent} /></div>
       <Img src={staticFile(brand.logo)} style={{width: vertical ? 430 : 360, marginTop: 58}} />
     </AbsoluteFill>
   </AbsoluteFill>;
