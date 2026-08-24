@@ -200,8 +200,14 @@ Remotion compositions, programmatic producer/compiler, render commands,
 packaging, provenance, and managed `timds-create-video` skill. A client that
 serves an automated Video Lab can add a `producer` block to its video contract;
 that block owns role labels, structure, CTA templates, and asset-key
-vocabulary, while consumers call `@dtconcepts/timds/video/producer` and render
-with `@dtconcepts/timds/video/remotion`.
+vocabulary. Its optional `producer.authoring` block selects published TimDS
+page/block ids for the shared and format-specific writing brief. Consumers ask
+`createVideoAuthoringContract()` for the exact prompt, JSON Schema, constraints,
+and Design System provenance, compile with `@dtconcepts/timds/video/producer`,
+and render with `@dtconcepts/timds/video/remotion`. This keeps client writing
+direction in the client system while TimDS owns the generic model boundary.
+The compiler rejects over-limit summaries and engagement questions; it never
+truncates model copy into a fragment to make it fit.
 
 The Remotion export includes a complete default component set. A client Design
 System can fork those exact installed defaults into one complete, editable

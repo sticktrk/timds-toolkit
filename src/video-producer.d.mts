@@ -36,7 +36,31 @@ export type ProducerFinalized = {
   coverSubject: ProducerMedia;
   footage: ProducerMedia[];
 };
+export type ProducerAuthoringContract = {
+  schemaVersion: 1;
+  producerContractVersion: number;
+  designSystem: {id: string; name: string; version: string; commit: string; indexUrl?: string};
+  outputFormat: ProducerOutputFormat;
+  prompt: {instructions: string[]; blockIds: string[]; brief: string};
+  constraints: {
+    headlineWords: number;
+    topicLabelWords: {minimum: number; maximum: number};
+    exactQuestion: {maximumWords: number; maximumCharacters: number; mustEndWithQuestionMark: true};
+    engagementQuestion: {required: boolean; requireYesNoQuestion: boolean; maximumWords: number};
+    answerBeatRoles: ProducerBeatRole[];
+    reservedSceneIds: string[];
+  };
+  compilerOwns: string[];
+  inputSchema: Record<string, unknown>;
+};
 export declare function validateVideoProducerConfig(input: unknown, contract: any): any | null;
+export declare function createVideoAuthoringContract(input: {
+  contract: any;
+  manifest: any;
+  designSystemIndex: any;
+  provenance: {version?: string; commit: string; indexUrl?: string};
+  outputFormat: ProducerOutputFormat;
+}): ProducerAuthoringContract;
 export declare function createVideoProducer(input: {contract: any; assetCatalog: any; mediaCatalog: any}): {
   PRODUCER_CONTRACT_VERSION: number;
   compileProduction(input: ProducerCompileInput): ProducerCompiledProduction;
