@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "id": "client-video",
+  "name": "Client Video System",
+  "fps": 30,
+  "formats": {
+    "longform": { "width": 1920, "height": 1080 },
+    "cover": { "width": 3840, "height": 2160 },
+    "short": { "width": 1080, "height": 1920 }
+  },
+  "package": {
+    "shortCount": 1,
+    "timeZone": "UTC",
+    "longformDirectory": "Longform",
+    "shortDirectoryPrefix": "Short form - "
+  },
+  "structure": {
+    "longform": { "requireIntro": false, "requireOutro": false },
+    "short": { "requireIntro": false, "requireOutro": false }
+  },
+  "copy": {
+    "eyebrowWords": 5,
+    "horizontalHeadlineWords": 8,
+    "shortHeadlineWords": 4,
+    "horizontalSublineWords": 10,
+    "captionPageWords": 5,
+    "coverHeadlineWords": 20,
+    "coverHeadlineCharacters": 180,
+    "coverMustBeQuestion": true
+  },
+  "brand": {
+    "colors": {
+      "background": "#101820",
+      "panel": "rgba(16, 24, 32, 0.94)",
+      "accent": "#d5b66f",
+      "text": "#ffffff",
+      "muted": "#e4e7eb"
+    },
+    "fonts": {
+      "display": "Georgia, serif",
+      "body": "Georgia, serif",
+      "ui": "Arial, sans-serif"
+    },
+    "logo": "public/design-system/brand/logo.svg",
+    "series": "Client series",
+    "site": "example.com",
+    "tagline": "A clear client-specific promise.",
+    "watermark": {
+      "left": "Client series",
+      "right": "example.com"
+    }
+  },
+  "publishing": {
+    "articleLabel": "Read the full article:",
+    "shortBridge": "Watch the full explainer for the complete answer.",
+    "disclaimer": ""
+  }
+}

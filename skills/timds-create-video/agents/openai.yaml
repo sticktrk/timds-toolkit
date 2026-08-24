@@ -1,0 +1,4 @@
+interface:
+  display_name: "Create a TimDS Video"
+  short_description: "Produce contract-driven client video packages"
+  default_prompt: "Use $timds-create-video to create a client video package from this Design System's video contract."

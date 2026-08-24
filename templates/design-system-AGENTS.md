@@ -37,6 +37,22 @@ __TIMDS_CLI__ diff
 
 Use `dev` for the authoring server and `preview` to inspect the exact built artifact. Check relevant views at desktop and mobile sizes before submission.
 
+## Optional video contract
+
+When `timds.json` declares `video`, this Design System also owns the client's
+video contract, logical video asset catalog, and five JSON records for each
+production. Read those declared files and use the managed
+`timds-create-video` skill. Do not add a Remotion engine, rendering scripts,
+client-specific agent skill, producer/compiler implementation, or per-topic TSX
+entry here; those are provided by the selected `@dtconcepts/timds` release. If
+the client enables programmatic production, keep its role labels, CTA
+templates, and asset-key vocabulary in the contract's `producer` block.
+
+Keep generated audio, prepared media, generated entries, renders, thumbnails,
+and review packages under ignored `video-local/`. Validate committed records
+with `npm run timds -- video check` and use `video studio` or `video render`
+only for an explicitly selected production.
+
 ## Git and publication
 
 - Use a `design-system/<change>` branch and a pull request.
@@ -55,7 +71,7 @@ Use `dev` for the authoring server and `preview` to inspect the exact built arti
 ## Protected tooling
 
 Treat the approved `@dtconcepts/timds` release line and resolved lockfile,
-`.timds/installation.json`, the repository-local AI skill, `timds.json`
+`.timds/installation.json`, the repository-local AI skills, `timds.json`
 workspace commands, and `.github/workflows/timds-design-system.yml` as
 execution policy. Do not change them during ordinary design work.
 
