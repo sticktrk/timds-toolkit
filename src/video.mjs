@@ -40,6 +40,15 @@ const words = (value) => String(value ?? "").trim().split(/\s+/u).filter(Boolean
 const unique = (values) => [...new Set(values)];
 const pascal = (value) => value.split("-").map((part) => `${part[0]?.toUpperCase() ?? ""}${part.slice(1)}`).join("");
 
+const fontFormatForPath = (filePath) => {
+  const extension = path.extname(filePath).toLowerCase();
+  if (extension === ".woff2") return "woff2";
+  if (extension === ".woff") return "woff";
+  if (extension === ".otf") return "opentype";
+  if (extension === ".ttf") return "truetype";
+  throw new Error(`video font uses an unsupported file extension: ${filePath}`);
+};
+
 async function readJson(filePath, label, { required = true } = {}) {
   try {
     return object(JSON.parse(await fs.readFile(filePath, "utf8")), label);
@@ -405,7 +414,12 @@ async function stageBrandFiles(workspace, contract, publicRoot) {
     await fs.mkdir(path.dirname(path.join(publicRoot, runtimePath)), { recursive: true });
     await fs.copyFile(source, path.join(publicRoot, runtimePath));
     if (file.kind === "logo") staged.logo = runtimePath;
-    else staged.fontFiles.push({ ...contract.brand.fontFiles[file.index], path: runtimePath });
+    else staged.fontFiles.push({
+      ...contract.brand.fontFiles[file.index],
+      path: runtimePath,
+      format: fontFormatForPath(safe),
+      dataBase64: (await fs.readFile(source)).toString("base64"),
+    });
   }
   return staged;
 }

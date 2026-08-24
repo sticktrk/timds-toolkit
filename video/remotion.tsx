@@ -50,6 +50,15 @@ type VideoProject = {
   };
 };
 
+type VideoFont = {
+  family: string;
+  path: string;
+  style?: string;
+  weight?: string;
+  dataBase64?: string;
+  format?: "woff2" | "woff" | "opentype" | "truetype";
+};
+
 const frames = (milliseconds: number, fps: number) => Math.max(1, Math.round(milliseconds / 1000 * fps));
 const tieOrphan = (value: string) => value.replace(/\s+(\S+)\s*$/u, "\u00a0$1");
 const lineById = (project: VideoProject, id: string) => {
@@ -241,10 +250,16 @@ export function createSingleVideoProjectRoot(project: VideoProject) {
 
 export function loadVideoProjectFonts(project: VideoProject) {
   if (project.schemaVersion !== 1) throw new Error(`TimDS video: unsupported project schema ${String(project.schemaVersion)}`);
-  for (const font of project.contract.brand.fontFiles || []) {
+  for (const font of (project.contract.brand.fontFiles || []) as VideoFont[]) {
+    const url = font.dataBase64
+      ? URL.createObjectURL(new Blob([
+        Uint8Array.from(atob(font.dataBase64), (character) => character.charCodeAt(0)).buffer,
+      ]))
+      : staticFile(font.path);
     void loadFont({
       family: font.family,
-      url: staticFile(font.path),
+      url,
+      format: font.format,
       style: font.style,
       weight: font.weight,
     });
