@@ -14,7 +14,7 @@ import {
   staticFile,
   useCurrentFrame,
 } from "remotion";
-import {splitGoldHeadline, tieOrphan} from "./text.mjs";
+import {fitCoverHeadline, splitGoldHeadline, tieOrphan} from "./text.mjs";
 
 export type VideoProjectWordTiming = {text: string; startMs: number; endMs: number};
 export type VideoProjectCaptionLine = {id: string; words: VideoProjectWordTiming[]; durationMs: number};
@@ -303,22 +303,62 @@ const Video: React.FC<VideoProjectVideoProps> = ({project, scenes, ids, pads = {
   </AbsoluteFill>;
 };
 
-const Cover: React.FC<VideoProjectCoverProps> = ({project, cover, vertical}) => {
-  const brand = project.contract.brand;
+export const resolveCoverObjectPosition = (
+  cover: VideoProjectCover,
+  asset: VideoProjectAsset,
+  vertical = false,
+) => cover.objectPosition || asset.objectPosition || (vertical ? "67% 50%" : "50% 50%");
+
+const CoverVisual: React.FC<VideoProjectCoverProps> = ({project, cover, vertical}) => {
   const asset = project.assets[cover.asset];
   if (!asset) throw new Error(`TimDS video: missing cover asset ${cover.asset}`);
+  const style = {
+    width: "100%",
+    height: "100%",
+    objectFit: "cover" as const,
+    objectPosition: resolveCoverObjectPosition(cover, asset, vertical),
+    transform: vertical ? "scale(1.04)" : undefined,
+  };
+  return asset.kind === "video"
+    ? <OffthreadVideo muted src={staticFile(asset.src)} startFrom={frames(Number(cover.atSeconds || 0) * 1000, project.contract.fps)} style={style} />
+    : <Img src={staticFile(asset.src)} style={style} />;
+};
+
+const HorizontalCover: React.FC<VideoProjectCoverProps> = ({project, cover}) => {
+  const brand = project.contract.brand;
   return <AbsoluteFill style={{backgroundColor: brand.colors.background, fontVariantNumeric: "lining-nums"}}>
-    {asset.kind === "video"
-      ? <OffthreadVideo muted src={staticFile(asset.src)} startFrom={frames(Number(cover.atSeconds || 0) * 1000, project.contract.fps)} style={{width: "100%", height: "100%", objectFit: "cover", objectPosition: cover.objectPosition || asset.objectPosition || "50% 50%"}} />
-      : <Img src={staticFile(asset.src)} style={{width: "100%", height: "100%", objectFit: "cover", objectPosition: cover.objectPosition || asset.objectPosition || "50% 50%"}} />}
-    <AbsoluteFill style={{background: vertical ? `linear-gradient(0deg, ${brand.colors.background} 0%, ${brand.colors.background}dd 48%, transparent 82%)` : `linear-gradient(90deg, ${brand.colors.background} 0%, ${brand.colors.background}ee 46%, transparent 82%)`}} />
-    <AbsoluteFill style={{justifyContent: vertical ? "flex-end" : "center", alignItems: "flex-start", padding: vertical ? "0 92px 210px" : "0 120px", width: vertical ? "100%" : "68%"}}>
-      <div style={{color: brand.colors.accent, fontFamily: brand.fonts.ui, fontSize: vertical ? 28 : 28, fontWeight: 700, letterSpacing: 6, textTransform: "uppercase", marginBottom: 26}}>{cover.eyebrow || brand.series}</div>
-      <div style={{color: brand.colors.text, fontFamily: brand.fonts.display, fontSize: vertical ? 92 : 116, fontWeight: 700, lineHeight: 0.96, textWrap: "pretty"}}><GoldHeadline headline={cover.headline} goldPhrase={cover.goldPhrase} color={brand.colors.accent} /></div>
-      <Img src={staticFile(brand.logo)} style={{width: vertical ? 430 : 360, marginTop: 58}} />
+    <CoverVisual project={project} cover={cover} />
+    <AbsoluteFill style={{background: `linear-gradient(90deg, ${brand.colors.background} 0%, ${brand.colors.background}ee 46%, transparent 82%)`}} />
+    <AbsoluteFill style={{justifyContent: "center", alignItems: "flex-start", padding: "0 120px", width: "68%"}}>
+      <div style={{color: brand.colors.accent, fontFamily: brand.fonts.ui, fontSize: 28, fontWeight: 700, letterSpacing: 6, textTransform: "uppercase", marginBottom: 26}}>{cover.eyebrow || brand.series}</div>
+      <div style={{color: brand.colors.text, fontFamily: brand.fonts.display, fontSize: 116, fontWeight: 700, lineHeight: 0.96, textWrap: "pretty"}}><GoldHeadline headline={cover.headline} goldPhrase={cover.goldPhrase} color={brand.colors.accent} /></div>
+      <Img src={staticFile(brand.logo)} style={{width: 360, marginTop: 58}} />
     </AbsoluteFill>
   </AbsoluteFill>;
 };
+
+const VerticalCover: React.FC<VideoProjectCoverProps> = ({project, cover}) => {
+  const brand = project.contract.brand;
+  const headline = cover.headline || "";
+  return <AbsoluteFill style={{backgroundColor: brand.colors.background, fontVariantNumeric: "lining-nums"}}>
+    <div style={{position: "absolute", inset: "0 0 auto", height: 1280, overflow: "hidden"}}>
+      <CoverVisual project={project} cover={cover} vertical />
+    </div>
+    <AbsoluteFill style={{background: `linear-gradient(180deg, color-mix(in srgb, ${brand.colors.background} 42%, transparent) 0%, color-mix(in srgb, ${brand.colors.background} 12%, transparent) 43%, color-mix(in srgb, ${brand.colors.background} 94%, transparent) 66%, ${brand.colors.background} 100%)`}} />
+    <div style={{position: "absolute", top: 168, left: 104, display: "flex", alignItems: "center", gap: 17}}>
+      <div style={{width: 14, height: 14, backgroundColor: brand.colors.accent, rotate: "45deg"}} />
+      <div style={{color: brand.colors.accent, fontFamily: brand.fonts.ui, fontSize: 26, fontWeight: 700, letterSpacing: 6, textTransform: "uppercase"}}>{cover.eyebrow || brand.series}</div>
+    </div>
+    <div style={{position: "absolute", left: 92, right: 92, bottom: 300, color: brand.colors.text, fontFamily: brand.fonts.display, fontSize: fitCoverHeadline(headline), fontWeight: 700, lineHeight: 1.01, textWrap: "pretty", textShadow: `0 4px 30px ${brand.colors.background}`}}>
+      <GoldHeadline headline={headline} goldPhrase={cover.goldPhrase} color={brand.colors.accent} />
+    </div>
+    <Img src={staticFile(brand.logo)} style={{position: "absolute", right: 76, top: 94, width: 300, opacity: 0.94}} />
+  </AbsoluteFill>;
+};
+
+const Cover: React.FC<VideoProjectCoverProps> = (props) => props.vertical
+  ? <VerticalCover {...props} />
+  : <HorizontalCover {...props} />;
 
 export const defaultVideoProjectComponents = {
   Video,
@@ -326,8 +366,8 @@ export const defaultVideoProjectComponents = {
   Intro,
   Outro,
   Cover,
-  HorizontalCover: Cover,
-  VerticalCover: Cover,
+  HorizontalCover,
+  VerticalCover,
 } satisfies Required<VideoProjectComponentOverrides>;
 
 export function resolveVideoProjectComponents(components: VideoProjectComponentOverrides = {}) {
@@ -337,8 +377,8 @@ export function resolveVideoProjectComponents(components: VideoProjectComponentO
     Intro: components.Intro ?? Intro,
     Outro: components.Outro ?? Outro,
     Cover: components.Cover ?? Cover,
-    HorizontalCover: components.HorizontalCover ?? components.Cover ?? Cover,
-    VerticalCover: components.VerticalCover ?? components.Cover ?? Cover,
+    HorizontalCover: components.HorizontalCover ?? components.Cover ?? HorizontalCover,
+    VerticalCover: components.VerticalCover ?? components.Cover ?? VerticalCover,
   } satisfies Required<VideoProjectComponentOverrides>;
 }
 
@@ -411,4 +451,4 @@ export function registerVideoProject(project: VideoProject, components: VideoPro
   registerRoot(createVideoProjectRoot(project, components));
 }
 
-export { Cover, GoldHeadline, Intro, Outro, SceneView, Video };
+export { Cover, GoldHeadline, HorizontalCover, Intro, Outro, SceneView, VerticalCover, Video };

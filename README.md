@@ -215,6 +215,13 @@ precedence over the shared `Cover` override. This keeps rendering mechanics in
 TimDS while allowing a reviewed client Design System to own its visual
 compositions.
 
+The default cover set includes separate horizontal and reel layouts. A cover's
+explicit `objectPosition` wins, followed by its prepared asset position; the
+reel fallback keeps right-biased portrait subjects in the upper photographic
+region. Both layouts use the same headline renderer and retain a visible,
+non-breaking separator before a highlighted final word, including with
+subsetted client fonts.
+
 Each production is a directory with five reviewable phase records:
 `request.json`, `script.json`, `publishing.json`, `captions.json`, and
 `production.json`. There is no per-topic TSX entry and no client-owned copy of
