@@ -1,19 +1,22 @@
 // A normal space keeps the font's intended advance width. The following word
 // joiner prevents a line break without relying on the font's NBSP glyph, which
-// can have a zero advance in subsetted webfonts.
-export const tieOrphan = (value) => value.replace(/\s+(\S+)\s*$/u, " \u2060$1");
+// can have a zero advance in subsetted webfonts. A non-breaking hyphen keeps a
+// compound word intact at display sizes.
+export const tieOrphan = (value) => value
+  .replace(/(?<=\p{L})-(?=\p{L})/gu, "\u2011")
+  .replace(/\s+(\S+)\s*$/u, " \u2060$1");
 
 export function splitGoldHeadline(value, requestedPhrase) {
   const headline = tieOrphan(value);
   const phrase = requestedPhrase || String(value).trim().split(/\s+/u).at(-1) || "";
-  const index = phrase
-    ? headline.toLocaleLowerCase().lastIndexOf(phrase.toLocaleLowerCase())
-    : -1;
+  const candidates = phrase ? [tieOrphan(phrase), phrase] : [];
+  const matched = candidates.find((candidate) => headline.toLocaleLowerCase().includes(candidate.toLocaleLowerCase())) || "";
+  const index = matched ? headline.toLocaleLowerCase().lastIndexOf(matched.toLocaleLowerCase()) : -1;
   if (index < 0) return {before: headline, highlighted: "", after: ""};
   return {
     before: headline.slice(0, index),
-    highlighted: headline.slice(index, index + phrase.length),
-    after: headline.slice(index + phrase.length),
+    highlighted: headline.slice(index, index + matched.length),
+    after: headline.slice(index + matched.length),
   };
 }
 
