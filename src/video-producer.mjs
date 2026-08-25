@@ -379,21 +379,36 @@ export function createVideoProducer({ contract, assetCatalog, mediaCatalog }) {
     })
     .sort((left, right) => left.master.key.localeCompare(right.master.key));
 
-  const selectFootage = (scene, seconds, format) => {
+  // Offset, mirrored, and vertical derivatives are the same footage; chaining
+  // one directly into its sibling — within a scene or across a scene cut —
+  // plays as a repeated clip.
+  const footageFamily = (key) => String(key)
+    .replace(/-vertical$/u, "")
+    .replace(/-mirrored$/u, "")
+    .replace(/-offset$/u, "");
+
+  const selectFootage = (scene, seconds, format, previousFamily = "") => {
     const query = tokens(`${scene.role} ${scene.narration} ${scene.headline || ""}`);
     const ranked = horizontalFootage()
       .filter((pair) => format !== "short" || (pair.vertical && Number.isFinite(pair.vertical.durationSeconds)))
       .map((pair) => ({ ...pair, effectiveDurationSeconds: format === "short" ? pair.vertical.durationSeconds : pair.master.durationSeconds }))
       .sort((left, right) => score(query, right.master.key) - score(query, left.master.key) || right.effectiveDurationSeconds - left.effectiveDurationSeconds || left.master.key.localeCompare(right.master.key));
     const selected = [];
+    const used = new Set();
     let duration = 0;
-    for (const candidate of ranked) {
-      if (duration + Number.EPSILON >= seconds) break;
-      if (format === "horizontal" && !compatibleTextSides([...selected.map((pair) => pair.master.key), candidate.master.key]).length) continue;
+    let lastFamily = previousFamily;
+    while (duration + Number.EPSILON < seconds) {
+      const candidate = ranked.find((pair) => !used.has(pair.master.key)
+        && footageFamily(pair.master.key) !== lastFamily
+        && (format !== "horizontal" || compatibleTextSides([...selected.map((entry) => entry.master.key), pair.master.key]).length > 0));
+      if (!candidate) {
+        fail(`scene ${scene.id} needs ${seconds.toFixed(2)} seconds, but registered footage covers only ${duration.toFixed(2)} seconds at natural 1x speed without repeating a footage family back to back`);
+      }
+      used.add(candidate.master.key);
       selected.push(candidate);
       duration += candidate.effectiveDurationSeconds;
+      lastFamily = footageFamily(candidate.master.key);
     }
-    if (duration + Number.EPSILON < seconds) fail(`scene ${scene.id} needs ${seconds.toFixed(2)} seconds, but registered footage covers only ${duration.toFixed(2)} seconds at natural 1x speed`);
     return selected;
   };
 
@@ -413,10 +428,19 @@ export function createVideoProducer({ contract, assetCatalog, mediaCatalog }) {
     if (!Array.isArray(input.timings) || input.timings.length !== input.compiled.scenes.length) fail("timings must match every compiled scene");
     const timingById = new Map(input.timings.map((line) => [line.id, line]));
     const selectedByScene = new Map();
+    // Intro and outro cards break the footage sequence; between them the last
+    // clip of one scene must not share a family with the next scene's first.
+    let previousFamily = "";
     for (const scene of input.compiled.scenes) {
       const timing = timingById.get(scene.id) || fail(`scene ${scene.id} has no measured timing`);
       if (!Number.isFinite(timing.durationMs) || timing.durationMs <= 0) fail(`scene ${scene.id} needs a positive measured duration`);
-      if (!scene.intro && !scene.outro) selectedByScene.set(scene.id, selectFootage(scene, timing.durationMs / 1000, input.compiled.outputFormat));
+      if (scene.intro || scene.outro) {
+        previousFamily = "";
+        continue;
+      }
+      const selected = selectFootage(scene, timing.durationMs / 1000, input.compiled.outputFormat, previousFamily);
+      selectedByScene.set(scene.id, selected);
+      previousFamily = footageFamily(selected[selected.length - 1].master.key);
     }
     const coverSubject = chooseCover(input.compiled);
     const coverExtension = String(coverSubject.filename).match(/\.[a-z0-9]+$/iu)?.[0] || ".png";
