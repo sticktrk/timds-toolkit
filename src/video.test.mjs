@@ -142,6 +142,8 @@ test("copies the installed default components into client-owned source exactly o
   assert.equal(manifest.video.components, "video/remotion.tsx");
   assert.match(generated, /This file is now owned by this Design System/u);
   assert.match(generated, /tieOrphan = \(value: string\)/u);
+  assert.match(generated, /useVideoConfig/u);
+  assert.match(generated, /horizontalCoverScale/u);
   assert.ok(generated.includes(snapshot));
   assert.match(generated, /export default defaultVideoProjectComponents/u);
   await assert.rejects(initializeVideoComponents(workspace), /already exist/u);

@@ -13,6 +13,7 @@ import {
   registerRoot,
   staticFile,
   useCurrentFrame,
+  useVideoConfig,
 } from "remotion";
 import {fitCoverHeadline, splitGoldHeadline, tieOrphan} from "./text.mjs";
 
@@ -121,8 +122,9 @@ type VideoFont = {
 };
 
 const videoFonts = (project: VideoProject) => (project.contract.brand.fontFiles || []) as VideoFont[];
-const videoFontDeclaration = (font: VideoFont) =>
-  `${font.style || "normal"} ${font.weight || "400"} 16px ${JSON.stringify(font.family)}`;
+export const videoFontLoadWeight = (weight = "400") => weight.trim().split(/\s+/u).at(-1) || "400";
+export const videoFontDeclaration = (font: VideoFont) =>
+  `${font.style || "normal"} ${videoFontLoadWeight(font.weight)} 16px ${JSON.stringify(font.family)}`;
 
 const videoFontStyles = (project: VideoProject) => videoFonts(project).map((font) => {
   const url = font.dataBase64
@@ -169,6 +171,10 @@ const useVideoProjectFonts = (project: VideoProject) => {
 };
 
 // TIMDS_DEFAULT_COMPONENTS_START
+export const HORIZONTAL_COVER_DESIGN_WIDTH = 1280;
+export const HORIZONTAL_COVER_DESIGN_HEIGHT = 720;
+export const horizontalCoverScale = (exportWidth: number) => exportWidth / HORIZONTAL_COVER_DESIGN_WIDTH;
+
 const frames = (milliseconds: number, fps: number) => Math.max(1, Math.round(milliseconds / 1000 * fps));
 const lineById = (project: VideoProject, id: string) => {
   const line = project.records.captions.lines.find((candidate) => candidate.id === id);
@@ -327,14 +333,19 @@ const CoverVisual: React.FC<VideoProjectCoverProps> = ({project, cover, vertical
 
 const HorizontalCover: React.FC<VideoProjectCoverProps> = ({project, cover}) => {
   const brand = project.contract.brand;
-  return <AbsoluteFill style={{backgroundColor: brand.colors.background, fontVariantNumeric: "lining-nums"}}>
-    <CoverVisual project={project} cover={cover} />
-    <AbsoluteFill style={{background: `linear-gradient(90deg, ${brand.colors.background} 0%, ${brand.colors.background}ee 46%, transparent 82%)`}} />
-    <AbsoluteFill style={{justifyContent: "center", alignItems: "flex-start", padding: "0 120px", width: "68%"}}>
-      <div style={{color: brand.colors.accent, fontFamily: brand.fonts.ui, fontSize: 28, fontWeight: 700, letterSpacing: 6, textTransform: "uppercase", marginBottom: 26}}>{cover.eyebrow || brand.series}</div>
-      <div style={{color: brand.colors.text, fontFamily: brand.fonts.display, fontSize: 116, fontWeight: 700, lineHeight: 0.96, textWrap: "pretty"}}><GoldHeadline headline={cover.headline} goldPhrase={cover.goldPhrase} color={brand.colors.accent} /></div>
-      <Img src={staticFile(brand.logo)} style={{width: 360, marginTop: 58}} />
-    </AbsoluteFill>
+  const {width} = useVideoConfig();
+  const headline = cover.headline || "";
+  const scale = horizontalCoverScale(width);
+  return <AbsoluteFill style={{backgroundColor: brand.colors.background, fontVariantNumeric: "lining-nums", overflow: "hidden"}}>
+    <div style={{position: "relative", width: HORIZONTAL_COVER_DESIGN_WIDTH, height: HORIZONTAL_COVER_DESIGN_HEIGHT, transform: `scale(${scale})`, transformOrigin: "0 0"}}>
+      <CoverVisual project={project} cover={cover} />
+      <AbsoluteFill style={{background: `linear-gradient(90deg, ${brand.colors.background} 0%, ${brand.colors.background}ee 46%, transparent 82%)`}} />
+      <AbsoluteFill style={{justifyContent: "center", alignItems: "flex-start", padding: "0 120px", width: "68%"}}>
+        <div style={{color: brand.colors.accent, fontFamily: brand.fonts.ui, fontSize: 28, fontWeight: 700, letterSpacing: 6, textTransform: "uppercase", marginBottom: 26}}>{cover.eyebrow || brand.series}</div>
+        <div style={{color: brand.colors.text, fontFamily: brand.fonts.display, fontSize: fitCoverHeadline(headline), fontWeight: 700, lineHeight: 0.96, textWrap: "pretty"}}><GoldHeadline headline={headline} goldPhrase={cover.goldPhrase} color={brand.colors.accent} /></div>
+        <Img src={staticFile(brand.logo)} style={{width: 360, marginTop: 58}} />
+      </AbsoluteFill>
+    </div>
   </AbsoluteFill>;
 };
 

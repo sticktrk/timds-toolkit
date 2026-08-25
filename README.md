@@ -237,9 +237,10 @@ compositions.
 The default cover set includes separate horizontal and reel layouts. A cover's
 explicit `objectPosition` wins, followed by its prepared asset position; the
 reel fallback keeps right-biased portrait subjects in the upper photographic
-region. Both layouts use the same headline renderer and retain a visible,
-non-breaking separator before a highlighted final word, including with
-subsetted client fonts.
+region. The horizontal cover scales its 1280×720 design grid to the declared
+export size, and both layouts adapt the headline to its available box. Both
+retain a visible, non-breaking separator before a highlighted final word,
+including with subsetted or variable client fonts.
 
 Each production is a directory with five reviewable phase records:
 `request.json`, `script.json`, `publishing.json`, `captions.json`, and

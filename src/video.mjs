@@ -14,20 +14,23 @@ const DEFAULT_COMPONENTS_START = "// TIMDS_DEFAULT_COMPONENTS_START";
 const DEFAULT_COMPONENTS_END = "// TIMDS_DEFAULT_COMPONENTS_END";
 const DEFAULT_VIDEO_TEXT_SOURCE = String.raw`// A normal space keeps the font's intended advance width. The following word
 // joiner prevents a line break without relying on the font's NBSP glyph, which
-// can have a zero advance in subsetted webfonts.
-export const tieOrphan = (value: string) => value.replace(/\s+(\S+)\s*$/u, " \u2060$1");
+// can have a zero advance in subsetted webfonts. A non-breaking hyphen keeps a
+// compound word intact at display sizes.
+export const tieOrphan = (value: string) => value
+  .replace(/(?<=\p{L})-(?=\p{L})/gu, "\u2011")
+  .replace(/\s+(\S+)\s*$/u, " \u2060$1");
 
 export function splitGoldHeadline(value: string, requestedPhrase?: string) {
   const headline = tieOrphan(value);
   const phrase = requestedPhrase || String(value).trim().split(/\s+/u).at(-1) || "";
-  const index = phrase
-    ? headline.toLocaleLowerCase().lastIndexOf(phrase.toLocaleLowerCase())
-    : -1;
+  const candidates = phrase ? [tieOrphan(phrase), phrase] : [];
+  const matched = candidates.find((candidate) => headline.toLocaleLowerCase().includes(candidate.toLocaleLowerCase())) || "";
+  const index = matched ? headline.toLocaleLowerCase().lastIndexOf(matched.toLocaleLowerCase()) : -1;
   if (index < 0) return {before: headline, highlighted: "", after: ""};
   return {
     before: headline.slice(0, index),
-    highlighted: headline.slice(index, index + phrase.length),
-    after: headline.slice(index + phrase.length),
+    highlighted: headline.slice(index, index + matched.length),
+    after: headline.slice(index + matched.length),
   };
 }
 
@@ -412,7 +415,7 @@ async function defaultVideoComponentsTemplate() {
   const end = remotionSource.indexOf(DEFAULT_COMPONENTS_END);
   if (start < 0 || end < start) throw new Error("TimDS default video component snapshot markers are missing");
   const componentSource = remotionSource.slice(start, end + DEFAULT_COMPONENTS_END.length);
-  return `// Generated once from the installed TimDS defaults. This file is now owned by this Design System.\n// TimDS upgrades do not overwrite it; use \`timds video components init --force\` only to reset it.\nimport React, {useMemo} from "react";\nimport {Audio} from "@remotion/media";\nimport {AbsoluteFill, Img, OffthreadVideo, Sequence, interpolate, staticFile, useCurrentFrame} from "remotion";\nimport type {\n  VideoProject,\n  VideoProjectAsset,\n  VideoProjectCaptionLine,\n  VideoProjectComponentOverrides,\n  VideoProjectCover,\n  VideoProjectCoverProps,\n  VideoProjectIntroProps,\n  VideoProjectOutroProps,\n  VideoProjectScene,\n  VideoProjectSceneProps,\n  VideoProjectVideoProps,\n} from "@dtconcepts/timds/video/remotion";\n\n${DEFAULT_VIDEO_TEXT_SOURCE}\n\n${componentSource}\n\nexport {BrandWatermark, CaptionPages, Cover, CoverVisual, GoldHeadline, HorizontalCover, Intro, Media, Outro, SceneView, VerticalCover, Video};\nexport default defaultVideoProjectComponents;\n`;
+  return `// Generated once from the installed TimDS defaults. This file is now owned by this Design System.\n// TimDS upgrades do not overwrite it; use \`timds video components init --force\` only to reset it.\nimport React, {useMemo} from "react";\nimport {Audio} from "@remotion/media";\nimport {AbsoluteFill, Img, OffthreadVideo, Sequence, interpolate, staticFile, useCurrentFrame, useVideoConfig} from "remotion";\nimport type {\n  VideoProject,\n  VideoProjectAsset,\n  VideoProjectCaptionLine,\n  VideoProjectComponentOverrides,\n  VideoProjectCover,\n  VideoProjectCoverProps,\n  VideoProjectIntroProps,\n  VideoProjectOutroProps,\n  VideoProjectScene,\n  VideoProjectSceneProps,\n  VideoProjectVideoProps,\n} from "@dtconcepts/timds/video/remotion";\n\n${DEFAULT_VIDEO_TEXT_SOURCE}\n\n${componentSource}\n\nexport {BrandWatermark, CaptionPages, Cover, CoverVisual, GoldHeadline, HorizontalCover, Intro, Media, Outro, SceneView, VerticalCover, Video};\nexport default defaultVideoProjectComponents;\n`;
 }
 
 export async function initializeVideoComponents(workspace, { force = false } = {}) {

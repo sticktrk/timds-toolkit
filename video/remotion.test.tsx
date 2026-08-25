@@ -6,9 +6,14 @@ import {
   Cover,
   defaultVideoProjectComponents,
   GoldHeadline,
+  HORIZONTAL_COVER_DESIGN_HEIGHT,
+  HORIZONTAL_COVER_DESIGN_WIDTH,
   HorizontalCover,
+  horizontalCoverScale,
   resolveCoverObjectPosition,
   resolveVideoProjectComponents,
+  videoFontDeclaration,
+  videoFontLoadWeight,
   VerticalCover,
 } from "./remotion.tsx";
 import type {VideoProjectCoverProps} from "./remotion.tsx";
@@ -55,4 +60,15 @@ test("renders a visible space before a tied highlighted final word", () => {
   />);
 
   assert.match(markup, /move \u2060<span/u);
+});
+
+test("loads a valid representative weight for a variable font range", () => {
+  assert.equal(videoFontLoadWeight("400 700"), "700");
+  assert.equal(videoFontDeclaration({family: "Instrument Sans", path: "instrument.ttf", weight: "400 700"}), 'normal 700 16px "Instrument Sans"');
+});
+
+test("scales the horizontal design grid to a high-resolution cover", () => {
+  assert.equal(HORIZONTAL_COVER_DESIGN_WIDTH, 1280);
+  assert.equal(HORIZONTAL_COVER_DESIGN_HEIGHT, 720);
+  assert.equal(horizontalCoverScale(3840), 3);
 });
