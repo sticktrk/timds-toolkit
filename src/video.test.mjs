@@ -386,3 +386,71 @@ test("enforces the selected client structure and package count", async (t) => {
   });
   await assert.rejects(checkVideoWorkspace(missingIntro, { slug: "sample-topic" }), /must begin with intro/);
 });
+
+test("never chains footage from one family back to back, within or across scenes", () => {
+  const contract = validateVideoContract({
+    schemaVersion: 1,
+    id: "example-video",
+    name: "Example video",
+    package: { shortCount: 0 },
+    copy: {},
+    brand: {
+      colors: { background: "#000", accent: "#fc0", text: "#fff" },
+      fonts: {},
+      logo: "public/logo.svg",
+      series: "Example Answers",
+      site: "example.com",
+      tagline: "Clear answers",
+    },
+    producer: {
+      schemaVersion: 1,
+      authoring: { sharedPromptBlocks: [], formatPromptBlocks: {} },
+      roleEyebrows: { hook: "In brief", rule: "The rule", risk: "The risk", process: "Next step", exception: "The exception", answer: "The answer" },
+      intro: { enabled: false },
+      engagement: { enabled: false, eyebrow: "Your turn", narrationTemplate: "{{question}} Tell us below." },
+      outro: { enabled: false, narrationTemplate: "Learn more about {{topic}} at {{site}}." },
+      cover: { assetPrefix: "cover-subject-" },
+      footage: { assetPrefix: "footage-" },
+    },
+  });
+  const assetCatalog = { assets: {
+    "cover-subject-concern": { mediaKey: "cover-subject-concern" },
+    "footage-one": { mediaKey: "footage-one", durationSeconds: 5, subject: "right", flip: false, text: "left-center" },
+    "footage-one-mirrored": { mediaKey: "footage-one-mirrored", durationSeconds: 5, subject: "right", flip: false, text: "left-center" },
+    "footage-two": { mediaKey: "footage-two", durationSeconds: 5, subject: "right", flip: false, text: "left-center" },
+  } };
+  const mediaCatalog = { assets: Object.keys(assetCatalog.assets).map((key) => ({
+    key,
+    filename: `${key}.${key.startsWith("cover-") ? "jpg" : "mp4"}`,
+    publicUrl: `https://example.com/${key}`,
+    contentType: key.startsWith("cover-") ? "image/jpeg" : "video/mp4",
+    durationSeconds: assetCatalog.assets[key].durationSeconds,
+  })) };
+  const producer = createVideoProducer({ contract, assetCatalog, mediaCatalog });
+  const compiled = producer.compileProduction({
+    schemaVersion: 1,
+    slug: "sample-answer",
+    outputFormat: "horizontal",
+    exactQuestion: "Should I keep these records?",
+    topic: { label: "important records", coverEmotion: "concern" },
+    answerBeats: [
+      { id: "first", role: "rule", narration: "Keep the records together.", summary: "Keep records together" },
+      { id: "second", role: "answer", narration: "Keep the records together.", summary: "Keep records together" },
+      { id: "third", role: "process", narration: "Keep the records together.", summary: "Keep records together" },
+    ],
+  });
+  const finalized = producer.finalizeProduction({
+    schemaVersion: 1,
+    compiled,
+    timings: compiled.scenes.map((scene) => ({ id: scene.id, durationMs: scene.id === "first" ? 8_000 : 4_000, words: [{ text: scene.id, startMs: 0, endMs: 700 }] })),
+    audioSrc: "audio.mp3",
+  });
+  // Within the first scene, footage-one-mirrored ranks directly after
+  // footage-one but is the same footage; the chain must jump to footage-two.
+  assert.deepEqual(finalized.plan.scenes.find((scene) => scene.id === "first").assets, ["footage-one", "footage-two"]);
+  // The first scene ended on footage-two, so the second reopens on footage-one.
+  assert.equal(finalized.plan.scenes.find((scene) => scene.id === "second").asset, "footage-one");
+  // The third scene ranks footage-one and its mirrored sibling first, but the
+  // second scene just played that family; the cut must land on footage-two.
+  assert.equal(finalized.plan.scenes.find((scene) => scene.id === "third").asset, "footage-two");
+});
