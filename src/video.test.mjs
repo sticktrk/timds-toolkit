@@ -263,6 +263,30 @@ test("compiles programmatic productions with client-owned producer copy and asse
   assert.match(authoring.prompt.brief, /Lead with the answer/u);
   assert.match(authoring.prompt.brief, /Make the first beat immediate/u);
   assert.equal(authoring.inputSchema.properties.outputFormat.const, "short");
+  assert.equal(authoring.inputSchema.properties.topic.properties.label.pattern, "^\\S+(?:\\s+\\S+){1,3}$");
+  assert.deepEqual(authoring.inputSchema.properties.exactQuestion.allOf, [
+    { pattern: `^\\S+(?:\\s+\\S+){0,${contract.copy.coverHeadlineWords - 1}}$` },
+    { pattern: "\\?$" },
+  ]);
+  const horizontalAuthoring = createVideoAuthoringContract({
+    contract,
+    manifest: { systemId: "example/core", name: "Example Design System", version: "2.3.4" },
+    designSystemIndex: {
+      schemaVersion: 1,
+      system: { id: "example/core", name: "Example Design System", version: "2.3.4" },
+      pages: [
+        { id: "brand/voice", blocks: [{ id: "brand/voice#plain-language", title: "Plain language", notes: [{ id: "direct", text: "Lead with the answer." }] }] },
+      ],
+    },
+    provenance: { version: "2.3.4", commit: "a".repeat(40) },
+    outputFormat: "horizontal",
+  });
+  assert.deepEqual(horizontalAuthoring.inputSchema.properties.topic.properties.engagementQuestion.allOf, [
+    { pattern: `^\\S+(?:\\s+\\S+){0,${contract.copy.horizontalHeadlineWords - 1}}$` },
+    { pattern: "\\?$" },
+    { pattern: "^(?:[Aa][Rr][Ee]|[Cc][Aa][Nn]|[Cc][Oo][Uu][Ll][Dd]|[Dd][Ii][Dd]|[Dd][Oo]|[Dd][Oo][Ee][Ss]|[Hh][Aa][Ss]|[Hh][Aa][Vv][Ee]|[Ii][Ss]|[Ss][Hh][Oo][Uu][Ll][Dd]|[Ww][Aa][Ss]|[Ww][Ee][Rr][Ee]|[Ww][Ii][Ll][Ll]|[Ww][Oo][Uu][Ll][Dd])\\b" },
+  ]);
+  assert.match("Are you keeping these records?", new RegExp(horizontalAuthoring.inputSchema.properties.topic.properties.engagementQuestion.allOf[2].pattern, "u"));
   assert.equal(authoring.designSystem.commit, "a".repeat(40));
 });
 

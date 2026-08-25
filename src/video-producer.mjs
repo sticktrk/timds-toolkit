@@ -132,6 +132,8 @@ const renderPromptBlock = (block) => {
 };
 
 const maximumWordsPattern = (maximum) => `^\\S+(?:\\s+\\S+){0,${maximum - 1}}$`;
+const wordRangePattern = (minimum, maximum) => `^\\S+(?:\\s+\\S+){${minimum - 1},${maximum - 1}}$`;
+const yesNoQuestionPattern = "^(?:[Aa][Rr][Ee]|[Cc][Aa][Nn]|[Cc][Oo][Uu][Ll][Dd]|[Dd][Ii][Dd]|[Dd][Oo]|[Dd][Oo][Ee][Ss]|[Hh][Aa][Ss]|[Hh][Aa][Vv][Ee]|[Ii][Ss]|[Ss][Hh][Oo][Uu][Ll][Dd]|[Ww][Aa][Ss]|[Ww][Ee][Rr][Ee]|[Ww][Ii][Ll][Ll]|[Ww][Oo][Uu][Ll][Dd])\\b";
 
 /**
  * Describe the exact model input accepted by one client producer and format.
@@ -168,7 +170,7 @@ export function createVideoAuthoringContract({ contract, manifest, designSystemI
   const topicProperties = {
     label: {
       type: "string",
-      pattern: maximumWordsPattern(config.topicLabel.maximumWords),
+      pattern: wordRangePattern(config.topicLabel.minimumWords, config.topicLabel.maximumWords),
       minLength: 1,
       description: `${config.topicLabel.minimumWords}–${config.topicLabel.maximumWords} plain words naming the subject`,
       "x-timds-minWords": config.topicLabel.minimumWords,
@@ -180,7 +182,11 @@ export function createVideoAuthoringContract({ contract, manifest, designSystemI
         type: "string",
         minLength: 2,
         maxLength: contract.copy.coverHeadlineCharacters,
-        pattern: "\\?$",
+        allOf: [
+          { pattern: maximumWordsPattern(headlineWords) },
+          { pattern: "\\?$" },
+          ...(config.engagement.requireYesNoQuestion ? [{ pattern: yesNoQuestionPattern }] : []),
+        ],
         description: config.engagement.requireYesNoQuestion
           ? "A complete, article-grounded yes/no question the viewer can answer about their own situation"
           : "A complete, article-grounded question the viewer can answer about their own situation",
@@ -202,7 +208,10 @@ export function createVideoAuthoringContract({ contract, manifest, designSystemI
         type: "string",
         minLength: 2,
         maxLength: contract.copy.coverHeadlineCharacters,
-        pattern: "\\?$",
+        allOf: [
+          { pattern: maximumWordsPattern(contract.copy.coverHeadlineWords) },
+          { pattern: "\\?$" },
+        ],
         "x-timds-maxWords": contract.copy.coverHeadlineWords,
       },
       topic: { type: "object", additionalProperties: false, required: topicRequired, properties: topicProperties },

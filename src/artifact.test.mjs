@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -8,10 +9,32 @@ import {
   artifactContentType,
   collectIndexAssetFiles,
   collectMachineDocFiles,
+  detectSourceCommit,
   publishExtractedIndex,
   rewriteIndexForPublish,
   rewriteLlmsForPublish,
 } from "./artifact.mjs";
+
+test("detectSourceCommit stamps the published checkout rather than the triggering workflow commit", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "timds-source-commit-test-"));
+  const previous = process.env.GITHUB_SHA;
+  try {
+    execFileSync("git", ["init", "-q"], { cwd: root });
+    execFileSync("git", ["config", "user.name", "TimDS Test"], { cwd: root });
+    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: root });
+    await fs.writeFile(path.join(root, "source.txt"), "release checkout\n");
+    execFileSync("git", ["add", "source.txt"], { cwd: root });
+    execFileSync("git", ["commit", "-q", "-m", "Release checkout"], { cwd: root });
+    const checkoutCommit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+    process.env.GITHUB_SHA = "f".repeat(40);
+
+    assert.equal(detectSourceCommit(root), checkoutCommit);
+  } finally {
+    if (previous === undefined) delete process.env.GITHUB_SHA;
+    else process.env.GITHUB_SHA = previous;
+    await fs.rm(root, { force: true, recursive: true });
+  }
+});
 
 const INDEX = {
   schemaVersion: 1,
