@@ -155,9 +155,7 @@ export function rewriteLlmsForPublish(text, publicBase) {
     .replace(/^(Machine-readable index: )(\/\S+)/m, (_match, label, target) => `${label}${base}${target}`);
 }
 
-function detectSourceCommit(cwd) {
-  const fromCi = String(process.env.GITHUB_SHA || "").trim();
-  if (/^[a-f0-9]{40}$/i.test(fromCi)) return fromCi;
+export function detectSourceCommit(cwd) {
   try {
     return execFileSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8" }).trim();
   } catch {

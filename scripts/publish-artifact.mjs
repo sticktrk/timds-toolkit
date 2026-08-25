@@ -7,6 +7,8 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 
+import { detectSourceCommit } from "../src/artifact.mjs";
+
 function run(command, args, cwd) {
   execFileSync(command, args, { cwd, stdio: "inherit" });
 }
@@ -14,13 +16,16 @@ function run(command, args, cwd) {
 const repoRoot = process.cwd();
 const manifest = JSON.parse(readFileSync(path.join(repoRoot, "timds.json"), "utf8"));
 const publishRef = String(manifest.artifact?.publishRef || "").trim();
-const sourceCommit = String(process.env.GITHUB_SHA || "").trim();
+// GITHUB_SHA identifies the workflow-triggering commit. A release workflow may
+// create and check out a newer version commit before publishing, so provenance
+// must come from the checkout whose bytes are actually being shipped.
+const sourceCommit = detectSourceCommit(repoRoot);
 const repository = String(process.env.GITHUB_REPOSITORY || "").trim();
 
 if (!/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/.test(publishRef)) {
   throw new Error("timds.json artifact.publishRef must be a safe Git ref");
 }
-if (!/^[a-f0-9]{40}$/i.test(sourceCommit)) throw new Error("GITHUB_SHA is required");
+if (!/^[a-f0-9]{40}$/i.test(sourceCommit)) throw new Error("The published checkout must have a Git commit");
 if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) throw new Error("GITHUB_REPOSITORY is required");
 
 const publishRoot = mkdtempSync(path.join(os.tmpdir(), "timds-publish-"));

@@ -11,7 +11,7 @@ import {
   prepareVideoWorkspace,
   validateVideoContract,
 } from "./video.mjs";
-import { createVideoProducer } from "./video-producer.mjs";
+import { createVideoAuthoringContract, createVideoProducer } from "./video-producer.mjs";
 
 async function writeJson(filePath, value) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
@@ -189,6 +189,10 @@ test("compiles programmatic productions with client-owned producer copy and asse
     },
     producer: {
       schemaVersion: 1,
+      authoring: {
+        sharedPromptBlocks: ["brand/voice#plain-language"],
+        formatPromptBlocks: { short: ["social/shorts#writing"] },
+      },
       roleEyebrows: { hook: "In brief", rule: "The rule", risk: "The risk", process: "Next step", exception: "The exception", answer: "The answer" },
       intro: { enabled: true, id: "intro" },
       engagement: { formats: ["horizontal"], id: "engage", eyebrow: "Your turn", narrationTemplate: "{{question}} Tell us below.", requireYesNoQuestion: true },
@@ -220,6 +224,14 @@ test("compiles programmatic productions with client-owned producer copy and asse
     topic: { label: "important records", engagementQuestion: "Are you keeping these records?", coverEmotion: "concern" },
     answerBeats: [{ id: "records", role: "rule", narration: "Keep the records together and preserve every page.", summary: "Keep every record together" }],
   });
+  assert.throws(() => producer.compileProduction({
+    schemaVersion: 1,
+    slug: "sample-answer-too-long",
+    outputFormat: "horizontal",
+    exactQuestion: "Should I keep these records?",
+    topic: { label: "important records", engagementQuestion: "Are you keeping these records?", coverEmotion: "concern" },
+    answerBeats: [{ id: "records", role: "rule", narration: "Keep the records together and preserve every page.", summary: "Keep every important estate record together in one protected account" }],
+  }), /summary exceeds 8 words/u);
   assert.match(compiled.scenes.at(-1).narration, /Example Answers at example\.com/u);
   const finalized = producer.finalizeProduction({
     schemaVersion: 1,
@@ -229,6 +241,92 @@ test("compiles programmatic productions with client-owned producer copy and asse
   });
   assert.equal(finalized.coverSubject.key, "cover-subject-concern");
   assert.deepEqual(finalized.plan.scenes.find((scene) => scene.id === "records").assets, ["footage-one", "footage-two"]);
+
+  const authoring = createVideoAuthoringContract({
+    contract,
+    manifest: { systemId: "example/core", name: "Example Design System", version: "2.3.4" },
+    designSystemIndex: {
+      schemaVersion: 1,
+      system: { id: "example/core", name: "Example Design System", version: "2.3.4" },
+      pages: [
+        { id: "brand/voice", blocks: [{ id: "brand/voice#plain-language", title: "Plain language", notes: [{ id: "direct", text: "Lead with the answer." }] }] },
+        { id: "social/shorts", blocks: [{ id: "social/shorts#writing", title: "Short writing", prose: [{ id: "fast", text: "Make the first beat immediate." }] }] },
+      ],
+    },
+    provenance: { version: "2.3.4", commit: "a".repeat(40), indexUrl: "https://example.com/artifact/design-system/index.json" },
+    outputFormat: "short",
+  });
+  assert.equal(authoring.constraints.headlineWords, contract.copy.shortHeadlineWords);
+  assert.equal(authoring.constraints.engagementQuestion.required, false);
+  assert.equal(authoring.constraints.engagementQuestion.maximumWords, contract.copy.shortHeadlineWords);
+  assert.deepEqual(authoring.prompt.blockIds, ["brand/voice#plain-language", "social/shorts#writing"]);
+  assert.match(authoring.prompt.brief, /Lead with the answer/u);
+  assert.match(authoring.prompt.brief, /Make the first beat immediate/u);
+  assert.equal(authoring.inputSchema.properties.outputFormat.const, "short");
+  assert.equal(authoring.inputSchema.properties.topic.properties.label.pattern, "^\\S+(?:\\s+\\S+){1,3}$");
+  assert.deepEqual(authoring.inputSchema.properties.exactQuestion.allOf, [
+    { pattern: `^\\S+(?:\\s+\\S+){0,${contract.copy.coverHeadlineWords - 1}}$` },
+    { pattern: "\\?$" },
+  ]);
+  const horizontalAuthoring = createVideoAuthoringContract({
+    contract,
+    manifest: { systemId: "example/core", name: "Example Design System", version: "2.3.4" },
+    designSystemIndex: {
+      schemaVersion: 1,
+      system: { id: "example/core", name: "Example Design System", version: "2.3.4" },
+      pages: [
+        { id: "brand/voice", blocks: [{ id: "brand/voice#plain-language", title: "Plain language", notes: [{ id: "direct", text: "Lead with the answer." }] }] },
+      ],
+    },
+    provenance: { version: "2.3.4", commit: "a".repeat(40) },
+    outputFormat: "horizontal",
+  });
+  assert.deepEqual(horizontalAuthoring.inputSchema.properties.topic.properties.engagementQuestion.allOf, [
+    { pattern: `^\\S+(?:\\s+\\S+){0,${contract.copy.horizontalHeadlineWords - 1}}$` },
+    { pattern: "\\?$" },
+    { pattern: "^(?:[Aa][Rr][Ee]|[Cc][Aa][Nn]|[Cc][Oo][Uu][Ll][Dd]|[Dd][Ii][Dd]|[Dd][Oo]|[Dd][Oo][Ee][Ss]|[Hh][Aa][Ss]|[Hh][Aa][Vv][Ee]|[Ii][Ss]|[Ss][Hh][Oo][Uu][Ll][Dd]|[Ww][Aa][Ss]|[Ww][Ee][Rr][Ee]|[Ww][Ii][Ll][Ll]|[Ww][Oo][Uu][Ll][Dd])\\b" },
+  ]);
+  assert.match("Are you keeping these records?", new RegExp(horizontalAuthoring.inputSchema.properties.topic.properties.engagementQuestion.allOf[2].pattern, "u"));
+  assert.equal(authoring.designSystem.commit, "a".repeat(40));
+});
+
+test("rejects stale or incomplete published authoring context", () => {
+  const contract = validateVideoContract({
+    schemaVersion: 1,
+    id: "example-video",
+    name: "Example video",
+    package: { shortCount: 0 },
+    copy: {},
+    brand: {
+      colors: { background: "#000", accent: "#fc0", text: "#fff" },
+      fonts: {},
+      logo: "public/logo.svg",
+      series: "Example Answers",
+      site: "example.com",
+      tagline: "Clear answers",
+    },
+    producer: {
+      schemaVersion: 1,
+      authoring: { sharedPromptBlocks: ["brand/voice#plain-language"] },
+      roleEyebrows: { hook: "In brief", rule: "The rule", risk: "The risk", process: "Next step", exception: "The exception", answer: "The answer" },
+      engagement: { enabled: false, eyebrow: "Your turn", narrationTemplate: "{{question}}" },
+      outro: { narrationTemplate: "Learn about {{topic}} at {{site}}." },
+    },
+  });
+  const input = {
+    contract,
+    manifest: { systemId: "example/core", name: "Example Design System", version: "2.3.4" },
+    provenance: { commit: "b".repeat(40) },
+    outputFormat: "horizontal",
+  };
+  assert.throws(
+    () => createVideoAuthoringContract({ ...input, designSystemIndex: { system: { id: "example/core", version: "2.3.3" }, pages: [] } }),
+    /does not match pinned 2\.3\.4/u,
+  );
+  assert.throws(
+    () => createVideoAuthoringContract({ ...input, designSystemIndex: { system: { id: "example/core", version: "2.3.4" }, pages: [] } }),
+    /authoring block brand\/voice#plain-language is missing/u,
+  );
 });
 
 test("validates and prepares a client-owned production with TimDS provenance", async (t) => {
