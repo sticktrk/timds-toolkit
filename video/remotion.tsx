@@ -16,6 +16,7 @@ import {
   useVideoConfig,
 } from "remotion";
 import {fitCoverHeadline, splitGoldHeadline, tieOrphan} from "./text.mjs";
+import {MINIMUM_CHAIN_CLIP_SECONDS, adjacentFootageRepeats, chainClipFrames, sceneAssetKeys} from "./footage.mjs";
 
 export type VideoProjectWordTiming = {text: string; startMs: number; endMs: number};
 export type VideoProjectCaptionLine = {id: string; words: VideoProjectWordTiming[]; durationMs: number};
@@ -224,9 +225,14 @@ const Outro: React.FC<VideoProjectOutroProps> = ({project, vertical}) => {
   </AbsoluteFill>;
 };
 
+// A scene's footage: one registered asset or an ordered chain, each playing at
+// natural speed in turn. A video clip is an OffthreadVideo; a still (kind
+// "image") is an Img held for its share of the scene. Both take the same slow
+// push-in so a held still never reads as a freeze-frame. The chain rules come
+// from footage.mjs, shared with the producer and `timds video check`.
 const Media: React.FC<{project: VideoProject; scene: VideoProjectScene; duration: number; vertical?: boolean}> = ({project, scene, duration, vertical}) => {
   const frame = useCurrentFrame();
-  const keys = scene.assets || (scene.asset ? [scene.asset] : []);
+  const keys = sceneAssetKeys(scene);
   const fps = project.contract.fps;
   const availableFrames = keys.map((key) => {
     const asset = project.assets[key];
@@ -237,18 +243,24 @@ const Media: React.FC<{project: VideoProject; scene: VideoProjectScene; duration
   if (availableFrames.reduce((sum, value) => sum + value, 0) < duration) {
     throw new Error(`TimDS video: scene ${scene.id} exceeds its natural-speed footage chain; add another asset or shorten the scene`);
   }
+  for (const repeat of adjacentFootageRepeats([scene])) {
+    throw new Error(`TimDS video: scene ${scene.id} chains ${repeat.previous.key} directly into ${repeat.current.key}; back-to-back footage from one family is not allowed`);
+  }
+  const clipFramesByIndex = chainClipFrames(availableFrames, duration, Math.max(1, Math.round(MINIMUM_CHAIN_CLIP_SECONDS * fps)));
   let cursor = 0;
   return <AbsoluteFill>
     {keys.map((key, index) => {
       const asset = project.assets[key];
-      const remaining = duration - cursor;
-      const clipFrames = Math.min(availableFrames[index], remaining);
+      const clipFrames = clipFramesByIndex[index];
       const from = cursor;
       cursor += clipFrames;
       if (clipFrames <= 0) return null;
       const zoom = interpolate(frame, [0, Math.max(1, duration - 1)], [1.01, 1.065], {extrapolateLeft: "clamp", extrapolateRight: "clamp"});
+      const style = {width: "100%", height: "100%", objectFit: "cover" as const, objectPosition: asset.objectPosition || "50% 50%", transform: `${asset.flip ? "scaleX(-1) " : ""}scale(${zoom})`};
       return <Sequence key={key} from={from} durationInFrames={clipFrames}>
-        <OffthreadVideo muted src={staticFile(asset.src)} style={{width: "100%", height: "100%", objectFit: "cover", objectPosition: asset.objectPosition || "50% 50%", transform: `${asset.flip ? "scaleX(-1) " : ""}scale(${zoom})`}} />
+        {asset.kind === "image"
+          ? <Img src={staticFile(asset.src)} style={style} />
+          : <OffthreadVideo muted src={staticFile(asset.src)} style={style} />}
       </Sequence>;
     })}
     <AbsoluteFill style={{backgroundColor: project.contract.brand.colors.background, opacity: vertical ? 0.64 : 0.12}} />

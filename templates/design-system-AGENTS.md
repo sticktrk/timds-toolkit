@@ -55,10 +55,17 @@ selected `@dtconcepts/timds` release. If the client enables programmatic
 production, keep its role labels, CTA templates, and asset-key vocabulary in
 the contract's `producer` block.
 
+`video/lab/` holds compile requests for the contract's `producer` block; they
+are preview fixtures, not productions. `npm run timds -- video lab` runs one
+through the producer the way an automated Video Lab does and opens Remotion
+Studio on the result with this system's components, so visual changes are
+reviewed on the frames the lab will ship. Footage-chain and headline-copy
+rules come from `@dtconcepts/timds/video/footage`; do not copy them here.
+
 Keep generated audio, prepared media, generated entries, renders, thumbnails,
 and review packages under ignored `video-local/`. Validate committed records
-with `npm run timds -- video check` and use `video studio` or `video render`
-only for an explicitly selected production.
+and lab inputs with `npm run timds -- video check` and use `video studio` or
+`video render` only for an explicitly selected production.
 
 Regenerating components with `video components init --force` discards client
 changes and requires explicit authorization. A normal `timds upgrade` does not

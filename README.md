@@ -209,6 +209,16 @@ direction in the client system while TimDS owns the generic model boundary.
 The compiler rejects over-limit summaries and engagement questions; it never
 truncates model copy into a fragment to make it fit.
 
+The engine, the producer, and `timds video check` share one set of production
+rules from `@dtconcepts/timds/video/footage`: consecutive footage picks must
+come from different footage families (offset, mirrored, and vertical
+derivatives are one family; intro and outro cards break the sequence), a chain
+must cover its scene at natural speed with the last clip holding at least two
+seconds, a still (`kind: "image"`) is held under the same push-in as a clip, and
+a scene headline must be a complete thought — a dangling article, conjunction,
+or possessive fails the check. A client snapshot imports that module rather
+than copying it, so a toolkit fix reaches the client's frames without a reset.
+
 The Remotion export includes a complete default component set. A client Design
 System can fork those exact installed defaults into one complete, editable
 source module:
@@ -261,6 +271,32 @@ under ignored `video-local/`. Registered source media remains governed by the
 normal TimDS media catalog. The committed production records refer only to
 client-declared logical asset keys; render-time media is always played at its
 natural speed, and a scene fails when its approved footage chain is too short.
+
+### The video lab
+
+`video init` also scaffolds `video/lab/`: compile requests for the client's
+`producer` block, which the template contract now carries with generic role
+labels and CTA templates. A lab input is what an automated Video Lab hands
+`compileProduction()` after a model writes to the authoring contract, and the
+lab takes it the rest of the way exactly as a render host does — compile,
+silent word-share timing, deterministic footage and cover, staged brand files
+and published media, `createSingleVideoProjectRoot` with the client's
+components — then opens Remotion Studio on the result so the Design System
+editor sees the frames the lab will ship.
+
+```bash
+npm run timds -- video lab                 # first input under video/lab/, in the studio
+npm run timds -- video lab NAME            # video/lab/NAME.json
+npm run timds -- video lab NAME --plan     # compile + finalize; print the plan, no staging
+npm run timds -- video lab NAME --prepare  # stage media and write the entry only
+npm run timds -- video lab NAME --render   # TimDSVideo + TimDSCover to video-local/lab/NAME/out/
+npm run timds -- video lab --list          # lab inputs and ready productions
+```
+
+`video check` compiles every lab input and warns when the registered catalog
+cannot finalize one yet, so a new system can commit the sample before it has
+registered footage under the producer's `footage.assetPrefix` keys and a cover
+library under its `cover.assetPrefix` keys.
 
 ## Upgrade a client repository
 

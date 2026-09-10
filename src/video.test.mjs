@@ -7,8 +7,13 @@ import { fileURLToPath } from "node:url";
 import {
   checkVideoWorkspace,
   initializeVideoComponents,
+  initializeVideoWorkspace,
   normalizeVideoManifest,
+  planVideoLab,
+  prepareVideoLab,
   prepareVideoWorkspace,
+  runVideoLab,
+  silentSceneTimings,
   validateVideoContract,
 } from "./video.mjs";
 import { createVideoAuthoringContract, createVideoProducer } from "./video-producer.mjs";
@@ -122,6 +127,7 @@ test("normalizes the optional video manifest", () => {
     assets: "video/assets.json",
     productions: "video/productions",
     local: "video-local",
+    lab: "video/lab",
     components: null,
   });
   assert.equal(normalizeVideoManifest({ components: "video/remotion.tsx" }).components, "video/remotion.tsx");
@@ -144,6 +150,9 @@ test("copies the installed default components into client-owned source exactly o
   assert.match(generated, /tieOrphan = \(value: string\)/u);
   assert.match(generated, /useVideoConfig/u);
   assert.match(generated, /horizontalCoverScale/u);
+  assert.match(generated, /from "@dtconcepts\/timds\/video\/footage"/u);
+  assert.match(generated, /chainClipFrames\(availableFrames, duration/u);
+  assert.match(generated, /asset\.kind === "image"/u);
   assert.ok(generated.includes(snapshot));
   assert.match(generated, /export default defaultVideoProjectComponents/u);
   await assert.rejects(initializeVideoComponents(workspace), /already exist/u);
@@ -453,4 +462,184 @@ test("never chains footage from one family back to back, within or across scenes
   // The third scene ranks footage-one and its mirrored sibling first, but the
   // second scene just played that family; the cut must land on footage-two.
   assert.equal(finalized.plan.scenes.find((scene) => scene.id === "third").asset, "footage-two");
+});
+
+test("video init scaffolds the lab beside the contract, with a producer block that validates", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "timds-video-init-"));
+  t.after(() => fs.rm(root, { force: true, recursive: true }));
+  const manifestPath = path.join(root, "timds.json");
+  await writeJson(manifestPath, { schemaVersion: 2, systemId: "example/core", name: "Example", version: "1.0.0" });
+  const result = await initializeVideoWorkspace({ designSystemRoot: root, repoRoot: root, manifestPath, manifest: {} });
+
+  assert.equal(result.lab, path.join(root, "video", "lab"));
+  await fs.access(path.join(root, "video", "lab", "README.md"));
+  const sample = JSON.parse(await fs.readFile(path.join(root, "video", "lab", "sample-answer.json"), "utf8"));
+  assert.equal(sample.outputFormat, "horizontal");
+  const contract = validateVideoContract(JSON.parse(await fs.readFile(result.contract, "utf8")));
+  assert.equal(contract.producer.footage.assetPrefix, "footage-");
+  assert.equal(contract.producer.cover.assetPrefix, "cover-subject-");
+  assert.deepEqual(Object.keys(contract.producer.roleEyebrows).sort(), ["answer", "exception", "hook", "process", "risk", "rule"]);
+});
+
+test("rejects back-to-back footage from one family inside a committed production", async (t) => {
+  const workspace = await videoFixture(t, {
+    production: {
+      longform: {
+        cover: { headline: "What should I know?", asset: "cover" },
+        scenes: [
+          { id: "intro", intro: true },
+          { id: "answer", headline: "A clear answer", assets: ["footage", "footage-mirrored"] },
+          { id: "outro", outro: true },
+        ],
+      },
+    },
+  });
+  const assetsPath = path.join(workspace.designSystemRoot, "video", "assets.json");
+  const catalog = JSON.parse(await fs.readFile(assetsPath, "utf8"));
+  catalog.assets["footage-mirrored"] = { publicPath: "public/footage.mp4", durationSeconds: 20 };
+  await writeJson(assetsPath, catalog);
+  await assert.rejects(checkVideoWorkspace(workspace, { slug: "sample-topic" }), /plays footage \(scene answer\) directly into footage-mirrored \(scene answer\); back-to-back footage from one family/u);
+});
+
+test("rejects a committed headline that ends on a dangling word", async (t) => {
+  const workspace = await videoFixture(t, {
+    production: {
+      longform: {
+        cover: { headline: "What should I know?", asset: "cover" },
+        scenes: [
+          { id: "intro", intro: true },
+          { id: "answer", headline: "A clear answer for the", asset: "footage" },
+          { id: "outro", outro: true },
+        ],
+      },
+    },
+  });
+  await assert.rejects(checkVideoWorkspace(workspace, { slug: "sample-topic" }), /headline must be a complete thought .* appears truncated/u);
+});
+
+test("times a silent narration by word share with the words spread evenly inside each scene", () => {
+  const timings = silentSceneTimings([
+    { id: "intro", narration: "Should I keep these records?" },
+    { id: "records", narration: "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen" },
+  ], { wordsPerMinute: 150, minimumSceneSeconds: 2 });
+  assert.equal(timings[0].durationMs, 2000); // 5 of 20 words at 150 wpm is 2.0s, the minimum
+  assert.equal(timings[1].durationMs, 6000);
+  assert.equal(timings[1].words.length, 15);
+  assert.equal(timings[1].words.at(-1).endMs, 6000);
+  assert.ok(timings[1].words.every((word, index, list) => index === 0 || word.startMs === list[index - 1].endMs));
+});
+
+const sha = (seed) => seed.repeat(64).slice(0, 64);
+
+async function labFixture(t) {
+  const workspace = await videoFixture(t, {
+    contract: {
+      producer: {
+        schemaVersion: 1,
+        roleEyebrows: { hook: "In brief", rule: "The rule", risk: "The risk", process: "Next step", exception: "The exception", answer: "The answer" },
+        intro: { enabled: true, id: "intro" },
+        engagement: { formats: ["horizontal"], id: "engage", eyebrow: "Your turn", narrationTemplate: "{{question}} Tell us below.", requireYesNoQuestion: true },
+        outro: { id: "outro", narrationTemplate: "Learn more about {{topic}} at {{site}}." },
+        cover: { assetPrefix: "cover-subject-", defaultEmotion: "concern" },
+        footage: { assetPrefix: "footage-" },
+      },
+    },
+  });
+  const root = workspace.designSystemRoot;
+  await writeJson(path.join(root, "video", "assets.json"), {
+    schemaVersion: 1,
+    assets: {
+      cover: { publicPath: "public/cover.jpg" },
+      footage: { publicPath: "public/footage.mp4", durationSeconds: 20 },
+      "cover-subject-concern": { mediaKey: "cover-subject-concern", kind: "image" },
+      "footage-one": { mediaKey: "footage-one", durationSeconds: 6, subject: "center", flip: false, text: "left-center" },
+      "footage-two": { mediaKey: "footage-two", durationSeconds: 6, subject: "center", flip: false, text: "left-center" },
+      "footage-three": { mediaKey: "footage-three", durationSeconds: 6, subject: "center", flip: false, text: "left-center" },
+    },
+  });
+  await writeJson(path.join(root, "media.json"), {
+    schemaVersion: 2,
+    assets: [
+      { id: "cover-subject-concern-id", key: "cover-subject-concern", kind: "image", title: "Concern", filename: "concern.jpg", contentType: "image/jpeg", publicUrl: "https://media.example.com/concern.jpg", sha256: sha("a"), bytes: 5 },
+      ...["one", "two", "three"].map((name) => ({ id: `footage-${name}-id`, key: `footage-${name}`, kind: "video", title: name, filename: `${name}.mp4`, contentType: "video/mp4", publicUrl: `https://media.example.com/${name}.mp4`, sha256: sha("b"), bytes: 5, durationSeconds: 6 })),
+    ],
+  });
+  await writeJson(path.join(root, "video", "lab", "records.json"), {
+    schemaVersion: 1,
+    slug: "records",
+    outputFormat: "horizontal",
+    exactQuestion: "Should I keep these records?",
+    topic: { label: "important records", engagementQuestion: "Are you keeping these records?", coverEmotion: "concern" },
+    answerBeats: [
+      { id: "keep", role: "rule", narration: "Keep the records together and preserve every page, even the routine ones.", summary: "Keep every record together" },
+      { id: "copies", role: "process", narration: "Ask for copies before anything is filed.", summary: "Ask for copies first" },
+    ],
+  });
+  return workspace;
+}
+
+test("plans a lab input through the client producer: compiled structure, silent timings, deterministic footage and cover", async (t) => {
+  const workspace = await labFixture(t);
+  const planned = await planVideoLab(workspace, "records");
+  const { compiled, timings, finalized } = planned.lab;
+  assert.deepEqual(compiled.scenes.map((scene) => scene.id), ["intro", "keep", "copies", "engage", "outro"]);
+  assert.equal(compiled.scenes[1].eyebrow, "The rule");
+  assert.equal(timings.length, compiled.scenes.length);
+  assert.equal(finalized.coverSubject.key, "cover-subject-concern");
+  for (const scene of finalized.plan.scenes) {
+    if (scene.intro || scene.outro) continue;
+    for (const key of scene.assets || [scene.asset]) assert.match(key, /^footage-/u);
+  }
+  const listed = await runVideoLab(workspace, undefined, { list: true });
+  assert.match(listed.lines[0], /Lab inputs \(video\/lab\/\): records/u);
+  assert.match(listed.lines[1], /Ready productions \(video\/productions\/\): sample-topic/u);
+  const plan = await runVideoLab(workspace, "records", { plan: true });
+  assert.match(plan.lines[0], /^records · horizontal · Should I keep these records\?/u);
+  assert.match(plan.lines[0], /cover +cover-subject-concern/u);
+  await assert.rejects(planVideoLab(workspace, "missing"), /video lab input missing was not found/u);
+});
+
+test("prepares a lab input as the single-format project an automated Video Lab renders", async (t) => {
+  const workspace = await labFixture(t);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(Buffer.from("bytes"), { status: 200 });
+  t.after(() => { globalThis.fetch = originalFetch; });
+  await fs.writeFile(path.join(workspace.designSystemRoot, "video", "remotion.tsx"), "export default {};\n", "utf8");
+  workspace.manifest.video = normalizeVideoManifest({ components: "video/remotion.tsx" });
+
+  const prepared = await prepareVideoLab(workspace, "records");
+  const project = prepared.project;
+  assert.equal(project.records.production.outputFormat, "horizontal");
+  assert.equal(project.records.production.cover.asset, "cover-subject-concern");
+  assert.equal(project.assets["cover-subject-concern"].kind, "image");
+  assert.equal(project.records.production.audioSrc, null);
+  assert.deepEqual(project.records.captions.lines.map((line) => line.id), ["intro", "keep", "copies", "engage", "outro"]);
+  for (const scene of project.records.production.scenes) {
+    assert.equal("verticalAsset" in scene, false);
+    for (const key of scene.assets || (scene.asset ? [scene.asset] : [])) assert.ok(project.assets[key], `${key} staged`);
+  }
+  assert.equal(project.contract.brand.fontFiles[0].format, "woff2");
+  await fs.access(path.join(prepared.publicRoot, "media", "cover-subject-concern.jpg"));
+  const entry = await fs.readFile(prepared.entryPath, "utf8");
+  assert.match(entry, /import videoProjectComponents from "\.\.\/\.\.\/\.\.\/\.\.\/video\/remotion\.tsx"/u);
+  assert.match(entry, /createSingleVideoProjectRoot\(project, videoProjectComponents\)/u);
+  assert.ok(prepared.entryPath.startsWith(path.join(workspace.designSystemRoot, "video-local", "lab", "records")));
+});
+
+test("video check compiles every lab input and only warns when the catalog cannot finalize one yet", async (t) => {
+  const workspace = await labFixture(t);
+  const checked = await checkVideoWorkspace(workspace);
+  assert.deepEqual(checked.labInputs, [{ name: "records", finalized: true }]);
+  assert.deepEqual(checked.warnings, []);
+
+  const assetsPath = path.join(workspace.designSystemRoot, "video", "assets.json");
+  const catalog = JSON.parse(await fs.readFile(assetsPath, "utf8"));
+  for (const key of Object.keys(catalog.assets)) if (key.startsWith("footage-")) delete catalog.assets[key];
+  await writeJson(assetsPath, catalog);
+  const starved = await checkVideoWorkspace(workspace);
+  assert.deepEqual(starved.labInputs, [{ name: "records", finalized: false }]);
+  assert.match(starved.warnings[0], /lab input records compiles but cannot finalize yet/u);
+
+  await writeJson(path.join(workspace.designSystemRoot, "video", "lab", "broken.json"), { schemaVersion: 1, slug: "broken", outputFormat: "horizontal", exactQuestion: "No question mark", topic: { label: "x y" }, answerBeats: [] });
+  await assert.rejects(checkVideoWorkspace(workspace), /exactQuestion must end with a question mark/u);
 });

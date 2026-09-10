@@ -4,7 +4,8 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { readLocalMediaManifest, readMediaCatalog } from "./media.mjs";
-import { validateVideoProducerConfig } from "./video-producer.mjs";
+import { createVideoProducer, validateVideoProducerConfig } from "./video-producer.mjs";
+import { adjacentFootageRepeats, truncatedHeadline } from "../video/footage.mjs";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(import.meta.url);
@@ -129,6 +130,7 @@ export function normalizeVideoManifest(value) {
     assets: safeRelativePath(video.assets || "video/assets.json", "timds.json video.assets"),
     productions: safeRelativePath(video.productions || "video/productions", "timds.json video.productions"),
     local: safeRelativePath(video.local || "video-local", "timds.json video.local"),
+    lab: safeRelativePath(video.lab || "video/lab", "timds.json video.lab"),
     components: video.components
       ? safeRelativePath(video.components, "timds.json video.components")
       : null,
@@ -300,6 +302,7 @@ function validateScene(scene, label, contract, format) {
     const headline = text(scene.headline, `${label}.headline`);
     const headlineLimit = format === "short" ? contract.copy.shortHeadlineWords : contract.copy.horizontalHeadlineWords;
     if (words(headline).length > headlineLimit) throw new Error(`${label}.headline exceeds ${headlineLimit} words`);
+    if (truncatedHeadline(headline)) throw new Error(`${label}.headline must be a complete thought within its word limit; it appears truncated: ${JSON.stringify(headline)}`);
     if (scene.eyebrow && words(scene.eyebrow).length > contract.copy.eyebrowWords) throw new Error(`${label}.eyebrow exceeds ${contract.copy.eyebrowWords} words`);
     if (format === "short" && scene.subline) throw new Error(`${label}.subline is not supported in shorts`);
     if (scene.subline && words(scene.subline).length > contract.copy.horizontalSublineWords) throw new Error(`${label}.subline exceeds ${contract.copy.horizontalSublineWords} words`);
@@ -325,6 +328,13 @@ function validateCover(cover, label, contract) {
   return { ...cover, headline, asset: slug(cover.asset, `${label}.asset`) };
 }
 
+function assertNoAdjacentFootageRepeats(scenes, label) {
+  const [repeat] = adjacentFootageRepeats(scenes);
+  if (repeat) {
+    throw new Error(`${label} plays ${repeat.previous.key} (scene ${repeat.previous.scene}) directly into ${repeat.current.key} (scene ${repeat.current.scene}); back-to-back footage from one family is not allowed`);
+  }
+}
+
 function validateProduction(records, contract, assetCatalog, label) {
   const { production, captions, publishing, request, script } = records;
   if (Number(production.schemaVersion) !== VIDEO_SCHEMA_VERSION) throw new Error(`${label}/production.json schemaVersion must be ${VIDEO_SCHEMA_VERSION}`);
@@ -340,6 +350,7 @@ function validateProduction(records, contract, assetCatalog, label) {
   if (contract.structure.longform.requireOutro && !longScenes.at(-1).outro) throw new Error(`${label} longform must end with outro`);
   for (const scene of longScenes) if (!lineIds.has(scene.id)) throw new Error(`${label} longform scene ${scene.id} has no caption line`);
   for (const scene of longScenes) validateNaturalSpeedFootage(scene, linesById.get(scene.id), longform.pads, contract, assetCatalog, `${label} longform scene ${scene.id}`);
+  assertNoAdjacentFootageRepeats(longScenes, `${label} longform`);
   const shorts = (production.shorts || []).map((short, shortIndex) => {
     object(short, `${label} short ${shortIndex + 1}`);
     const id = slug(short.id, `${label} short ${shortIndex + 1}.id`);
@@ -352,6 +363,7 @@ function validateProduction(records, contract, assetCatalog, label) {
     if (contract.structure.short.requireIntro && !scenes[0].intro) throw new Error(`${label} short ${id} must begin with intro`);
     if (contract.structure.short.requireOutro && !scenes.at(-1).outro) throw new Error(`${label} short ${id} must end with outro`);
     for (const scene of scenes) validateNaturalSpeedFootage(scene, linesById.get(scene.id), short.pads, contract, assetCatalog, `${label} short ${id} scene ${scene.id}`);
+    assertNoAdjacentFootageRepeats(scenes, `${label} short ${id}`);
     return { ...short, id, harvest, scenes, cover: validateCover(short.cover, `${label} short ${id}.cover`, contract) };
   });
   if (shorts.length !== contract.package.shortCount) throw new Error(`${label} has ${shorts.length} shorts; contract requires ${contract.package.shortCount}`);
@@ -372,6 +384,7 @@ export async function loadVideoWorkspace(workspace, { slug: selectedSlug } = {})
   const assetsPath = path.join(workspace.designSystemRoot, video.assets);
   const productionsRoot = path.join(workspace.designSystemRoot, video.productions);
   const localRoot = path.join(workspace.designSystemRoot, video.local);
+  const labRoot = path.join(workspace.designSystemRoot, video.lab || "video/lab");
   const componentsPath = video.components
     ? path.join(workspace.designSystemRoot, video.components)
     : null;
@@ -390,7 +403,7 @@ export async function loadVideoWorkspace(workspace, { slug: selectedSlug } = {})
     productions.push(validateProduction(values, contract, assets, productionSlug));
   }
   if (selectedSlug && !productions.length) throw new Error(`video production ${selectedSlug} was not found`);
-  return { ...workspace, video: { ...video, assets, assetsPath, componentsPath, contract, contractPath, localRoot, productions, productionsRoot } };
+  return { ...workspace, video: { ...video, assets, assetsPath, componentsPath, contract, contractPath, labRoot, localRoot, productions, productionsRoot } };
 }
 
 export async function checkVideoWorkspace(workspace, options = {}) {
@@ -401,7 +414,198 @@ export async function checkVideoWorkspace(workspace, options = {}) {
   for (const [key, asset] of Object.entries(loaded.video.assets.assets)) {
     if (asset.mediaKey && !registered.has(asset.mediaKey)) warnings.push(`${key}: mediaKey ${asset.mediaKey} is not registered in media.json`);
   }
-  return { ...loaded, productionCount: loaded.video.productions.length, warnings };
+  // Every lab input must compile: it is the request an automated Video Lab
+  // hands the producer, so a broken one is a broken preview. Finalizing needs
+  // registered footage and a cover library, which a new system may not have
+  // yet, so that stage only warns here; `timds video lab` fails on it.
+  const labInputs = [];
+  for (const name of await listVideoLabInputs(loaded.video.labRoot)) {
+    const { compiled, producer } = await compileVideoLabInput(loaded, catalog, name);
+    try {
+      producer.finalizeProduction({ schemaVersion: VIDEO_SCHEMA_VERSION, compiled, timings: silentSceneTimings(compiled.scenes), audioSrc: null });
+      labInputs.push({ name, finalized: true });
+    } catch (caught) {
+      warnings.push(`lab input ${name} compiles but cannot finalize yet: ${caught instanceof Error ? caught.message : String(caught)}`);
+      labInputs.push({ name, finalized: false });
+    }
+  }
+  return { ...loaded, productionCount: loaded.video.productions.length, labInputs, warnings };
+}
+
+// --- video lab -----------------------------------------------------------------
+//
+// A lab input is the compile request an automated Video Lab hands the producer:
+// the exact question, a topic label, and ordered answer beats. The lab takes it
+// the rest of the way exactly as an automated render host does — compile
+// through the client's producer block, time the narration, finalize footage
+// and cover deterministically, stage brand files and published media, mount
+// the single-format root with the client's components — and then opens
+// Remotion Studio instead of rendering, so the Design System editor sees the
+// frames the lab will ship.
+
+export async function listVideoLabInputs(labRoot) {
+  try {
+    return (await fs.readdir(labRoot)).filter((entry) => entry.endsWith(".json")).map((entry) => entry.slice(0, -".json".length)).sort();
+  } catch (caught) {
+    if (caught?.code === "ENOENT") return [];
+    throw caught;
+  }
+}
+
+/**
+ * Silent narration timing, the way an automated lab times a render without
+ * audio: the total runtime follows the narration length, each scene takes its
+ * share by word count, and the words spread evenly inside the scene so
+ * captions still page. A voiced production replaces this with measured words.
+ */
+export function silentSceneTimings(scenes, { wordsPerMinute = 150, minimumSceneSeconds = 2 } = {}) {
+  const counts = scenes.map((scene) => words(scene.narration).length);
+  const total = counts.reduce((sum, count) => sum + count, 0);
+  if (!total) throw new Error("video lab: every scene needs narration");
+  const totalMs = (total / wordsPerMinute) * 60 * 1000;
+  return scenes.map((scene, index) => {
+    const durationMs = Math.max(minimumSceneSeconds * 1000, Math.round((totalMs * counts[index]) / total));
+    const tokens = words(scene.narration);
+    const slice = durationMs / Math.max(1, tokens.length);
+    return {
+      id: scene.id,
+      durationMs,
+      words: tokens.map((token, position) => ({ text: token, startMs: Math.round(position * slice), endMs: Math.max(1, Math.round((position + 1) * slice)) })),
+    };
+  });
+}
+
+async function compileVideoLabInput(loaded, mediaCatalog, name) {
+  if (!loaded.video.contract.producer) throw new Error(`video lab input ${name} needs a producer block in ${loaded.video.contract.name}'s video contract`);
+  const input = await readJson(path.join(loaded.video.labRoot, `${name}.json`), `video lab input ${name}`);
+  const producer = createVideoProducer({ contract: loaded.video.contract, assetCatalog: loaded.video.assets, mediaCatalog });
+  const compiled = producer.compileProduction(input);
+  for (const scene of compiled.scenes) {
+    if (truncatedHeadline(scene.headline)) throw new Error(`video lab input ${name}: scene ${scene.id} headline appears truncated: ${JSON.stringify(scene.headline)}`);
+  }
+  return { input, producer, compiled };
+}
+
+export async function planVideoLab(workspace, requestedName) {
+  const loaded = await loadVideoWorkspace(workspace);
+  const names = await listVideoLabInputs(loaded.video.labRoot);
+  const name = requestedName ? (names.includes(requestedName) ? requestedName : null) : (names[0] ?? null);
+  if (!name) {
+    throw new Error(requestedName
+      ? `video lab input ${requestedName} was not found under ${loaded.video.lab} (available: ${names.join(", ") || "none"})`
+      : `no video lab input under ${loaded.video.lab}; add a compile request there (see its README.md)`);
+  }
+  const { catalog: mediaCatalog } = await readMediaCatalog(workspace.designSystemRoot);
+  const { input, producer, compiled } = await compileVideoLabInput(loaded, mediaCatalog, name);
+  const timings = silentSceneTimings(compiled.scenes);
+  const finalized = producer.finalizeProduction({ schemaVersion: VIDEO_SCHEMA_VERSION, compiled, timings, audioSrc: null });
+  return { ...loaded, lab: { name, names, input, compiled, timings, finalized } };
+}
+
+export function describeVideoLabPlan({ compiled, timings, finalized }) {
+  const byId = new Map(timings.map((line) => [line.id, line]));
+  const lines = [`${compiled.slug} · ${compiled.outputFormat} · ${compiled.exactQuestion}`];
+  for (const scene of finalized.plan.scenes) {
+    const seconds = (byId.get(scene.id).durationMs / 1000).toFixed(1);
+    const footage = scene.intro || scene.outro ? "card" : (scene.assets || [scene.asset]).join(" → ");
+    lines.push(`  ${scene.id.padEnd(14)} ${seconds.padStart(5)}s  ${(scene.eyebrow || "").padEnd(22)} ${scene.headline || ""}`);
+    lines.push(`  ${"".padEnd(14)}        ${footage}`);
+  }
+  lines.push(`  cover          ${finalized.coverSubject.key} · ${finalized.plan.cover.eyebrow} · ${finalized.plan.cover.headline}`);
+  return lines.join("\n");
+}
+
+/** The scene list a single-format root plays: horizontal masters or short verticals, nothing else. */
+export const singleFormatScenes = (finalized) => finalized.plan.scenes.map((scene) => {
+  const { asset, assets, verticalAsset, verticalAssets, ...copy } = scene;
+  if (scene.intro || scene.outro) return copy;
+  if (finalized.plan.outputFormat === "short") {
+    if (!verticalAsset && !verticalAssets?.length) throw new Error(`video lab: short scene ${scene.id} has no vertical footage; register each clip's vertical derivative`);
+    return { ...copy, ...(verticalAssets?.length ? { assets: verticalAssets } : { asset: verticalAsset }) };
+  }
+  return { ...copy, ...(assets?.length ? { assets } : { asset }) };
+});
+
+export async function prepareVideoLab(workspace, requestedName) {
+  const planned = await planVideoLab(workspace, requestedName);
+  const { name, finalized } = planned.lab;
+  const labLocal = path.join(planned.video.localRoot, "lab", name);
+  const publicRoot = path.join(labLocal, "public");
+  const generatedRoot = path.join(labLocal, "generated");
+  await fs.mkdir(publicRoot, { recursive: true });
+  await fs.mkdir(generatedRoot, { recursive: true });
+  const { manifest: localManifest } = await readLocalMediaManifest(workspace.designSystemRoot);
+  const { catalog: mediaCatalog } = await readMediaCatalog(workspace.designSystemRoot);
+  const stagedAssets = {};
+  for (const key of unique([...finalized.footage.map((media) => media.key), finalized.coverSubject.key])) {
+    stagedAssets[key] = await stageAsset(workspace, key, planned.video.assets.assets[key], publicRoot, localManifest, mediaCatalog);
+  }
+  stagedAssets[finalized.coverSubject.key] = { ...stagedAssets[finalized.coverSubject.key], kind: "image" };
+  const stagedBrand = await stageBrandFiles(workspace, planned.video.contract, publicRoot);
+  const project = {
+    schemaVersion: VIDEO_SCHEMA_VERSION,
+    engine: { name: "@dtconcepts/timds", version: (await readJson(path.join(packageRoot, "package.json"), "TimDS package.json")).version },
+    contract: { ...planned.video.contract, brand: { ...planned.video.contract.brand, ...stagedBrand } },
+    assets: stagedAssets,
+    records: {
+      captions: { lines: finalized.plan.lines },
+      production: {
+        schemaVersion: VIDEO_SCHEMA_VERSION,
+        slug: finalized.plan.slug,
+        outputFormat: finalized.plan.outputFormat,
+        scenes: singleFormatScenes(finalized),
+        pads: finalized.plan.pads,
+        audioSrc: finalized.plan.audioSrc,
+        cover: { eyebrow: finalized.plan.cover.eyebrow, headline: finalized.plan.cover.headline, asset: finalized.coverSubject.key },
+      },
+      publishing: {},
+      request: {},
+      script: {},
+    },
+  };
+  const projectPath = path.join(generatedRoot, `${name}.json`);
+  const entryPath = path.join(generatedRoot, `${name}.mjs`);
+  const componentImport = planned.video.componentsPath
+    ? `import videoProjectComponents from ${JSON.stringify(path.relative(generatedRoot, planned.video.componentsPath).replaceAll(path.sep, "/").replace(/^(?!\.)/u, "./"))};\n`
+    : "const videoProjectComponents = {};\n";
+  await fs.writeFile(projectPath, `${JSON.stringify(project, null, 2)}\n`, "utf8");
+  await fs.writeFile(entryPath, `import project from ${JSON.stringify(`./${path.basename(projectPath)}`)};\n${componentImport}import { registerRoot } from "remotion";\nimport { createSingleVideoProjectRoot, loadVideoProjectFonts } from "@dtconcepts/timds/video/remotion";\nloadVideoProjectFonts(project);\nregisterRoot(createSingleVideoProjectRoot(project, videoProjectComponents));\n`, "utf8");
+  return { ...planned, entryPath, project, projectPath, publicRoot, outputRoot: path.join(labLocal, "out") };
+}
+
+export async function runVideoLab(workspace, requestedName, options = {}) {
+  const log = options.log || (() => {});
+  if (options.list) {
+    const loaded = await loadVideoWorkspace(workspace);
+    const names = await listVideoLabInputs(loaded.video.labRoot);
+    const lines = [
+      `Lab inputs (${loaded.video.lab}/): ${names.join(", ") || "none"}`,
+      `Ready productions (${workspace.manifest.video.productions}/): ${loaded.video.productions.map((production) => production.production.slug).join(", ") || "none"}`,
+    ];
+    for (const line of lines) log(line);
+    return { ...loaded, lines };
+  }
+  if (options.plan) {
+    const planned = await planVideoLab(workspace, requestedName);
+    const lines = [describeVideoLabPlan(planned.lab)];
+    for (const line of lines) log(line);
+    return { ...planned, lines };
+  }
+  const prepared = await prepareVideoLab(workspace, requestedName);
+  const lines = [describeVideoLabPlan(prepared.lab), `Entry ${path.relative(workspace.designSystemRoot, prepared.entryPath)} (${prepared.video.componentsPath ? path.relative(workspace.designSystemRoot, prepared.video.componentsPath) : "TimDS default components"})`];
+  for (const line of lines) log(line);
+  if (options.prepare) return { ...prepared, lines };
+  const remotion = path.join(path.dirname(require.resolve("@remotion/cli/package.json")), "remotion-cli.js");
+  const common = ["--public-dir", prepared.publicRoot];
+  if (options.render) {
+    await fs.mkdir(prepared.outputRoot, { recursive: true });
+    await run(process.execPath, [remotion, "render", prepared.entryPath, "TimDSVideo", path.join(prepared.outputRoot, `${prepared.lab.name}.mp4`), "--codec=h264", ...common, "--log=error"], { cwd: workspace.designSystemRoot });
+    await run(process.execPath, [remotion, "still", prepared.entryPath, "TimDSCover", path.join(prepared.outputRoot, "thumbnail.jpg"), "--image-format=jpeg", "--jpeg-quality=90", ...common, "--log=error"], { cwd: workspace.designSystemRoot });
+    log(`Rendered ${path.relative(workspace.designSystemRoot, prepared.outputRoot)}`);
+    return { ...prepared, lines };
+  }
+  await run(process.execPath, [remotion, "studio", prepared.entryPath, ...common], { cwd: workspace.designSystemRoot });
+  return { ...prepared, lines };
 }
 
 async function copyTemplate(source, destination) {
@@ -415,7 +619,7 @@ async function defaultVideoComponentsTemplate() {
   const end = remotionSource.indexOf(DEFAULT_COMPONENTS_END);
   if (start < 0 || end < start) throw new Error("TimDS default video component snapshot markers are missing");
   const componentSource = remotionSource.slice(start, end + DEFAULT_COMPONENTS_END.length);
-  return `// Generated once from the installed TimDS defaults. This file is now owned by this Design System.\n// TimDS upgrades do not overwrite it; use \`timds video components init --force\` only to reset it.\nimport React, {useMemo} from "react";\nimport {Audio} from "@remotion/media";\nimport {AbsoluteFill, Img, OffthreadVideo, Sequence, interpolate, staticFile, useCurrentFrame, useVideoConfig} from "remotion";\nimport type {\n  VideoProject,\n  VideoProjectAsset,\n  VideoProjectCaptionLine,\n  VideoProjectComponentOverrides,\n  VideoProjectCover,\n  VideoProjectCoverProps,\n  VideoProjectIntroProps,\n  VideoProjectOutroProps,\n  VideoProjectScene,\n  VideoProjectSceneProps,\n  VideoProjectVideoProps,\n} from "@dtconcepts/timds/video/remotion";\n\n${DEFAULT_VIDEO_TEXT_SOURCE}\n\n${componentSource}\n\nexport {BrandWatermark, CaptionPages, Cover, CoverVisual, GoldHeadline, HorizontalCover, Intro, Media, Outro, SceneView, VerticalCover, Video};\nexport default defaultVideoProjectComponents;\n`;
+  return `// Generated once from the installed TimDS defaults. This file is now owned by this Design System.\n// TimDS upgrades do not overwrite it; use \`timds video components init --force\` only to reset it.\n// Footage-chain rules are imported from the toolkit on purpose: they are production rules, not styling,\n// and \`timds video check\` enforces the same module, so a toolkit fix reaches these frames without a reset.\nimport React, {useMemo} from "react";\nimport {Audio} from "@remotion/media";\nimport {AbsoluteFill, Img, OffthreadVideo, Sequence, interpolate, staticFile, useCurrentFrame, useVideoConfig} from "remotion";\nimport {MINIMUM_CHAIN_CLIP_SECONDS, adjacentFootageRepeats, chainClipFrames, sceneAssetKeys} from "@dtconcepts/timds/video/footage";\nimport type {\n  VideoProject,\n  VideoProjectAsset,\n  VideoProjectCaptionLine,\n  VideoProjectComponentOverrides,\n  VideoProjectCover,\n  VideoProjectCoverProps,\n  VideoProjectIntroProps,\n  VideoProjectOutroProps,\n  VideoProjectScene,\n  VideoProjectSceneProps,\n  VideoProjectVideoProps,\n} from "@dtconcepts/timds/video/remotion";\n\n${DEFAULT_VIDEO_TEXT_SOURCE}\n\n${componentSource}\n\nexport {BrandWatermark, CaptionPages, Cover, CoverVisual, GoldHeadline, HorizontalCover, Intro, Media, Outro, SceneView, VerticalCover, Video};\nexport default defaultVideoProjectComponents;\n`;
 }
 
 export async function initializeVideoComponents(workspace, { force = false } = {}) {
@@ -448,7 +652,7 @@ export async function initializeVideoWorkspace(workspace, { force = false } = {}
   await fs.writeFile(manifestPath, `${JSON.stringify(rawManifest, null, 2)}\n`, "utf8");
   const destination = path.join(workspace.designSystemRoot, "video");
   await fs.mkdir(path.join(destination, "productions"), { recursive: true });
-  for (const name of ["contract.json", "assets.json"]) {
+  for (const name of ["contract.json", "assets.json", "lab/README.md", "lab/sample-answer.json"]) {
     const target = path.join(destination, name);
     if (!existsSync(target) || force) await copyTemplate(path.join(packageRoot, "templates", "video", name), target);
   }
@@ -458,7 +662,7 @@ export async function initializeVideoWorkspace(workspace, { force = false } = {}
   const ignorePath = path.join(workspace.designSystemRoot, ".gitignore");
   const currentIgnore = await fs.readFile(ignorePath, "utf8").catch(() => "");
   if (!currentIgnore.split(/\r?\n/).includes("video-local/")) await fs.appendFile(ignorePath, `${currentIgnore.endsWith("\n") || !currentIgnore ? "" : "\n"}video-local/\n`);
-  return { contract: path.join(destination, "contract.json"), assets: path.join(destination, "assets.json"), skillDestination };
+  return { contract: path.join(destination, "contract.json"), assets: path.join(destination, "assets.json"), lab: path.join(destination, "lab"), skillDestination };
 }
 
 function referencedAssetKeys(production) {
@@ -657,6 +861,6 @@ export async function voiceoverVideoWorkspace(workspace, selectedSlug, options =
   return { outputRoot, production: production.production.slug };
 }
 
-export const VIDEO_HELP = `TimDS video workflow\n\nUsage:\n  timds video init [--root PATH] [--force]\n  timds video components init [--root PATH] [--force]\n  timds video doctor [--root PATH]\n  timds video check [SLUG] [--root PATH]\n  timds video prepare SLUG [--root PATH]\n  timds video voiceover SLUG [--root PATH] [--force]\n  timds video studio SLUG [--root PATH]\n  timds video render SLUG [--root PATH] [--date YYYY-MM-DD]\n\nThe client Design System owns video/contract.json, video/assets.json, brand files, production records, and any generated component snapshot. TimDS owns validation, media staging, voiceover orchestration, default components, rendering, and review packaging. Generating components copies the installed defaults once; upgrades never overwrite that client-owned file.`;
+export const VIDEO_HELP = `TimDS video workflow\n\nUsage:\n  timds video init [--root PATH] [--force]\n  timds video components init [--root PATH] [--force]\n  timds video doctor [--root PATH]\n  timds video check [SLUG] [--root PATH]\n  timds video lab [NAME] [--root PATH] [--plan] [--prepare] [--render] [--list]\n  timds video prepare SLUG [--root PATH]\n  timds video voiceover SLUG [--root PATH] [--force]\n  timds video studio SLUG [--root PATH]\n  timds video render SLUG [--root PATH] [--date YYYY-MM-DD]\n\nThe client Design System owns video/contract.json, video/assets.json, video/lab/ compile requests, brand files, production records, and any generated component snapshot. TimDS owns validation, the producer, media staging, voiceover orchestration, default components, the lab, rendering, and review packaging. Generating components copies the installed defaults once; upgrades never overwrite that client-owned file.\n\nThe lab runs a video/lab/NAME.json compile request the way an automated Video Lab does — producer compile, silent timing, deterministic footage and cover, staged media — and opens Remotion Studio on the result with the client's components; --plan prints the plan without staging, --prepare stages without launching, --render writes the video and cover under video-local/lab/NAME/out/. check compiles every lab input and warns when the catalog cannot finalize one yet.`;
 
 export { VIDEO_SCHEMA_VERSION };

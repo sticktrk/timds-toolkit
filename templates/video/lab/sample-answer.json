@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "slug": "sample-answer",
+  "outputFormat": "horizontal",
+  "exactQuestion": "Should I keep these records?",
+  "topic": {
+    "label": "important records",
+    "engagementQuestion": "Are you keeping these records?",
+    "coverEmotion": "concern"
+  },
+  "answerBeats": [
+    {
+      "id": "records",
+      "role": "rule",
+      "narration": "Keep the records together and preserve every page, even the ones that look routine.",
+      "summary": "Keep every record together"
+    },
+    {
+      "id": "copies",
+      "role": "process",
+      "narration": "Ask for copies before anything is filed, and keep the originals where you can find them.",
+      "summary": "Ask for copies first"
+    },
+    {
+      "id": "answer",
+      "role": "answer",
+      "narration": "So yes: keep them, keep them together, and keep them until the matter is closed.",
+      "summary": "Keep them until it closes"
+    }
+  ]
+}

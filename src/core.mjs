@@ -23,6 +23,7 @@ import { publishExtractedIndex } from "./artifact.mjs";
 import { extractArtifact, normalizeMachineConfig } from "./extract.mjs";
 import {
   VIDEO_HELP,
+  runVideoLab,
   checkVideoWorkspace,
   initializeVideoComponents,
   initializeVideoWorkspace,
@@ -848,7 +849,7 @@ function parseArguments(argv) {
     }
     const [rawName, inlineValue] = value.replace(/^--?/, "").split("=", 2);
     const name = ({ m: "message", p: "port" })[rawName] || rawName.replace(/-([a-z])/g, (_match, letter) => letter.toUpperCase());
-    if (["autoRelease", "dryRun", "force", "help", "noBuild", "noOpen", "noPr", "noPush", "publish", "requireCleanDist", "skipBuild", "standalone"].includes(name)) {
+    if (["autoRelease", "dryRun", "force", "help", "list", "noBuild", "noOpen", "noPr", "noPush", "plan", "prepare", "publish", "render", "requireCleanDist", "skipBuild", "standalone"].includes(name)) {
       options[name] = true;
       continue;
     }
@@ -1006,6 +1007,9 @@ export async function runCli(argv) {
       output(`TimDS video check passed: ${result.productionCount} production${result.productionCount === 1 ? "" : "s"}.`);
       for (const warning of result.warnings) output(`Warning: ${warning}`);
       return result;
+    }
+    if (videoCommand === "lab") {
+      return runVideoLab(workspace, videoArgument || undefined, { list: Boolean(options.list), plan: Boolean(options.plan), prepare: Boolean(options.prepare), render: Boolean(options.render), log: output });
     }
     if (!videoArgument) throw new Error(`video ${videoCommand} requires a production slug`);
     if (videoCommand === "prepare") {

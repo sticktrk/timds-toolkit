@@ -40,7 +40,12 @@ production records, and output policy belong under that client's Design System
 and must never enter this package.
 
 TimDS owns the complete default Remotion component set, the typed partial
-override contract, and the one-time component snapshot generator. Client
+override contract, the one-time component snapshot generator, the shared
+production rules in `video/footage.mjs` (footage families, natural-speed
+chains, headline copy) that the components, the producer, and `video check`
+all import, and the `video lab` command that previews a producer compile
+request the way an automated Video Lab renders it. A generated snapshot
+imports the rules module rather than copying it. Client
 Design Systems may generate a complete editable snapshot or implement partial
 visual overrides against that contract. Never overwrite a generated snapshot
 during `upgrade`; only `video components init --force` intentionally resets it.
