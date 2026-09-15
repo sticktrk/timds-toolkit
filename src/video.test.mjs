@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import {
   checkVideoWorkspace,
   descriptionFor,
+  exportVideoPublishing,
   initializeVideoComponents,
   initializeVideoWorkspace,
   normalizeVideoManifest,
@@ -378,6 +379,8 @@ test("video init scaffolds the lab beside the contract, with a producer block th
   const contract = validateVideoContract(JSON.parse(await fs.readFile(result.contract, "utf8")));
   assert.equal(contract.producer.footage.assetPrefix, "footage-");
   assert.equal(contract.producer.cover.assetPrefix, "cover-subject-");
+  assert.deepEqual(Object.keys(contract.publishing.targets), ["youtube_short", "facebook_reel", "instagram_reel"]);
+  await fs.access(path.join(root, "video", "publishing.md"));
   assert.deepEqual(Object.keys(contract.producer.roleEyebrows).sort(), ["answer", "exception", "hook", "process", "risk", "rule"]);
 });
 
@@ -619,4 +622,46 @@ test("lets the producer speak a shorter outro in Shorts than in the long-form", 
   assert.equal(producer.compileProduction(request("horizontal")).scenes.at(-1).narration, "Learn more about important records from Example Answers at example.com.");
   const blank = validateVideoContract({ ...bannerContractBase, producer: { ...contract.producer, outro: { narrationTemplate: "Learn more.", narrationTemplates: { short: "" } } } });
   assert.deepEqual(blank.producer.outro.narrationTemplates, {});
+});
+
+test("exports separate platform copy without rendering and preserves legacy records", async (t) => {
+  const policy = { brief: "Describe this clip", maxCharacters: 300, maxCopyCharacters: 120, shortArticleLink: false };
+  const workspace = await videoFixture(t, { contract: { publishing: {
+    disclaimer: "Original disclaimer.",
+    targetDefaults: { shortDisclaimer: "Information only." },
+    targets: {
+      youtube_short: { ...policy, shortBridge: "example.com/watch" },
+      facebook_reel: { ...policy, shortBridge: "Learn more: https://example.com/facebook" },
+      instagram_reel: { ...policy, shortBridge: "Save for later." },
+    },
+  } } });
+  const recordPath = path.join(workspace.designSystemRoot, "video/productions/sample-topic/publishing.json");
+  const publishing = JSON.parse(await fs.readFile(recordPath, "utf8"));
+  const legacy = await exportVideoPublishing(workspace, "sample-topic", { date: "2026-01-01" });
+  const directory = path.join(legacy.outputRoot, "Short form -Sample");
+  const original = await fs.readFile(path.join(directory, "description.md"), "utf8");
+  assert.match(original, /A clear answer/);
+  assert.match(original, /Original disclaimer/);
+  assert.doesNotMatch(original, /Information only/);
+  await assert.rejects(fs.access(path.join(directory, "description.facebook_reel.md")), /ENOENT/);
+  publishing.shorts[0].descriptions = {
+    youtube_short: "One step to start.",
+    facebook_reel: "Starting can feel complicated. Here is a useful first step.",
+    instagram_reel: "Start with this small step.",
+  };
+  await writeJson(recordPath, publishing);
+  await checkVideoWorkspace(workspace);
+  await exportVideoPublishing(workspace, "sample-topic", { date: "2026-01-01" });
+  const youtube = await fs.readFile(path.join(directory, "description.youtube_short.md"), "utf8");
+  const facebook = await fs.readFile(path.join(directory, "description.facebook_reel.md"), "utf8");
+  assert.equal(youtube, "One step to start.\n\nAnswers\n\nexample.com/watch\n\nInformation only.\n");
+  assert.match(facebook, /Starting can feel complicated[\s\S]*https:\/\/example.com\/facebook/);
+  assert.doesNotMatch(facebook, /example.com\/watch|example.com\/sample/);
+  assert.equal(await fs.readFile(path.join(directory, "description.md"), "utf8"), youtube);
+  delete publishing.shorts[0].descriptions.instagram_reel;
+  await writeJson(recordPath, publishing);
+  await assert.rejects(checkVideoWorkspace(workspace), /Missing instagram_reel/);
+  publishing.shorts[0].descriptions.instagram_reel = "x".repeat(121);
+  await writeJson(recordPath, publishing);
+  await assert.rejects(checkVideoWorkspace(workspace), /copy exceeds 120/);
 });

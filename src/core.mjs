@@ -25,6 +25,7 @@ import {
   VIDEO_HELP,
   runVideoLab,
   checkVideoWorkspace,
+  exportVideoPublishing,
   initializeVideoComponents,
   initializeVideoWorkspace,
   normalizeVideoManifest,
@@ -1016,6 +1017,11 @@ export async function runCli(argv) {
       return runVideoLab(workspace, videoArgument || undefined, { list: Boolean(options.list), plan: Boolean(options.plan), prepare: Boolean(options.prepare), render: Boolean(options.render), log: output });
     }
     if (!videoArgument) throw new Error(`video ${videoCommand} requires a production slug`);
+    if (videoCommand === "publishing") {
+      const result = await exportVideoPublishing(workspace, videoArgument, options);
+      output(`Publishing copy: ${result.outputRoot}`);
+      return result;
+    }
     if (videoCommand === "prepare") {
       const result = await prepareVideoWorkspace(workspace, videoArgument);
       output(`Prepared TimDS video ${videoArgument}: ${result.projectPath}`);

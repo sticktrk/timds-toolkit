@@ -98,8 +98,15 @@ freezing or slowing it.
 
 Inspect the generated package for the client contract's visual, audio,
 accessibility, legal, and publishing gates. Check the first, middle, and final
-frame of people footage for copy collisions. Confirm every description links
-the declared source and every output contains the correct real brand mark.
+frame of people footage for copy collisions. For each short, author separate `descriptions` entries in `publishing.json`
+for the targets under `video/contract.json → publishing.targets`, following
+each target brief. These entries contain clip-specific copy only; TimDS adds
+the configured source link, CTA, series line, and disclaimer. Preserve necessary
+qualifications and revise oversized copy instead of truncating it. Run
+`npm run timds -- video publishing SLUG` to review/export the exact platform
+text without rendering again. Existing records without a variants map retain
+their legacy description; do not migrate them unless requested. Confirm each
+platform output follows its source-link policy and contains the correct brand.
 
 Return the absolute review-package path. Do not commit ignored audio, staged
 media, generated covers, or rendered video. Do not push, publish, upload, or
