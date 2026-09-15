@@ -177,9 +177,10 @@ npm run timds -- defaults --apply
 ```
 
 Run defaults application on a feature branch. It migrates shared publishing
-wording and budgets, retaining client overrides and recording the supplied
-values in `.timds/defaults.json`. Commit that baseline with the contract so the
-next update can advance unchanged defaults. Review the diff and run `timds check`.
+wording and budgets, retaining inherited client policy and recording supplied
+values and persistent override paths in `.timds/defaults.json`. Commit that
+baseline with the contract so updates advance unchanged defaults and keep client
+choices, even when a later default matches them. Review the diff and run `timds check`.
 
 An older standalone repository adopts the managed automatic release flow with
 `npm run timds -- upgrade --root . --auto-release`. The command refuses

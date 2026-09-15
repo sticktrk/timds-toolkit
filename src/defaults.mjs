@@ -10,33 +10,57 @@ export async function videoPublishingDefaults() {
   return JSON.parse(await fs.readFile(publishingTemplate, "utf8"));
 }
 
-// A three-way update: advance an unchanged default, retain a local edit, and
-// introduce a new key. A locally deleted key stays deleted on later updates.
-export function mergeDefaults(current, previous, next, prefix = "publishing") {
-  const value = structuredClone(current);
+// Overrides are sticky: equality with a later default never transfers ownership.
+export function mergeDefaults(current, previous, next, overrides = []) {
+  const protectedPaths = new Set(overrides);
   const changed = [];
-  const preserved = [];
-  for (const key of new Set([...Object.keys(previous), ...Object.keys(next)])) {
-    const label = `${prefix}.${key}`;
-    if (isObject(next[key]) && isObject(value[key]) && (!own(previous, key) || isObject(previous[key]))) {
-      const merged = mergeDefaults(value[key], previous[key] || {}, next[key], label);
-      value[key] = merged.value;
-      changed.push(...merged.changed);
-      preserved.push(...merged.preserved);
-    } else if ((own(value, key) === own(previous, key) && isDeepStrictEqual(value[key], previous[key]))) {
-      if (own(value, key) !== own(next, key) || !isDeepStrictEqual(value[key], next[key])) {
-        if (own(next, key)) value[key] = structuredClone(next[key]); else delete value[key];
-        changed.push(label);
+  function merge(value, before, after, prefix) {
+    const result = structuredClone(value);
+    const keys = new Set([...Object.keys(before), ...Object.keys(after), ...(prefix === "publishing" ? [] : Object.keys(value))]);
+    for (const key of keys) {
+      const label = `${prefix}.${key}`;
+      if (protectedPaths.has(label)) continue;
+      if (isObject(after[key]) && (isObject(value[key]) || (!own(value, key) && !own(before, key))) && (!own(before, key) || isObject(before[key]))) {
+        const nested = merge(value[key] || {}, before[key] || {}, after[key], label);
+        result[key] = nested;
+        if (!own(value, key) && !Object.keys(nested).length) changed.push(label);
+      } else if ([...protectedPaths].some((entry) => entry.startsWith(`${label}.`))) {
+        // Removing/replacing a defaults group cannot remove a nested override.
+        continue;
+      } else if (own(value, key) === own(before, key) && isDeepStrictEqual(value[key], before[key])) {
+        if (own(value, key) !== own(after, key) || !isDeepStrictEqual(value[key], after[key])) {
+          if (own(after, key)) result[key] = structuredClone(after[key]); else delete result[key];
+          changed.push(label);
+        }
+      } else {
+        protectedPaths.add(label);
       }
-    } else if (!isDeepStrictEqual(value[key], next[key])) {
-      preserved.push(label);
+    }
+    return result;
+  }
+  const value = merge(current, previous, next, "publishing");
+  const preserved = [...protectedPaths].sort();
+  return { value, changed, preserved, overrides: preserved };
+}
+
+function inheritedOverrides(publishing, previous, next) {
+  const overrides = [];
+  const fields = ["shortBridge", "shortDisclaimer", "shortArticleLink"];
+  for (const field of fields) {
+    if (own(next.targetDefaults || {}, field) && !own(previous.targetDefaults || {}, field) && !own(publishing.targetDefaults || {}, field) && own(publishing, field)) {
+      overrides.push(`publishing.targetDefaults.${field}`);
+    }
+    for (const [target, policy] of Object.entries(next.targets || {})) {
+      if (own(policy, field) && !own(previous.targets?.[target] || {}, field) && !own(publishing.targets?.[target] || {}, field) && (own(publishing.targetDefaults || {}, field) || own(publishing, field))) {
+        overrides.push(`publishing.targets.${target}.${field}`);
+      }
     }
   }
-  return { value, changed, preserved };
+  return overrides;
 }
 
 /** Only the publishing defaults participate. Brand, productions and components never do. */
-export async function syncDefaults(workspace, { apply = false } = {}) {
+export async function syncDefaults(workspace, { apply = false, scaffold = false } = {}) {
   if (!workspace.manifest.video) return { changed: [], preserved: [], applied: false, enabled: false };
   const contractPath = path.join(workspace.designSystemRoot, workspace.manifest.video.contract);
   const baselinePath = path.join(workspace.designSystemRoot, ".timds", "defaults.json");
@@ -45,13 +69,18 @@ export async function syncDefaults(workspace, { apply = false } = {}) {
   let baseline = null;
   try {
     baseline = JSON.parse(await fs.readFile(baselinePath, "utf8"));
-    if (baseline.schemaVersion !== 1 || !isObject(baseline.videoPublishing)) throw new Error("Invalid TimDS defaults baseline");
+    if (![1, 2].includes(baseline.schemaVersion) || !isObject(baseline.videoPublishing)) throw new Error("Invalid TimDS defaults baseline");
+    if (baseline.schemaVersion === 2 && (!Array.isArray(baseline.overrides) || baseline.overrides.some((entry) => typeof entry !== "string" || !/^publishing\.(targets|targetDefaults)(\.[A-Za-z_][A-Za-z_0-9]*)*$/u.test(entry)))) throw new Error("Invalid TimDS defaults overrides");
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
   }
   const next = await videoPublishingDefaults();
-  const merged = mergeDefaults(contract.publishing || {}, baseline?.videoPublishing || {}, next);
-  const baselineChanged = !isDeepStrictEqual(baseline?.videoPublishing, next);
+  const publishing = contract.publishing || {};
+  const previous = baseline?.videoPublishing || {};
+  const inherited = scaffold ? [] : inheritedOverrides(publishing, previous, next);
+  const merged = mergeDefaults(publishing, previous, next, [...(baseline?.schemaVersion === 2 ? baseline.overrides : []), ...inherited]);
+  const nextBaseline = { schemaVersion: 2, videoPublishing: next, overrides: merged.overrides };
+  const baselineChanged = !isDeepStrictEqual(baseline, nextBaseline);
   const changed = [...merged.changed, ...(baselineChanged ? [".timds/defaults.json"] : [])];
   if (apply) {
     if (merged.changed.length) {
@@ -60,7 +89,7 @@ export async function syncDefaults(workspace, { apply = false } = {}) {
     }
     if (baselineChanged) {
       await fs.mkdir(path.dirname(baselinePath), { recursive: true });
-      await fs.writeFile(baselinePath, `${JSON.stringify({ schemaVersion: 1, videoPublishing: next }, null, 2)}\n`);
+      await fs.writeFile(baselinePath, `${JSON.stringify(nextBaseline, null, 2)}\n`);
     }
   }
   return { changed, preserved: merged.preserved, applied: apply, enabled: true };

@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import childProcess from "node:child_process";
+import { EventEmitter } from "node:events";
 import { promises as fs } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -14,6 +17,7 @@ import {
   planVideoLab,
   prepareVideoLab,
   prepareVideoWorkspace,
+  renderVideoWorkspace,
   runVideoLab,
   silentSceneTimings,
   validateVideoContract,
@@ -384,6 +388,8 @@ test("video init scaffolds the lab beside the contract, with a producer block th
   assert.deepEqual(Object.keys(contract.producer.roleEyebrows).sort(), ["answer", "exception", "hook", "process", "risk", "rule"]);
   const baseline = JSON.parse(await fs.readFile(path.join(root, ".timds/defaults.json"), "utf8"));
   assert.deepEqual(contract.publishing.targets, baseline.videoPublishing.targets);
+  assert.deepEqual(contract.publishing.targetDefaults, baseline.videoPublishing.targetDefaults);
+  assert.deepEqual(baseline.overrides, []);
   await initializeVideoWorkspace({ designSystemRoot: root, repoRoot: root, manifestPath, manifest: {} }, { force: true });
   assert.deepEqual(JSON.parse(await fs.readFile(result.contract, "utf8")).publishing.targets, baseline.videoPublishing.targets);
 });
@@ -674,4 +680,52 @@ test("exports separate platform copy without rendering and preserves legacy reco
   publishing.shorts[0].descriptions.instagram_reel = "x".repeat(121);
   await writeJson(recordPath, publishing);
   await assert.rejects(checkVideoWorkspace(workspace), /copy exceeds 120/);
+  await fs.writeFile(path.join(directory, "sample-short.mp4"), "existing video");
+  await fs.writeFile(path.join(directory, "description.custom.md"), "client notes");
+  delete publishing.shorts[0].descriptions;
+  publishing.shorts[0].description = "Revised legacy caption.";
+  await writeJson(recordPath, publishing);
+  await exportVideoPublishing(workspace, "sample-topic", { date: "2026-01-01" });
+  for (const target of ["youtube_short", "facebook_reel", "instagram_reel"]) {
+    await assert.rejects(fs.access(path.join(directory, `description.${target}.md`)), /ENOENT/);
+  }
+  assert.match(await fs.readFile(path.join(directory, "description.md"), "utf8"), /Revised legacy caption/);
+  assert.equal(await fs.readFile(path.join(directory, "sample-short.mp4"), "utf8"), "existing video");
+  assert.equal(await fs.readFile(path.join(directory, "description.custom.md"), "utf8"), "client notes");
+});
+
+test("rendering keeps its original copy and output directory across midnight and source edits", async (t) => {
+  const policy = { brief: "A short caption", maxCopyCharacters: 100, maxCharacters: 500 };
+  const workspace = await videoFixture(t, { contract: { publishing: { targets: { youtube_short: policy } } } });
+  const recordPath = path.join(workspace.designSystemRoot, "video/productions/sample-topic/publishing.json");
+  const publishing = JSON.parse(await fs.readFile(recordPath, "utf8"));
+  publishing.shorts[0].descriptions = { youtube_short: "Copy approved before rendering." };
+  await writeJson(recordPath, publishing);
+  t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-09-15T23:59:59Z") });
+  const renderOutputs = [];
+  const spawn = t.mock.method(childProcess, "spawn", (_command, args) => {
+    const child = new EventEmitter();
+    renderOutputs.push(args[4]);
+    Promise.resolve().then(async () => {
+      t.mock.timers.setTime(Date.parse("2026-09-16T00:00:01Z"));
+      publishing.shorts[0].descriptions.youtube_short = "Different copy edited during rendering.";
+      await writeJson(recordPath, publishing);
+      await fs.writeFile(args[4], "stubbed media renderer");
+      child.emit("close", 0);
+    }).catch((error) => child.emit("error", error));
+    return child;
+  });
+  syncBuiltinESMExports();
+  t.after(() => { spawn.mock.restore(); syncBuiltinESMExports(); });
+  const result = await renderVideoWorkspace(workspace, "sample-topic");
+  assert.ok(result.outputRoot.endsWith("Sample topic - 2026-09-15"));
+  assert.equal(renderOutputs.length, 4);
+  assert.ok(renderOutputs.every((file) => file.startsWith(result.outputRoot)));
+  const directory = path.join(result.outputRoot, "Short form -Sample");
+  const description = await fs.readFile(path.join(directory, "description.youtube_short.md"), "utf8");
+  assert.match(description, /Copy approved before rendering/);
+  assert.doesNotMatch(description, /Different copy/);
+  const packaged = JSON.parse(await fs.readFile(path.join(directory, "publishing.json"), "utf8"));
+  assert.equal(packaged.descriptions.youtube_short, "Copy approved before rendering.");
+  await assert.rejects(fs.access(path.join(workspace.designSystemRoot, "video-local/out/Sample topic - 2026-09-16")), /ENOENT/);
 });

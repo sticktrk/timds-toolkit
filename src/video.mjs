@@ -11,6 +11,7 @@ import { adjacentFootageRepeats, truncatedHeadline } from "../video/footage.mjs"
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(import.meta.url);
 const VIDEO_SCHEMA_VERSION = 1;
+const PUBLISHING_TARGETS = ["youtube_short", "facebook_reel", "instagram_reel"];
 const productionFiles = ["request.json", "script.json", "publishing.json", "captions.json", "production.json"];
 const DEFAULT_COMPONENTS_START = "// TIMDS_DEFAULT_COMPONENTS_START";
 const DEFAULT_COMPONENTS_END = "// TIMDS_DEFAULT_COMPONENTS_END";
@@ -178,7 +179,7 @@ function normalizeVideoPublishing(input) {
   if (publishing.targets !== undefined) {
     normalized.targets = {};
     for (const [target, value] of Object.entries(object(publishing.targets, "publishing.targets"))) {
-      if (!["youtube_short", "facebook_reel", "instagram_reel"].includes(target)) throw new Error(`Unknown publishing target: ${target}`);
+      if (!PUBLISHING_TARGETS.includes(target)) throw new Error(`Unknown publishing target: ${target}`);
       const policy = object(value, `publishing.targets.${target}`);
       normalized.targets[target] = {
         brief: text(policy.brief, `publishing.targets.${target}.brief`),
@@ -729,13 +730,14 @@ export async function initializeVideoWorkspace(workspace, { force = false } = {}
   };
   await fs.writeFile(manifestPath, `${JSON.stringify(rawManifest, null, 2)}\n`, "utf8");
   const destination = path.join(workspace.designSystemRoot, "video");
+  const scaffold = force || !existsSync(path.join(destination, "contract.json"));
   await fs.mkdir(path.join(destination, "productions"), { recursive: true });
   for (const name of ["contract.json", "assets.json", "lab/README.md", "lab/sample-answer.json", "publishing.md"]) {
     const target = path.join(destination, name);
     if (!existsSync(target) || force) await copyTemplate(path.join(packageRoot, "templates", "video", name), target);
   }
   if (force) await fs.rm(path.join(workspace.designSystemRoot, ".timds", "defaults.json"), { force: true });
-  await syncDefaults({ ...workspace, manifest: { ...workspace.manifest, video: rawManifest.video } }, { apply: true });
+  await syncDefaults({ ...workspace, manifest: { ...workspace.manifest, video: rawManifest.video } }, { apply: true, scaffold });
   const skillDestination = path.join(workspace.repoRoot, ".agents", "skills", "timds-create-video");
   if (force) await fs.rm(skillDestination, { recursive: true, force: true });
   await fs.cp(path.join(packageRoot, "skills", "timds-create-video"), skillDestination, { recursive: true, force });
@@ -946,6 +948,11 @@ export async function exportVideoPublishing(workspace, selectedSlug, options = {
   const loaded = await loadVideoWorkspace(workspace, { slug: selectedSlug });
   const prepared = { ...loaded, production: loaded.video.productions[0] };
   const paths = renderPaths(prepared, options.date);
+  await writeVideoPublishing(prepared, paths);
+  return { outputRoot: paths.root };
+}
+
+async function writeVideoPublishing(prepared, paths) {
   await fs.mkdir(paths.longform, { recursive: true });
   await fs.writeFile(path.join(paths.longform, "description.md"), descriptionFor(prepared), "utf8");
   await fs.writeFile(path.join(paths.longform, "publishing.json"), `${JSON.stringify(prepared.production.publishing, null, 2)}\n`, "utf8");
@@ -958,10 +965,12 @@ export async function exportVideoPublishing(workspace, selectedSlug, options = {
     for (const [target, description] of Object.entries(descriptions)) {
       await fs.writeFile(path.join(directory, `description.${target}.md`), description, "utf8");
     }
+    for (const target of PUBLISHING_TARGETS) {
+      if (!Object.hasOwn(descriptions, target)) await fs.rm(path.join(directory, `description.${target}.md`), { force: true });
+    }
     await fs.writeFile(path.join(directory, "description.md"), descriptions.youtube_short || descriptionFor(prepared, source), "utf8");
     await fs.writeFile(path.join(directory, "publishing.json"), `${JSON.stringify({ ...source, compiledDescriptions: descriptions }, null, 2)}\n`, "utf8");
   }
-  return { outputRoot: paths.root };
 }
 
 export async function renderVideoWorkspace(workspace, selectedSlug, options = {}) {
@@ -973,17 +982,12 @@ export async function renderVideoWorkspace(workspace, selectedSlug, options = {}
   const common = ["--public-dir", prepared.publicRoot, "--log=error"];
   await run(process.execPath, [remotion, "still", prepared.entryPath, `${prefix}Cover`, path.join(paths.longform, "thumbnail.jpg"), "--image-format=jpeg", "--jpeg-quality=90", ...common], { cwd: workspace.designSystemRoot });
   await run(process.execPath, [remotion, "render", prepared.entryPath, `${prefix}Long`, path.join(paths.longform, `${prepared.production.production.slug}-longform.mp4`), "--codec=h264", ...common], { cwd: workspace.designSystemRoot });
-  await fs.writeFile(path.join(paths.longform, "description.md"), descriptionFor(prepared), "utf8");
-  await fs.writeFile(path.join(paths.longform, "publishing.json"), `${JSON.stringify(prepared.production.publishing, null, 2)}\n`, "utf8");
   for (let index = 0; index < prepared.production.production.shorts.length; index += 1) {
     const short = prepared.production.production.shorts[index];
     const directory = paths.shorts[index];
     await fs.mkdir(directory, { recursive: true });
     await run(process.execPath, [remotion, "still", prepared.entryPath, `${prefix}Short${index + 1}Cover`, path.join(directory, "thumbnail.jpg"), "--image-format=jpeg", "--jpeg-quality=90", ...common], { cwd: workspace.designSystemRoot });
     await run(process.execPath, [remotion, "render", prepared.entryPath, `${prefix}Short${index + 1}`, path.join(directory, `${short.id}.mp4`), "--codec=h264", ...common], { cwd: workspace.designSystemRoot });
-    const publish = prepared.production.publishing.shorts?.find((candidate) => candidate.id === short.id) || short;
-    await fs.writeFile(path.join(directory, "description.md"), descriptionFor(prepared, publish), "utf8");
-    await fs.writeFile(path.join(directory, "publishing.json"), `${JSON.stringify(publish, null, 2)}\n`, "utf8");
   }
   const lock = {
     schemaVersion: 1,
@@ -993,7 +997,7 @@ export async function renderVideoWorkspace(workspace, selectedSlug, options = {}
     assets: Object.fromEntries(Object.entries(prepared.project.assets).map(([key, asset]) => [key, { mediaKey: asset.mediaKey, sha256: asset.sha256, src: asset.src }])),
   };
   await fs.writeFile(path.join(paths.root, "production.lock.json"), `${JSON.stringify(lock, null, 2)}\n`, "utf8");
-  await exportVideoPublishing(workspace, selectedSlug, options);
+  await writeVideoPublishing(prepared, paths);
   return { ...prepared, outputRoot: paths.root };
 }
 

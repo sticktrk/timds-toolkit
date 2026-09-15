@@ -365,11 +365,17 @@ URLs, and client-only requirements. New video workspaces receive these defaults.
 
 `timds defaults` previews an existing system's update. On a feature branch,
 `timds defaults --apply` adds missing publishing fields and records the supplied
-defaults in `.timds/defaults.json`. Commit that baseline with the contract: it
-lets the next update replace values that still match the prior TimDS defaults,
-while retaining client edits and intentional deletions. Existing values on first
-adoption are preserved. A value equal to the last supplied default follows TimDS;
-a differing value is an override. The command is safe to repeat.
+defaults and explicit override paths in `.timds/defaults.json`. Commit that
+baseline with the contract. Unedited toolkit values follow later defaults;
+client edits and intentional deletions stay protected, even when a later default
+happens to match them. First adoption also preserves existing values and inherited
+CTAs, disclosures, and article-link policy. New scaffolds use the toolkit policy.
+The command is safe to repeat and migrates older baselines automatically.
+
+To return an override to toolkit control, set its contract field to the value in
+the baseline's `videoPublishing` object (or remove it if absent there), remove
+its path from the baseline's `overrides` list, then preview and apply defaults.
+Review both files together.
 
 After upgrading the package, run the same command, inspect its reported overrides
 and Git diff, validate, and open a PR in each Design System. `upgrade` reports

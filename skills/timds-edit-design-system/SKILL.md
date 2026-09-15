@@ -52,7 +52,9 @@ When the task includes adopting shared publishing improvements, run
 `npm run timds -- defaults --apply` on the feature branch. Review the contract
 diff and reported local overrides. Commit `.timds/defaults.json` with the
 authored contract: it records the supplied default values, so later runs update
-unchanged defaults and preserve client edits. Keep client CTAs and disclosures.
+unchanged defaults and preserve client edits. The baseline's override paths are
+persistent: a later matching default does not surrender client ownership.
+Keep inherited client CTAs, disclosures, and article-link policy on adoption.
 Promote reusable wording improvements into TimDS's publishing defaults so the
 same upgrade procedure carries them to other systems. Never regenerate client
 components or production records to adopt publishing defaults.

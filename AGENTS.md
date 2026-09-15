@@ -36,8 +36,10 @@ explicit contract change and migration plan.
 
 `timds defaults --apply` is the explicit migration for shared publishing defaults.
 It updates only `publishing.targets` and `publishing.targetDefaults` and records
-the supplied values in `.timds/defaults.json`. Compare against that baseline to
-advance unchanged defaults and preserve local overrides. Ordinary `upgrade`
+the supplied values and persistent override paths in `.timds/defaults.json`.
+Compare against that baseline to advance unchanged defaults; never clear an
+override merely because a later default matches it. Preserve inherited client
+publishing policy on adoption. Ordinary `upgrade`
 reports pending defaults without applying them. New video scaffolds use the same
 source and baseline. Reusable wording and budgets refined in a client system may
 be promoted to these defaults; firm names, URLs, and client-only requirements stay

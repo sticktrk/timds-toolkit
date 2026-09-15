@@ -26,12 +26,17 @@ final length. `timds video publishing SLUG` exports `description.TARGET.md`
 beside each short, without rendering or provider credentials. Rendering uses
 the same export. `description.md` aliases the YouTube Short for compatibility;
 `publishing.json` also records the compiled platform descriptions.
+Re-export removes obsolete generated platform descriptions while preserving
+other package files. A render uses the copy and output folder prepared at its
+start, even if source files change during rendering.
 
 Existing projects adopt the shared wording and budgets with `timds defaults`
 (preview), then `timds defaults --apply` on a feature branch. Review the diff,
 customize client CTAs and disclosures, and commit `.timds/defaults.json` with
-the contract. The baseline records the last supplied defaults so later package
-updates can advance unchanged defaults while preserving client overrides.
+the contract. The baseline records the last supplied defaults and persistent
+override paths. Later updates advance unchanged defaults while preserving
+client overrides, including deletions and values that happen to match a later
+default. Adoption preserves inherited client CTAs, disclosures, and link policy.
 Run this after each TimDS upgrade; it is safe to repeat. Promote reusable
 improvements from a client system into the toolkit defaults for all systems.
 

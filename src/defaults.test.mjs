@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { mergeDefaults, syncDefaults, videoPublishingDefaults } from "./defaults.mjs";
 import { videoFixture } from "./video.fixture.mjs";
+import { descriptionFor } from "./video.mjs";
 import { runCli } from "./core.mjs";
 
 test("new defaults advance unchanged values and preserve edits and deletions", () => {
@@ -15,6 +16,61 @@ test("new defaults advance unchanged values and preserve edits and deletions", (
   assert.deepEqual(value, { targets: { youtube_short: { brief: "new", maxCharacters: 650 }, instagram_reel: { brief: "new platform" } }, custom: "owned" });
   assert.deepEqual(preserved, ["publishing.targets.youtube_short.maxCharacters", "publishing.targets.youtube_short.shortBridge"]);
   assert.equal(current.retired, true);
+});
+
+test("an override survives a matching intermediate default and subsequent releases", () => {
+  const defaults = (limit) => ({ targets: { youtube_short: { maxCharacters: limit } } });
+  const adopted = mergeDefaults(defaults(650), defaults(500), defaults(650));
+  assert.deepEqual(adopted.overrides, ["publishing.targets.youtube_short.maxCharacters"]);
+  const updated = mergeDefaults(adopted.value, defaults(650), defaults(800), adopted.overrides);
+  assert.equal(updated.value.targets.youtube_short.maxCharacters, 650);
+  assert.deepEqual(updated.changed, []);
+  const removed = mergeDefaults(updated.value, defaults(800), {}, updated.overrides);
+  assert.equal(removed.value.targets.youtube_short.maxCharacters, 650);
+});
+
+test("explicit first-adoption values remain overrides even when they match defaults", () => {
+  const value = { targets: { youtube_short: { maxCharacters: 500 } } };
+  const adopted = mergeDefaults(value, {}, value);
+  const updated = mergeDefaults(adopted.value, value, { targets: { youtube_short: { maxCharacters: 700 } } }, adopted.overrides);
+  assert.equal(updated.value.targets.youtube_short.maxCharacters, 500);
+});
+
+test("deleted client fields stay deleted after the toolkit removes and reintroduces them", () => {
+  const before = { targetDefaults: { shortBridge: "Shared CTA" } };
+  const current = { targetDefaults: {} };
+  const first = mergeDefaults(current, before, before);
+  const second = mergeDefaults(first.value, before, {}, first.overrides);
+  const third = mergeDefaults(second.value, {}, before, second.overrides);
+  assert.equal(third.value.targetDefaults?.shortBridge, undefined);
+});
+
+test("adoption preserves inherited CTA and article-link policy without freezing other defaults", async (t) => {
+  const workspace = await videoFixture(t, { contract: { publishing: { shortBridge: "Contact the client at example.com/contact", shortArticleLink: true } } });
+  const contractPath = path.join(workspace.designSystemRoot, "video/contract.json");
+  const before = JSON.parse(await fs.readFile(contractPath, "utf8"));
+  await syncDefaults(workspace, { apply: true });
+  const adopted = JSON.parse(await fs.readFile(contractPath, "utf8"));
+  const publishing = { articleUrl: "https://example.com/article" };
+  const copy = "The clip's actual takeaway.";
+  const prepare = (contract) => ({ video: { contract }, production: { publishing } });
+  assert.equal(
+    descriptionFor(prepare(adopted), { id: "s", descriptions: { youtube_short: copy } }, "youtube_short"),
+    descriptionFor(prepare(before), { id: "s", description: copy }),
+  );
+  const baselinePath = path.join(workspace.designSystemRoot, ".timds/defaults.json");
+  const baseline = JSON.parse(await fs.readFile(baselinePath, "utf8"));
+  assert.deepEqual(baseline.overrides, ["publishing.targetDefaults.shortArticleLink", "publishing.targetDefaults.shortBridge"]);
+  assert.deepEqual((await syncDefaults(workspace, { apply: true })).changed, []);
+  const oldBrief = "An older toolkit brief";
+  baseline.videoPublishing.targets.youtube_short.brief = oldBrief;
+  adopted.publishing.targets.youtube_short.brief = oldBrief;
+  await fs.writeFile(contractPath, JSON.stringify(adopted));
+  await fs.writeFile(baselinePath, JSON.stringify(baseline));
+  await syncDefaults(workspace, { apply: true });
+  const refreshed = JSON.parse(await fs.readFile(contractPath, "utf8"));
+  assert.notEqual(refreshed.publishing.targets.youtube_short.brief, oldBrief);
+  assert.equal(refreshed.publishing.targetDefaults.shortBridge, undefined);
 });
 
 test("defaults adoption previews without writing, preserves client source, and is idempotent", async (t) => {
@@ -59,12 +115,34 @@ test("a later toolkit default refresh replaces old defaults while keeping client
   assert.equal(updated.publishing.targets.facebook_reel.brief, "Client-owned writing brief");
 });
 
+test("schema-one migration persists an override even when it matches the new default", async (t) => {
+  const workspace = await videoFixture(t);
+  const supplied = await videoPublishingDefaults();
+  const contractPath = path.join(workspace.designSystemRoot, workspace.manifest.video.contract);
+  const baselinePath = path.join(workspace.designSystemRoot, ".timds/defaults.json");
+  const contract = JSON.parse(await fs.readFile(contractPath, "utf8"));
+  contract.publishing = structuredClone(supplied);
+  const oldDefaults = structuredClone(supplied);
+  oldDefaults.targets.youtube_short.maxCharacters = 400;
+  await fs.mkdir(path.dirname(baselinePath), { recursive: true });
+  await fs.writeFile(contractPath, JSON.stringify(contract));
+  await fs.writeFile(baselinePath, JSON.stringify({ schemaVersion: 1, videoPublishing: oldDefaults }));
+  await syncDefaults(workspace, { apply: true });
+  const migrated = JSON.parse(await fs.readFile(baselinePath, "utf8"));
+  assert.equal(migrated.schemaVersion, 2);
+  assert.deepEqual(migrated.overrides, ["publishing.targets.youtube_short.maxCharacters"]);
+  assert.deepEqual((await syncDefaults(workspace, { apply: true })).changed, []);
+  assert.deepEqual(JSON.parse(await fs.readFile(baselinePath, "utf8")).overrides, migrated.overrides);
+});
+
 test("defaults skip non-video systems and reject damaged baseline data", async (t) => {
   assert.equal((await syncDefaults({ manifest: {} })).enabled, false);
   const workspace = await videoFixture(t);
   await syncDefaults(workspace, { apply: true });
   await fs.writeFile(path.join(workspace.designSystemRoot, ".timds/defaults.json"), '{"schemaVersion":9}');
   await assert.rejects(syncDefaults(workspace, { apply: true }), /Invalid TimDS defaults baseline/);
+  await fs.writeFile(path.join(workspace.designSystemRoot, ".timds/defaults.json"), '{"schemaVersion":2,"videoPublishing":{},"overrides":"bad"}');
+  await assert.rejects(syncDefaults(workspace, { apply: true }), /Invalid TimDS defaults overrides/);
 });
 
 test("CLI defaults application requires a feature branch", async (t) => {
@@ -77,8 +155,8 @@ test("CLI defaults application requires a feature branch", async (t) => {
   await assert.rejects(fs.access(path.join(workspace.designSystemRoot, ".timds/defaults.json")));
 });
 
-test("CLI video init creates the publishing defaults baseline", async (t) => {
-  const workspace = await videoFixture(t);
+test("CLI video init preserves a pre-existing contract when creating its defaults baseline", async (t) => {
+  const workspace = await videoFixture(t, { contract: { publishing: { shortBridge: "Existing client CTA" } } });
   const manifest = JSON.parse(await fs.readFile(workspace.manifestPath, "utf8"));
   delete manifest.video;
   await fs.writeFile(workspace.manifestPath, JSON.stringify(manifest));
@@ -87,4 +165,7 @@ test("CLI video init creates the publishing defaults baseline", async (t) => {
   const result = await runCli(["video", "init", "--root", workspace.repoRoot]);
   assert.ok(result.contract);
   await fs.access(path.join(workspace.designSystemRoot, ".timds/defaults.json"));
+  const contract = JSON.parse(await fs.readFile(result.contract, "utf8"));
+  assert.equal(contract.publishing.shortBridge, "Existing client CTA");
+  assert.equal(contract.publishing.targetDefaults.shortBridge, undefined);
 });
