@@ -88,6 +88,14 @@ export function validateVideoProducerConfig(input, contract) {
       enabled: outro.enabled !== false,
       id: slugSafe(outro.id || "outro", "video contract producer.outro.id"),
       narrationTemplate: text(outro.narrationTemplate, "video contract producer.outro.narrationTemplate"),
+      // Optional per-format overrides. A Short's viewers rarely reach the outro, so a client
+      // usually wants a much shorter spoken close there than in the long-form.
+      narrationTemplates: Object.fromEntries(["horizontal", "short"].flatMap((format) => {
+        const templates = object(outro.narrationTemplates || {}, "video contract producer.outro.narrationTemplates");
+        const value = templates[format];
+        if (value === undefined || value === null || value === "") return [];
+        return [[format, text(value, `video contract producer.outro.narrationTemplates.${format}`)]];
+      })),
     },
     cover: {
       eyebrow: text(cover.eyebrow || contract.brand.series, "video contract producer.cover.eyebrow"),
@@ -352,7 +360,7 @@ export function createVideoProducer({ contract, assetCatalog, mediaCatalog }) {
       eyebrow: config.engagement.eyebrow,
       headline: engagementQuestion,
     });
-    if (config.outro.enabled) scenes.push({ id: config.outro.id, role: "outro", narration: renderTemplate(config.outro.narrationTemplate, values), outro: true });
+    if (config.outro.enabled) scenes.push({ id: config.outro.id, role: "outro", narration: renderTemplate(config.outro.narrationTemplates[input.outputFormat] || config.outro.narrationTemplate, values), outro: true });
     return {
       schemaVersion: PRODUCER_SCHEMA_VERSION,
       producerContractVersion: config.schemaVersion,

@@ -41,7 +41,11 @@ JSON files as phase records with one owner each:
 - `production.json`: scene, cover, long-form, and short-form composition data.
 
 Follow the client contract for output counts, source selection, copy limits,
-CTA wording, cover rules, media authorization, and compliance. Reference only
+CTA wording, cover rules, media authorization, and compliance. Put persistent
+calls to action in the contract's `brand.banners` (they render on every frame)
+rather than only in the outro, which most viewers never reach; give Shorts
+their own short `description` in `publishing.json` and, where the client
+allows, a shorter outro line than the long-form. Reference only
 keys declared by the client video asset catalog. Do not generate new moving
 footage unless the request and client contract authorize it. Never recreate a
 client logo; use the declared brand file.

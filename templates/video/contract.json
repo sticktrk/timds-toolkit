@@ -15,8 +15,8 @@
     "shortDirectoryPrefix": "Short form - "
   },
   "structure": {
-    "longform": { "requireIntro": false, "requireOutro": false },
-    "short": { "requireIntro": false, "requireOutro": false }
+    "longform": { "requireIntro": true, "requireOutro": false },
+    "short": { "requireIntro": true, "requireOutro": false }
   },
   "copy": {
     "eyebrowWords": 5,
@@ -48,6 +48,13 @@
     "watermark": {
       "left": "Client series",
       "right": "example.com"
+    },
+    "banners": {
+      "longform": "Subscribe for more",
+      "short": {
+        "kicker": "Learn more",
+        "url": "example.com"
+      }
     }
   },
   "producer": {
@@ -88,7 +95,10 @@
     "outro": {
       "enabled": true,
       "id": "outro",
-      "narrationTemplate": "Learn more about {{topic}} from {{series}} at {{site}}."
+      "narrationTemplate": "Learn more about {{topic}} from {{series}} at {{site}}.",
+      "narrationTemplates": {
+        "short": "Learn more at {{site}}."
+      }
     },
     "cover": {
       "eyebrow": "Client series",
@@ -102,6 +112,8 @@
   "publishing": {
     "articleLabel": "Read the full article:",
     "shortBridge": "Watch the full explainer for the complete answer.",
-    "disclaimer": ""
+    "disclaimer": "",
+    "shortDisclaimer": "",
+    "shortArticleLink": true
   }
 }

@@ -3,6 +3,7 @@ import test from "node:test";
 import React from "react";
 import {renderToStaticMarkup} from "react-dom/server";
 import {
+  BrandWatermark,
   Cover,
   defaultVideoProjectComponents,
   GoldHeadline,
@@ -71,4 +72,52 @@ test("scales the horizontal design grid to a high-resolution cover", () => {
   assert.equal(HORIZONTAL_COVER_DESIGN_WIDTH, 1280);
   assert.equal(HORIZONTAL_COVER_DESIGN_HEIGHT, 720);
   assert.equal(horizontalCoverScale(3840), 3);
+});
+
+const bannerProject = (banners: unknown) => ({
+  schemaVersion: 1 as const,
+  engine: {name: "@dtconcepts/timds", version: "0.0.0"},
+  contract: {
+    brand: {
+      colors: {background: "#000", panel: "#111", accent: "#fc0", text: "#fff", muted: "#eee"},
+      fonts: {display: "serif", body: "serif", ui: "sans-serif"},
+      logo: "logo.svg",
+      watermark: {left: "Example series", right: "example.com/a-long-path"},
+      banners,
+    },
+  },
+  assets: {},
+  records: {captions: {lines: []}, production: {}, publishing: {}, request: {}, script: {}},
+});
+
+test("keeps the persistent CTA banners on every frame and off the Shorts UI edge", () => {
+  const banners = {longform: "Subscribe for more", short: {kicker: "Learn more", url: "example.com/start"}};
+
+  const horizontal = renderToStaticMarkup(<BrandWatermark project={bannerProject(banners)} sceneHasLogo />);
+  assert.match(horizontal, /data-banner="longform"/u);
+  assert.match(horizontal, /Subscribe for more/u);
+  assert.doesNotMatch(horizontal, /data-banner="short"/u);
+  assert.match(horizontal, /example\.com\/a-long-path/u);
+
+  const vertical = renderToStaticMarkup(<BrandWatermark project={bannerProject(banners)} vertical sceneHasLogo />);
+  assert.match(vertical, /data-banner="short"/u);
+  assert.match(vertical, /Learn more/u);
+  assert.match(vertical, /example\.com\/start/u);
+  assert.doesNotMatch(vertical, /data-banner="longform"/u);
+  // (sceneHasLogo skips Remotion's <Img>, which needs a composition context)
+  // the banner replaces the bottom-right label, so nothing shares the baseline with watermark.left
+  assert.doesNotMatch(vertical, /example\.com\/a-long-path/u);
+  assert.match(vertical, /Example series/u);
+});
+
+test("stacks the vertical watermark labels when no Short banner is configured", () => {
+  const vertical = renderToStaticMarkup(<BrandWatermark project={bannerProject(undefined)} vertical sceneHasLogo />);
+  assert.match(vertical, /example\.com\/a-long-path/u);
+  assert.match(vertical, /Example series/u);
+  assert.doesNotMatch(vertical, /right:150px/u);
+  assert.doesNotMatch(vertical, /data-banner=/u);
+
+  const horizontal = renderToStaticMarkup(<BrandWatermark project={bannerProject(undefined)} sceneHasLogo />);
+  assert.match(horizontal, /right:48px/u);
+  assert.doesNotMatch(horizontal, /data-banner=/u);
 });
