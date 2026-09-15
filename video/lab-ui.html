@@ -304,9 +304,11 @@
 
   // ---- format ----------------------------------------------------------------------
   document.querySelectorAll("[data-format]").forEach((button) => button.addEventListener("click", () => {
+    if (state.format === button.dataset.format) return;
     state.format = button.dataset.format;
     for (const other of document.querySelectorAll("[data-format]")) other.setAttribute("aria-pressed", String(other === button));
     syncFormatUi();
+    markDirty();
     $("json").value = JSON.stringify(currentInput(), null, 2);
   }));
 
