@@ -849,7 +849,7 @@ function parseArguments(argv) {
     }
     const [rawName, inlineValue] = value.replace(/^--?/, "").split("=", 2);
     const name = ({ m: "message", p: "port" })[rawName] || rawName.replace(/-([a-z])/g, (_match, letter) => letter.toUpperCase());
-    if (["autoRelease", "dryRun", "force", "help", "list", "noBuild", "noOpen", "noPr", "noPush", "plan", "prepare", "publish", "render", "requireCleanDist", "skipBuild", "standalone"].includes(name)) {
+    if (["autoRelease", "dryRun", "force", "help", "list", "noBuild", "noOpen", "noPr", "noPush", "plan", "prepare", "publish", "render", "requireCleanDist", "serve", "skipBuild", "standalone"].includes(name)) {
       options[name] = true;
       continue;
     }
@@ -1009,6 +1009,10 @@ export async function runCli(argv) {
       return result;
     }
     if (videoCommand === "lab") {
+      if (options.serve) {
+        const { serveVideoLab } = await import("./video-lab-server.mjs");
+        return serveVideoLab(workspace, { port: options.port || undefined, log: output });
+      }
       return runVideoLab(workspace, videoArgument || undefined, { list: Boolean(options.list), plan: Boolean(options.plan), prepare: Boolean(options.prepare), render: Boolean(options.render), log: output });
     }
     if (!videoArgument) throw new Error(`video ${videoCommand} requires a production slug`);

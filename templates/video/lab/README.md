@@ -16,6 +16,7 @@ npm run timds -- video lab NAME --plan       # compile + finalize; print the pla
 npm run timds -- video lab NAME --prepare    # stage media and write the entry only
 npm run timds -- video lab NAME --render     # render the video and cover locally
 npm run timds -- video lab --list            # inputs and ready productions
+npm run timds -- video lab --serve           # local Video Lab web app: draft, edit, plan, render, download
 ```
 
 The lab compiles the input through the producer block, times the narration

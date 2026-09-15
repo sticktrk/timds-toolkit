@@ -29,6 +29,15 @@ generated module as authored client source from that point forward. Never
 regenerate it during a normal toolkit upgrade, and use `--force` only when the
 user explicitly requests a reset that discards client component changes.
 
+## Test-generate in the lab first
+
+`npm run timds -- video lab --serve` opens the local Video Lab (no Remotion
+Studio): draft or paste a compile request, edit the beats, check the plan,
+render headless, and review the MP4. Use it to confirm the client's contract,
+components, banners, and catalog produce the frames the client expects before
+authoring a full production. Saved lab inputs land under `video/lab/` and are
+validated by `timds video check`.
+
 ## Author a production
 
 Create one folder under the configured productions directory. Treat its five
