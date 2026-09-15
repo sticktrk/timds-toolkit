@@ -99,9 +99,16 @@ programmatic producer/compiler without adding client runtime code:
 ```bash
 __TIMDS_CLI__ video doctor
 __TIMDS_CLI__ video check TOPIC
+__TIMDS_CLI__ video lab NAME --plan
+__TIMDS_CLI__ video lab NAME
 __TIMDS_CLI__ video studio TOPIC
 __TIMDS_CLI__ video render TOPIC
 ```
+
+`video lab` previews a `video/lab/` compile request the way an automated Video
+Lab ships it: compiled through the `producer` block, timed silently, footage
+and cover chosen from the registered catalog, and opened in Remotion Studio
+with this repository's components. `video check` compiles every lab input.
 
 TimDS supplies the default Remotion component set. To begin with an identical
 client-owned copy that can evolve independently, generate one snapshot:

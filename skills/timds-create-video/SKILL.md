@@ -46,6 +46,24 @@ keys declared by the client video asset catalog. Do not generate new moving
 footage unless the request and client contract authorize it. Never recreate a
 client logo; use the declared brand file.
 
+## Preview through the lab first
+
+When the contract declares a `producer` block, put the answer into a compile
+request under the declared lab directory (`video/lab/NAME.json` by default:
+exact question, topic label, engagement question if required, ordered answer
+beats with role, narration, and a complete micro-headline) and run:
+
+```bash
+npm run timds -- video lab NAME --plan
+npm run timds -- video lab NAME
+```
+
+The plan prints every scene's timing, eyebrow, headline, footage chain, and
+cover as the producer resolved them; the studio shows the frames through the
+client's components. Fix the request, the catalog, or the components there
+before authoring a five-record production. `video check` compiles every lab
+input.
+
 ## Use TimDS for deterministic work
 
 Run commands from the Design System repository root:

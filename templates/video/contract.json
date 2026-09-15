@@ -50,6 +50,55 @@
       "right": "example.com"
     }
   },
+  "producer": {
+    "schemaVersion": 1,
+    "authoring": {
+      "sharedPromptBlocks": [],
+      "formatPromptBlocks": {
+        "horizontal": [],
+        "short": []
+      }
+    },
+    "topicLabel": {
+      "minimumWords": 2,
+      "maximumWords": 4
+    },
+    "roleEyebrows": {
+      "hook": "In brief",
+      "rule": "The rule",
+      "risk": "The risk",
+      "process": "Next step",
+      "exception": "The exception",
+      "answer": "The answer"
+    },
+    "intro": {
+      "enabled": true,
+      "id": "intro"
+    },
+    "engagement": {
+      "enabled": true,
+      "formats": [
+        "horizontal"
+      ],
+      "id": "engage",
+      "eyebrow": "Your turn",
+      "narrationTemplate": "{{question}} Tell us in the comments.",
+      "requireYesNoQuestion": true
+    },
+    "outro": {
+      "enabled": true,
+      "id": "outro",
+      "narrationTemplate": "Learn more about {{topic}} from {{series}} at {{site}}."
+    },
+    "cover": {
+      "eyebrow": "Client series",
+      "defaultEmotion": "concern",
+      "assetPrefix": "cover-subject-"
+    },
+    "footage": {
+      "assetPrefix": "footage-"
+    }
+  },
   "publishing": {
     "articleLabel": "Read the full article:",
     "shortBridge": "Watch the full explainer for the complete answer.",

@@ -1,3 +1,5 @@
+import { footageFamily } from "../video/footage.mjs";
+
 const PRODUCER_SCHEMA_VERSION = 1;
 const PRODUCER_AUTHORING_SCHEMA_VERSION = 1;
 const beatRoles = ["hook", "rule", "risk", "process", "exception", "answer"];
@@ -381,11 +383,8 @@ export function createVideoProducer({ contract, assetCatalog, mediaCatalog }) {
 
   // Offset, mirrored, and vertical derivatives are the same footage; chaining
   // one directly into its sibling — within a scene or across a scene cut —
-  // plays as a repeated clip.
-  const footageFamily = (key) => String(key)
-    .replace(/-vertical$/u, "")
-    .replace(/-mirrored$/u, "")
-    .replace(/-offset$/u, "");
+  // plays as a repeated clip. footageFamily comes from video/footage.mjs so the
+  // producer, the Media component, and `timds video check` agree.
 
   const selectFootage = (scene, seconds, format, previousFamily = "") => {
     const query = tokens(`${scene.role} ${scene.narration} ${scene.headline || ""}`);

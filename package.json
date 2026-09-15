@@ -16,6 +16,7 @@
     "./html": "./src/html.mjs",
     "./media": "./src/media.mjs",
     "./video": "./src/video.mjs",
+    "./video/footage": "./video/footage.mjs",
     "./video/producer": "./src/video-producer.mjs",
     "./video/remotion": "./video/remotion.tsx"
   },
