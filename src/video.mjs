@@ -3,6 +3,7 @@ import { existsSync, promises as fs } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { syncDefaults } from "./defaults.mjs";
 import { readLocalMediaManifest, readMediaCatalog } from "./media.mjs";
 import { createVideoProducer, validateVideoProducerConfig } from "./video-producer.mjs";
 import { adjacentFootageRepeats, truncatedHeadline } from "../video/footage.mjs";
@@ -733,6 +734,8 @@ export async function initializeVideoWorkspace(workspace, { force = false } = {}
     const target = path.join(destination, name);
     if (!existsSync(target) || force) await copyTemplate(path.join(packageRoot, "templates", "video", name), target);
   }
+  if (force) await fs.rm(path.join(workspace.designSystemRoot, ".timds", "defaults.json"), { force: true });
+  await syncDefaults({ ...workspace, manifest: { ...workspace.manifest, video: rawManifest.video } }, { apply: true });
   const skillDestination = path.join(workspace.repoRoot, ".agents", "skills", "timds-create-video");
   if (force) await fs.rm(skillDestination, { recursive: true, force: true });
   await fs.cp(path.join(packageRoot, "skills", "timds-create-video"), skillDestination, { recursive: true, force });
@@ -923,7 +926,7 @@ export function descriptionFor(prepared, short, target) {
     source.answer ? `A: ${source.answer}` : "",
   ].filter(Boolean).join("\n\n");
   const parts = [lead, publishing.seriesLine || prepared.video.contract.brand.series];
-  if (short && contractPublishing.shortBridge) parts.push(contractPublishing.shortBridge);
+  if (short && contractPublishing.shortBridge && !parts.includes(contractPublishing.shortBridge)) parts.push(contractPublishing.shortBridge);
   // A Short's description is rarely clickable and rarely expanded; the contract may drop
   // the article link and swap the full disclaimer for a one-liner there only.
   if (publishing.articleUrl && (!short || contractPublishing.shortArticleLink !== false)) parts.push(`${articleLabel} ${publishing.articleUrl}`);

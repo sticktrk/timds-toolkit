@@ -1,0 +1,23 @@
+{
+  "targets": {
+    "youtube_short": {
+      "brief": "Write 1-2 concise sentences from this clip: a clear hook and a qualified payoff. Do not instruct viewers to click a description URL or promise a related video unless one is supplied.",
+      "maxCharacters": 500,
+      "maxCopyCharacters": 240
+    },
+    "facebook_reel": {
+      "brief": "Write 2-3 self-contained, conversational sentences from this clip. Explain why the situation matters to the audience and give a practical, qualified takeaway. Keep the important context in the caption.",
+      "maxCharacters": 700,
+      "maxCopyCharacters": 360
+    },
+    "instagram_reel": {
+      "brief": "Write a concise caption from this clip with a strong opening and a useful, qualified takeaway. Do not invent a profile link, ask viewers to click a caption URL, or copy the YouTube wording.",
+      "maxCharacters": 500,
+      "maxCopyCharacters": 240
+    }
+  },
+  "targetDefaults": {
+    "shortArticleLink": false,
+    "shortBridge": ""
+  }
+}

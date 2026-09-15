@@ -344,6 +344,8 @@ skill and installation record:
 ```bash
 npm update @dtconcepts/timds
 npm run timds -- upgrade --root .
+npm run timds -- defaults
+npm run timds -- defaults --apply
 npm run timds -- doctor
 npm run timds -- check
 ```
@@ -353,6 +355,29 @@ both managed skills. It refuses locally modified managed files unless `--force`
 is explicitly supplied and never
 rewrites `timds.json`, tokens, media records, authored source, framework config,
 documentation, or artifacts.
+
+### Shared defaults across existing Design Systems
+
+TimDS owns reusable publishing wording and budgets in
+`templates/video/publishing-defaults.json`. Improvements developed in a client
+system can become the next package defaults after removing firm names, campaign
+URLs, and client-only requirements. New video workspaces receive these defaults.
+
+`timds defaults` previews an existing system's update. On a feature branch,
+`timds defaults --apply` adds missing publishing fields and records the supplied
+defaults in `.timds/defaults.json`. Commit that baseline with the contract: it
+lets the next update replace values that still match the prior TimDS defaults,
+while retaining client edits and intentional deletions. Existing values on first
+adoption are preserved. A value equal to the last supplied default follows TimDS;
+a differing value is an override. The command is safe to repeat.
+
+After upgrading the package, run the same command, inspect its reported overrides
+and Git diff, validate, and open a PR in each Design System. `upgrade` reports
+available defaults without applying them. This is a local, reviewed update; it
+does not discover repositories, push branches, merge, or deploy. Currently only
+`publishing.targets` and `publishing.targetDefaults` participate. Historical
+productions, legacy publishing fields, brand, components, and media are untouched.
+Client-specific CTAs and legal/disclosure requirements remain local overrides.
 
 Standalone repositories created by older TimDS releases can adopt the managed
 merge-to-patch automation explicitly:

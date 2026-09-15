@@ -382,6 +382,16 @@ test("video init scaffolds the lab beside the contract, with a producer block th
   assert.deepEqual(Object.keys(contract.publishing.targets), ["youtube_short", "facebook_reel", "instagram_reel"]);
   await fs.access(path.join(root, "video", "publishing.md"));
   assert.deepEqual(Object.keys(contract.producer.roleEyebrows).sort(), ["answer", "exception", "hook", "process", "risk", "rule"]);
+  const baseline = JSON.parse(await fs.readFile(path.join(root, ".timds/defaults.json"), "utf8"));
+  assert.deepEqual(contract.publishing.targets, baseline.videoPublishing.targets);
+  await initializeVideoWorkspace({ designSystemRoot: root, repoRoot: root, manifestPath, manifest: {} }, { force: true });
+  assert.deepEqual(JSON.parse(await fs.readFile(result.contract, "utf8")).publishing.targets, baseline.videoPublishing.targets);
+});
+
+test("a contact CTA already used as the series line is included once", () => {
+  const cta = "Contact the team at example.com";
+  const prepared = { production: { publishing: { seriesLine: cta } }, video: { contract: { brand: { series: "Answers" }, publishing: { shortBridge: cta } } } };
+  assert.equal(descriptionFor(prepared, { description: "Clip copy." }), `Clip copy.\n\n${cta}\n`);
 });
 
 test("rejects back-to-back footage from one family inside a committed production", async (t) => {

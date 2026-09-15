@@ -34,6 +34,16 @@ Never extend upgrades to authored source, `timds.json`, tokens, `media.json`,
 framework configuration, documentation, or generated artifacts without an
 explicit contract change and migration plan.
 
+`timds defaults --apply` is the explicit migration for shared publishing defaults.
+It updates only `publishing.targets` and `publishing.targetDefaults` and records
+the supplied values in `.timds/defaults.json`. Compare against that baseline to
+advance unchanged defaults and preserve local overrides. Ordinary `upgrade`
+reports pending defaults without applying them. New video scaffolds use the same
+source and baseline. Reusable wording and budgets refined in a client system may
+be promoted to these defaults; firm names, URLs, and client-only requirements stay
+in the client repository. Keep this migration covered by first-adoption,
+subsequent-update, override-preservation, and idempotence tests.
+
 The generic video engine may know only the executable schema and deterministic
 tooling. Client brand, copy, source authorization, compliance, asset selection,
 production records, and output policy belong under that client's Design System

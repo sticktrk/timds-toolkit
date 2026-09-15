@@ -4,9 +4,18 @@
   "name": "Client Video System",
   "fps": 30,
   "formats": {
-    "longform": { "width": 1920, "height": 1080 },
-    "cover": { "width": 3840, "height": 2160 },
-    "short": { "width": 1080, "height": 1920 }
+    "longform": {
+      "width": 1920,
+      "height": 1080
+    },
+    "cover": {
+      "width": 3840,
+      "height": 2160
+    },
+    "short": {
+      "width": 1080,
+      "height": 1920
+    }
   },
   "package": {
     "shortCount": 1,
@@ -15,8 +24,14 @@
     "shortDirectoryPrefix": "Short form - "
   },
   "structure": {
-    "longform": { "requireIntro": true, "requireOutro": false },
-    "short": { "requireIntro": true, "requireOutro": false }
+    "longform": {
+      "requireIntro": true,
+      "requireOutro": false
+    },
+    "short": {
+      "requireIntro": true,
+      "requireOutro": false
+    }
   },
   "copy": {
     "eyebrowWords": 5,
@@ -114,26 +129,6 @@
     "shortBridge": "Watch the full explainer for the complete answer.",
     "disclaimer": "",
     "shortDisclaimer": "",
-    "shortArticleLink": true,
-    "targets": {
-      "youtube_short": {
-        "brief": "Write a concise hook and payoff for this clip on YouTube Shorts. Do not instruct viewers to click a description URL. Do not promise a related video unless one is supplied.",
-        "maxCharacters": 500,
-        "maxCopyCharacters": 240
-      },
-      "facebook_reel": {
-        "brief": "Write a self-contained Facebook Reel caption: introduce the situation and explain why this clip matters. Use a conversational, practical tone.",
-        "maxCharacters": 800,
-        "maxCopyCharacters": 360
-      },
-      "instagram_reel": {
-        "brief": "Write a concise Instagram Reel caption with a strong opening and a useful takeaway. Do not invent a profile link or ask viewers to click a caption URL.",
-        "maxCharacters": 600,
-        "maxCopyCharacters": 240
-      }
-    },
-    "targetDefaults": {
-      "shortArticleLink": false
-    }
+    "shortArticleLink": true
   }
 }
