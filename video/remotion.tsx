@@ -41,6 +41,13 @@ export type VideoProjectAsset = {
   flip?: boolean;
   objectPosition?: string;
 };
+export type VideoProjectBrandBanners = {
+  /** Horizontal renders: pill top-right on every frame, e.g. "Subscribe for more". */
+  longform?: string;
+  /** Vertical renders: kicker + URL banner under the logo on every frame. */
+  short?: {kicker?: string; url: string};
+};
+
 export type VideoProject = {
   schemaVersion: 1;
   engine: {name: string; version: string};
@@ -197,12 +204,39 @@ const GoldHeadline: React.FC<{headline?: string; goldPhrase?: string; color: str
   return <>{parts.before}<span style={{color}}>{parts.highlighted}</span>{parts.after}</>;
 };
 
+/**
+ * Persistent brand chrome on every frame — content scenes, intro and outro cards alike.
+ * Outros are rarely watched (least of all in Shorts), so the contract's optional
+ * `brand.banners` keep a call to action on screen the whole time: a pill top-right in
+ * horizontal renders and a kicker + URL banner under the logo in vertical renders.
+ * Vertical renders keep the right edge clear for the Shorts UI (like / comment / share)
+ * and never share the bottom baseline between two labels — a long `watermark.right`
+ * (a URL with a path) would collide with `watermark.left` there.
+ */
 const BrandWatermark: React.FC<{project: VideoProject; vertical?: boolean; sceneHasLogo?: boolean}> = ({project, vertical, sceneHasLogo}) => {
   const brand = project.contract.brand;
+  const banners: VideoProjectBrandBanners = brand.banners || {};
+  const shadow = `0 2px 14px ${brand.colors.background}`;
+  const label = {color: brand.colors.text, fontFamily: brand.fonts.ui, fontSize: vertical ? 24 : 20, fontWeight: 700, letterSpacing: 1.5, textShadow: shadow} as const;
+  const shortBanner = vertical ? banners.short : undefined;
   return <>
-    {!sceneHasLogo ? <Img src={staticFile(brand.logo)} style={{position: "absolute", top: vertical ? 116 : 38, left: vertical ? 48 : 48, width: vertical ? 190 : 210, opacity: 0.82}} /> : null}
-    <div style={{position: "absolute", left: vertical ? 48 : 48, bottom: vertical ? 112 : 34, color: brand.colors.text, fontFamily: brand.fonts.ui, fontSize: vertical ? 24 : 20, fontWeight: 700, letterSpacing: 1.5, textShadow: `0 2px 14px ${brand.colors.background}`}}>{brand.watermark.left}</div>
-    <div style={{position: "absolute", right: vertical ? 150 : 48, bottom: vertical ? 112 : 34, color: brand.colors.text, fontFamily: brand.fonts.ui, fontSize: vertical ? 24 : 20, fontWeight: 700, letterSpacing: 1.5, textShadow: `0 2px 14px ${brand.colors.background}`}}>{brand.watermark.right}</div>
+    {!sceneHasLogo ? <Img src={staticFile(brand.logo)} style={{position: "absolute", top: vertical ? 116 : 38, left: 48, width: vertical ? 190 : 210, opacity: 0.82}} /> : null}
+    {!vertical && banners.longform ? (
+      <div data-banner="longform" style={{...label, position: "absolute", top: 38, right: 48, display: "flex", alignItems: "center", gap: 12, padding: "10px 22px 10px 18px", border: `2px solid ${brand.colors.accent}`, borderRadius: 999, backgroundColor: brand.colors.panel, fontSize: 21, letterSpacing: 1.2}}>
+        <span style={{width: 0, height: 0, borderTop: "8px solid transparent", borderBottom: "8px solid transparent", borderLeft: `13px solid ${brand.colors.accent}`}} />
+        <span>{banners.longform}</span>
+      </div>
+    ) : null}
+    {shortBanner ? (
+      <div data-banner="short" style={{position: "absolute", top: 196, left: 48, display: "flex", flexDirection: "column", gap: 6}}>
+        {shortBanner.kicker ? <div style={{...label, fontSize: 24, letterSpacing: 3, textTransform: "uppercase", opacity: 0.92}}>{shortBanner.kicker}</div> : null}
+        <div style={{...label, color: brand.colors.accent, fontSize: 36, letterSpacing: 1.2}}>{shortBanner.url}</div>
+      </div>
+    ) : null}
+    <div style={{...label, position: "absolute", left: 48, bottom: vertical ? 112 : 34}}>{brand.watermark.left}</div>
+    {shortBanner ? null : vertical
+      ? <div style={{...label, position: "absolute", left: 48, bottom: 152, color: brand.colors.accent}}>{brand.watermark.right}</div>
+      : <div style={{...label, position: "absolute", right: 48, bottom: 34}}>{brand.watermark.right}</div>}
   </>;
 };
 
@@ -476,4 +510,4 @@ export function registerVideoProject(project: VideoProject, components: VideoPro
   registerRoot(createVideoProjectRoot(project, components));
 }
 
-export { Cover, GoldHeadline, HorizontalCover, Intro, Outro, SceneView, VerticalCover, Video };
+export { BrandWatermark, Cover, GoldHeadline, HorizontalCover, Intro, Outro, SceneView, VerticalCover, Video };

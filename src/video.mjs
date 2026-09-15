@@ -137,6 +137,43 @@ export function normalizeVideoManifest(value) {
   };
 }
 
+const optionalText = (value, label) => (value === undefined || value === null || value === "" ? undefined : text(value, label));
+
+/**
+ * Persistent on-screen calls to action. Outros are rarely watched — least of all in
+ * vertical Shorts — so a client can ask the default components to keep a CTA on every
+ * frame instead: a pill top-right in horizontal renders and a kicker + URL banner under
+ * the logo in vertical renders. Both are optional; wording stays client-owned.
+ */
+function normalizeVideoBanners(input) {
+  if (input === undefined || input === null) return {};
+  const banners = object(input, "video contract brand.banners");
+  const normalized = {};
+  const longform = optionalText(banners.longform, "video contract brand.banners.longform");
+  if (longform) normalized.longform = longform;
+  if (banners.short !== undefined && banners.short !== null) {
+    const short = object(banners.short, "video contract brand.banners.short");
+    const kicker = optionalText(short.kicker, "video contract brand.banners.short.kicker");
+    normalized.short = { ...(kicker ? { kicker } : {}), url: text(short.url, "video contract brand.banners.short.url") };
+  }
+  return normalized;
+}
+
+/**
+ * Package-time publishing copy. `shortDisclaimer` and `shortArticleLink` let a client keep
+ * the full long-form description while the Short's description stays short: a Short's
+ * description is not clickable on most platforms and the first line is all anyone reads.
+ */
+function normalizeVideoPublishing(input) {
+  const publishing = input === undefined || input === null ? {} : object(input, "video contract publishing");
+  const normalized = { ...publishing, shortArticleLink: publishing.shortArticleLink !== false };
+  for (const key of ["articleLabel", "shortBridge", "disclaimer", "shortDisclaimer"]) {
+    const value = optionalText(publishing[key], `video contract publishing.${key}`);
+    if (value) normalized[key] = value; else delete normalized[key];
+  }
+  return normalized;
+}
+
 function positiveInteger(value, label) {
   const result = Number(value);
   if (!Number.isSafeInteger(result) || result < 1) throw new Error(`${label} must be a positive integer`);
@@ -239,7 +276,9 @@ export function validateVideoContract(input) {
         left: text(brand.watermark?.left || brand.series, "video contract brand.watermark.left"),
         right: text(brand.watermark?.right || brand.site, "video contract brand.watermark.right"),
       },
+      banners: normalizeVideoBanners(brand.banners),
     },
+    publishing: normalizeVideoPublishing(contract.publishing),
   };
 }
 
@@ -802,18 +841,23 @@ export async function runVideoStudio(workspace, selectedSlug) {
   return prepared;
 }
 
-function descriptionFor(prepared, short) {
+export function descriptionFor(prepared, short) {
   const publishing = prepared.production.publishing;
+  const contractPublishing = prepared.video.contract.publishing || {};
   const source = short || publishing;
-  const articleLabel = prepared.video.contract.publishing?.articleLabel || "Read the full article:";
+  const articleLabel = contractPublishing.articleLabel || "Read the full article:";
   const lead = source.description || [
     source.descriptionHook || (source.question ? `Q: ${source.question}` : ""),
     source.answer ? `A: ${source.answer}` : "",
   ].filter(Boolean).join("\n\n");
   const parts = [lead, publishing.seriesLine || prepared.video.contract.brand.series];
-  if (short && prepared.video.contract.publishing?.shortBridge) parts.push(prepared.video.contract.publishing.shortBridge);
-  if (publishing.articleUrl) parts.push(`${articleLabel} ${publishing.articleUrl}`);
-  const disclaimer = publishing.disclaimer || prepared.video.contract.publishing?.disclaimer;
+  if (short && contractPublishing.shortBridge) parts.push(contractPublishing.shortBridge);
+  // A Short's description is rarely clickable and rarely expanded; the contract may drop
+  // the article link and swap the full disclaimer for a one-liner there only.
+  if (publishing.articleUrl && (!short || contractPublishing.shortArticleLink !== false)) parts.push(`${articleLabel} ${publishing.articleUrl}`);
+  const disclaimer = short && contractPublishing.shortDisclaimer
+    ? contractPublishing.shortDisclaimer
+    : publishing.disclaimer || contractPublishing.disclaimer;
   if (disclaimer) parts.push(disclaimer);
   return `${parts.filter(Boolean).join("\n\n")}\n`;
 }

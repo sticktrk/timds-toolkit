@@ -244,6 +244,20 @@ precedence over the shared `Cover` override. This keeps rendering mechanics in
 TimDS while allowing a reviewed client Design System to own its visual
 compositions.
 
+Outros are rarely watched — least of all in vertical Shorts — so the default
+components keep a call to action on every frame when the contract asks for one.
+`brand.banners.longform` renders as a pill top-right of horizontal frames (for
+example "Subscribe for more"); `brand.banners.short` renders a kicker and URL
+under the logo on vertical frames, with the right edge left clear for the
+Shorts UI. Vertical frames never place two labels on the bottom baseline, so a
+long `watermark.right` cannot collide with `watermark.left`. The producer's
+`outro.narrationTemplates.short` may shorten the spoken close for Shorts, and
+`publishing.shortDisclaimer` / `publishing.shortArticleLink: false` keep a
+Short's packaged description brief while the long-form keeps the full text. A
+Short with its own `description` in `publishing.json` uses it instead of the
+long-form hook and answer. The video template now requires the question intro
+card in both formats, matching what the producer always emits.
+
 The default cover set includes separate horizontal and reel layouts. A cover's
 explicit `objectPosition` wins, followed by its prepared asset position; the
 reel fallback keeps right-biased portrait subjects in the upper photographic
