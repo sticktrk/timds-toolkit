@@ -39,10 +39,12 @@
     "src/video-producer.mjs",
     "src/video-producer.d.mts",
     "src/video.mjs",
+    "src/video-lab-server.mjs",
     "video",
     "templates"
   ],
   "dependencies": {
+    "@anthropic-ai/sdk": "0.125.0",
     "@remotion/cli": "4.0.484",
     "@remotion/media": "4.0.484",
     "@remotion/media-parser": "4.0.484",

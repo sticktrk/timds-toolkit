@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TimDS Video Lab</title>
+<style>
+  :root {
+    --bg: #f5f4f0; --surface: #ffffff; --surface-2: #eeece6; --text: #1a1d23; --muted: #626875; --line: #d9d6cd;
+    --accent: #2b4a8a; --accent-ink: #ffffff; --ok: #1f7a4d; --warn: #9a6700; --bad: #b3261e;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 var(--sans); }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 18px; padding: 14px 22px; background: var(--surface); border-bottom: 1px solid var(--line); }
+  header h1 { margin: 0; font-size: 17px; font-weight: 650; }
+  header .ds { color: var(--muted); font-size: 13px; }
+  header .ds strong { color: var(--text); }
+  header .spacer { flex: 1; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; letter-spacing: .02em; border: 1px solid var(--line); background: var(--surface-2); color: var(--muted); }
+  .pill.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 35%, transparent); }
+  .pill.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 35%, transparent); }
+  main { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(320px, 1.3fr) minmax(300px, 1.1fr); gap: 18px; padding: 18px 22px 40px; max-width: 1500px; margin: 0 auto; }
+  @media (max-width: 1100px) { main { grid-template-columns: 1fr; } }
+  section.step { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px 18px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  section.step h2 { margin: 0; font-size: 13px; text-transform: uppercase; letter-spacing: .12em; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+  section.step h2 .n { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); font-size: 11px; }
+  label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+  label span.hint { font-size: 12px; }
+  input, textarea, select { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; width: 100%; }
+  textarea { resize: vertical; min-height: 68px; }
+  input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .row > * { flex: 1 1 140px; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .seg button { flex: 1; border: 0; background: var(--surface); padding: 8px 12px; cursor: pointer; font: inherit; color: var(--muted); }
+  .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+  button.primary, button.secondary, button.ghost { font: inherit; font-weight: 600; border-radius: 6px; padding: 9px 14px; cursor: pointer; border: 1px solid var(--line); }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  button.secondary { background: var(--surface-2); color: var(--text); }
+  button.ghost { background: transparent; color: var(--muted); padding: 4px 8px; font-weight: 500; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .note { font-size: 13px; color: var(--muted); }
+  .error { color: var(--bad); font-size: 13px; white-space: pre-wrap; }
+  .beat { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: grid; gap: 8px; background: var(--surface); }
+  .beat .top { display: flex; gap: 8px; align-items: center; }
+  .beat .top select { flex: 0 0 150px; }
+  .beat .top input { flex: 1; }
+  .beat .tools { display: flex; gap: 2px; }
+  .beat .count { font-size: 11px; color: var(--muted); text-align: right; }
+  .beat .count.over { color: var(--bad); font-weight: 600; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; vertical-align: top; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  th { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 600; }
+  td.num { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+  td .eyebrow { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--accent); }
+  td .footage { display: block; font: 11px/1.4 var(--mono); color: var(--muted); }
+  pre.log { margin: 0; padding: 10px 12px; background: #14171d; color: #d9dde6; border-radius: 8px; font: 12px/1.5 var(--mono); max-height: 220px; overflow: auto; white-space: pre-wrap; }
+  video { width: 100%; max-height: 520px; background: #000; border-radius: 8px; }
+  img.thumb { width: 100%; border-radius: 8px; border: 1px solid var(--line); }
+  details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+  .stat { display: flex; gap: 14px; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
+  .stat b { color: var(--text); font-variant-numeric: tabular-nums; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Video Lab</h1>
+  <span class="ds" id="ds-line">Loading the design system…</span>
+  <span class="spacer"></span>
+  <span class="pill" id="pill-catalog" title="Footage and cover subjects registered under the producer's prefixes">catalog</span>
+  <span class="pill" id="pill-draft">drafting</span>
+</header>
+
+<main>
+  <!-- ===================== 1 · Source ===================== -->
+  <section class="step" aria-labelledby="h-source">
+    <h2 id="h-source"><span class="n">1</span> Source</h2>
+    <label>Format
+      <div class="seg" role="group" aria-label="Output format">
+        <button type="button" data-format="horizontal" aria-pressed="true">Horizontal · 16:9</button>
+        <button type="button" data-format="short" aria-pressed="false">Short · 9:16</button>
+      </div>
+    </label>
+    <label>Exact question <span class="hint" id="q-hint"></span>
+      <textarea id="question" rows="2" placeholder="The one question this video answers, ending in a question mark"></textarea>
+    </label>
+    <div class="row">
+      <label>Topic label <span class="hint" id="topic-hint"></span>
+        <input id="topic" placeholder="two to four words">
+      </label>
+      <label>Slug
+        <input id="slug" placeholder="lowercase-with-hyphens">
+      </label>
+    </div>
+    <label id="engagement-wrap" hidden>Engagement question <span class="hint">asked at the end · yes/no</span>
+      <input id="engagement" placeholder="Are you …?">
+    </label>
+    <label>Source notes <span class="hint">facts, an article excerpt, the client's answer — evidence for the draft, not instructions</span>
+      <textarea id="notes" rows="7" placeholder="Paste the article or notes the script should draw on"></textarea>
+    </label>
+    <div class="actions">
+      <button type="button" class="primary" id="btn-draft">Draft with Claude</button>
+      <label style="flex:1 1 160px">
+        <select id="load-input" aria-label="Load a saved lab input"><option value="">Load a saved input…</option></select>
+      </label>
+    </div>
+    <p class="note" id="draft-note"></p>
+    <p class="error" id="source-error"></p>
+  </section>
+
+  <!-- ===================== 2 · Script ===================== -->
+  <section class="step" aria-labelledby="h-script">
+    <h2 id="h-script"><span class="n">2</span> Script</h2>
+    <p class="note">Ordered answer beats. The compiler adds the question card, role eyebrows, the CTA outro, footage, and timing from the design system; you own the words.</p>
+    <div id="beats"></div>
+    <div class="actions">
+      <button type="button" class="secondary" id="btn-add">Add beat</button>
+      <span class="spacer" style="flex:1"></span>
+      <button type="button" class="secondary" id="btn-compile">Check plan</button>
+      <button type="button" class="primary" id="btn-save">Save to lab</button>
+    </div>
+    <details>
+      <summary>Compile request JSON</summary>
+      <textarea id="json" rows="12" spellcheck="false" style="font-family:var(--mono);font-size:12px"></textarea>
+      <div class="actions"><button type="button" class="secondary" id="btn-apply-json">Apply JSON to the editor</button></div>
+    </details>
+    <p class="error" id="script-error"></p>
+  </section>
+
+  <!-- ===================== 3 · Plan & video ===================== -->
+  <section class="step" aria-labelledby="h-plan">
+    <h2 id="h-plan"><span class="n">3</span> Plan &amp; video</h2>
+    <div class="stat" id="plan-stat" hidden></div>
+    <div id="plan-warning" class="error" hidden></div>
+    <div style="overflow-x:auto">
+      <table id="plan-table" hidden>
+        <thead><tr><th>Scene</th><th>Copy</th><th class="num">s</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <p class="note" id="plan-empty">Check the plan to see how the design system will cut this script, then render.</p>
+    <div class="actions">
+      <button type="button" class="primary" id="btn-render" disabled>Render video</button>
+      <span class="note" id="render-note"></span>
+    </div>
+    <pre class="log" id="render-log" hidden></pre>
+    <div id="result" hidden>
+      <video id="player" controls playsinline></video>
+      <div class="actions" style="margin-top:8px">
+        <a id="dl-video" class="pill ok" download>Download MP4</a>
+        <a id="dl-thumb" class="pill" download>Thumbnail</a>
+        <span class="note" id="out-dir"></span>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const ROLES = ["hook", "rule", "risk", "process", "exception", "answer"];
+  const state = { format: "horizontal", meta: null, beats: [], plan: null, savedName: null, job: null };
+
+  // ---- helpers -------------------------------------------------------------------
+  const words = (value) => String(value || "").trim().split(/\s+/).filter(Boolean).length;
+  const slugify = (value) => String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
+  async function api(method, url, body) {
+    const response = await fetch(url, { method, headers: body ? { "content-type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined });
+    const payload = await response.json().catch(() => ({ error: `${response.status} ${response.statusText}` }));
+    if (!response.ok) throw new Error(payload.error || `${response.status} ${response.statusText}`);
+    return payload;
+  }
+  const headlineWords = () => state.meta ? (state.format === "short" ? state.meta.contract.copy.shortHeadlineWords : state.meta.contract.copy.horizontalHeadlineWords) : 8;
+  const engagementRequired = () => {
+    const engagement = state.meta?.contract.producer?.engagement;
+    return Boolean(engagement && engagement.enabled && (engagement.formats || ["horizontal"]).includes(state.format));
+  };
+  function currentInput() {
+    return {
+      schemaVersion: 1,
+      slug: $("slug").value.trim() || slugify($("question").value),
+      outputFormat: state.format,
+      exactQuestion: $("question").value.trim(),
+      topic: {
+        label: $("topic").value.trim(),
+        ...(engagementRequired() || $("engagement").value.trim() ? { engagementQuestion: $("engagement").value.trim() } : {}),
+        coverEmotion: state.coverEmotion || state.meta?.contract.producer?.cover?.defaultEmotion || "concern",
+      },
+      answerBeats: state.beats.map((beat) => ({ id: beat.id, role: beat.role, narration: beat.narration, summary: beat.summary })),
+    };
+  }
+  function applyInput(input) {
+    state.format = input.outputFormat === "short" ? "short" : "horizontal";
+    for (const button of document.querySelectorAll("[data-format]")) button.setAttribute("aria-pressed", String(button.dataset.format === state.format));
+    $("question").value = input.exactQuestion || "";
+    $("topic").value = input.topic?.label || "";
+    $("engagement").value = input.topic?.engagementQuestion || "";
+    $("slug").value = input.slug || "";
+    state.coverEmotion = input.topic?.coverEmotion;
+    state.beats = (input.answerBeats || []).map((beat, index) => ({ id: beat.id || `beat-${index + 1}`, role: ROLES.includes(beat.role) ? beat.role : "rule", narration: beat.narration || "", summary: beat.summary || "" }));
+    renderBeats();
+    syncFormatUi();
+    $("json").value = JSON.stringify(currentInput(), null, 2);
+  }
+
+  // ---- state ---------------------------------------------------------------------
+  async function loadState() {
+    const meta = await api("GET", "/api/state");
+    state.meta = meta;
+    $("ds-line").innerHTML = `<strong>${escapeHtml(meta.designSystem.name)}</strong> ${escapeHtml(meta.designSystem.version)} · ${escapeHtml(meta.contract.name)} · ${escapeHtml(meta.contract.brand.series)}`;
+    const accent = meta.contract.brand.colors?.accent;
+    if (accent) document.documentElement.style.setProperty("--accent", accent);
+    const ink = meta.contract.brand.colors?.background;
+    if (ink) document.documentElement.style.setProperty("--accent-ink", ink);
+    const catalog = $("pill-catalog");
+    catalog.textContent = `${meta.catalog.footage} footage · ${meta.catalog.covers} cover${meta.catalog.covers === 1 ? "" : "s"}`;
+    catalog.className = `pill ${meta.catalog.footage && meta.catalog.covers ? "ok" : "warn"}`;
+    const draft = $("pill-draft");
+    draft.textContent = meta.drafting.credentials ? `drafting · ${meta.drafting.model}` : "drafting off · no Claude credentials";
+    draft.className = `pill ${meta.drafting.credentials ? "ok" : "warn"}`;
+    $("btn-draft").disabled = !meta.drafting.credentials || !meta.contract.producer;
+    $("draft-note").textContent = !meta.contract.producer
+      ? "This contract has no producer block; add one (timds video init scaffolds it) before drafting or compiling."
+      : meta.drafting.credentials ? "Claude drafts against this design system's authoring contract; you edit the beats before anything renders." : "Run `ant auth login` or export ANTHROPIC_API_KEY, then reload to enable drafting. You can still paste a compile request under Script.";
+    const load = $("load-input");
+    load.innerHTML = '<option value="">Load a saved input…</option>' + meta.lab.inputs.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("");
+    const topic = meta.contract.producer?.topicLabel;
+    $("topic-hint").textContent = topic ? `${topic.minimumWords}–${topic.maximumWords} words` : "";
+    $("q-hint").textContent = `≤ ${meta.contract.copy.coverHeadlineWords} words, ends with ?`;
+    syncFormatUi();
+    if (!state.beats.length) { state.beats = [{ id: "beat-1", role: "hook", narration: "", summary: "" }]; renderBeats(); }
+  }
+  function syncFormatUi() {
+    $("engagement-wrap").hidden = !engagementRequired();
+    for (const el of document.querySelectorAll(".beat .count")) updateCount(el.closest(".beat"));
+  }
+
+  // ---- beats editor ---------------------------------------------------------------
+  function renderBeats() {
+    const host = $("beats");
+    host.innerHTML = "";
+    state.beats.forEach((beat, index) => {
+      const card = document.createElement("div");
+      card.className = "beat";
+      card.dataset.index = index;
+      card.innerHTML = `
+        <div class="top">
+          <select aria-label="Role">${ROLES.map((role) => `<option value="${role}" ${role === beat.role ? "selected" : ""}>${role}${state.meta?.contract.producer?.roleEyebrows?.[role] ? " · " + escapeHtml(state.meta.contract.producer.roleEyebrows[role]) : ""}</option>`).join("")}</select>
+          <input class="summary" placeholder="Micro-headline (complete thought)" value="${escapeAttr(beat.summary)}" aria-label="Summary">
+          <div class="tools">
+            <button type="button" class="ghost" data-move="-1" title="Move up">↑</button>
+            <button type="button" class="ghost" data-move="1" title="Move down">↓</button>
+            <button type="button" class="ghost" data-remove title="Remove">✕</button>
+          </div>
+        </div>
+        <textarea class="narration" rows="3" placeholder="Spoken narration for this beat" aria-label="Narration">${escapeHtml(beat.narration)}</textarea>
+        <div class="count"></div>`;
+      host.appendChild(card);
+      updateCount(card);
+    });
+  }
+  function updateCount(card) {
+    if (!card) return;
+    const summary = card.querySelector(".summary").value;
+    const limit = headlineWords();
+    const count = card.querySelector(".count");
+    const n = words(summary);
+    count.textContent = `summary ${n}/${limit} words · narration ${words(card.querySelector(".narration").value)} words`;
+    count.className = `count ${n > limit ? "over" : ""}`;
+  }
+  function readBeats() {
+    state.beats = [...document.querySelectorAll(".beat")].map((card, index) => ({
+      id: state.beats[index]?.id || `beat-${index + 1}`,
+      role: card.querySelector("select").value,
+      summary: card.querySelector(".summary").value.trim(),
+      narration: card.querySelector(".narration").value.trim(),
+    }));
+  }
+  const markDirty = () => { if (state.savedName) { state.savedName = null; $("btn-render").disabled = true; $("render-note").textContent = "Edited since save — save again to render."; } };
+  $("beats").addEventListener("input", (event) => { updateCount(event.target.closest(".beat")); readBeats(); markDirty(); $("json").value = JSON.stringify(currentInput(), null, 2); });
+  $("beats").addEventListener("click", (event) => {
+    const button = event.target.closest("button");
+    if (!button) return;
+    readBeats();
+    const index = Number(button.closest(".beat").dataset.index);
+    if (button.hasAttribute("data-remove")) state.beats.splice(index, 1);
+    if (button.dataset.move) {
+      const target = index + Number(button.dataset.move);
+      if (target >= 0 && target < state.beats.length) [state.beats[index], state.beats[target]] = [state.beats[target], state.beats[index]];
+    }
+    renderBeats();
+  });
+  $("btn-add").addEventListener("click", () => { readBeats(); state.beats.push({ id: `beat-${state.beats.length + 1}`, role: state.beats.length ? "rule" : "hook", narration: "", summary: "" }); renderBeats(); });
+  $("btn-apply-json").addEventListener("click", () => {
+    try { applyInput(JSON.parse($("json").value)); $("script-error").textContent = ""; }
+    catch (caught) { $("script-error").textContent = `JSON: ${caught.message}`; }
+  });
+  for (const el of ["question", "topic", "slug", "engagement"]) $(el).addEventListener("input", () => { markDirty(); $("json").value = JSON.stringify(currentInput(), null, 2); });
+  $("question").addEventListener("blur", () => { if (!$("slug").value) $("slug").value = slugify($("question").value); });
+
+  // ---- format ----------------------------------------------------------------------
+  document.querySelectorAll("[data-format]").forEach((button) => button.addEventListener("click", () => {
+    state.format = button.dataset.format;
+    for (const other of document.querySelectorAll("[data-format]")) other.setAttribute("aria-pressed", String(other === button));
+    syncFormatUi();
+    $("json").value = JSON.stringify(currentInput(), null, 2);
+  }));
+
+  // ---- draft -------------------------------------------------------------------------
+  $("btn-draft").addEventListener("click", async () => {
+    const button = $("btn-draft");
+    $("source-error").textContent = "";
+    button.disabled = true; button.textContent = "Drafting…";
+    try {
+      const result = await api("POST", "/api/draft", {
+        outputFormat: state.format,
+        question: $("question").value.trim(),
+        topicLabel: $("topic").value.trim(),
+        engagementQuestion: $("engagement").value.trim(),
+        notes: $("notes").value.trim(),
+        slug: $("slug").value.trim() || slugify($("question").value),
+      });
+      applyInput(result.input);
+      showPlan(result.plan);
+      $("draft-note").textContent = `Drafted with ${result.model}${result.usage ? ` · ${result.usage.input_tokens} in / ${result.usage.output_tokens} out` : ""}. Edit the beats, then save and render.`;
+    } catch (caught) {
+      $("source-error").textContent = caught.message;
+    } finally {
+      button.disabled = false; button.textContent = "Draft with Claude";
+    }
+  });
+  $("load-input").addEventListener("change", async (event) => {
+    const name = event.target.value;
+    if (!name) return;
+    try { applyInput(await api("GET", `/api/inputs/${name}`)); state.savedName = name; $("btn-render").disabled = false; $("render-note").textContent = `Saved as ${name}.json`; $("source-error").textContent = ""; }
+    catch (caught) { $("source-error").textContent = caught.message; }
+  });
+
+  // ---- compile / save --------------------------------------------------------------------
+  async function compile(save) {
+    readBeats();
+    $("script-error").textContent = "";
+    const input = currentInput();
+    try {
+      const result = save ? await api("POST", "/api/inputs", { input }) : await api("POST", "/api/compile", { input });
+      const plan = save ? result.plan : result;
+      showPlan(plan);
+      if (save) {
+        state.savedName = result.name;
+        $("btn-render").disabled = !plan.renderable;
+        $("render-note").textContent = `Saved ${result.path}`;
+        if (![...$("load-input").options].some((option) => option.value === result.name)) $("load-input").add(new Option(result.name, result.name));
+      } else {
+        // A checked plan renders only once it is saved; an already-saved input stays renderable.
+        $("btn-render").disabled = !(state.savedName && plan.renderable);
+        $("render-note").textContent = state.savedName ? `Saved as ${state.savedName}.json` : (plan.renderable ? "Save to lab to render." : "");
+      }
+    } catch (caught) {
+      $("script-error").textContent = caught.message;
+    }
+  }
+  $("btn-compile").addEventListener("click", () => compile(false));
+  $("btn-save").addEventListener("click", () => compile(true));
+
+  function showPlan(plan) {
+    state.plan = plan;
+    $("plan-empty").hidden = true;
+    const stat = $("plan-stat");
+    stat.hidden = false;
+    stat.innerHTML = `<span><b>${plan.scenes.length}</b> scenes</span><span><b>${plan.totalSeconds}</b>s at reading speed</span><span>${escapeHtml(plan.outputFormat)}</span>${plan.cover ? `<span>cover · <b>${escapeHtml(plan.cover.subject)}</b></span>` : ""}`;
+    const warning = $("plan-warning");
+    warning.hidden = !plan.warning;
+    warning.textContent = plan.warning ? `Not renderable yet: ${plan.warning}` : "";
+    const table = $("plan-table");
+    table.hidden = false;
+    table.querySelector("tbody").innerHTML = plan.scenes.map((scene) => `
+      <tr>
+        <td><code>${escapeHtml(scene.id)}</code><br><span class="note">${escapeHtml(scene.role || (scene.intro ? "intro" : scene.outro ? "outro" : ""))}</span></td>
+        <td>${scene.eyebrow ? `<span class="eyebrow">${escapeHtml(scene.eyebrow)}</span>` : ""}${escapeHtml(scene.headline || (scene.intro ? plan.exactQuestion : ""))}<br><span class="note">${escapeHtml(scene.narration)}</span>${Array.isArray(scene.footage) ? `<span class="footage">${escapeHtml(scene.footage.join(" → "))}</span>` : `<span class="footage">card</span>`}</td>
+        <td class="num">${scene.seconds.toFixed(1)}</td>
+      </tr>`).join("");
+  }
+
+  // ---- render ----------------------------------------------------------------------------
+  $("btn-render").addEventListener("click", async () => {
+    if (!state.savedName) return;
+    const button = $("btn-render");
+    button.disabled = true;
+    $("result").hidden = true;
+    const log = $("render-log");
+    log.hidden = false; log.textContent = "Starting render…";
+    try {
+      const job = await api("POST", "/api/render", { name: state.savedName });
+      await poll(job.id);
+    } catch (caught) {
+      log.textContent += `\n${caught.message}`;
+      button.disabled = false;
+    }
+  });
+  async function poll(id) {
+    const log = $("render-log");
+    for (;;) {
+      const job = await api("GET", `/api/jobs/${id}`);
+      log.textContent = [`Rendering ${job.name} (headless)…`, ...job.log, job.error ? `Failed: ${job.error}` : ""].filter(Boolean).join("\n");
+      log.scrollTop = log.scrollHeight;
+      if (job.status === "done") {
+        $("result").hidden = false;
+        $("player").src = `${job.output.video}?t=${Date.now()}`;
+        $("dl-video").href = job.output.video; $("dl-video").download = `${job.name}.mp4`;
+        $("dl-thumb").href = job.output.thumbnail; $("dl-thumb").download = `${job.name}-thumbnail.jpg`;
+        $("out-dir").textContent = job.output.directory;
+        $("btn-render").disabled = false;
+        return;
+      }
+      if (job.status === "failed") { $("btn-render").disabled = false; return; }
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    }
+  }
+
+  function escapeHtml(value) { return String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]); }
+  function escapeAttr(value) { return escapeHtml(value); }
+
+  loadState().catch((caught) => { $("ds-line").textContent = caught.message; });
+})();
+</script>
+</body>
+</html>

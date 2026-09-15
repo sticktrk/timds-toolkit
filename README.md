@@ -307,6 +307,29 @@ npm run timds -- video lab NAME --render   # TimDSVideo + TimDSCover to video-lo
 npm run timds -- video lab --list          # lab inputs and ready productions
 ```
 
+The lab also ships as a small local web app, the toolkit's standardized copy of
+the LawBoost Video Lab flow, so a Design System editor can test-generate a
+video without touching Remotion:
+
+```bash
+npm run timds -- video lab --serve            # http://127.0.0.1:4410/
+npm run timds -- video lab --serve --port 4500
+```
+
+Describe the source (the exact question, a topic label, notes or an article
+excerpt), let Claude draft the compile request against this Design System's
+authoring contract — the same prompt, brief, and JSON Schema
+`createVideoAuthoringContract()` hands an automated Video Lab — or paste one,
+edit the answer beats, check the compiled plan (scenes, silent timings,
+footage chain, cover), save it under `video/lab/`, and render. Rendering runs
+headless through the same path as `video lab NAME --render` and the page hands
+back the MP4 and thumbnail. Drafting uses `claude-opus-5` with the Anthropic
+SDK's own credential lookup (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, or an
+`ant auth login` profile); without credentials the draft button is off and
+everything else still works. The server binds to `127.0.0.1` only. When the
+producer selects prompt blocks, run `timds check` first so the built
+`dist/…/index.json` can resolve them; a producer with no blocks needs no index.
+
 `video check` compiles every lab input and warns when the registered catalog
 cannot finalize one yet, so a new system can commit the sample before it has
 registered footage under the producer's `footage.assetPrefix` keys and a cover

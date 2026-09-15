@@ -637,9 +637,10 @@ export async function runVideoLab(workspace, requestedName, options = {}) {
   const remotion = path.join(path.dirname(require.resolve("@remotion/cli/package.json")), "remotion-cli.js");
   const common = ["--public-dir", prepared.publicRoot];
   if (options.render) {
+    const onLine = options.captureOutput ? log : undefined;
     await fs.mkdir(prepared.outputRoot, { recursive: true });
-    await run(process.execPath, [remotion, "render", prepared.entryPath, "TimDSVideo", path.join(prepared.outputRoot, `${prepared.lab.name}.mp4`), "--codec=h264", ...common, "--log=error"], { cwd: workspace.designSystemRoot });
-    await run(process.execPath, [remotion, "still", prepared.entryPath, "TimDSCover", path.join(prepared.outputRoot, "thumbnail.jpg"), "--image-format=jpeg", "--jpeg-quality=90", ...common, "--log=error"], { cwd: workspace.designSystemRoot });
+    await run(process.execPath, [remotion, "render", prepared.entryPath, "TimDSVideo", path.join(prepared.outputRoot, `${prepared.lab.name}.mp4`), "--codec=h264", ...common, "--log=error"], { cwd: workspace.designSystemRoot, onLine });
+    await run(process.execPath, [remotion, "still", prepared.entryPath, "TimDSCover", path.join(prepared.outputRoot, "thumbnail.jpg"), "--image-format=jpeg", "--jpeg-quality=90", ...common, "--log=error"], { cwd: workspace.designSystemRoot, onLine });
     log(`Rendered ${path.relative(workspace.designSystemRoot, prepared.outputRoot)}`);
     return { ...prepared, lines };
   }
@@ -806,9 +807,36 @@ export async function prepareVideoWorkspace(workspace, selectedSlug) {
 
 function run(command, args, options = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd: options.cwd, env: options.env || process.env, stdio: "inherit" });
+    // With an `onLine` sink (the video lab server) the child's output is captured
+    // line by line so a render log can reach a browser; otherwise it inherits the
+    // terminal as before.
+    const capture = typeof options.onLine === "function";
+    const child = spawn(command, args, { cwd: options.cwd, env: options.env || process.env, stdio: capture ? ["ignore", "pipe", "pipe"] : "inherit" });
+    const tail = [];
+    if (capture) {
+      for (const stream of [child.stdout, child.stderr]) {
+        let buffered = "";
+        stream.setEncoding("utf8");
+        stream.on("data", (chunk) => {
+          buffered += chunk;
+          const lines = buffered.split(/\r?\n/u);
+          buffered = lines.pop() ?? "";
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            tail.push(line);
+            if (tail.length > 40) tail.shift();
+            options.onLine(line);
+          }
+        });
+        stream.on("end", () => { if (buffered.trim()) { tail.push(buffered); options.onLine(buffered); } });
+      }
+    }
     child.on("error", reject);
-    child.on("close", (code) => code === 0 ? resolve() : reject(new Error(`${command} ${args.join(" ")} failed with exit code ${code}`)));
+    child.on("close", (code) => {
+      if (code === 0) return resolve();
+      const detail = tail.length ? `\n${tail.slice(-12).join("\n")}` : "";
+      reject(new Error(`${path.basename(command)} ${args[1] || args[0] || ""} failed with exit code ${code}${detail}`));
+    });
   });
 }
 
@@ -905,6 +933,6 @@ export async function voiceoverVideoWorkspace(workspace, selectedSlug, options =
   return { outputRoot, production: production.production.slug };
 }
 
-export const VIDEO_HELP = `TimDS video workflow\n\nUsage:\n  timds video init [--root PATH] [--force]\n  timds video components init [--root PATH] [--force]\n  timds video doctor [--root PATH]\n  timds video check [SLUG] [--root PATH]\n  timds video lab [NAME] [--root PATH] [--plan] [--prepare] [--render] [--list]\n  timds video prepare SLUG [--root PATH]\n  timds video voiceover SLUG [--root PATH] [--force]\n  timds video studio SLUG [--root PATH]\n  timds video render SLUG [--root PATH] [--date YYYY-MM-DD]\n\nThe client Design System owns video/contract.json, video/assets.json, video/lab/ compile requests, brand files, production records, and any generated component snapshot. TimDS owns validation, the producer, media staging, voiceover orchestration, default components, the lab, rendering, and review packaging. Generating components copies the installed defaults once; upgrades never overwrite that client-owned file.\n\nThe lab runs a video/lab/NAME.json compile request the way an automated Video Lab does — producer compile, silent timing, deterministic footage and cover, staged media — and opens Remotion Studio on the result with the client's components; --plan prints the plan without staging, --prepare stages without launching, --render writes the video and cover under video-local/lab/NAME/out/. check compiles every lab input and warns when the catalog cannot finalize one yet.`;
+export const VIDEO_HELP = `TimDS video workflow\n\nUsage:\n  timds video init [--root PATH] [--force]\n  timds video components init [--root PATH] [--force]\n  timds video doctor [--root PATH]\n  timds video check [SLUG] [--root PATH]\n  timds video lab [NAME] [--root PATH] [--plan] [--prepare] [--render] [--list]\n  timds video lab --serve [--port 4410] [--root PATH]\n  timds video prepare SLUG [--root PATH]\n  timds video voiceover SLUG [--root PATH] [--force]\n  timds video studio SLUG [--root PATH]\n  timds video render SLUG [--root PATH] [--date YYYY-MM-DD]\n\nThe client Design System owns video/contract.json, video/assets.json, video/lab/ compile requests, brand files, production records, and any generated component snapshot. TimDS owns validation, the producer, media staging, voiceover orchestration, default components, the lab, rendering, and review packaging. Generating components copies the installed defaults once; upgrades never overwrite that client-owned file.\n\nThe lab runs a video/lab/NAME.json compile request the way an automated Video Lab does — producer compile, silent timing, deterministic footage and cover, staged media — and opens Remotion Studio on the result with the client's components; --plan prints the plan without staging, --prepare stages without launching, --render writes the video and cover under video-local/lab/NAME/out/. check compiles every lab input and warns when the catalog cannot finalize one yet.`;
 
 export { VIDEO_SCHEMA_VERSION };
