@@ -74,7 +74,38 @@ components or production records to adopt publishing defaults.
    a separate CI publication branch.
 7. Use genuine licensed assets. Never invent client marks or usage rights.
 
-## Handle large media outside Git
+## Route imagery through the Design System
+
+Shared brand imagery, photography, campaign art, character art, and page heroes
+belong to the client's Design System, including imagery used by a linked
+website. Follow the client contract for website-only exceptions. Work in the
+owning Design System repository and let consumers use its reviewed asset URLs
+or media keys; do not copy the assets into the consumer repository or bypass
+its release pin.
+
+Use TimDS media publication for image originals and their web derivatives.
+Small optimized logos, icons, fonts, and other lightweight public assets may
+live in the Design System's tracked asset directory when the client contract
+allows it. Respect that repository's file-size limits; being under a Git size
+limit does not make a full-resolution original suitable for a web page.
+
+## Keep originals and display images separate
+
+Before generating, downloading, or copying an image, stage it outside tracked
+source in the Design System's ignored `media-local/` workspace. Keep the
+original for future edits and make an optimized derivative for the actual
+display dimensions, preserving needed transparency and visual quality. Publish
+both through the media workflow below under distinct logical keys, such as
+`campaign-hero-original` and `campaign-hero`.
+
+Before replacing an existing media key, inspect its consumers, dimensions,
+format, and byte size. Preserve the key's purpose: a thumbnail or page-display
+key must resolve to the optimized derivative, never a newly uploaded large
+original. CSS sizing does not reduce the downloaded image bytes; do not assume
+a `publicUrl` automatically resizes the source. Check the published derivative's
+dimensions, size, and rendering in the consuming page before submitting.
+
+## Publish media outside Git
 
 This release supports public media only. Never commit full-resolution images,
 video masters, B-roll, source audio, or other large originals to Git or `dist/`.
