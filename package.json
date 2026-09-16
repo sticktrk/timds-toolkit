@@ -31,6 +31,7 @@
     "scripts/publish-artifact.mjs",
     "skills",
     "src/core.mjs",
+    "src/defaults.mjs",
     "src/artifact.mjs",
     "src/auth.mjs",
     "src/extract.mjs",

@@ -34,6 +34,7 @@ surface. Work only in the client repository supplied by the user.
 ```bash
 npm update @dtconcepts/timds
 npm run timds -- upgrade --root .
+npm run timds -- defaults
 ```
 
 3. Never use `--force` without explicit authorization to replace locally
@@ -46,6 +47,17 @@ npm run timds -- upgrade --root .
    of any legacy `.timds/cli` tree.
 6. Run `npm run timds -- doctor` and `npm run timds -- check`. Submit the
    tooling update separately from ordinary design work.
+
+When the task includes adopting shared publishing improvements, run
+`npm run timds -- defaults --apply` on the feature branch. Review the contract
+diff and reported local overrides. Commit `.timds/defaults.json` with the
+authored contract: it records the supplied default values, so later runs update
+unchanged defaults and preserve client edits. The baseline's override paths are
+persistent: a later matching default does not surrender client ownership.
+Keep inherited client CTAs, disclosures, and article-link policy on adoption.
+Promote reusable wording improvements into TimDS's publishing defaults so the
+same upgrade procedure carries them to other systems. Never regenerate client
+components or production records to adopt publishing defaults.
 
 ## Make the design change
 

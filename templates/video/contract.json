@@ -4,9 +4,18 @@
   "name": "Client Video System",
   "fps": 30,
   "formats": {
-    "longform": { "width": 1920, "height": 1080 },
-    "cover": { "width": 3840, "height": 2160 },
-    "short": { "width": 1080, "height": 1920 }
+    "longform": {
+      "width": 1920,
+      "height": 1080
+    },
+    "cover": {
+      "width": 3840,
+      "height": 2160
+    },
+    "short": {
+      "width": 1080,
+      "height": 1920
+    }
   },
   "package": {
     "shortCount": 1,
@@ -15,8 +24,14 @@
     "shortDirectoryPrefix": "Short form - "
   },
   "structure": {
-    "longform": { "requireIntro": true, "requireOutro": false },
-    "short": { "requireIntro": true, "requireOutro": false }
+    "longform": {
+      "requireIntro": true,
+      "requireOutro": false
+    },
+    "short": {
+      "requireIntro": true,
+      "requireOutro": false
+    }
   },
   "copy": {
     "eyebrowWords": 5,

@@ -3,6 +3,7 @@ import { existsSync, promises as fs } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { syncDefaults } from "./defaults.mjs";
 import { readLocalMediaManifest, readMediaCatalog } from "./media.mjs";
 import { createVideoProducer, validateVideoProducerConfig } from "./video-producer.mjs";
 import { adjacentFootageRepeats, truncatedHeadline } from "../video/footage.mjs";
@@ -10,6 +11,7 @@ import { adjacentFootageRepeats, truncatedHeadline } from "../video/footage.mjs"
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(import.meta.url);
 const VIDEO_SCHEMA_VERSION = 1;
+const PUBLISHING_TARGETS = ["youtube_short", "facebook_reel", "instagram_reel"];
 const productionFiles = ["request.json", "script.json", "publishing.json", "captions.json", "production.json"];
 const DEFAULT_COMPONENTS_START = "// TIMDS_DEFAULT_COMPONENTS_START";
 const DEFAULT_COMPONENTS_END = "// TIMDS_DEFAULT_COMPONENTS_END";
@@ -171,7 +173,37 @@ function normalizeVideoPublishing(input) {
     const value = optionalText(publishing[key], `video contract publishing.${key}`);
     if (value) normalized[key] = value; else delete normalized[key];
   }
+  if (publishing.targetDefaults !== undefined) {
+    normalized.targetDefaults = normalizeTargetOverrides(publishing.targetDefaults, "publishing.targetDefaults");
+  }
+  if (publishing.targets !== undefined) {
+    normalized.targets = {};
+    for (const [target, value] of Object.entries(object(publishing.targets, "publishing.targets"))) {
+      if (!PUBLISHING_TARGETS.includes(target)) throw new Error(`Unknown publishing target: ${target}`);
+      const policy = object(value, `publishing.targets.${target}`);
+      normalized.targets[target] = {
+        brief: text(policy.brief, `publishing.targets.${target}.brief`),
+        maxCharacters: positiveInteger(policy.maxCharacters, `publishing.targets.${target}.maxCharacters`),
+        maxCopyCharacters: positiveInteger(policy.maxCopyCharacters, `publishing.targets.${target}.maxCopyCharacters`),
+        ...normalizeTargetOverrides(policy, `publishing.targets.${target}`),
+      };
+      if (normalized.targets[target].maxCopyCharacters > normalized.targets[target].maxCharacters) throw new Error(`${target} copy budget exceeds the final description budget`);
+    }
+  }
   return normalized;
+}
+
+function normalizeTargetOverrides(input, label) {
+  const policy = object(input, label);
+  const result = {};
+  if (policy.shortArticleLink !== undefined) {
+    if (typeof policy.shortArticleLink !== "boolean") throw new Error(`${label}.shortArticleLink must be boolean`);
+    result.shortArticleLink = policy.shortArticleLink;
+  }
+  for (const key of ["shortBridge", "shortDisclaimer"]) {
+    if (policy[key] !== undefined) result[key] = policy[key] === "" ? "" : text(policy[key], `${label}.${key}`);
+  }
+  return result;
 }
 
 function positiveInteger(value, label) {
@@ -413,6 +445,13 @@ function validateProduction(records, contract, assetCatalog, label) {
     ...shorts.flatMap((short) => [short.cover.asset, ...short.scenes.flatMap((scene) => scene.assets ?? (scene.asset ? [scene.asset] : []))]),
   ]);
   for (const key of usedAssets) if (!assetCatalog.assets[key]) throw new Error(`${label} references undeclared video asset ${key}`);
+  for (const short of publishing.shorts || []) {
+    // Adding a variants map opts this record into platform validation.
+    if (!short.descriptions) continue;
+    for (const target of Object.keys(contract.publishing.targets || {})) {
+      descriptionFor({ production: { publishing }, video: { contract } }, short, target);
+    }
+  }
   return { captions: { ...captions, lines }, production: { ...production, slug: productionSlug, longform: { ...longform, scenes: longScenes, cover }, shorts }, publishing, request, script, usedAssets };
 }
 
@@ -691,11 +730,14 @@ export async function initializeVideoWorkspace(workspace, { force = false } = {}
   };
   await fs.writeFile(manifestPath, `${JSON.stringify(rawManifest, null, 2)}\n`, "utf8");
   const destination = path.join(workspace.designSystemRoot, "video");
+  const scaffold = force || !existsSync(path.join(destination, "contract.json"));
   await fs.mkdir(path.join(destination, "productions"), { recursive: true });
-  for (const name of ["contract.json", "assets.json", "lab/README.md", "lab/sample-answer.json"]) {
+  for (const name of ["contract.json", "assets.json", "lab/README.md", "lab/sample-answer.json", "publishing.md"]) {
     const target = path.join(destination, name);
     if (!existsSync(target) || force) await copyTemplate(path.join(packageRoot, "templates", "video", name), target);
   }
+  if (force) await fs.rm(path.join(workspace.designSystemRoot, ".timds", "defaults.json"), { force: true });
+  await syncDefaults({ ...workspace, manifest: { ...workspace.manifest, video: rawManifest.video } }, { apply: true, scaffold });
   const skillDestination = path.join(workspace.repoRoot, ".agents", "skills", "timds-create-video");
   if (force) await fs.rm(skillDestination, { recursive: true, force: true });
   await fs.cp(path.join(packageRoot, "skills", "timds-create-video"), skillDestination, { recursive: true, force });
@@ -869,17 +911,24 @@ export async function runVideoStudio(workspace, selectedSlug) {
   return prepared;
 }
 
-export function descriptionFor(prepared, short) {
+export function descriptionFor(prepared, short, target) {
   const publishing = prepared.production.publishing;
-  const contractPublishing = prepared.video.contract.publishing || {};
+  const basePolicy = prepared.video.contract.publishing || {};
+  const targetPolicy = target ? basePolicy.targets?.[target] : undefined;
+  if (target && (!short || !targetPolicy)) throw new Error(`No short publishing policy for ${target}`);
+  const contractPublishing = { ...basePolicy, ...(target ? basePolicy.targetDefaults : {}), ...targetPolicy };
   const source = short || publishing;
+  if (target && (typeof source.descriptions?.[target] !== "string" || !source.descriptions[target].trim())) {
+    throw new Error(`Missing ${target} description for ${short.id}`);
+  }
+  if (targetPolicy && source.descriptions[target].trim().length > targetPolicy.maxCopyCharacters) throw new Error(`${target} copy exceeds ${targetPolicy.maxCopyCharacters} characters`);
   const articleLabel = contractPublishing.articleLabel || "Read the full article:";
-  const lead = source.description || [
+  const lead = (target ? source.descriptions[target].trim() : source.description) || [
     source.descriptionHook || (source.question ? `Q: ${source.question}` : ""),
     source.answer ? `A: ${source.answer}` : "",
   ].filter(Boolean).join("\n\n");
   const parts = [lead, publishing.seriesLine || prepared.video.contract.brand.series];
-  if (short && contractPublishing.shortBridge) parts.push(contractPublishing.shortBridge);
+  if (short && contractPublishing.shortBridge && !parts.includes(contractPublishing.shortBridge)) parts.push(contractPublishing.shortBridge);
   // A Short's description is rarely clickable and rarely expanded; the contract may drop
   // the article link and swap the full disclaimer for a one-liner there only.
   if (publishing.articleUrl && (!short || contractPublishing.shortArticleLink !== false)) parts.push(`${articleLabel} ${publishing.articleUrl}`);
@@ -887,7 +936,41 @@ export function descriptionFor(prepared, short) {
     ? contractPublishing.shortDisclaimer
     : publishing.disclaimer || contractPublishing.disclaimer;
   if (disclaimer) parts.push(disclaimer);
-  return `${parts.filter(Boolean).join("\n\n")}\n`;
+  const result = `${parts.filter(Boolean).join("\n\n")}\n`;
+  if (targetPolicy && result.trimEnd().length > targetPolicy.maxCharacters) {
+    throw new Error(`${target} description exceeds ${targetPolicy.maxCharacters} characters; revise the copy without truncating it`);
+  }
+  return result;
+}
+
+/** Export copy independently of rendering; a publishing edit does not require a new MP4. */
+export async function exportVideoPublishing(workspace, selectedSlug, options = {}) {
+  const loaded = await loadVideoWorkspace(workspace, { slug: selectedSlug });
+  const prepared = { ...loaded, production: loaded.video.productions[0] };
+  const paths = renderPaths(prepared, options.date);
+  await writeVideoPublishing(prepared, paths);
+  return { outputRoot: paths.root };
+}
+
+async function writeVideoPublishing(prepared, paths) {
+  await fs.mkdir(paths.longform, { recursive: true });
+  await fs.writeFile(path.join(paths.longform, "description.md"), descriptionFor(prepared), "utf8");
+  await fs.writeFile(path.join(paths.longform, "publishing.json"), `${JSON.stringify(prepared.production.publishing, null, 2)}\n`, "utf8");
+  for (let index = 0; index < prepared.production.production.shorts.length; index += 1) {
+    const short = prepared.production.production.shorts[index];
+    const source = prepared.production.publishing.shorts?.find((entry) => entry.id === short.id) || short;
+    const directory = paths.shorts[index];
+    const descriptions = Object.fromEntries(Object.keys(source.descriptions ? prepared.video.contract.publishing.targets || {} : {}).map((target) => [target, descriptionFor(prepared, source, target)]));
+    await fs.mkdir(directory, { recursive: true });
+    for (const [target, description] of Object.entries(descriptions)) {
+      await fs.writeFile(path.join(directory, `description.${target}.md`), description, "utf8");
+    }
+    for (const target of PUBLISHING_TARGETS) {
+      if (!Object.hasOwn(descriptions, target)) await fs.rm(path.join(directory, `description.${target}.md`), { force: true });
+    }
+    await fs.writeFile(path.join(directory, "description.md"), descriptions.youtube_short || descriptionFor(prepared, source), "utf8");
+    await fs.writeFile(path.join(directory, "publishing.json"), `${JSON.stringify({ ...source, compiledDescriptions: descriptions }, null, 2)}\n`, "utf8");
+  }
 }
 
 export async function renderVideoWorkspace(workspace, selectedSlug, options = {}) {
@@ -899,17 +982,12 @@ export async function renderVideoWorkspace(workspace, selectedSlug, options = {}
   const common = ["--public-dir", prepared.publicRoot, "--log=error"];
   await run(process.execPath, [remotion, "still", prepared.entryPath, `${prefix}Cover`, path.join(paths.longform, "thumbnail.jpg"), "--image-format=jpeg", "--jpeg-quality=90", ...common], { cwd: workspace.designSystemRoot });
   await run(process.execPath, [remotion, "render", prepared.entryPath, `${prefix}Long`, path.join(paths.longform, `${prepared.production.production.slug}-longform.mp4`), "--codec=h264", ...common], { cwd: workspace.designSystemRoot });
-  await fs.writeFile(path.join(paths.longform, "description.md"), descriptionFor(prepared), "utf8");
-  await fs.writeFile(path.join(paths.longform, "publishing.json"), `${JSON.stringify(prepared.production.publishing, null, 2)}\n`, "utf8");
   for (let index = 0; index < prepared.production.production.shorts.length; index += 1) {
     const short = prepared.production.production.shorts[index];
     const directory = paths.shorts[index];
     await fs.mkdir(directory, { recursive: true });
     await run(process.execPath, [remotion, "still", prepared.entryPath, `${prefix}Short${index + 1}Cover`, path.join(directory, "thumbnail.jpg"), "--image-format=jpeg", "--jpeg-quality=90", ...common], { cwd: workspace.designSystemRoot });
     await run(process.execPath, [remotion, "render", prepared.entryPath, `${prefix}Short${index + 1}`, path.join(directory, `${short.id}.mp4`), "--codec=h264", ...common], { cwd: workspace.designSystemRoot });
-    const publish = prepared.production.publishing.shorts?.find((candidate) => candidate.id === short.id) || short;
-    await fs.writeFile(path.join(directory, "description.md"), descriptionFor(prepared, publish), "utf8");
-    await fs.writeFile(path.join(directory, "publishing.json"), `${JSON.stringify(publish, null, 2)}\n`, "utf8");
   }
   const lock = {
     schemaVersion: 1,
@@ -919,6 +997,7 @@ export async function renderVideoWorkspace(workspace, selectedSlug, options = {}
     assets: Object.fromEntries(Object.entries(prepared.project.assets).map(([key, asset]) => [key, { mediaKey: asset.mediaKey, sha256: asset.sha256, src: asset.src }])),
   };
   await fs.writeFile(path.join(paths.root, "production.lock.json"), `${JSON.stringify(lock, null, 2)}\n`, "utf8");
+  await writeVideoPublishing(prepared, paths);
   return { ...prepared, outputRoot: paths.root };
 }
 
@@ -933,6 +1012,6 @@ export async function voiceoverVideoWorkspace(workspace, selectedSlug, options =
   return { outputRoot, production: production.production.slug };
 }
 
-export const VIDEO_HELP = `TimDS video workflow\n\nUsage:\n  timds video init [--root PATH] [--force]\n  timds video components init [--root PATH] [--force]\n  timds video doctor [--root PATH]\n  timds video check [SLUG] [--root PATH]\n  timds video lab [NAME] [--root PATH] [--plan] [--prepare] [--render] [--list]\n  timds video lab --serve [--port 4410] [--root PATH]\n  timds video prepare SLUG [--root PATH]\n  timds video voiceover SLUG [--root PATH] [--force]\n  timds video studio SLUG [--root PATH]\n  timds video render SLUG [--root PATH] [--date YYYY-MM-DD]\n\nThe client Design System owns video/contract.json, video/assets.json, video/lab/ compile requests, brand files, production records, and any generated component snapshot. TimDS owns validation, the producer, media staging, voiceover orchestration, default components, the lab, rendering, and review packaging. Generating components copies the installed defaults once; upgrades never overwrite that client-owned file.\n\nThe lab runs a video/lab/NAME.json compile request the way an automated Video Lab does — producer compile, silent timing, deterministic footage and cover, staged media — and opens Remotion Studio on the result with the client's components; --plan prints the plan without staging, --prepare stages without launching, --render writes the video and cover under video-local/lab/NAME/out/. check compiles every lab input and warns when the catalog cannot finalize one yet.`;
+export const VIDEO_HELP = `TimDS video workflow\n\nUsage:\n  timds video init [--root PATH] [--force]\n  timds video components init [--root PATH] [--force]\n  timds video doctor [--root PATH]\n  timds video check [SLUG] [--root PATH]\n  timds video lab [NAME] [--root PATH] [--plan] [--prepare] [--render] [--list]\n  timds video lab --serve [--port 4410] [--root PATH]\n  timds video publishing SLUG [--root PATH] [--date YYYY-MM-DD]\n  timds video prepare SLUG [--root PATH]\n  timds video voiceover SLUG [--root PATH] [--force]\n  timds video studio SLUG [--root PATH]\n  timds video render SLUG [--root PATH] [--date YYYY-MM-DD]\n\nThe client Design System owns video/contract.json, video/assets.json, video/lab/ compile requests, brand files, production records, and any generated component snapshot. TimDS owns validation, the producer, media staging, voiceover orchestration, default components, the lab, rendering, and review packaging. Generating components copies the installed defaults once; upgrades never overwrite that client-owned file.\n\nThe lab runs a video/lab/NAME.json compile request the way an automated Video Lab does — producer compile, silent timing, deterministic footage and cover, staged media — and opens Remotion Studio on the result with the client's components; --plan prints the plan without staging, --prepare stages without launching, --render writes the video and cover under video-local/lab/NAME/out/. check compiles every lab input and warns when the catalog cannot finalize one yet.`;
 
 export { VIDEO_SCHEMA_VERSION };

@@ -344,6 +344,8 @@ skill and installation record:
 ```bash
 npm update @dtconcepts/timds
 npm run timds -- upgrade --root .
+npm run timds -- defaults
+npm run timds -- defaults --apply
 npm run timds -- doctor
 npm run timds -- check
 ```
@@ -353,6 +355,35 @@ both managed skills. It refuses locally modified managed files unless `--force`
 is explicitly supplied and never
 rewrites `timds.json`, tokens, media records, authored source, framework config,
 documentation, or artifacts.
+
+### Shared defaults across existing Design Systems
+
+TimDS owns reusable publishing wording and budgets in
+`templates/video/publishing-defaults.json`. Improvements developed in a client
+system can become the next package defaults after removing firm names, campaign
+URLs, and client-only requirements. New video workspaces receive these defaults.
+
+`timds defaults` previews an existing system's update. On a feature branch,
+`timds defaults --apply` adds missing publishing fields and records the supplied
+defaults and explicit override paths in `.timds/defaults.json`. Commit that
+baseline with the contract. Unedited toolkit values follow later defaults;
+client edits and intentional deletions stay protected, even when a later default
+happens to match them. First adoption also preserves existing values and inherited
+CTAs, disclosures, and article-link policy. New scaffolds use the toolkit policy.
+The command is safe to repeat and migrates older baselines automatically.
+
+To return an override to toolkit control, set its contract field to the value in
+the baseline's `videoPublishing` object (or remove it if absent there), remove
+its path from the baseline's `overrides` list, then preview and apply defaults.
+Review both files together.
+
+After upgrading the package, run the same command, inspect its reported overrides
+and Git diff, validate, and open a PR in each Design System. `upgrade` reports
+available defaults without applying them. This is a local, reviewed update; it
+does not discover repositories, push branches, merge, or deploy. Currently only
+`publishing.targets` and `publishing.targetDefaults` participate. Historical
+productions, legacy publishing fields, brand, components, and media are untouched.
+Client-specific CTAs and legal/disclosure requirements remain local overrides.
 
 Standalone repositories created by older TimDS releases can adopt the managed
 merge-to-patch automation explicitly:

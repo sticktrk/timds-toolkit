@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import childProcess from "node:child_process";
+import { EventEmitter } from "node:events";
 import { promises as fs } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -7,12 +10,14 @@ import { fileURLToPath } from "node:url";
 import {
   checkVideoWorkspace,
   descriptionFor,
+  exportVideoPublishing,
   initializeVideoComponents,
   initializeVideoWorkspace,
   normalizeVideoManifest,
   planVideoLab,
   prepareVideoLab,
   prepareVideoWorkspace,
+  renderVideoWorkspace,
   runVideoLab,
   silentSceneTimings,
   validateVideoContract,
@@ -378,7 +383,21 @@ test("video init scaffolds the lab beside the contract, with a producer block th
   const contract = validateVideoContract(JSON.parse(await fs.readFile(result.contract, "utf8")));
   assert.equal(contract.producer.footage.assetPrefix, "footage-");
   assert.equal(contract.producer.cover.assetPrefix, "cover-subject-");
+  assert.deepEqual(Object.keys(contract.publishing.targets), ["youtube_short", "facebook_reel", "instagram_reel"]);
+  await fs.access(path.join(root, "video", "publishing.md"));
   assert.deepEqual(Object.keys(contract.producer.roleEyebrows).sort(), ["answer", "exception", "hook", "process", "risk", "rule"]);
+  const baseline = JSON.parse(await fs.readFile(path.join(root, ".timds/defaults.json"), "utf8"));
+  assert.deepEqual(contract.publishing.targets, baseline.videoPublishing.targets);
+  assert.deepEqual(contract.publishing.targetDefaults, baseline.videoPublishing.targetDefaults);
+  assert.deepEqual(baseline.overrides, []);
+  await initializeVideoWorkspace({ designSystemRoot: root, repoRoot: root, manifestPath, manifest: {} }, { force: true });
+  assert.deepEqual(JSON.parse(await fs.readFile(result.contract, "utf8")).publishing.targets, baseline.videoPublishing.targets);
+});
+
+test("a contact CTA already used as the series line is included once", () => {
+  const cta = "Contact the team at example.com";
+  const prepared = { production: { publishing: { seriesLine: cta } }, video: { contract: { brand: { series: "Answers" }, publishing: { shortBridge: cta } } } };
+  assert.equal(descriptionFor(prepared, { description: "Clip copy." }), `Clip copy.\n\n${cta}\n`);
 });
 
 test("rejects back-to-back footage from one family inside a committed production", async (t) => {
@@ -619,4 +638,94 @@ test("lets the producer speak a shorter outro in Shorts than in the long-form", 
   assert.equal(producer.compileProduction(request("horizontal")).scenes.at(-1).narration, "Learn more about important records from Example Answers at example.com.");
   const blank = validateVideoContract({ ...bannerContractBase, producer: { ...contract.producer, outro: { narrationTemplate: "Learn more.", narrationTemplates: { short: "" } } } });
   assert.deepEqual(blank.producer.outro.narrationTemplates, {});
+});
+
+test("exports separate platform copy without rendering and preserves legacy records", async (t) => {
+  const policy = { brief: "Describe this clip", maxCharacters: 300, maxCopyCharacters: 120, shortArticleLink: false };
+  const workspace = await videoFixture(t, { contract: { publishing: {
+    disclaimer: "Original disclaimer.",
+    targetDefaults: { shortDisclaimer: "Information only." },
+    targets: {
+      youtube_short: { ...policy, shortBridge: "example.com/watch" },
+      facebook_reel: { ...policy, shortBridge: "Learn more: https://example.com/facebook" },
+      instagram_reel: { ...policy, shortBridge: "Save for later." },
+    },
+  } } });
+  const recordPath = path.join(workspace.designSystemRoot, "video/productions/sample-topic/publishing.json");
+  const publishing = JSON.parse(await fs.readFile(recordPath, "utf8"));
+  const legacy = await exportVideoPublishing(workspace, "sample-topic", { date: "2026-01-01" });
+  const directory = path.join(legacy.outputRoot, "Short form -Sample");
+  const original = await fs.readFile(path.join(directory, "description.md"), "utf8");
+  assert.match(original, /A clear answer/);
+  assert.match(original, /Original disclaimer/);
+  assert.doesNotMatch(original, /Information only/);
+  await assert.rejects(fs.access(path.join(directory, "description.facebook_reel.md")), /ENOENT/);
+  publishing.shorts[0].descriptions = {
+    youtube_short: "One step to start.",
+    facebook_reel: "Starting can feel complicated. Here is a useful first step.",
+    instagram_reel: "Start with this small step.",
+  };
+  await writeJson(recordPath, publishing);
+  await checkVideoWorkspace(workspace);
+  await exportVideoPublishing(workspace, "sample-topic", { date: "2026-01-01" });
+  const youtube = await fs.readFile(path.join(directory, "description.youtube_short.md"), "utf8");
+  const facebook = await fs.readFile(path.join(directory, "description.facebook_reel.md"), "utf8");
+  assert.equal(youtube, "One step to start.\n\nAnswers\n\nexample.com/watch\n\nInformation only.\n");
+  assert.match(facebook, /Starting can feel complicated[\s\S]*https:\/\/example.com\/facebook/);
+  assert.doesNotMatch(facebook, /example.com\/watch|example.com\/sample/);
+  assert.equal(await fs.readFile(path.join(directory, "description.md"), "utf8"), youtube);
+  delete publishing.shorts[0].descriptions.instagram_reel;
+  await writeJson(recordPath, publishing);
+  await assert.rejects(checkVideoWorkspace(workspace), /Missing instagram_reel/);
+  publishing.shorts[0].descriptions.instagram_reel = "x".repeat(121);
+  await writeJson(recordPath, publishing);
+  await assert.rejects(checkVideoWorkspace(workspace), /copy exceeds 120/);
+  await fs.writeFile(path.join(directory, "sample-short.mp4"), "existing video");
+  await fs.writeFile(path.join(directory, "description.custom.md"), "client notes");
+  delete publishing.shorts[0].descriptions;
+  publishing.shorts[0].description = "Revised legacy caption.";
+  await writeJson(recordPath, publishing);
+  await exportVideoPublishing(workspace, "sample-topic", { date: "2026-01-01" });
+  for (const target of ["youtube_short", "facebook_reel", "instagram_reel"]) {
+    await assert.rejects(fs.access(path.join(directory, `description.${target}.md`)), /ENOENT/);
+  }
+  assert.match(await fs.readFile(path.join(directory, "description.md"), "utf8"), /Revised legacy caption/);
+  assert.equal(await fs.readFile(path.join(directory, "sample-short.mp4"), "utf8"), "existing video");
+  assert.equal(await fs.readFile(path.join(directory, "description.custom.md"), "utf8"), "client notes");
+});
+
+test("rendering keeps its original copy and output directory across midnight and source edits", async (t) => {
+  const policy = { brief: "A short caption", maxCopyCharacters: 100, maxCharacters: 500 };
+  const workspace = await videoFixture(t, { contract: { publishing: { targets: { youtube_short: policy } } } });
+  const recordPath = path.join(workspace.designSystemRoot, "video/productions/sample-topic/publishing.json");
+  const publishing = JSON.parse(await fs.readFile(recordPath, "utf8"));
+  publishing.shorts[0].descriptions = { youtube_short: "Copy approved before rendering." };
+  await writeJson(recordPath, publishing);
+  t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-09-15T23:59:59Z") });
+  const renderOutputs = [];
+  const spawn = t.mock.method(childProcess, "spawn", (_command, args) => {
+    const child = new EventEmitter();
+    renderOutputs.push(args[4]);
+    Promise.resolve().then(async () => {
+      t.mock.timers.setTime(Date.parse("2026-09-16T00:00:01Z"));
+      publishing.shorts[0].descriptions.youtube_short = "Different copy edited during rendering.";
+      await writeJson(recordPath, publishing);
+      await fs.writeFile(args[4], "stubbed media renderer");
+      child.emit("close", 0);
+    }).catch((error) => child.emit("error", error));
+    return child;
+  });
+  syncBuiltinESMExports();
+  t.after(() => { spawn.mock.restore(); syncBuiltinESMExports(); });
+  const result = await renderVideoWorkspace(workspace, "sample-topic");
+  assert.ok(result.outputRoot.endsWith("Sample topic - 2026-09-15"));
+  assert.equal(renderOutputs.length, 4);
+  assert.ok(renderOutputs.every((file) => file.startsWith(result.outputRoot)));
+  const directory = path.join(result.outputRoot, "Short form -Sample");
+  const description = await fs.readFile(path.join(directory, "description.youtube_short.md"), "utf8");
+  assert.match(description, /Copy approved before rendering/);
+  assert.doesNotMatch(description, /Different copy/);
+  const packaged = JSON.parse(await fs.readFile(path.join(directory, "publishing.json"), "utf8"));
+  assert.equal(packaged.descriptions.youtube_short, "Copy approved before rendering.");
+  await assert.rejects(fs.access(path.join(workspace.designSystemRoot, "video-local/out/Sample topic - 2026-09-16")), /ENOENT/);
 });

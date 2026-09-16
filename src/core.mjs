@@ -19,12 +19,14 @@ import {
   removeAccessToken,
   saveAccessToken,
 } from "./auth.mjs";
+import { syncDefaults } from "./defaults.mjs";
 import { publishExtractedIndex } from "./artifact.mjs";
 import { extractArtifact, normalizeMachineConfig } from "./extract.mjs";
 import {
   VIDEO_HELP,
   runVideoLab,
   checkVideoWorkspace,
+  exportVideoPublishing,
   initializeVideoComponents,
   initializeVideoWorkspace,
   normalizeVideoManifest,
@@ -849,7 +851,7 @@ function parseArguments(argv) {
     }
     const [rawName, inlineValue] = value.replace(/^--?/, "").split("=", 2);
     const name = ({ m: "message", p: "port" })[rawName] || rawName.replace(/-([a-z])/g, (_match, letter) => letter.toUpperCase());
-    if (["autoRelease", "dryRun", "force", "help", "list", "noBuild", "noOpen", "noPr", "noPush", "plan", "prepare", "publish", "render", "requireCleanDist", "serve", "skipBuild", "standalone"].includes(name)) {
+    if (["apply", "autoRelease", "dryRun", "force", "help", "list", "noBuild", "noOpen", "noPr", "noPush", "plan", "prepare", "publish", "render", "requireCleanDist", "serve", "skipBuild", "standalone"].includes(name)) {
       options[name] = true;
       continue;
     }
@@ -971,7 +973,7 @@ function machineSummary({ counts }) {
 }
 
 function helpText() {
-  return `TimDS local design-system workflow\n\nUsage:\n  timds init [--root PATH] [--standalone] [--consumer-repository OWNER/REPO] [--consumer-branch BRANCH] [--consumer-path PATH] [--force]\n  timds upgrade [--root PATH] [--auto-release] [--force]\n  timds auth login [--token TOKEN] [--portal-url URL]\n  timds auth status [--portal-url URL]\n  timds auth logout [--portal-url URL]\n  timds doctor [--root PATH]\n  timds dev [--root PATH]\n  timds check [--root PATH] [--skip-build] [--require-clean-dist]\n  timds extract [--root PATH] [--skip-build] [--publish]\n  timds preview [--root PATH] [--port 4400] [--no-build]\n  timds diff [--root PATH] [--base origin/main]\n  timds assets list [--root PATH]\n  timds assets add FILE [--key LOGICAL_KEY] [--title TEXT] [--tags a,b]\n  timds assets backfill-metadata [--root PATH] [--force]\n  timds assets publish [--root PATH]\n  timds assets pull KEY [--output PATH] [--force]\n  timds video --help\n  timds submit --message "Change summary" [--dry-run] [--no-push] [--no-pr]\n\nCheck and extract derive index.json, llms.txt, and per-page Markdown from the built artifact so agents and pipelines can read the system without scraping HTML. Extract --publish uploads the index, llms.txt, the per-page Markdown mirrors, a .timds-artifact.json provenance stamp, and the artifact files the index references to the system's stable CDN prefix through the portal, so pipelines and agents consume the system from one stable URL. Large public media is copied into ignored media-local/ for authoring. assets add measures timed-media duration and dimensions before upload; backfill-metadata repairs older catalogs from their stable public URLs without re-uploading them. Video-enabled systems keep client rules and production data in the Design System while TimDS owns validation, voiceover orchestration, Remotion rendering, and packaging. Submit creates a review branch and draft pull request.`;
+  return `TimDS local design-system workflow\n\nUsage:\n  timds init [--root PATH] [--standalone] [--consumer-repository OWNER/REPO] [--consumer-branch BRANCH] [--consumer-path PATH] [--force]\n  timds upgrade [--root PATH] [--auto-release] [--force]\n  timds auth login [--token TOKEN] [--portal-url URL]\n  timds auth status [--portal-url URL]\n  timds auth logout [--portal-url URL]\n  timds defaults [--root PATH] [--apply]\n  timds doctor [--root PATH]\n  timds dev [--root PATH]\n  timds check [--root PATH] [--skip-build] [--require-clean-dist]\n  timds extract [--root PATH] [--skip-build] [--publish]\n  timds preview [--root PATH] [--port 4400] [--no-build]\n  timds diff [--root PATH] [--base origin/main]\n  timds assets list [--root PATH]\n  timds assets add FILE [--key LOGICAL_KEY] [--title TEXT] [--tags a,b]\n  timds assets backfill-metadata [--root PATH] [--force]\n  timds assets publish [--root PATH]\n  timds assets pull KEY [--output PATH] [--force]\n  timds video --help\n  timds submit --message "Change summary" [--dry-run] [--no-push] [--no-pr]\n\nCheck and extract derive index.json, llms.txt, and per-page Markdown from the built artifact so agents and pipelines can read the system without scraping HTML. Extract --publish uploads the index, llms.txt, the per-page Markdown mirrors, a .timds-artifact.json provenance stamp, and the artifact files the index references to the system's stable CDN prefix through the portal, so pipelines and agents consume the system from one stable URL. Large public media is copied into ignored media-local/ for authoring. assets add measures timed-media duration and dimensions before upload; backfill-metadata repairs older catalogs from their stable public URLs without re-uploading them. Video-enabled systems keep client rules and production data in the Design System while TimDS owns validation, voiceover orchestration, Remotion rendering, and packaging. Submit creates a review branch and draft pull request.`;
 }
 
 export async function runCli(argv) {
@@ -1016,6 +1018,11 @@ export async function runCli(argv) {
       return runVideoLab(workspace, videoArgument || undefined, { list: Boolean(options.list), plan: Boolean(options.plan), prepare: Boolean(options.prepare), render: Boolean(options.render), log: output });
     }
     if (!videoArgument) throw new Error(`video ${videoCommand} requires a production slug`);
+    if (videoCommand === "publishing") {
+      const result = await exportVideoPublishing(workspace, videoArgument, options);
+      output(`Publishing copy: ${result.outputRoot}`);
+      return result;
+    }
     if (videoCommand === "prepare") {
       const result = await prepareVideoWorkspace(workspace, videoArgument);
       output(`Prepared TimDS video ${videoArgument}: ${result.projectPath}`);
@@ -1091,10 +1098,28 @@ export async function runCli(argv) {
     output("Run npm install to create the lockfile, then git add --all and commit the validated contract.");
     return result;
   }
+  if (command === "defaults") {
+    const workspace = await loadWorkspace(root);
+    const apply = Boolean(options.apply && !options.dryRun);
+    if (apply) {
+      const branch = await currentBranch(workspace.repoRoot);
+      if (!branch || ["main", "master", await defaultBranch(workspace.repoRoot)].includes(branch)) {
+        throw new Error("Apply defaults on a feature branch, then review the diff in a pull request");
+      }
+    }
+    const result = await syncDefaults(workspace, { apply });
+    output(result.enabled ? `TimDS defaults: ${result.changed.length} change(s)${result.applied ? " applied" : " available"}.` : "No video defaults apply to this Design System.");
+    for (const field of result.changed) output(`  ${field}`);
+    for (const field of result.preserved) output(`Preserved local override: ${field}`);
+    if (result.changed.length && !result.applied) output("Run timds defaults --apply on a feature branch, review the diff, then run timds check.");
+    return result;
+  }
   if (command === "upgrade") {
     const result = await upgradeRepository(root, { autoRelease: options.autoRelease, force: options.force });
     output(`TimDS tooling upgraded for ${result.repoRoot}`);
     output(`Toolkit: ${result.previousVersion} -> ${result.package.version}`);
+    const defaults = await syncDefaults(result);
+    if (defaults.changed.length) output(`Publishing defaults: ${defaults.changed.length} change(s) available. Run timds defaults to review, then timds defaults --apply.`);
     output(`Agent skill: ${result.skillDestination}`);
     if (result.releaseAutomationChanges.length) {
       output(`Release automation: ${standaloneReleaseAutomation} (${result.releaseAutomationChanges.length} files updated)`);
