@@ -120,16 +120,17 @@ fi
 echo "==> Bumping package.json and tagging"
 npm version "$version" -m "Release TimDS %s" >/dev/null
 
-# From here a failure leaves a local commit and tag that are not yet public.
-# Undo with: git tag -d ${tag} && git reset --hard HEAD~1
-rollback="git tag -d ${tag} && git reset --hard HEAD~1"
-trap 'echo; echo "Release failed after the local bump. Undo with:" >&2; echo "  ${rollback}" >&2' ERR
+# Push the branch and this tag together. If master advances during the tests,
+# neither ref should be published from the stale checkout.
+trap 'echo "Release push failed. Inspect the local release commit and tag before retrying." >&2' ERR
 
 echo "==> Pushing ${RELEASE_BRANCH} and ${tag}"
-git push origin "$RELEASE_BRANCH" --follow-tags
+git push --atomic origin "$RELEASE_BRANCH" "refs/tags/${tag}"
+
+trap 'echo "The release commit and tag were pushed. Retry: gh release create ${tag} --verify-tag --title \"TimDS ${version}\" --generate-notes" >&2' ERR
 
 echo "==> Creating the GitHub release"
-gh release create "$tag" --title "TimDS ${version}" --generate-notes
+gh release create "$tag" --verify-tag --title "TimDS ${version}" --generate-notes
 
 trap - ERR
 

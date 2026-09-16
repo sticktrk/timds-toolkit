@@ -21,7 +21,7 @@
     "./video/remotion": "./video/remotion.tsx"
   },
   "scripts": {
-    "test": "npm run typecheck && node --test src/*.test.mjs video/*.test.mjs && tsx --test video/*.test.tsx",
+    "test": "npm run typecheck && node --test .github/scripts/*.test.mjs src/*.test.mjs video/*.test.mjs && tsx --test video/*.test.tsx",
     "typecheck": "tsc --noEmit",
     "pack:check": "npm pack --dry-run",
     "release": "./scripts/release.sh"

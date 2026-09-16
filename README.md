@@ -404,7 +404,23 @@ npm test
 npm run pack:check
 ```
 
-Cut a release from a clean `master`:
+To release the latest `master` from GitHub, open
+[Actions → Publish npm package](https://github.com/dtconceptsnc/timds-toolkit/actions/workflows/release.yml),
+click **Run workflow**, leave the branch set to **master**, and click **Run workflow**
+again. No version input is needed: the workflow checks out the latest `master`,
+runs the checks above, bumps the patch version in `package.json` and the lockfile,
+pushes the release commit and matching tag, creates a GitHub Release with generated
+notes, and publishes to npm. Release runs are serialized. If `master` changes
+during validation, the push fails without publishing a stale release; start a new
+run against the updated branch.
+
+The workflow uses the built-in GitHub token to create the release and the existing
+npm trusted publisher for `release.yml` to publish. No additional secret is needed.
+If npm publishing fails after the release was created, use **Re-run failed jobs**
+to retry publishing the same version. **Run workflow** or **Re-run all jobs** creates
+another patch release.
+
+You can also cut a release locally from a clean, synced `master`:
 
 ```bash
 npm run release              # bump the patch: 0.1.403 -> 0.1.404

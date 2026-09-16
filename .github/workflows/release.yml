@@ -1,20 +1,75 @@
 name: Publish npm package
 
 on:
+  workflow_dispatch:
   release:
     types:
       - published
 
 permissions:
   contents: read
-  id-token: write
+
+concurrency:
+  group: timds-npm-release
+  cancel-in-progress: false
 
 jobs:
+  create-release:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      sha: ${{ steps.release.outputs.sha }}
+    steps:
+      - name: Require the master workflow
+        env:
+          RELEASE_REF: ${{ github.ref }}
+        run: |
+          if [ "$RELEASE_REF" != refs/heads/master ]; then
+            echo "::error::Run this workflow from master to release the latest master."
+            exit 1
+          fi
+      - uses: actions/checkout@v6
+        with:
+          ref: master
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - run: npm ci
+      - name: Configure the release author
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - name: Test and create the next patch release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          npm run release -- --yes
+          echo "tag=v$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  # Releases created with GITHUB_TOKEN do not trigger another release workflow.
+  # Publish here as well as for releases created by the local release command.
   publish:
+    needs: create-release
+    if: >-
+      ${{ !cancelled() &&
+          (github.event_name == 'release' || needs.create-release.result == 'success') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.create-release.outputs.sha || github.ref }}
       - uses: actions/setup-node@v6
         with:
           node-version: 24
@@ -22,5 +77,8 @@ jobs:
           registry-url: https://registry.npmjs.org
       - run: npm ci
       - run: npm test
+      - run: npm run pack:check
       - run: node .github/scripts/check-release.mjs
+        env:
+          RELEASE_TAG: ${{ needs.create-release.outputs.tag || github.event.release.tag_name }}
       - run: npm publish

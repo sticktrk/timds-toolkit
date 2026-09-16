@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 
 const packageJson = JSON.parse(await readFile(new URL("../../package.json", import.meta.url), "utf8"));
 const expectedTag = `v${packageJson.version}`;
-const actualTag = String(process.env.GITHUB_REF_NAME || "").trim();
+const actualTag = String(process.env.RELEASE_TAG || process.env.GITHUB_REF_NAME || "").trim();
 
 if (packageJson.name !== "@dtconcepts/timds") {
   throw new Error(`Unexpected npm package name ${String(packageJson.name || "")}`);
