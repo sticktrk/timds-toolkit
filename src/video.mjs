@@ -4,7 +4,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { syncDefaults } from "./defaults.mjs";
-import { readLocalMediaManifest, readMediaCatalog } from "./media.mjs";
+import { fileSha256, readLocalMediaManifest, readMediaCatalog } from "./media.mjs";
 import { createVideoProducer, validateVideoProducerConfig } from "./video-producer.mjs";
 import { validateVideoVerticalMetadata } from "./video-crops.mjs";
 import { adjacentFootageRepeats, truncatedHeadline } from "../video/footage.mjs";
@@ -704,7 +704,7 @@ async function defaultVideoComponentsTemplate() {
   const end = remotionSource.indexOf(DEFAULT_COMPONENTS_END);
   if (start < 0 || end < start) throw new Error("TimDS default video component snapshot markers are missing");
   const componentSource = remotionSource.slice(start, end + DEFAULT_COMPONENTS_END.length);
-  return `// Generated once from the installed TimDS defaults. This file is now owned by this Design System.\n// TimDS upgrades do not overwrite it; use \`timds video components init --force\` only to reset it.\n// Footage-chain rules are imported from the toolkit on purpose: they are production rules, not styling,\n// and \`timds video check\` enforces the same module, so a toolkit fix reaches these frames without a reset.\nimport React, {useMemo} from "react";\nimport {Audio} from "@remotion/media";\nimport {AbsoluteFill, Img, OffthreadVideo, Sequence, interpolate, staticFile, useCurrentFrame, useVideoConfig} from "remotion";\nimport {MINIMUM_CHAIN_CLIP_SECONDS, adjacentFootageRepeats, chainClipFrames, sceneAssetKeys} from "@dtconcepts/timds/video/footage";\nimport type {\n  VideoProject,\n  VideoProjectAsset,\n  VideoProjectCaptionLine,\n  VideoProjectComponentOverrides,\n  VideoProjectCover,\n  VideoProjectCoverProps,\n  VideoProjectIntroProps,\n  VideoProjectOutroProps,\n  VideoProjectScene,\n  VideoProjectSceneProps,\n  VideoProjectVideoProps,\n} from "@dtconcepts/timds/video/remotion";\n\n${DEFAULT_VIDEO_TEXT_SOURCE}\n\n${componentSource}\n\nexport {BrandWatermark, CaptionPages, Cover, CoverVisual, GoldHeadline, HorizontalCover, Intro, Media, Outro, SceneView, VerticalCover, Video};\nexport default defaultVideoProjectComponents;\n`;
+  return `// Generated once from the installed TimDS defaults. This file is now owned by this Design System.\n// TimDS upgrades do not overwrite it; use \`timds video components init --force\` only to reset it.\n// Footage-chain rules are imported from the toolkit on purpose: they are production rules, not styling,\n// and \`timds video check\` enforces the same module, so a toolkit fix reaches these frames without a reset.\nimport React, {useMemo} from "react";\nimport {Audio} from "@remotion/media";\nimport {AbsoluteFill, Img, OffthreadVideo, Sequence, interpolate, staticFile, useCurrentFrame, useVideoConfig} from "remotion";\nimport {MINIMUM_CHAIN_CLIP_SECONDS, adjacentFootageRepeats, chainClipFrames, sceneAssetKeys, verticalTextZone} from "@dtconcepts/timds/video/footage";\nimport type {\n  VideoProject,\n  VideoProjectAsset,\n  VideoProjectCaptionLine,\n  VideoProjectComponentOverrides,\n  VideoProjectCover,\n  VideoProjectCoverProps,\n  VideoProjectIntroProps,\n  VideoProjectOutroProps,\n  VideoProjectScene,\n  VideoProjectSceneProps,\n  VideoProjectVideoProps,\n} from "@dtconcepts/timds/video/remotion";\n\n${DEFAULT_VIDEO_TEXT_SOURCE}\n\n${componentSource}\n\nexport {BrandWatermark, CaptionPages, Cover, CoverVisual, GoldHeadline, HorizontalCover, Intro, Media, Outro, SceneView, VerticalCover, Video};\nexport default defaultVideoProjectComponents;\n`;
 }
 
 export async function initializeVideoComponents(workspace, { force = false } = {}) {
@@ -761,6 +761,7 @@ function referencedAssetKeys(production) {
 async function sourceForAsset(workspace, asset, localManifest, mediaCatalog) {
   if (asset.publicPath) return path.join(workspace.designSystemRoot, safeRelativePath(asset.publicPath, "video asset publicPath"));
   if (asset.localPath) return path.join(workspace.designSystemRoot, safeRelativePath(asset.localPath, "video asset localPath"));
+  const published = mediaCatalog.assets.find((entry) => entry.key === asset.mediaKey);
   const local = localManifest.assets.find((entry) => entry.key === asset.mediaKey);
   if (local) {
     const localPath = path.join(workspace.designSystemRoot, safeRelativePath(local.path, "video local media path"));
@@ -768,11 +769,10 @@ async function sourceForAsset(workspace, asset, localManifest, mediaCatalog) {
       if (error.code === "ENOENT") return null;
       throw error;
     });
-    // A stale manifest is not a cache hit: another workstation (or a cleared
-    // cache) must still be able to fetch this mediaKey from the published DS.
-    if (stat?.isFile() && stat.size > 0) return localPath;
+    // Crop approval is tied to the published bytes, not just the media key.
+    // A stale manifest or a file changed after registration is not a cache hit.
+    if (stat?.isFile() && stat.size > 0 && (!published || (stat.size === published.bytes && await fileSha256(localPath) === published.sha256))) return localPath;
   }
-  const published = mediaCatalog.assets.find((entry) => entry.key === asset.mediaKey);
   if (!published?.publicUrl) throw new Error(`video asset ${asset.mediaKey} is not available locally or from media.json`);
   return { url: published.publicUrl, filename: published.filename, metadata: published };
 }

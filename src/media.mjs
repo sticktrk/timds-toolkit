@@ -229,7 +229,7 @@ export async function readLocalMediaManifest(designSystemRoot) {
   }
 }
 
-async function fileSha256(filePath) {
+export async function fileSha256(filePath) {
   const handle = await fs.open(filePath, "r");
   const hash = createHash("sha256");
   try {

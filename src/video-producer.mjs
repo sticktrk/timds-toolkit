@@ -1,4 +1,4 @@
-import { footageFamily } from "../video/footage.mjs";
+import { footageFamily, verticalTextZone } from "../video/footage.mjs";
 import { validateVideoVerticalMetadata } from "./video-crops.mjs";
 
 const PRODUCER_SCHEMA_VERSION = 1;
@@ -418,23 +418,33 @@ export function createVideoProducer({ contract, assetCatalog, mediaCatalog, vert
         ? `no eligible Shorts footage under ${config.footage.assetPrefix}; publish and link vertical derivatives, or configure video.verticalMetadata with reviewed crops and enable producer.footage.allowShortCrop`
         : `no eligible footage under ${config.footage.assetPrefix}; register published clips with positive durationSeconds`);
     }
-    const selected = [];
-    const used = new Set();
-    let duration = 0;
-    let lastFamily = previousFamily;
-    while (duration + Number.EPSILON < seconds) {
-      const candidate = ranked.find((pair) => !used.has(pair.master.key)
-        && footageFamily(pair.master.key) !== lastFamily
-        && (format !== "horizontal" || compatibleTextSides([...selected.map((entry) => entry.master.key), pair.master.key]).length > 0));
-      if (!candidate) {
-        fail(`scene ${scene.id} needs ${seconds.toFixed(2)} seconds, but registered footage covers only ${duration.toFixed(2)} seconds at natural 1x speed without repeating a footage family back to back`);
+    // Default scenes and existing client snapshots hold the first clip's
+    // headline placement for the whole scene. Try each zone in ranked order
+    // so a short preferred chain cannot hide a complete chain in the other zone.
+    const zones = format === "short"
+      ? [...new Set(ranked.filter((pair) => footageFamily(pair.master.key) !== previousFamily).map((pair) => verticalTextZone(pair.vertical.text)))]
+      : [null];
+    let maximumDuration = 0;
+    for (const zone of zones) {
+      const candidates = zone === null ? ranked : ranked.filter((pair) => verticalTextZone(pair.vertical.text) === zone);
+      const selected = [];
+      const used = new Set();
+      let duration = 0;
+      let lastFamily = previousFamily;
+      while (duration + Number.EPSILON < seconds) {
+        const candidate = candidates.find((pair) => !used.has(pair.master.key)
+          && footageFamily(pair.master.key) !== lastFamily
+          && (format !== "horizontal" || compatibleTextSides([...selected.map((entry) => entry.master.key), pair.master.key]).length > 0));
+        if (!candidate) break;
+        used.add(candidate.master.key);
+        selected.push(candidate);
+        duration += candidate.effectiveDurationSeconds;
+        lastFamily = footageFamily(candidate.master.key);
       }
-      used.add(candidate.master.key);
-      selected.push(candidate);
-      duration += candidate.effectiveDurationSeconds;
-      lastFamily = footageFamily(candidate.master.key);
+      if (duration + Number.EPSILON >= seconds) return selected;
+      maximumDuration = Math.max(maximumDuration, duration);
     }
-    return selected;
+    fail(`scene ${scene.id} needs ${seconds.toFixed(2)} seconds, but registered footage covers only ${maximumDuration.toFixed(2)} seconds at natural 1x speed without repeating a footage family back to back${format === "short" ? " within a single vertical text zone" : ""}`);
   };
 
   const chooseCover = (compiled) => {

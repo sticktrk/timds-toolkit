@@ -72,6 +72,11 @@ published master with a validated record to fill a missing vertical link.
 Without either a linked derivative or a reviewed crop plus that opt-in, the
 producer reports that the Short has no eligible footage. A mixed chain may
 use both. Cropped masters retain their measured duration and footage family.
+Every clip in a Short scene's chain must support the same vertical text zone,
+because the headline holds its position for that scene. If neither zone has
+enough compatible footage, shorten the scene or register more reviewed clips.
+Local cached media must match the published source bytes and hash; stale or
+modified files fall back to the published URL before staging.
 
 ## Existing libraries
 

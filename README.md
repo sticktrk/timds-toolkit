@@ -337,6 +337,9 @@ registry configured by `timds.json → video.verticalMetadata`. The video compon
 uses that record's `objectPosition` and vertical `text` zone; a horizontal
 `subject` label or a default center crop is insufficient. Explicit derivatives
 still take precedence, and footage duration and family rules still apply.
+Each Short scene uses clips with one compatible vertical text zone, keeping
+its headline in the reviewed position throughout the chain. If the preferred
+zone cannot cover the scene, the producer tries the other zone before failing.
 Horizontal renders retain their original framing and text layout.
 
 New `video init` scaffolds include `video/vertical-meta.json` and enable its
@@ -354,6 +357,8 @@ registry as `verticalMetadata` to `createVideoProducer`.
 
 Preparing or rendering downloads assets from their `media.json` public URLs
 when no usable local media file exists, including stale or empty cache entries.
+Cached published media must match the catalog's byte count and SHA-256; a
+different local clip under the same media key is downloaded again before staging.
 No manual asset pull or cloud login is required for published media.
 
 `video check` compiles every lab input and warns when the registered catalog

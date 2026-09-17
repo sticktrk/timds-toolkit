@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import childProcess from "node:child_process";
+import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { promises as fs } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
@@ -595,6 +596,56 @@ test("Shorts crop published masters only when opted in, prefer derivatives, and 
   await assert.rejects(planVideoLab(workspace, "records"), /no eligible Shorts footage/u);
 });
 
+for (const derivative of [false, true]) {
+  test(`Shorts choose a complete chain in one reviewed text zone${derivative ? " with a linked derivative" : ""}`, async (t) => {
+    const workspace = await labFixture(t);
+    const root = workspace.designSystemRoot;
+    const contractPath = path.join(root, "video/contract.json");
+    const contract = JSON.parse(await fs.readFile(contractPath, "utf8"));
+    contract.producer.footage.allowShortCrop = true;
+    await writeJson(contractPath, contract);
+    const inputPath = path.join(root, "video/lab/records.json");
+    const input = JSON.parse(await fs.readFile(inputPath, "utf8"));
+    input.outputFormat = "short";
+    input.answerBeats = [{ id: "keep", role: "rule", summary: "Keep every record together", narration: "Keep the original records together and make a backup copy of every page before sharing any of them with anyone." }];
+    await writeJson(inputPath, input);
+    const assetsPath = path.join(root, "video/assets.json");
+    const assets = JSON.parse(await fs.readFile(assetsPath, "utf8"));
+    if (derivative) {
+      assets.assets["footage-one"].vertical = "footage-one-vertical";
+      assets.assets["footage-one-vertical"] = { mediaKey: "footage-one-vertical", durationSeconds: 6, text: "upper" };
+      await writeJson(assetsPath, assets);
+      const mediaPath = path.join(root, "media.json");
+      const media = JSON.parse(await fs.readFile(mediaPath, "utf8"));
+      media.assets.push({ ...media.assets.find((entry) => entry.key === "footage-one"), id: "footage-one-vertical-id", key: "footage-one-vertical", filename: "one-vertical.mp4", publicUrl: "https://media.example.com/one-vertical.mp4" });
+      await writeJson(mediaPath, media);
+    }
+    const metadata = await registerVerticalMetadata(workspace);
+    const metadataPath = path.join(root, "video/vertical-meta.json");
+    metadata.assets["footage-one"].text = "upper";
+    metadata.assets["footage-two"].text = "upper";
+    await writeJson(metadataPath, metadata);
+    const upper = (await planVideoLab(workspace, "records")).lab.finalized;
+    const upperScene = singleFormatScenes(upper).find((scene) => scene.id === "keep");
+    assert.deepEqual(upperScene.assets, [derivative ? "footage-one-vertical" : "footage-one", "footage-two"]);
+    assert.ok(upperScene.assets.every((key) => upper.footage.find((asset) => asset.key === key).text === "upper"));
+
+    // The highest-ranked clip alone cannot cover eight seconds. Try the other
+    // zone rather than rejecting a catalog that has a complete lower chain.
+    metadata.assets["footage-two"].text = "lower";
+    await writeJson(metadataPath, metadata);
+    const lower = (await planVideoLab(workspace, "records")).lab.finalized;
+    const lowerScene = singleFormatScenes(lower).find((scene) => scene.id === "keep");
+    assert.deepEqual(lowerScene.assets, ["footage-three", "footage-two"]);
+    assert.ok(lowerScene.assets.every((key) => lower.footage.find((asset) => asset.key === key).text === "lower"));
+
+    // Total footage is still long enough, but neither zone can cover the scene.
+    assets.assets["footage-two"].durationSeconds = 1;
+    await writeJson(assetsPath, assets);
+    await assert.rejects(planVideoLab(workspace, "records"), /single vertical text zone/u);
+  });
+}
+
 test("video check gates the full B-roll registry even when no lab input uses a clip", async (t) => {
   const workspace = await labFixture(t);
   const root = workspace.designSystemRoot;
@@ -620,18 +671,35 @@ test("video check gates the full B-roll registry even when no lab input uses a c
   }
 });
 
-for (const cache of ["absent", "missing-file", "empty-file", "present"]) {
+for (const cache of ["absent", "missing-file", "empty-file", "present", "stale-manifest", "changed-file"]) {
   test(`lab staging resolves published media with a ${cache} local cache`, async (t) => {
     const workspace = await labFixture(t);
     const root = workspace.designSystemRoot;
+    const contractPath = path.join(root, "video/contract.json");
+    const contract = JSON.parse(await fs.readFile(contractPath, "utf8"));
+    contract.producer.footage.allowShortCrop = true;
+    await writeJson(contractPath, contract);
+    const inputPath = path.join(root, "video/lab/records.json");
+    const input = JSON.parse(await fs.readFile(inputPath, "utf8"));
+    input.outputFormat = "short";
+    await writeJson(inputPath, input);
+    const digest = (value) => createHash("sha256").update(value).digest("hex");
+    const mediaPath = path.join(root, "media.json");
+    const media = JSON.parse(await fs.readFile(mediaPath, "utf8"));
+    for (const asset of media.assets) {
+      asset.sha256 = digest("cloud-video");
+      asset.bytes = Buffer.byteLength("cloud-video");
+    }
+    await writeJson(mediaPath, media);
+    await registerVerticalMetadata(workspace);
     const planned = await planVideoLab(workspace, "records");
     const key = planned.lab.finalized.footage[0].key;
     const localPath = "media-local/cached.mp4";
     if (cache !== "absent") {
-      await writeJson(path.join(root, ".timds/local-media.json"), { schemaVersion: 1, assets: [{ key, path: localPath, kind: "video", title: "Cached footage", tags: [], contentType: "video/mp4", filename: "cached.mp4", bytes: 11, sha256: sha("b") }] });
+      await writeJson(path.join(root, ".timds/local-media.json"), { schemaVersion: 1, assets: [{ key, path: localPath, kind: "video", title: "Cached footage", tags: [], contentType: "video/mp4", filename: "cached.mp4", bytes: 11, sha256: digest(cache === "stale-manifest" ? "stale-video" : "cloud-video") }] });
       if (cache !== "missing-file") {
         await fs.mkdir(path.join(root, "media-local"), { recursive: true });
-        await fs.writeFile(path.join(root, localPath), cache === "present" ? "local-video" : "");
+        await fs.writeFile(path.join(root, localPath), cache === "empty-file" ? "" : cache === "present" ? "cloud-video" : "stale-video");
       }
     }
     const urls = [];
@@ -640,7 +708,9 @@ for (const cache of ["absent", "missing-file", "empty-file", "present"]) {
     t.after(() => { globalThis.fetch = originalFetch; });
     const prepared = await prepareVideoLab(workspace, "records");
     const staged = await fs.readFile(path.join(prepared.publicRoot, prepared.project.assets[key].src), "utf8");
-    assert.equal(staged, cache === "present" ? "local-video" : "cloud-video");
+    assert.equal(staged, "cloud-video");
+    assert.equal(digest(staged), prepared.project.assets[key].sha256);
+    assert.equal(prepared.project.assets[key].objectPosition, "85% 50%");
     const published = planned.lab.finalized.footage.find((entry) => entry.key === key);
     assert.equal(urls.includes(published.publicUrl), cache !== "present");
   });
