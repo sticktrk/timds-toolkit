@@ -200,6 +200,10 @@ function normalizedLocalAsset(value, index) {
     sha256: validatedSha(asset.sha256, `${label}.sha256`),
     tags: normalizedTags(asset.tags, `${label}.tags`),
     title: boundedString(asset.title, `${label}.title`, 300, { required: true }),
+    // Missing means legacy staging; null explicitly means the key was unpublished.
+    ...(Object.hasOwn(asset, "baseSha256") ? {
+      baseSha256: asset.baseSha256 === null ? null : validatedSha(asset.baseSha256, `${label}.baseSha256`),
+    } : {}),
     ...normalizedMediaMetadata(asset, label),
   };
 }
@@ -323,6 +327,8 @@ export async function stageMediaFile(workspace, filePathInput, options = {}) {
   const info = await fs.stat(sourcePath);
   if (!info.isFile() || info.size < 1 || info.size > MAX_MEDIA_BYTES) throw new Error("Media input must be a non-empty file smaller than 5 TiB");
   const key = mediaKey(options.key || keyFromFile(sourcePath));
+  const { catalog } = await readMediaCatalog(workspace.designSystemRoot);
+  const baseSha256 = catalog.assets.find((asset) => asset.key === key)?.sha256 ?? null;
   const mediaRoot = path.join(workspace.designSystemRoot, "media-local");
   await fs.mkdir(mediaRoot, { recursive: true });
   const sourceRealPath = await fs.realpath(sourcePath);
@@ -348,6 +354,7 @@ export async function stageMediaFile(workspace, filePathInput, options = {}) {
   const contentType = contentTypeForFile(destinationRealPath, options.contentType);
   const mediaMetadata = await probeMediaMetadata(destinationRealPath, contentType, options);
   const local = normalizedLocalAsset({
+    baseSha256,
     bytes: destinationInfo.size,
     contentType,
     filename: path.basename(destinationRealPath),
@@ -449,10 +456,14 @@ function catalogRecord(asset, local) {
 }
 
 async function writeCatalog(catalogPath, catalog, asset) {
-  const assets = catalog.assets.filter((entry) => entry.key !== asset.key && entry.id !== asset.id);
+  const collision = catalog.assets.find((entry) => entry.key !== asset.key && entry.id === asset.id);
+  if (collision) {
+    throw new Error(`Cannot publish media ${asset.key}: asset ${asset.id} already belongs to key ${collision.key}. Use that existing key; media.json was not changed for ${asset.key}`);
+  }
+  const assets = catalog.assets.filter((entry) => entry.key !== asset.key);
   assets.push(asset);
   assets.sort((left, right) => left.key.localeCompare(right.key));
-  const next = { assets, schemaVersion: 2 };
+  const next = validateMediaCatalog({ assets, schemaVersion: 2 });
   await fs.writeFile(catalogPath, `${JSON.stringify(next, null, 2)}\n`, "utf8");
   return next;
 }
@@ -467,9 +478,10 @@ async function uploadLocalAsset(workspace, local, options) {
   const token = await resolveAccessToken(portalUrl, options);
   if (!token) throw new Error("Sign in with `timds auth login` or set TIMDS_ACCESS_TOKEN before publishing media");
   const fetchImpl = options.fetchImpl || fetch;
+  const { baseSha256, ...uploadMetadata } = local;
   const created = await portalJson(fetchImpl, portalEndpoint(portalUrl, "/api/operator/design-system-assets/uploads"), token, {
     body: {
-      ...local,
+      ...uploadMetadata,
       sourceId: options.sourceId || process.env.TIMDS_SOURCE_ID || "",
       systemId: workspace.manifest.systemId,
       visibility: "public",
@@ -510,19 +522,46 @@ async function uploadLocalAsset(workspace, local, options) {
   return { asset: catalogRecord(asset, local), reused: Boolean(created.reused) };
 }
 
+function assertPublishBase(local, catalog) {
+  const existing = catalog.assets.find((asset) => asset.key === local.key);
+  if (existing?.sha256 === local.sha256 && existing.publicUrl) return;
+  const currentSha256 = existing?.sha256 ?? null;
+  const legacyNewAsset = !Object.hasOwn(local, "baseSha256") && !existing;
+  if (!legacyNewAsset && local.baseSha256 !== currentSha256) {
+    throw new Error(`Staged media ${local.key} conflicts with media.json: ${Object.hasOwn(local, "baseSha256") ? "the catalog changed since staging" : "this older staging entry has no catalog baseline"}. Remove the stale entry from .timds/local-media.json to keep the catalog, or review the replacement and run assets add FILE --key ${local.key} again`);
+  }
+}
+
+async function recordPublishedBase(designSystemRoot, local) {
+  if (local.baseSha256 === local.sha256) return;
+  // Preserve any unrelated assets staged while an upload was in progress.
+  const { manifest, manifestPath } = await readLocalMediaManifest(designSystemRoot);
+  const current = manifest.assets.find((asset) => asset.key === local.key);
+  if (current?.sha256 !== local.sha256 || current.baseSha256 === local.sha256) return;
+  current.baseSha256 = local.sha256;
+  await writeLocalManifest(manifestPath, manifest);
+}
+
 export async function publishStagedMedia(workspace, options = {}) {
   const { manifest } = await readLocalMediaManifest(workspace.designSystemRoot);
   let { catalog, catalogPath } = await readMediaCatalog(workspace.designSystemRoot);
+  // Detect all known staging conflicts before uploading or rewriting any records.
+  for (const local of manifest.assets) assertPublishBase(local, catalog);
   const published = [];
   const unchanged = [];
   for (const local of manifest.assets) {
     const existing = catalog.assets.find((asset) => asset.key === local.key);
     if (existing?.sha256 === local.sha256 && existing.publicUrl) {
+      await recordPublishedBase(workspace.designSystemRoot, local);
       unchanged.push(existing);
       continue;
     }
     const result = await uploadLocalAsset(workspace, local, options);
+    // A checkout or another publisher may have changed the catalog during upload.
+    ({ catalog } = await readMediaCatalog(workspace.designSystemRoot));
+    assertPublishBase(local, catalog);
     catalog = await writeCatalog(catalogPath, catalog, result.asset);
+    await recordPublishedBase(workspace.designSystemRoot, local);
     published.push(result);
   }
   return { catalogPath, published, staged: manifest.assets.length, unchanged };

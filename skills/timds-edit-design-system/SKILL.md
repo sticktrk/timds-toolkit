@@ -129,7 +129,18 @@ npm run timds -- assets publish
 ```
 
 `submit` publishes changed staged files automatically before validation. Commit
-the resulting `media.json` record, never the raw file or local manifest. TimDS
+the resulting `media.json` record, never the raw file or local manifest.
+`assets add` records the catalog checksum when staging. `assets publish` and
+`submit` stop before uploading if a staged replacement conflicts with the
+current catalog, including older staging entries without that baseline. Keep
+reviewed published derivatives: remove stale entries from
+`.timds/local-media.json` or run `assets pull KEY --force` to restore the
+published asset. Restage with `assets add FILE --key KEY` only after reviewing
+an intentional replacement; never restage originals over optimized keys merely
+to bypass a conflict. Reusing an asset ID belonging to another key is rejected
+without deleting that key; reference the existing logical key instead.
+
+TimDS
 uses `ffprobe` while staging video and audio so the record and published machine
 index include measured duration and video dimensions. For an older catalog,
 run `npm run timds -- assets backfill-metadata` once to measure its stable public
