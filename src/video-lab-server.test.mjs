@@ -90,6 +90,23 @@ test("reports a plan that cannot finalize yet instead of failing the compile", a
   assert.equal(plan.scenes.length, 5);
 });
 
+test("the Shorts API exposes a specific blocker and enables rendering when the client permits cropping", async (t) => {
+  const workspace = await labFixture(t);
+  const { call } = await serve(t, workspace);
+  const input = { ...recordsInput, outputFormat: "short" };
+  const blocked = await call("POST", "/api/compile", { input });
+  assert.equal(blocked.body.renderable, false);
+  assert.match(blocked.body.warning, /no eligible Shorts footage/u);
+  const contractPath = path.join(workspace.designSystemRoot, "video/contract.json");
+  const contract = JSON.parse(await fs.readFile(contractPath, "utf8"));
+  contract.producer.footage.allowShortCrop = true;
+  await fs.writeFile(contractPath, JSON.stringify(contract));
+  const saved = await call("POST", "/api/inputs", { input });
+  assert.equal(saved.status, 200);
+  assert.equal(saved.body.plan.renderable, true);
+  assert.equal(saved.body.plan.warning, null);
+});
+
 test("builds the draft prompt from the client's authoring contract and strips TimDS schema annotations", async (t) => {
   const workspace = await labFixture(t);
   const loaded = await loadVideoWorkspace(workspace);

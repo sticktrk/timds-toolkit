@@ -56,6 +56,9 @@ export function validateVideoProducerConfig(input, contract) {
   const outro = object(config.outro || {}, "video contract producer.outro");
   const cover = object(config.cover || {}, "video contract producer.cover");
   const footage = object(config.footage || {}, "video contract producer.footage");
+  if (footage.allowShortCrop !== undefined && typeof footage.allowShortCrop !== "boolean") {
+    throw new Error("video contract producer.footage.allowShortCrop must be a boolean");
+  }
   const authoring = object(config.authoring || {}, "video contract producer.authoring");
   const formatPromptBlocks = object(authoring.formatPromptBlocks || {}, "video contract producer.authoring.formatPromptBlocks");
   const formats = engagement.formats || ["horizontal"];
@@ -104,6 +107,7 @@ export function validateVideoProducerConfig(input, contract) {
     },
     footage: {
       assetPrefix: prefix(footage.assetPrefix, "video contract producer.footage.assetPrefix", "footage-"),
+      allowShortCrop: footage.allowShortCrop === true,
     },
     authoring: {
       sharedPromptBlocks: promptBlockIds(authoring.sharedPromptBlocks, "video contract producer.authoring.sharedPromptBlocks"),
@@ -384,7 +388,9 @@ export function createVideoProducer({ contract, assetCatalog, mediaCatalog }) {
     .map((key) => {
       const master = mediaFor(key);
       const verticalKey = assets[key].vertical;
-      const vertical = verticalKey ? mediaFor(verticalKey) : null;
+      // A client may use its renderer's object-fit crop of the published master.
+      // Keep explicit derivatives preferred, and preserve vertical-only by default.
+      const vertical = verticalKey ? mediaFor(verticalKey) : config.footage.allowShortCrop ? master : null;
       return { master, vertical, durationSeconds: master.durationSeconds };
     })
     .sort((left, right) => left.master.key.localeCompare(right.master.key));
@@ -400,6 +406,11 @@ export function createVideoProducer({ contract, assetCatalog, mediaCatalog }) {
       .filter((pair) => format !== "short" || (pair.vertical && Number.isFinite(pair.vertical.durationSeconds)))
       .map((pair) => ({ ...pair, effectiveDurationSeconds: format === "short" ? pair.vertical.durationSeconds : pair.master.durationSeconds }))
       .sort((left, right) => score(query, right.master.key) - score(query, left.master.key) || right.effectiveDurationSeconds - left.effectiveDurationSeconds || left.master.key.localeCompare(right.master.key));
+    if (!ranked.length) {
+      fail(format === "short" && !config.footage.allowShortCrop
+        ? `no eligible Shorts footage under ${config.footage.assetPrefix}; publish and link vertical derivatives, or enable producer.footage.allowShortCrop to crop published masters`
+        : `no eligible footage under ${config.footage.assetPrefix}; register published clips with positive durationSeconds`);
+    }
     const selected = [];
     const used = new Set();
     let duration = 0;

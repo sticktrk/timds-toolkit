@@ -20,6 +20,7 @@ import {
   renderVideoWorkspace,
   runVideoLab,
   silentSceneTimings,
+  singleFormatScenes,
   validateVideoContract,
 } from "./video.mjs";
 import { createVideoAuthoringContract, createVideoProducer } from "./video-producer.mjs";
@@ -515,6 +516,82 @@ test("video check compiles every lab input and only warns when the catalog canno
   await writeJson(path.join(workspace.designSystemRoot, "video", "lab", "broken.json"), { schemaVersion: 1, slug: "broken", outputFormat: "horizontal", exactQuestion: "No question mark", topic: { label: "x y" }, answerBeats: [] });
   await assert.rejects(checkVideoWorkspace(workspace), /exactQuestion must end with a question mark/u);
 });
+
+test("Shorts crop published masters only when opted in, prefer derivatives, and keep complete mixed chains", async (t) => {
+  const workspace = await labFixture(t);
+  const root = workspace.designSystemRoot;
+  const inputPath = path.join(root, "video/lab/records.json");
+  const input = JSON.parse(await fs.readFile(inputPath, "utf8"));
+  input.outputFormat = "short";
+  input.answerBeats = [{ id: "keep", role: "rule", summary: "Keep every record together", narration: "Keep the original records together and make a backup copy of every page before sharing any of them with anyone." }];
+  await writeJson(inputPath, input);
+  await assert.rejects(planVideoLab(workspace, "records"), /no eligible Shorts footage.*allowShortCrop/u);
+
+  const contractPath = path.join(root, "video/contract.json");
+  const contract = JSON.parse(await fs.readFile(contractPath, "utf8"));
+  contract.producer.footage.allowShortCrop = "true";
+  assert.throws(() => validateVideoContract(contract), /allowShortCrop must be a boolean/u);
+  contract.producer.footage.allowShortCrop = true;
+  await writeJson(contractPath, contract);
+  const cropped = (await planVideoLab(workspace, "records")).lab;
+  const scene = cropped.finalized.plan.scenes.find((entry) => entry.id === "keep");
+  assert.ok(scene.assets.length > 1, "the eight-second scene needs more than one six-second master");
+  assert.deepEqual(scene.verticalAssets, scene.assets);
+  assert.deepEqual(singleFormatScenes(cropped.finalized).find((entry) => entry.id === "keep").assets, scene.assets);
+
+  const assetsPath = path.join(root, "video/assets.json");
+  const assets = JSON.parse(await fs.readFile(assetsPath, "utf8"));
+  const master = scene.assets[0];
+  const vertical = `${master}-vertical`;
+  assets.assets[master].vertical = vertical;
+  assets.assets[vertical] = { mediaKey: vertical, durationSeconds: 4, text: "lower" };
+  delete assets.assets["footage-three"];
+  await writeJson(assetsPath, assets);
+  const mediaPath = path.join(root, "media.json");
+  const media = JSON.parse(await fs.readFile(mediaPath, "utf8"));
+  media.assets.push({ ...media.assets.find((entry) => entry.key === master), id: `${vertical}-id`, key: vertical, filename: `${vertical}.mp4`, publicUrl: `https://media.example.com/${vertical}.mp4`, durationSeconds: 4 });
+  await writeJson(mediaPath, media);
+  const mixed = (await planVideoLab(workspace, "records")).lab;
+  const mixedScene = mixed.finalized.plan.scenes.find((entry) => entry.id === "keep");
+  assert.equal(mixedScene.verticalAssets.length, mixedScene.assets.length);
+  assert.equal(mixedScene.verticalAssets[mixedScene.assets.indexOf(master)], vertical);
+  assert.ok(mixedScene.verticalAssets.some((key) => key !== vertical), "unlinked masters remain in the chain");
+  assert.deepEqual(singleFormatScenes(mixed.finalized).find((entry) => entry.id === "keep").assets, mixedScene.verticalAssets);
+
+  // A crop uses the real duration, never a stretched or frozen clip.
+  input.answerBeats[0].narration = Array(100).fill("records").join(" ");
+  await writeJson(inputPath, input);
+  await assert.rejects(planVideoLab(workspace, "records"), /natural 1x speed/u);
+  for (const key of Object.keys(assets.assets)) if (key.startsWith("footage-")) delete assets.assets[key];
+  await writeJson(assetsPath, assets);
+  await assert.rejects(planVideoLab(workspace, "records"), /no eligible footage.*register published clips/u);
+});
+
+for (const cache of ["absent", "missing-file", "empty-file", "present"]) {
+  test(`lab staging resolves published media with a ${cache} local cache`, async (t) => {
+    const workspace = await labFixture(t);
+    const root = workspace.designSystemRoot;
+    const planned = await planVideoLab(workspace, "records");
+    const key = planned.lab.finalized.footage[0].key;
+    const localPath = "media-local/cached.mp4";
+    if (cache !== "absent") {
+      await writeJson(path.join(root, ".timds/local-media.json"), { schemaVersion: 1, assets: [{ key, path: localPath, kind: "video", title: "Cached footage", tags: [], contentType: "video/mp4", filename: "cached.mp4", bytes: 11, sha256: sha("b") }] });
+      if (cache !== "missing-file") {
+        await fs.mkdir(path.join(root, "media-local"), { recursive: true });
+        await fs.writeFile(path.join(root, localPath), cache === "present" ? "local-video" : "");
+      }
+    }
+    const urls = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (url) => { urls.push(url); return new Response("cloud-video"); };
+    t.after(() => { globalThis.fetch = originalFetch; });
+    const prepared = await prepareVideoLab(workspace, "records");
+    const staged = await fs.readFile(path.join(prepared.publicRoot, prepared.project.assets[key].src), "utf8");
+    assert.equal(staged, cache === "present" ? "local-video" : "cloud-video");
+    const published = planned.lab.finalized.footage.find((entry) => entry.key === key);
+    assert.equal(urls.includes(published.publicUrl), cache !== "present");
+  });
+}
 
 const bannerContractBase = {
   schemaVersion: 1,

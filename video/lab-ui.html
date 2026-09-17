@@ -338,7 +338,9 @@
   $("load-input").addEventListener("change", async (event) => {
     const name = event.target.value;
     if (!name) return;
-    try { applyInput(await api("GET", `/api/inputs/${name}`)); state.savedName = name; $("btn-render").disabled = false; $("render-note").textContent = `Saved as ${name}.json`; $("source-error").textContent = ""; }
+    $("btn-render").disabled = true;
+    state.savedName = null;
+    try { applyInput(await api("GET", `/api/inputs/${name}`)); state.savedName = name; await compile(false); $("source-error").textContent = ""; }
     catch (caught) { $("source-error").textContent = caught.message; }
   });
 
@@ -354,15 +356,17 @@
       if (save) {
         state.savedName = result.name;
         $("btn-render").disabled = !plan.renderable;
-        $("render-note").textContent = `Saved ${result.path}`;
+        $("render-note").textContent = plan.renderable ? `Saved ${result.path}` : `Render unavailable: ${plan.warning}`;
         if (![...$("load-input").options].some((option) => option.value === result.name)) $("load-input").add(new Option(result.name, result.name));
       } else {
         // A checked plan renders only once it is saved; an already-saved input stays renderable.
         $("btn-render").disabled = !(state.savedName && plan.renderable);
-        $("render-note").textContent = state.savedName ? `Saved as ${state.savedName}.json` : (plan.renderable ? "Save to lab to render." : "");
+        $("render-note").textContent = !plan.renderable ? `Render unavailable: ${plan.warning}` : state.savedName ? `Saved as ${state.savedName}.json` : "Save to lab to render.";
       }
     } catch (caught) {
       $("script-error").textContent = caught.message;
+      $("btn-render").disabled = true;
+      $("render-note").textContent = `Render unavailable: ${caught.message}`;
     }
   }
   $("btn-compile").addEventListener("click", () => compile(false));

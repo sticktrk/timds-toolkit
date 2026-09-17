@@ -330,6 +330,17 @@ everything else still works. The server binds to `127.0.0.1` only. When the
 producer selects prompt blocks, run `timds check` first so the built
 `dist/…/index.json` can resolve them; a producer with no blocks needs no index.
 
+Shorts use each master's published `vertical` derivative by default. A client
+can set `producer.footage.allowShortCrop: true` to use the published master
+when no derivative is linked; the video component crops it with `objectFit:
+cover` and the asset's `objectPosition`. Explicit derivatives still take
+precedence, and footage duration and family rules still apply. A mixed chain
+can contain both derivatives and cropped masters.
+
+Preparing or rendering downloads assets from their `media.json` public URLs
+when no usable local media file exists, including stale or empty cache entries.
+No manual asset pull or cloud login is required for published media.
+
 `video check` compiles every lab input and warns when the registered catalog
 cannot finalize one yet, so a new system can commit the sample before it has
 registered footage under the producer's `footage.assetPrefix` keys and a cover

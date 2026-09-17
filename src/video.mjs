@@ -593,7 +593,7 @@ export function describeVideoLabPlan({ compiled, timings, finalized }) {
   return lines.join("\n");
 }
 
-/** The scene list a single-format root plays: horizontal masters or short verticals, nothing else. */
+/** The scene list a single-format root plays, using the producer's chosen keys for that format. */
 export const singleFormatScenes = (finalized) => finalized.plan.scenes.map((scene) => {
   const { asset, assets, verticalAsset, verticalAssets, ...copy } = scene;
   if (scene.intro || scene.outro) return copy;
@@ -755,7 +755,16 @@ async function sourceForAsset(workspace, asset, localManifest, mediaCatalog) {
   if (asset.publicPath) return path.join(workspace.designSystemRoot, safeRelativePath(asset.publicPath, "video asset publicPath"));
   if (asset.localPath) return path.join(workspace.designSystemRoot, safeRelativePath(asset.localPath, "video asset localPath"));
   const local = localManifest.assets.find((entry) => entry.key === asset.mediaKey);
-  if (local) return path.join(workspace.designSystemRoot, local.path);
+  if (local) {
+    const localPath = path.join(workspace.designSystemRoot, safeRelativePath(local.path, "video local media path"));
+    const stat = await fs.stat(localPath).catch((error) => {
+      if (error.code === "ENOENT") return null;
+      throw error;
+    });
+    // A stale manifest is not a cache hit: another workstation (or a cleared
+    // cache) must still be able to fetch this mediaKey from the published DS.
+    if (stat?.isFile() && stat.size > 0) return localPath;
+  }
   const published = mediaCatalog.assets.find((entry) => entry.key === asset.mediaKey);
   if (!published?.publicUrl) throw new Error(`video asset ${asset.mediaKey} is not available locally or from media.json`);
   return { url: published.publicUrl, filename: published.filename, metadata: published };
