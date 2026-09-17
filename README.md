@@ -158,6 +158,20 @@ to `media.json`. Timed media is inspected with `ffprobe` during `assets add`, so
 video and audio records also carry their measured duration; video records carry
 dimensions, frame rate, and codec when available. The raw file and
 `.timds/local-media.json` remain ignored.
+Staging records the current catalog checksum locally. Publishing (including
+`submit`) checks every staged entry before uploading and refuses replacements
+if the catalog has changed since staging. Older staging entries without a
+baseline may still publish new keys or match unchanged records, but cannot
+replace existing records until deliberately restaged. To keep the published
+asset, remove its stale entry from `.timds/local-media.json` or restore it with
+`assets pull KEY --force`. Run `assets add FILE --key KEY` again only after
+reviewing the intended replacement; do not restage an original over an
+optimized derivative just to clear a conflict. Successful publication advances
+the local baseline, so reverting `media.json` does not replay the old upload.
+If storage returns an asset ID already registered under another logical key,
+publication refuses that catalog write and preserves both keys. Use the
+existing key instead of implicitly renaming it.
+
 If an object transfer fails, the CLI reports the bounded storage response and
 cancels the server upload lease before returning the error, so correcting the
 problem and rerunning `assets publish` does not wait for a stale lock to expire.

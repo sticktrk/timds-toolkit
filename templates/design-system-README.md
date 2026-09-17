@@ -73,6 +73,14 @@ __TIMDS_CLI__ assets publish
 
 `submit` performs the publish step automatically before building and preparing
 the pull request. Git receives only the stable public record in `media.json`.
+Staging remembers the catalog checksum. Publication refuses stale replacements,
+including older staging entries without a baseline, and never removes another
+logical key when storage reuses its asset ID. To keep the published asset,
+remove its stale entry from `.timds/local-media.json` or run
+`__TIMDS_CLI__ assets pull KEY --force`. Restage with `assets add FILE --key KEY`
+only after reviewing an intentional replacement; keep optimized derivatives
+under their existing keys.
+
 TimDS uses `ffprobe` during `assets add` to record timed-media duration and video
 dimensions. Backfill an older catalog from its stable public URLs without
 re-uploading objects:
