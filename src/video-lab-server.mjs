@@ -153,7 +153,7 @@ async function producerFor(workspace) {
   const loaded = await loadVideoWorkspace(workspace);
   if (!loaded.video.contract.producer) throw new LabError(409, "video lab: the video contract has no producer block, so there is nothing to compile against; run timds video init to scaffold one");
   const { catalog: mediaCatalog } = await readMediaCatalog(workspace.designSystemRoot);
-  return { loaded, producer: createVideoProducer({ contract: loaded.video.contract, assetCatalog: loaded.video.assets, mediaCatalog }) };
+  return { loaded, producer: createVideoProducer({ contract: loaded.video.contract, assetCatalog: loaded.video.assets, mediaCatalog, verticalMetadata: loaded.video.verticalMetadata }) };
 }
 
 export async function compileVideoLabInput(workspace, input) {

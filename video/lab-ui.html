@@ -163,7 +163,7 @@
 (() => {
   const $ = (id) => document.getElementById(id);
   const ROLES = ["hook", "rule", "risk", "process", "exception", "answer"];
-  const state = { format: "horizontal", meta: null, beats: [], plan: null, savedName: null, job: null };
+  const state = { format: "horizontal", meta: null, beats: [], plan: null, savedName: null, job: null, revision: 0 };
 
   // ---- helpers -------------------------------------------------------------------
   const words = (value) => String(value || "").trim().split(/\s+/).filter(Boolean).length;
@@ -280,7 +280,14 @@
       narration: card.querySelector(".narration").value.trim(),
     }));
   }
-  const markDirty = () => { if (state.savedName) { state.savedName = null; $("btn-render").disabled = true; $("render-note").textContent = "Edited since save — save again to render."; } };
+  const markDirty = () => {
+    // Edits also invalidate in-flight loads, drafts, checks, and saves.
+    state.revision += 1;
+    state.savedName = null;
+    state.plan = null;
+    $("btn-render").disabled = true;
+    $("render-note").textContent = "Edited since save — save again to render.";
+  };
   $("beats").addEventListener("input", (event) => { updateCount(event.target.closest(".beat")); readBeats(); markDirty(); $("json").value = JSON.stringify(currentInput(), null, 2); });
   $("beats").addEventListener("click", (event) => {
     const button = event.target.closest("button");
@@ -293,10 +300,11 @@
       if (target >= 0 && target < state.beats.length) [state.beats[index], state.beats[target]] = [state.beats[target], state.beats[index]];
     }
     renderBeats();
+    markDirty();
   });
-  $("btn-add").addEventListener("click", () => { readBeats(); state.beats.push({ id: `beat-${state.beats.length + 1}`, role: state.beats.length ? "rule" : "hook", narration: "", summary: "" }); renderBeats(); });
+  $("btn-add").addEventListener("click", () => { readBeats(); state.beats.push({ id: `beat-${state.beats.length + 1}`, role: state.beats.length ? "rule" : "hook", narration: "", summary: "" }); renderBeats(); markDirty(); });
   $("btn-apply-json").addEventListener("click", () => {
-    try { applyInput(JSON.parse($("json").value)); $("script-error").textContent = ""; }
+    try { applyInput(JSON.parse($("json").value)); markDirty(); $("script-error").textContent = ""; }
     catch (caught) { $("script-error").textContent = `JSON: ${caught.message}`; }
   });
   for (const el of ["question", "topic", "slug", "engagement"]) $(el).addEventListener("input", () => { markDirty(); $("json").value = JSON.stringify(currentInput(), null, 2); });
@@ -314,6 +322,8 @@
 
   // ---- draft -------------------------------------------------------------------------
   $("btn-draft").addEventListener("click", async () => {
+    markDirty();
+    const revision = state.revision;
     const button = $("btn-draft");
     $("source-error").textContent = "";
     button.disabled = true; button.textContent = "Drafting…";
@@ -326,31 +336,47 @@
         notes: $("notes").value.trim(),
         slug: $("slug").value.trim() || slugify($("question").value),
       });
+      if (revision !== state.revision) return;
       applyInput(result.input);
       showPlan(result.plan);
       $("draft-note").textContent = `Drafted with ${result.model}${result.usage ? ` · ${result.usage.input_tokens} in / ${result.usage.output_tokens} out` : ""}. Edit the beats, then save and render.`;
     } catch (caught) {
-      $("source-error").textContent = caught.message;
+      if (revision === state.revision) $("source-error").textContent = caught.message;
     } finally {
       button.disabled = false; button.textContent = "Draft with Claude";
     }
   });
   $("load-input").addEventListener("change", async (event) => {
     const name = event.target.value;
-    if (!name) return;
+    const revision = ++state.revision;
     $("btn-render").disabled = true;
     state.savedName = null;
-    try { applyInput(await api("GET", `/api/inputs/${name}`)); state.savedName = name; await compile(false); $("source-error").textContent = ""; }
-    catch (caught) { $("source-error").textContent = caught.message; }
+    state.plan = null;
+    if (!name) return;
+    $("render-note").textContent = `Checking ${name}…`;
+    try {
+      const input = await api("GET", `/api/inputs/${name}`);
+      if (revision !== state.revision) return;
+      applyInput(input);
+      state.savedName = name;
+      $("source-error").textContent = "";
+      await compile(false);
+    } catch (caught) {
+      if (revision === state.revision) $("source-error").textContent = caught.message;
+    }
   });
 
   // ---- compile / save --------------------------------------------------------------------
   async function compile(save) {
+    const revision = ++state.revision;
+    state.plan = null;
+    $("btn-render").disabled = true;
     readBeats();
     $("script-error").textContent = "";
     const input = currentInput();
     try {
       const result = save ? await api("POST", "/api/inputs", { input }) : await api("POST", "/api/compile", { input });
+      if (revision !== state.revision) return;
       const plan = save ? result.plan : result;
       showPlan(plan);
       if (save) {
@@ -364,6 +390,7 @@
         $("render-note").textContent = !plan.renderable ? `Render unavailable: ${plan.warning}` : state.savedName ? `Saved as ${state.savedName}.json` : "Save to lab to render.";
       }
     } catch (caught) {
+      if (revision !== state.revision) return;
       $("script-error").textContent = caught.message;
       $("btn-render").disabled = true;
       $("render-note").textContent = `Render unavailable: ${caught.message}`;
@@ -404,7 +431,7 @@
       await poll(job.id);
     } catch (caught) {
       log.textContent += `\n${caught.message}`;
-      button.disabled = false;
+      button.disabled = !(state.savedName && state.plan?.renderable);
     }
   });
   async function poll(id) {
@@ -419,10 +446,10 @@
         $("dl-video").href = job.output.video; $("dl-video").download = `${job.name}.mp4`;
         $("dl-thumb").href = job.output.thumbnail; $("dl-thumb").download = `${job.name}-thumbnail.jpg`;
         $("out-dir").textContent = job.output.directory;
-        $("btn-render").disabled = false;
+        $("btn-render").disabled = !(state.savedName && state.plan?.renderable);
         return;
       }
-      if (job.status === "failed") { $("btn-render").disabled = false; return; }
+      if (job.status === "failed") { $("btn-render").disabled = !(state.savedName && state.plan?.renderable); return; }
       await new Promise((resolve) => setTimeout(resolve, 1500));
     }
   }

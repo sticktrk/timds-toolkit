@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { syncDefaults } from "./defaults.mjs";
 import { readLocalMediaManifest, readMediaCatalog } from "./media.mjs";
 import { createVideoProducer, validateVideoProducerConfig } from "./video-producer.mjs";
+import { validateVideoVerticalMetadata } from "./video-crops.mjs";
 import { adjacentFootageRepeats, truncatedHeadline } from "../video/footage.mjs";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -130,6 +131,7 @@ export function normalizeVideoManifest(value) {
   return {
     contract: safeRelativePath(video.contract || "video/contract.json", "timds.json video.contract"),
     assets: safeRelativePath(video.assets || "video/assets.json", "timds.json video.assets"),
+    verticalMetadata: video.verticalMetadata ? safeRelativePath(video.verticalMetadata, "timds.json video.verticalMetadata") : null,
     productions: safeRelativePath(video.productions || "video/productions", "timds.json video.productions"),
     local: safeRelativePath(video.local || "video-local", "timds.json video.local"),
     lab: safeRelativePath(video.lab || "video/lab", "timds.json video.lab"),
@@ -471,6 +473,10 @@ export async function loadVideoWorkspace(workspace, { slug: selectedSlug } = {})
   }
   const contract = validateVideoContract(await readJson(contractPath, "video contract"));
   const assets = validateAssetCatalog(await readJson(assetsPath, "video assets"));
+  const verticalMetadata = video.verticalMetadata ? validateVideoVerticalMetadata(
+    await readJson(path.join(workspace.designSystemRoot, video.verticalMetadata), "video vertical metadata"),
+    { assetCatalog: assets, mediaCatalog: (await readMediaCatalog(workspace.designSystemRoot)).catalog, footagePrefix: contract.producer?.footage.assetPrefix },
+  ) : null;
   const entries = selectedSlug
     ? [slug(selectedSlug)]
     : (await fs.readdir(productionsRoot, { withFileTypes: true })).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
@@ -481,7 +487,7 @@ export async function loadVideoWorkspace(workspace, { slug: selectedSlug } = {})
     productions.push(validateProduction(values, contract, assets, productionSlug));
   }
   if (selectedSlug && !productions.length) throw new Error(`video production ${selectedSlug} was not found`);
-  return { ...workspace, video: { ...video, assets, assetsPath, componentsPath, contract, contractPath, labRoot, localRoot, productions, productionsRoot } };
+  return { ...workspace, video: { ...video, assets, assetsPath, verticalMetadata, componentsPath, contract, contractPath, labRoot, localRoot, productions, productionsRoot } };
 }
 
 export async function checkVideoWorkspace(workspace, options = {}) {
@@ -556,7 +562,7 @@ export function silentSceneTimings(scenes, { wordsPerMinute = 150, minimumSceneS
 async function compileVideoLabInput(loaded, mediaCatalog, name) {
   if (!loaded.video.contract.producer) throw new Error(`video lab input ${name} needs a producer block in ${loaded.video.contract.name}'s video contract`);
   const input = await readJson(path.join(loaded.video.labRoot, `${name}.json`), `video lab input ${name}`);
-  const producer = createVideoProducer({ contract: loaded.video.contract, assetCatalog: loaded.video.assets, mediaCatalog });
+  const producer = createVideoProducer({ contract: loaded.video.contract, assetCatalog: loaded.video.assets, mediaCatalog, verticalMetadata: loaded.video.verticalMetadata });
   const compiled = producer.compileProduction(input);
   for (const scene of compiled.scenes) {
     if (truncatedHeadline(scene.headline)) throw new Error(`video lab input ${name}: scene ${scene.id} headline appears truncated: ${JSON.stringify(scene.headline)}`);
@@ -615,8 +621,8 @@ export async function prepareVideoLab(workspace, requestedName) {
   const { manifest: localManifest } = await readLocalMediaManifest(workspace.designSystemRoot);
   const { catalog: mediaCatalog } = await readMediaCatalog(workspace.designSystemRoot);
   const stagedAssets = {};
-  for (const key of unique([...finalized.footage.map((media) => media.key), finalized.coverSubject.key])) {
-    stagedAssets[key] = await stageAsset(workspace, key, planned.video.assets.assets[key], publicRoot, localManifest, mediaCatalog);
+  for (const media of [...finalized.footage, finalized.coverSubject]) {
+    stagedAssets[media.key] = await stageAsset(workspace, media.key, media, publicRoot, localManifest, mediaCatalog);
   }
   stagedAssets[finalized.coverSubject.key] = { ...stagedAssets[finalized.coverSubject.key], kind: "image" };
   const stagedBrand = await stageBrandFiles(workspace, planned.video.contract, publicRoot);
@@ -722,17 +728,18 @@ export async function initializeVideoWorkspace(workspace, { force = false } = {}
   const manifestPath = workspace.manifestPath;
   const rawManifest = await readJson(manifestPath, "timds.json");
   if (rawManifest.video && !force) throw new Error("timds.json already declares a video contract");
+  const destination = path.join(workspace.designSystemRoot, "video");
+  const scaffold = force || !existsSync(path.join(destination, "contract.json"));
   rawManifest.video = {
     contract: "video/contract.json",
     assets: "video/assets.json",
+    ...(scaffold ? { verticalMetadata: "video/vertical-meta.json" } : {}),
     productions: "video/productions",
     local: "video-local",
   };
   await fs.writeFile(manifestPath, `${JSON.stringify(rawManifest, null, 2)}\n`, "utf8");
-  const destination = path.join(workspace.designSystemRoot, "video");
-  const scaffold = force || !existsSync(path.join(destination, "contract.json"));
   await fs.mkdir(path.join(destination, "productions"), { recursive: true });
-  for (const name of ["contract.json", "assets.json", "lab/README.md", "lab/sample-answer.json", "publishing.md"]) {
+  for (const name of ["contract.json", "assets.json", ...(scaffold ? ["vertical-meta.json"] : []), "lab/README.md", "lab/sample-answer.json", "publishing.md"]) {
     const target = path.join(destination, name);
     if (!existsSync(target) || force) await copyTemplate(path.join(packageRoot, "templates", "video", name), target);
   }

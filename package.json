@@ -38,6 +38,7 @@
     "src/html.mjs",
     "src/media.mjs",
     "src/video-producer.mjs",
+    "src/video-crops.mjs",
     "src/video-producer.d.mts",
     "src/video.mjs",
     "src/video-lab-server.mjs",

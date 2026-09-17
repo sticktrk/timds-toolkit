@@ -139,6 +139,12 @@ commit credentials, storage keys, or expiring signed URLs. Use
 workstation. `TIMDS_ACCESS_TOKEN` is the non-interactive alternative for an AI
 agent or CI job.
 
+When creating or registering B-roll for a video-enabled system, also follow
+the [vertical crop authoring contract](../timds-create-video/references/vertical-crops.md).
+Include the configured `vertical-meta.json` records with the video asset map
+and run `npm run timds -- video check`; wide subject-side labels do not replace
+reviewed vertical framing. Preserve the client's approved derivatives.
+
 ## Verify locally
 
 Run:

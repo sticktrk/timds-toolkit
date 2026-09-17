@@ -61,7 +61,16 @@ export declare function createVideoAuthoringContract(input: {
   provenance: {version?: string; commit: string; indexUrl?: string};
   outputFormat: ProducerOutputFormat;
 }): ProducerAuthoringContract;
-export declare function createVideoProducer(input: {contract: any; assetCatalog: any; mediaCatalog: any}): {
+export type VideoVerticalMetadata = {
+  schemaVersion: 1;
+  assets: Record<string, {
+    sourceSha256: string;
+    objectPosition: string;
+    text: "upper" | "lower";
+    reviewedFrames: Array<"first" | "middle" | "last">;
+  }>;
+};
+export declare function createVideoProducer(input: {contract: any; assetCatalog: any; mediaCatalog: any; verticalMetadata?: VideoVerticalMetadata | null}): {
   PRODUCER_CONTRACT_VERSION: number;
   compileProduction(input: ProducerCompileInput): ProducerCompiledProduction;
   finalizeProduction(input: {schemaVersion: 1; compiled: ProducerCompiledProduction; timings: ProducerFinalized["plan"]["lines"]; coverImage?: string; audioSrc?: string | null}): ProducerFinalized;

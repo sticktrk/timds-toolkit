@@ -24,13 +24,14 @@ import {
   validateVideoContract,
 } from "./video.mjs";
 import { createVideoAuthoringContract, createVideoProducer } from "./video-producer.mjs";
-import { labFixture, videoFixture, writeJson } from "./video.fixture.mjs";
+import { labFixture, registerVerticalMetadata, videoFixture, writeJson } from "./video.fixture.mjs";
 
 test("normalizes the optional video manifest", () => {
   assert.equal(normalizeVideoManifest(false), null);
   assert.deepEqual(normalizeVideoManifest(true), {
     contract: "video/contract.json",
     assets: "video/assets.json",
+    verticalMetadata: null,
     productions: "video/productions",
     local: "video-local",
     lab: "video/lab",
@@ -38,6 +39,7 @@ test("normalizes the optional video manifest", () => {
   });
   assert.equal(normalizeVideoManifest({ components: "video/remotion.tsx" }).components, "video/remotion.tsx");
   assert.throws(() => normalizeVideoManifest({ components: "../outside.tsx" }), /must stay inside the Design System/);
+  assert.throws(() => normalizeVideoManifest({ verticalMetadata: "../outside.json" }), /must stay inside the Design System/);
 });
 
 test("copies the installed default components into client-owned source exactly once", async (t) => {
@@ -382,6 +384,9 @@ test("video init scaffolds the lab beside the contract, with a producer block th
   const sample = JSON.parse(await fs.readFile(path.join(root, "video", "lab", "sample-answer.json"), "utf8"));
   assert.equal(sample.outputFormat, "horizontal");
   const contract = validateVideoContract(JSON.parse(await fs.readFile(result.contract, "utf8")));
+  const initializedManifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
+  assert.equal(initializedManifest.video.verticalMetadata, "video/vertical-meta.json");
+  assert.deepEqual(JSON.parse(await fs.readFile(path.join(root, initializedManifest.video.verticalMetadata), "utf8")), { schemaVersion: 1, assets: {} });
   assert.equal(contract.producer.footage.assetPrefix, "footage-");
   assert.equal(contract.producer.cover.assetPrefix, "cover-subject-");
   assert.deepEqual(Object.keys(contract.publishing.targets), ["youtube_short", "facebook_reel", "instagram_reel"]);
@@ -533,11 +538,31 @@ test("Shorts crop published masters only when opted in, prefer derivatives, and 
   assert.throws(() => validateVideoContract(contract), /allowShortCrop must be a boolean/u);
   contract.producer.footage.allowShortCrop = true;
   await writeJson(contractPath, contract);
+  await assert.rejects(planVideoLab(workspace, "records"), /no eligible Shorts footage.*reviewed crops/u);
+  const metadata = await registerVerticalMetadata(workspace);
   const cropped = (await planVideoLab(workspace, "records")).lab;
   const scene = cropped.finalized.plan.scenes.find((entry) => entry.id === "keep");
   assert.ok(scene.assets.length > 1, "the eight-second scene needs more than one six-second master");
   assert.deepEqual(scene.verticalAssets, scene.assets);
   assert.deepEqual(singleFormatScenes(cropped.finalized).find((entry) => entry.id === "keep").assets, scene.assets);
+  for (const key of scene.assets) {
+    const selected = cropped.finalized.footage.find((entry) => entry.key === key);
+    assert.equal(selected.objectPosition, "85% 50%");
+    assert.equal(selected.text, "lower");
+  }
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response("video-bytes");
+  t.after(() => { globalThis.fetch = originalFetch; });
+  const staged = await prepareVideoLab(workspace, "records");
+  assert.equal(staged.project.assets[scene.assets[0]].objectPosition, "85% 50%");
+  assert.equal(staged.project.assets[scene.assets[0]].text, "lower");
+  input.outputFormat = "horizontal";
+  await writeJson(inputPath, input);
+  const wide = await prepareVideoLab(workspace, "records");
+  assert.equal(wide.project.assets[scene.assets[0]].objectPosition, undefined);
+  assert.equal(wide.project.assets[scene.assets[0]].text, "left-center");
+  input.outputFormat = "short";
+  await writeJson(inputPath, input);
 
   const assetsPath = path.join(root, "video/assets.json");
   const assets = JSON.parse(await fs.readFile(assetsPath, "utf8"));
@@ -546,6 +571,8 @@ test("Shorts crop published masters only when opted in, prefer derivatives, and 
   assets.assets[master].vertical = vertical;
   assets.assets[vertical] = { mediaKey: vertical, durationSeconds: 4, text: "lower" };
   delete assets.assets["footage-three"];
+  delete metadata.assets["footage-three"];
+  await writeJson(path.join(root, "video/vertical-meta.json"), metadata);
   await writeJson(assetsPath, assets);
   const mediaPath = path.join(root, "media.json");
   const media = JSON.parse(await fs.readFile(mediaPath, "utf8"));
@@ -564,7 +591,33 @@ test("Shorts crop published masters only when opted in, prefer derivatives, and 
   await assert.rejects(planVideoLab(workspace, "records"), /natural 1x speed/u);
   for (const key of Object.keys(assets.assets)) if (key.startsWith("footage-")) delete assets.assets[key];
   await writeJson(assetsPath, assets);
-  await assert.rejects(planVideoLab(workspace, "records"), /no eligible footage.*register published clips/u);
+  await writeJson(path.join(root, "video/vertical-meta.json"), { schemaVersion: 1, assets: {} });
+  await assert.rejects(planVideoLab(workspace, "records"), /no eligible Shorts footage/u);
+});
+
+test("video check gates the full B-roll registry even when no lab input uses a clip", async (t) => {
+  const workspace = await labFixture(t);
+  const root = workspace.designSystemRoot;
+  await fs.rm(path.join(root, "video/lab/records.json"));
+  workspace.manifest.video.verticalMetadata = "video/vertical-meta.json";
+  await assert.rejects(checkVideoWorkspace(workspace), /video vertical metadata is required/u);
+  const metadata = await registerVerticalMetadata(workspace);
+  const metadataPath = path.join(root, "video/vertical-meta.json");
+  await checkVideoWorkspace(workspace);
+  for (const [change, expected] of [
+    [(value) => { delete value.assets["footage-one"]; }, /footage-one needs a reviewed crop record/u],
+    [(value) => { value.assets["footage-one"].objectPosition = "left center"; }, /objectPosition/u],
+    [(value) => { value.assets["footage-one"].objectPosition = "101% 50%"; }, /objectPosition/u],
+    [(value) => { value.assets["footage-one"].text = "right-center"; }, /vertical headline zone/u],
+    [(value) => { value.assets["footage-one"].sourceSha256 = "a".repeat(64); }, /sourceSha256/u],
+    [(value) => { value.assets["footage-one"].reviewedFrames = ["first"]; }, /reviewedFrames/u],
+    [(value) => { value.assets["unknown"] = value.assets["footage-one"]; }, /not a registered footage master/u],
+  ]) {
+    const invalid = structuredClone(metadata);
+    change(invalid);
+    await writeJson(metadataPath, invalid);
+    await assert.rejects(checkVideoWorkspace(workspace), expected);
+  }
 });
 
 for (const cache of ["absent", "missing-file", "empty-file", "present"]) {

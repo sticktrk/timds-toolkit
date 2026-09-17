@@ -155,3 +155,21 @@ export async function labFixture(t) {
   return workspace;
 }
 
+export async function registerVerticalMetadata(workspace) {
+  const root = workspace.designSystemRoot;
+  const { assets } = JSON.parse(await fs.readFile(path.join(root, "video/assets.json"), "utf8"));
+  const media = JSON.parse(await fs.readFile(path.join(root, "media.json"), "utf8"));
+  const derivatives = new Set(Object.values(assets).map((asset) => asset.vertical));
+  const metadata = { schemaVersion: 1, assets: Object.fromEntries(Object.entries(assets)
+    .filter(([key]) => key.startsWith("footage-") && !derivatives.has(key))
+    .map(([key, asset]) => [key, {
+      sourceSha256: media.assets.find((entry) => entry.key === asset.mediaKey).sha256,
+      objectPosition: "85% 50%",
+      text: "lower",
+      reviewedFrames: ["first", "middle", "last"],
+    }])) };
+  workspace.manifest.video.verticalMetadata = "video/vertical-meta.json";
+  await writeJson(workspace.manifestPath, workspace.manifest);
+  await writeJson(path.join(root, workspace.manifest.video.verticalMetadata), metadata);
+  return metadata;
+}

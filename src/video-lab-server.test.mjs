@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import { createVideoAuthoringContract } from "./video-producer.mjs";
 import { loadVideoWorkspace } from "./video.mjs";
-import { labFixture } from "./video.fixture.mjs";
+import { labFixture, registerVerticalMetadata } from "./video.fixture.mjs";
 import {
   buildDraftMessages,
   compileVideoLabInput,
@@ -101,6 +101,10 @@ test("the Shorts API exposes a specific blocker and enables rendering when the c
   const contract = JSON.parse(await fs.readFile(contractPath, "utf8"));
   contract.producer.footage.allowShortCrop = true;
   await fs.writeFile(contractPath, JSON.stringify(contract));
+  const unreviewed = await call("POST", "/api/compile", { input });
+  assert.equal(unreviewed.body.renderable, false);
+  assert.match(unreviewed.body.warning, /reviewed crops/u);
+  await registerVerticalMetadata(workspace);
   const saved = await call("POST", "/api/inputs", { input });
   assert.equal(saved.status, 200);
   assert.equal(saved.body.plan.renderable, true);

@@ -1,4 +1,5 @@
 import { footageFamily } from "../video/footage.mjs";
+import { validateVideoVerticalMetadata } from "./video-crops.mjs";
 
 const PRODUCER_SCHEMA_VERSION = 1;
 const PRODUCER_AUTHORING_SCHEMA_VERSION = 1;
@@ -301,10 +302,13 @@ const validateQuestion = (fail, label, value, maximumWords, maximumCharacters) =
   return normalized;
 };
 
-export function createVideoProducer({ contract, assetCatalog, mediaCatalog }) {
+export function createVideoProducer({ contract, assetCatalog, mediaCatalog, verticalMetadata }) {
   const config = validateVideoProducerConfig(contract.producer, contract);
   if (!config) throw new Error(`${contract.name} has no video producer contract`);
   const assets = object(assetCatalog.assets || assetCatalog, "video producer asset catalog");
+  const crops = verticalMetadata == null ? {} : validateVideoVerticalMetadata(verticalMetadata, {
+    assetCatalog, mediaCatalog, footagePrefix: config.footage.assetPrefix,
+  }).assets;
   const mediaEntries = Array.isArray(mediaCatalog.assets) ? mediaCatalog.assets : [];
   const mediaByKey = new Map(mediaEntries.map((asset) => [asset.key, asset]));
   const fail = (message) => { throw new Error(`${contract.name} producer contract: ${message}`); };
@@ -388,9 +392,12 @@ export function createVideoProducer({ contract, assetCatalog, mediaCatalog }) {
     .map((key) => {
       const master = mediaFor(key);
       const verticalKey = assets[key].vertical;
-      // A client may use its renderer's object-fit crop of the published master.
-      // Keep explicit derivatives preferred, and preserve vertical-only by default.
-      const vertical = verticalKey ? mediaFor(verticalKey) : config.footage.allowShortCrop ? master : null;
+      // A wide subject-side label is not a reviewed vertical crop. Require the
+      // separate crop record, and keep its vertical text zone off the master.
+      const crop = crops[key];
+      const vertical = verticalKey
+        ? { ...mediaFor(verticalKey), ...(crop ? { text: crop.text } : {}) }
+        : config.footage.allowShortCrop && crop ? { ...master, objectPosition: crop.objectPosition, text: crop.text } : null;
       return { master, vertical, durationSeconds: master.durationSeconds };
     })
     .sort((left, right) => left.master.key.localeCompare(right.master.key));
@@ -407,8 +414,8 @@ export function createVideoProducer({ contract, assetCatalog, mediaCatalog }) {
       .map((pair) => ({ ...pair, effectiveDurationSeconds: format === "short" ? pair.vertical.durationSeconds : pair.master.durationSeconds }))
       .sort((left, right) => score(query, right.master.key) - score(query, left.master.key) || right.effectiveDurationSeconds - left.effectiveDurationSeconds || left.master.key.localeCompare(right.master.key));
     if (!ranked.length) {
-      fail(format === "short" && !config.footage.allowShortCrop
-        ? `no eligible Shorts footage under ${config.footage.assetPrefix}; publish and link vertical derivatives, or enable producer.footage.allowShortCrop to crop published masters`
+      fail(format === "short"
+        ? `no eligible Shorts footage under ${config.footage.assetPrefix}; publish and link vertical derivatives, or configure video.verticalMetadata with reviewed crops and enable producer.footage.allowShortCrop`
         : `no eligible footage under ${config.footage.assetPrefix}; register published clips with positive durationSeconds`);
     }
     const selected = [];
@@ -478,7 +485,7 @@ export function createVideoProducer({ contract, assetCatalog, mediaCatalog }) {
     const selectedMedia = new Map();
     for (const pairs of selectedByScene.values()) for (const pair of pairs) {
       selectedMedia.set(pair.master.key, pair.master);
-      if (pair.vertical) selectedMedia.set(pair.vertical.key, pair.vertical);
+      if (pair.vertical && (input.compiled.outputFormat === "short" || pair.vertical.key !== pair.master.key)) selectedMedia.set(pair.vertical.key, pair.vertical);
     }
     return {
       schemaVersion: PRODUCER_SCHEMA_VERSION,
