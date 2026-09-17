@@ -25,6 +25,9 @@ export const footageFamily = (key) => {
 /** The shortest cut that still reads as an intentional edit rather than a blip. */
 export const MINIMUM_CHAIN_CLIP_SECONDS = 2;
 
+/** The fixed headline zone used by the default scene, including legacy placements. */
+export const verticalTextZone = (text) => text === "lower" || text?.endsWith("bottom") ? "lower" : "upper";
+
 /**
  * Screen time per chain clip. Clips play in order at natural speed and the
  * scene boundary cuts the last one, so a chain whose total barely exceeds the

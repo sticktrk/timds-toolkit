@@ -330,6 +330,37 @@ everything else still works. The server binds to `127.0.0.1` only. When the
 producer selects prompt blocks, run `timds check` first so the built
 `dist/…/index.json` can resolve them; a producer with no blocks needs no index.
 
+Shorts use each master's published `vertical` derivative by default. A client
+can set `producer.footage.allowShortCrop: true` to use the published master
+when no derivative is linked **and** that master has a reviewed crop in the
+registry configured by `timds.json → video.verticalMetadata`. The video component
+uses that record's `objectPosition` and vertical `text` zone; a horizontal
+`subject` label or a default center crop is insufficient. Explicit derivatives
+still take precedence, and footage duration and family rules still apply.
+Each Short scene uses clips with one compatible vertical text zone, keeping
+its headline in the reviewed position throughout the chain. If the preferred
+zone cannot cover the scene, the producer tries the other zone before failing.
+Horizontal renders retain their original framing and text layout.
+
+New `video init` scaffolds include `video/vertical-meta.json` and enable its
+catalog gate. `video check` (and workspace loading before rendering) requires
+every footage master under `producer.footage.assetPrefix` to have a valid
+record tied to its published SHA-256, with a crop position, vertical text zone,
+and first/middle/last-frame review. This checks the records, not the visual
+correctness of a crop or automatic object detection. The designer must inspect
+the subject throughout the clip. Existing catalogs opt in by adding the
+manifest path and completing their records; ordinary upgrades do not migrate
+authored metadata. The normal `timds check`/submission checks include this video
+gate too. See the [B-roll crop authoring contract](skills/timds-create-video/references/vertical-crops.md)
+for the schema and adoption procedure. Programmatic callers pass the same
+registry as `verticalMetadata` to `createVideoProducer`.
+
+Preparing or rendering downloads assets from their `media.json` public URLs
+when no usable local media file exists, including stale or empty cache entries.
+Cached published media must match the catalog's byte count and SHA-256; a
+different local clip under the same media key is downloaded again before staging.
+No manual asset pull or cloud login is required for published media.
+
 `video check` compiles every lab input and warns when the registered catalog
 cannot finalize one yet, so a new system can commit the sample before it has
 registered footage under the producer's `footage.assetPrefix` keys and a cover

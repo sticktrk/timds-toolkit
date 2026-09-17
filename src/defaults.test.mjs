@@ -164,6 +164,8 @@ test("CLI video init preserves a pre-existing contract when creating its default
   execFileSync("git", ["init", "-b", "design-system/example"], { cwd: workspace.repoRoot, stdio: "ignore" });
   const result = await runCli(["video", "init", "--root", workspace.repoRoot]);
   assert.ok(result.contract);
+  const adoptedManifest = JSON.parse(await fs.readFile(workspace.manifestPath, "utf8"));
+  assert.equal(adoptedManifest.video.verticalMetadata, undefined, "adopting an existing contract does not silently require a new crop registry");
   await fs.access(path.join(workspace.designSystemRoot, ".timds/defaults.json"));
   const contract = JSON.parse(await fs.readFile(result.contract, "utf8"));
   assert.equal(contract.publishing.shortBridge, "Existing client CTA");

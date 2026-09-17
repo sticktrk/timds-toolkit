@@ -8,6 +8,7 @@ import {
   footageFamily,
   sceneAssetKeys,
   truncatedHeadline,
+  verticalTextZone,
 } from "./footage.mjs";
 
 test("treats offset, mirrored, and vertical derivatives as one footage family", () => {
@@ -27,6 +28,11 @@ test("reads a scene's chain from assets, then asset, then nothing", () => {
 
 test("keeps the minimum cut long enough to read as an intentional edit", () => {
   assert.equal(MINIMUM_CHAIN_CLIP_SECONDS, 2);
+});
+
+test("resolves reviewed and legacy headline placements to their vertical zone", () => {
+  for (const text of ["lower", "bottom", "left-bottom", "right-bottom"]) assert.equal(verticalTextZone(text), "lower");
+  for (const text of [undefined, "upper", "left-center", "right-center"]) assert.equal(verticalTextZone(text), "upper");
 });
 
 test("gives the last chain clip its minimum screen time by cutting the previous clip early", () => {

@@ -1,6 +1,6 @@
 ---
 name: timds-create-video
-description: Create, validate, preview, or render videos governed by a client-owned TimDS video contract. Use when a user asks to create a video, long-form explainer, short, thumbnail, voiceover, or review package in a Design System whose timds.json enables video.
+description: Create, validate, preview, or render videos and register B-roll with reviewed vertical crop metadata in a client-owned TimDS video contract. Use for video, B-roll, explainer, short, thumbnail, voiceover, or review-package work in a Design System whose timds.json enables video.
 ---
 
 # Create a TimDS Video
@@ -13,7 +13,8 @@ content, media, compliance, and publishing decisions.
 
 1. Read the repository instructions and preserve existing work.
 2. Locate `timds.json` and confirm it declares `video`.
-3. Read the declared video contract, asset catalog, optional `video.components`
+3. Read the declared video contract, asset catalog, `video.verticalMetadata`
+   registry when configured, optional `video.components`
    module, relevant production files, and the Design System pages they cite.
    Do not substitute remembered rules for the repository's current executable
    contract.
@@ -58,6 +59,16 @@ allows, a shorter outro line than the long-form. Reference only
 keys declared by the client video asset catalog. Do not generate new moving
 footage unless the request and client contract authorize it. Never recreate a
 client logo; use the declared brand file.
+
+## Register B-roll with its vertical framing
+
+When creating or registering B-roll, follow the
+[vertical crop authoring contract](references/vertical-crops.md). Include the
+client's `vertical-meta.json` record with the asset registration, inspect the
+subject and text zone in the first, middle, and last frames, and run
+`npm run timds -- video check` before handing off. A wide clip's subject-side
+label is not sufficient crop metadata. Prefer reviewed, published vertical
+derivatives; do not enable a blind center-crop fallback to make a plan pass.
 
 ## Preview through the lab first
 

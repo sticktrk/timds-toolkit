@@ -1,4 +1,5 @@
-import { footageFamily } from "../video/footage.mjs";
+import { footageFamily, verticalTextZone } from "../video/footage.mjs";
+import { validateVideoVerticalMetadata } from "./video-crops.mjs";
 
 const PRODUCER_SCHEMA_VERSION = 1;
 const PRODUCER_AUTHORING_SCHEMA_VERSION = 1;
@@ -56,6 +57,9 @@ export function validateVideoProducerConfig(input, contract) {
   const outro = object(config.outro || {}, "video contract producer.outro");
   const cover = object(config.cover || {}, "video contract producer.cover");
   const footage = object(config.footage || {}, "video contract producer.footage");
+  if (footage.allowShortCrop !== undefined && typeof footage.allowShortCrop !== "boolean") {
+    throw new Error("video contract producer.footage.allowShortCrop must be a boolean");
+  }
   const authoring = object(config.authoring || {}, "video contract producer.authoring");
   const formatPromptBlocks = object(authoring.formatPromptBlocks || {}, "video contract producer.authoring.formatPromptBlocks");
   const formats = engagement.formats || ["horizontal"];
@@ -104,6 +108,7 @@ export function validateVideoProducerConfig(input, contract) {
     },
     footage: {
       assetPrefix: prefix(footage.assetPrefix, "video contract producer.footage.assetPrefix", "footage-"),
+      allowShortCrop: footage.allowShortCrop === true,
     },
     authoring: {
       sharedPromptBlocks: promptBlockIds(authoring.sharedPromptBlocks, "video contract producer.authoring.sharedPromptBlocks"),
@@ -297,10 +302,13 @@ const validateQuestion = (fail, label, value, maximumWords, maximumCharacters) =
   return normalized;
 };
 
-export function createVideoProducer({ contract, assetCatalog, mediaCatalog }) {
+export function createVideoProducer({ contract, assetCatalog, mediaCatalog, verticalMetadata }) {
   const config = validateVideoProducerConfig(contract.producer, contract);
   if (!config) throw new Error(`${contract.name} has no video producer contract`);
   const assets = object(assetCatalog.assets || assetCatalog, "video producer asset catalog");
+  const crops = verticalMetadata == null ? {} : validateVideoVerticalMetadata(verticalMetadata, {
+    assetCatalog, mediaCatalog, footagePrefix: config.footage.assetPrefix,
+  }).assets;
   const mediaEntries = Array.isArray(mediaCatalog.assets) ? mediaCatalog.assets : [];
   const mediaByKey = new Map(mediaEntries.map((asset) => [asset.key, asset]));
   const fail = (message) => { throw new Error(`${contract.name} producer contract: ${message}`); };
@@ -384,7 +392,12 @@ export function createVideoProducer({ contract, assetCatalog, mediaCatalog }) {
     .map((key) => {
       const master = mediaFor(key);
       const verticalKey = assets[key].vertical;
-      const vertical = verticalKey ? mediaFor(verticalKey) : null;
+      // A wide subject-side label is not a reviewed vertical crop. Require the
+      // separate crop record, and keep its vertical text zone off the master.
+      const crop = crops[key];
+      const vertical = verticalKey
+        ? { ...mediaFor(verticalKey), ...(crop ? { text: crop.text } : {}) }
+        : config.footage.allowShortCrop && crop ? { ...master, objectPosition: crop.objectPosition, text: crop.text } : null;
       return { master, vertical, durationSeconds: master.durationSeconds };
     })
     .sort((left, right) => left.master.key.localeCompare(right.master.key));
@@ -400,23 +413,38 @@ export function createVideoProducer({ contract, assetCatalog, mediaCatalog }) {
       .filter((pair) => format !== "short" || (pair.vertical && Number.isFinite(pair.vertical.durationSeconds)))
       .map((pair) => ({ ...pair, effectiveDurationSeconds: format === "short" ? pair.vertical.durationSeconds : pair.master.durationSeconds }))
       .sort((left, right) => score(query, right.master.key) - score(query, left.master.key) || right.effectiveDurationSeconds - left.effectiveDurationSeconds || left.master.key.localeCompare(right.master.key));
-    const selected = [];
-    const used = new Set();
-    let duration = 0;
-    let lastFamily = previousFamily;
-    while (duration + Number.EPSILON < seconds) {
-      const candidate = ranked.find((pair) => !used.has(pair.master.key)
-        && footageFamily(pair.master.key) !== lastFamily
-        && (format !== "horizontal" || compatibleTextSides([...selected.map((entry) => entry.master.key), pair.master.key]).length > 0));
-      if (!candidate) {
-        fail(`scene ${scene.id} needs ${seconds.toFixed(2)} seconds, but registered footage covers only ${duration.toFixed(2)} seconds at natural 1x speed without repeating a footage family back to back`);
-      }
-      used.add(candidate.master.key);
-      selected.push(candidate);
-      duration += candidate.effectiveDurationSeconds;
-      lastFamily = footageFamily(candidate.master.key);
+    if (!ranked.length) {
+      fail(format === "short"
+        ? `no eligible Shorts footage under ${config.footage.assetPrefix}; publish and link vertical derivatives, or configure video.verticalMetadata with reviewed crops and enable producer.footage.allowShortCrop`
+        : `no eligible footage under ${config.footage.assetPrefix}; register published clips with positive durationSeconds`);
     }
-    return selected;
+    // Default scenes and existing client snapshots hold the first clip's
+    // headline placement for the whole scene. Try each zone in ranked order
+    // so a short preferred chain cannot hide a complete chain in the other zone.
+    const zones = format === "short"
+      ? [...new Set(ranked.filter((pair) => footageFamily(pair.master.key) !== previousFamily).map((pair) => verticalTextZone(pair.vertical.text)))]
+      : [null];
+    let maximumDuration = 0;
+    for (const zone of zones) {
+      const candidates = zone === null ? ranked : ranked.filter((pair) => verticalTextZone(pair.vertical.text) === zone);
+      const selected = [];
+      const used = new Set();
+      let duration = 0;
+      let lastFamily = previousFamily;
+      while (duration + Number.EPSILON < seconds) {
+        const candidate = candidates.find((pair) => !used.has(pair.master.key)
+          && footageFamily(pair.master.key) !== lastFamily
+          && (format !== "horizontal" || compatibleTextSides([...selected.map((entry) => entry.master.key), pair.master.key]).length > 0));
+        if (!candidate) break;
+        used.add(candidate.master.key);
+        selected.push(candidate);
+        duration += candidate.effectiveDurationSeconds;
+        lastFamily = footageFamily(candidate.master.key);
+      }
+      if (duration + Number.EPSILON >= seconds) return selected;
+      maximumDuration = Math.max(maximumDuration, duration);
+    }
+    fail(`scene ${scene.id} needs ${seconds.toFixed(2)} seconds, but registered footage covers only ${maximumDuration.toFixed(2)} seconds at natural 1x speed without repeating a footage family back to back${format === "short" ? " within a single vertical text zone" : ""}`);
   };
 
   const chooseCover = (compiled) => {
@@ -467,7 +495,7 @@ export function createVideoProducer({ contract, assetCatalog, mediaCatalog }) {
     const selectedMedia = new Map();
     for (const pairs of selectedByScene.values()) for (const pair of pairs) {
       selectedMedia.set(pair.master.key, pair.master);
-      if (pair.vertical) selectedMedia.set(pair.vertical.key, pair.vertical);
+      if (pair.vertical && (input.compiled.outputFormat === "short" || pair.vertical.key !== pair.master.key)) selectedMedia.set(pair.vertical.key, pair.vertical);
     }
     return {
       schemaVersion: PRODUCER_SCHEMA_VERSION,

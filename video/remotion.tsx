@@ -16,7 +16,7 @@ import {
   useVideoConfig,
 } from "remotion";
 import {fitCoverHeadline, splitGoldHeadline, tieOrphan} from "./text.mjs";
-import {MINIMUM_CHAIN_CLIP_SECONDS, adjacentFootageRepeats, chainClipFrames, sceneAssetKeys} from "./footage.mjs";
+import {MINIMUM_CHAIN_CLIP_SECONDS, adjacentFootageRepeats, chainClipFrames, sceneAssetKeys, verticalTextZone} from "./footage.mjs";
 
 export type VideoProjectWordTiming = {text: string; startMs: number; endMs: number};
 export type VideoProjectCaptionLine = {id: string; words: VideoProjectWordTiming[]; durationMs: number};
@@ -320,7 +320,7 @@ const SceneView: React.FC<VideoProjectSceneProps> = ({project, scene, line, dura
   if (scene.outro) return <><OutroComponent project={project} vertical={vertical} /><BrandWatermark project={project} vertical={vertical} sceneHasLogo /></>;
   const firstAsset = project.assets[(scene.assets || [scene.asset])[0] || ""];
   const right = firstAsset?.text?.startsWith("right");
-  const lower = firstAsset?.text === "lower" || firstAsset?.text?.endsWith("bottom");
+  const lower = verticalTextZone(firstAsset?.text) === "lower";
   return <AbsoluteFill>
     <Media project={project} scene={scene} duration={duration} vertical={vertical} />
     <AbsoluteFill style={{alignItems: vertical ? "center" : right ? "flex-end" : "flex-start", justifyContent: vertical ? lower ? "flex-end" : "flex-start" : lower ? "flex-end" : "center", padding: vertical ? lower ? "0 150px 430px 70px" : "240px 150px 0 70px" : "0 120px 150px"}}>

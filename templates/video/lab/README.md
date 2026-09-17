@@ -33,3 +33,11 @@ review package. Finalizing needs footage registered under the producer's
 image under its `cover.assetPrefix` keys. `timds video check` compiles every
 input here (a broken request fails the check) and warns when the registered
 catalog cannot finalize one yet.
+
+New scaffolds also enable `../vertical-meta.json`. Register B-roll with a
+reviewed crop record for each master, tied to its published source hash and
+including a vertical text zone and first/middle/last-frame review. See the
+installed `timds-create-video/references/vertical-crops.md` for the schema.
+`video check` fails on missing or invalid records even when no lab input uses
+the clip. A linked vertical derivative is preferred; live cropping additionally
+requires `producer.footage.allowShortCrop: true`.
