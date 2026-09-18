@@ -19,12 +19,19 @@ npm run timds -- video lab --list            # inputs and ready productions
 npm run timds -- video lab --serve           # local Video Lab web app: draft, edit, plan, render, download
 ```
 
-The lab compiles the input through the producer block, times the narration
-silently at reading speed (a voiced production replaces this with measured
-word timings), finalizes footage and cover deterministically from the
+The lab compiles the input through the producer block, generates spoken
+narration with Edge TTS, and uses its measured word timings to finalize
+footage and cover deterministically from the
 registered catalog, stages brand files and published media under ignored
 `video-local/lab/`, and mounts TimDS's single-format root with the declared
 `video.components` module or the TimDS defaults.
+
+Planning and checks only estimate timing; renders include speech unless you
+choose **Silent preview** in the browser or pass `--silent`. Use Python with
+`edge-tts` installed (`--python`, `TIMDS_PYTHON`, the client's `.venv-tts`, or
+`python3`). Set the contract's `voiceover` voice/rate/pitch or use `--voice` to
+select a voice. TimDS caches generated audio by script and voice, regenerates
+missing files, and fails visibly if narration cannot be generated.
 
 An input is a preview fixture, not a production. It carries no source,
 authorization, publishing, or caption record, and nothing here renders into a

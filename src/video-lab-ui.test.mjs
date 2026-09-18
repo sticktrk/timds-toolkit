@@ -80,6 +80,23 @@ async function labUi() {
 
 const plan = (slug, renderable) => ({ slug, renderable, warning: renderable ? null : "no eligible Shorts footage", outputFormat: "short", scenes: [], totalSeconds: 2 });
 
+test("rendering requests narration unless the user selects a silent preview", async () => {
+  const ui = await labUi();
+  const loaded = await ui.load("ready");
+  loaded.compile.reply(plan("ready", true));
+  await loaded.done;
+  for (const [choice, silent] of [["narrated", false], ["silent", true]]) {
+    ui.$("render-audio").value = choice;
+    const rendered = ui.$("btn-render").emit("click");
+    const request = ui.take("/api/render");
+    assert.deepEqual(request.body, { name: "ready", silent });
+    request.reply({ id: "audio-job" });
+    await tick();
+    ui.take("/api/jobs/audio-job").reply({ name: "ready", status: "done", log: [], output: { video: "/ready.mp4", thumbnail: "/cover.jpg", directory: "out" } });
+    await rendered;
+  }
+});
+
 test("an older successful compile cannot enable rendering a newly loaded blocked input", async () => {
   const ui = await labUi();
   const older = await ui.load("ready");

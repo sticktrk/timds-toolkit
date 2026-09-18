@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, promises as fs } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -610,9 +611,78 @@ export const singleFormatScenes = (finalized) => finalized.plan.scenes.map((scen
   return { ...copy, ...(assets?.length ? { assets } : { asset }) };
 });
 
-export async function prepareVideoLab(workspace, requestedName) {
+async function prepareLabNarration(workspace, planned, labLocal, publicRoot, options) {
+  const config = object(planned.video.contract.voiceover || {}, "video contract voiceover");
+  const script = {
+    slug: planned.lab.compiled.slug,
+    voice: text(options.voice || config.voice || "en-US-AriaNeural", "video lab voice"),
+    rate: text(config.rate || "+0%", "video lab voice rate"),
+    pitch: text(config.pitch || "+0Hz", "video lab voice pitch"),
+    lines: planned.lab.compiled.scenes.map(({ id, narration }) => ({ id, tts: narration })),
+  };
+  const generator = path.join(packageRoot, "video", "generate_voiceover.py");
+  // A lab take belongs to its exact script and voice. Never reuse timings from
+  // an edited script or replace a production's authored/locked voice take.
+  const key = createHash("sha256").update(JSON.stringify(script)).update(await fs.readFile(generator)).digest("hex");
+  const cacheRoot = path.join(labLocal, "voiceover", key);
+  const captionsPath = path.join(cacheRoot, "captions.json");
+  const readTake = async () => {
+    const captions = await readJson(captionsPath, "video lab measured captions");
+    if (!Array.isArray(captions.lines) || captions.lines.length !== script.lines.length) throw new Error("video lab narration must cover every scene");
+    const lines = captions.lines.map((line, index) => validateCaptionLine(line, `video lab narration ${index}`));
+    for (const [index, line] of lines.entries()) {
+      if (line.id !== script.lines[index].id || !line.words.length) throw new Error("video lab narration does not match the compiled scenes");
+      const audio = await fs.stat(path.join(cacheRoot, `${line.id}.mp3`));
+      if (!audio.isFile() || !audio.size) throw new Error(`video lab narration is missing audio for ${line.id}`);
+    }
+    return lines;
+  };
+  let timings = await readTake().catch(() => null);
+  if (!timings) {
+    await fs.mkdir(cacheRoot, { recursive: true });
+    const scriptPath = path.join(cacheRoot, "script.json");
+    await fs.writeFile(scriptPath, `${JSON.stringify(script, null, 2)}\n`);
+    // An incomplete generated lab cache is not a locked production take.
+    await fs.rm(captionsPath, { force: true });
+    const localPython = path.join(workspace.designSystemRoot, ".venv-tts", process.platform === "win32" ? "Scripts/python.exe" : "bin/python");
+    const python = options.python || process.env.TIMDS_PYTHON || (existsSync(localPython) ? localPython : "python3");
+    options.log?.(`Generating spoken narration (${script.voice})…`);
+    try {
+      await run(python, [generator, "--script", scriptPath, "--captions", captionsPath, "--output", cacheRoot], {
+        cwd: workspace.designSystemRoot, onLine: options.log || (() => {}),
+      });
+      timings = await readTake();
+    } catch (cause) {
+      throw new Error(`Video Lab narration failed. Use Python with edge-tts installed (--python or TIMDS_PYTHON), or choose an explicit silent preview. ${cause.message}`, { cause });
+    }
+  } else options.log?.("Using cached spoken narration.");
+  const audioRoot = path.join(publicRoot, "audio", script.slug);
+  await fs.mkdir(audioRoot, { recursive: true });
+  for (const line of timings) await fs.copyFile(path.join(cacheRoot, `${line.id}.mp3`), path.join(audioRoot, `${line.id}.mp3`));
+  return { timings, script };
+}
+
+async function stageLabSoundDesign(planned, publicRoot, options) {
+  const audio = { ...planned.video.contract.brand.audio };
+  for (const key of ["bed", "transition"]) {
+    if (!audio[key]) continue;
+    const relative = safeRelativePath(audio[key], `video brand.audio.${key}`);
+    const source = path.join(planned.video.localRoot, "public", relative);
+    const stat = await fs.stat(source).catch((error) => { if (error.code === "ENOENT") return null; throw error; });
+    if (!stat?.isFile() || !stat.size) {
+      options.log?.(`Optional ${key} audio is unavailable; rendering narration without it.`);
+      delete audio[key];
+      continue;
+    }
+    await fs.mkdir(path.dirname(path.join(publicRoot, relative)), { recursive: true });
+    await fs.copyFile(source, path.join(publicRoot, relative));
+  }
+  return audio;
+}
+
+export async function prepareVideoLab(workspace, requestedName, options = {}) {
   const planned = await planVideoLab(workspace, requestedName);
-  const { name, finalized } = planned.lab;
+  const { name } = planned.lab;
   const labLocal = path.join(planned.video.localRoot, "lab", name);
   const publicRoot = path.join(labLocal, "public");
   const generatedRoot = path.join(labLocal, "generated");
@@ -620,12 +690,22 @@ export async function prepareVideoLab(workspace, requestedName) {
   await fs.mkdir(generatedRoot, { recursive: true });
   const { manifest: localManifest } = await readLocalMediaManifest(workspace.designSystemRoot);
   const { catalog: mediaCatalog } = await readMediaCatalog(workspace.designSystemRoot);
+  let script = {};
+  if (!options.silent) {
+    const narration = await prepareLabNarration(workspace, planned, labLocal, publicRoot, options);
+    script = narration.script;
+    planned.lab.timings = narration.timings;
+    const producer = createVideoProducer({ contract: planned.video.contract, assetCatalog: planned.video.assets, mediaCatalog, verticalMetadata: planned.video.verticalMetadata });
+    planned.lab.finalized = producer.finalizeProduction({ schemaVersion: VIDEO_SCHEMA_VERSION, compiled: planned.lab.compiled, timings: narration.timings });
+  }
+  const { finalized } = planned.lab;
   const stagedAssets = {};
   for (const media of [...finalized.footage, finalized.coverSubject]) {
     stagedAssets[media.key] = await stageAsset(workspace, media.key, media, publicRoot, localManifest, mediaCatalog);
   }
   stagedAssets[finalized.coverSubject.key] = { ...stagedAssets[finalized.coverSubject.key], kind: "image" };
   const stagedBrand = await stageBrandFiles(workspace, planned.video.contract, publicRoot);
+  if (!options.silent) stagedBrand.audio = await stageLabSoundDesign(planned, publicRoot, options);
   const project = {
     schemaVersion: VIDEO_SCHEMA_VERSION,
     engine: { name: "@dtconcepts/timds", version: (await readJson(path.join(packageRoot, "package.json"), "TimDS package.json")).version },
@@ -644,7 +724,7 @@ export async function prepareVideoLab(workspace, requestedName) {
       },
       publishing: {},
       request: {},
-      script: {},
+      script,
     },
   };
   const projectPath = path.join(generatedRoot, `${name}.json`);
@@ -675,7 +755,7 @@ export async function runVideoLab(workspace, requestedName, options = {}) {
     for (const line of lines) log(line);
     return { ...planned, lines };
   }
-  const prepared = await prepareVideoLab(workspace, requestedName);
+  const prepared = await prepareVideoLab(workspace, requestedName, options);
   const lines = [describeVideoLabPlan(prepared.lab), `Entry ${path.relative(workspace.designSystemRoot, prepared.entryPath)} (${prepared.video.componentsPath ? path.relative(workspace.designSystemRoot, prepared.video.componentsPath) : "TimDS default components"})`];
   for (const line of lines) log(line);
   if (options.prepare) return { ...prepared, lines };
@@ -1028,6 +1108,6 @@ export async function voiceoverVideoWorkspace(workspace, selectedSlug, options =
   return { outputRoot, production: production.production.slug };
 }
 
-export const VIDEO_HELP = `TimDS video workflow\n\nUsage:\n  timds video init [--root PATH] [--force]\n  timds video components init [--root PATH] [--force]\n  timds video doctor [--root PATH]\n  timds video check [SLUG] [--root PATH]\n  timds video lab [NAME] [--root PATH] [--plan] [--prepare] [--render] [--list]\n  timds video lab --serve [--port 4410] [--root PATH]\n  timds video publishing SLUG [--root PATH] [--date YYYY-MM-DD]\n  timds video prepare SLUG [--root PATH]\n  timds video voiceover SLUG [--root PATH] [--force]\n  timds video studio SLUG [--root PATH]\n  timds video render SLUG [--root PATH] [--date YYYY-MM-DD]\n\nThe client Design System owns video/contract.json, video/assets.json, video/lab/ compile requests, brand files, production records, and any generated component snapshot. TimDS owns validation, the producer, media staging, voiceover orchestration, default components, the lab, rendering, and review packaging. Generating components copies the installed defaults once; upgrades never overwrite that client-owned file.\n\nThe lab runs a video/lab/NAME.json compile request the way an automated Video Lab does — producer compile, silent timing, deterministic footage and cover, staged media — and opens Remotion Studio on the result with the client's components; --plan prints the plan without staging, --prepare stages without launching, --render writes the video and cover under video-local/lab/NAME/out/. check compiles every lab input and warns when the catalog cannot finalize one yet.`;
+export const VIDEO_HELP = `TimDS video workflow\n\nUsage:\n  timds video init [--root PATH] [--force]\n  timds video components init [--root PATH] [--force]\n  timds video doctor [--root PATH]\n  timds video check [SLUG] [--root PATH]\n  timds video lab [NAME] [--root PATH] [--plan] [--prepare] [--render] [--silent] [--voice NAME] [--python PATH] [--list]\n  timds video lab --serve [--port 4410] [--root PATH]\n  timds video publishing SLUG [--root PATH] [--date YYYY-MM-DD]\n  timds video prepare SLUG [--root PATH]\n  timds video voiceover SLUG [--root PATH] [--force]\n  timds video studio SLUG [--root PATH]\n  timds video render SLUG [--root PATH] [--date YYYY-MM-DD]\n\nThe client Design System owns video/contract.json, video/assets.json, video/lab/ compile requests, brand files, production records, and any generated component snapshot. TimDS owns validation, the producer, media staging, voiceover orchestration, default components, the lab, rendering, and review packaging. Generating components copies the installed defaults once; upgrades never overwrite that client-owned file.\n\nThe lab runs a video/lab/NAME.json compile request the way an automated Video Lab does — producer compile, spoken narration with measured word timings, deterministic footage and cover, staged media — and opens Remotion Studio on the result with the client's components; --plan estimates timing without audio generation, --silent explicitly requests a silent preview, --prepare stages narration and media without launching, --render writes the video and cover under video-local/lab/NAME/out/. check compiles every lab input and warns when the catalog cannot finalize one yet.`;
 
 export { VIDEO_SCHEMA_VERSION };

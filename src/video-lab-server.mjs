@@ -312,13 +312,14 @@ export async function readVideoLabInput(workspace, name) {
 
 // --- render jobs ----------------------------------------------------------------------
 
-export function createRenderJobs(workspace) {
+export function createRenderJobs(workspace, { runLab = runVideoLab } = {}) {
   const jobs = new Map();
   let active = null;
   return {
     get: (id) => jobs.get(id) || null,
     list: () => [...jobs.values()],
-    async start(name) {
+    async start(name, { silent = false } = {}) {
+      if (typeof silent !== "boolean") throw new LabError(400, "silent must be boolean");
       if (!SLUG_PATTERN.test(String(name || ""))) throw new LabError(400, "input name must be lowercase letters, digits, and hyphens");
       const loaded = await loadVideoWorkspace(workspace);
       const names = await listVideoLabInputs(loaded.video.labRoot);
@@ -327,7 +328,7 @@ export function createRenderJobs(workspace) {
       const job = { id: randomUUID(), name, status: "running", log: [], startedAt: new Date().toISOString(), finishedAt: null, error: null, output: null };
       jobs.set(job.id, job);
       active = job;
-      runVideoLab(workspace, name, { render: true, captureOutput: true, log: (line) => job.log.push(line) })
+      runLab(workspace, name, { render: true, silent, captureOutput: true, log: (line) => job.log.push(line) })
         .then((result) => {
           job.status = "done";
           job.finishedAt = new Date().toISOString();
@@ -403,7 +404,10 @@ export function createVideoLabServer(workspace, { jobs = createRenderJobs(worksp
         if (!hasClaudeCredentials()) throw new LabError(503, "No Claude credentials found. Run `ant auth login` or export ANTHROPIC_API_KEY, then reload the lab.");
         return sendJson(response, 200, await draft(workspace, await readJsonBody(request)));
       }
-      if (route === "POST /api/render") return sendJson(response, 202, await jobs.start((await readJsonBody(request)).name));
+      if (route === "POST /api/render") {
+        const body = await readJsonBody(request);
+        return sendJson(response, 202, await jobs.start(body.name, { silent: body.silent ?? false }));
+      }
       if (route === "GET /api/jobs" && parts[2]) {
         const job = jobs.get(parts[2]);
         if (!job) throw new LabError(404, "job not found");

@@ -307,7 +307,7 @@ natural speed, and a scene fails when its approved footage chain is too short.
 labels and CTA templates. A lab input is what an automated Video Lab hands
 `compileProduction()` after a model writes to the authoring contract, and the
 lab takes it the rest of the way exactly as a render host does — compile,
-silent word-share timing, deterministic footage and cover, staged brand files
+spoken narration and measured word timings, deterministic footage and cover, staged brand files
 and published media, `createSingleVideoProjectRoot` with the client's
 components — then opens Remotion Studio on the result so the Design System
 editor sees the frames the lab will ship.
@@ -334,7 +334,7 @@ Describe the source (the exact question, a topic label, notes or an article
 excerpt), let Claude draft the compile request against this Design System's
 authoring contract — the same prompt, brief, and JSON Schema
 `createVideoAuthoringContract()` hands an automated Video Lab — or paste one,
-edit the answer beats, check the compiled plan (scenes, silent timings,
+edit the answer beats, check the compiled plan (scenes, estimated timings,
 footage chain, cover), save it under `video/lab/`, and render. Rendering runs
 headless through the same path as `video lab NAME --render` and the page hands
 back the MP4 and thumbnail. Drafting uses `claude-opus-5` with the Anthropic
@@ -343,6 +343,24 @@ SDK's own credential lookup (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, or an
 everything else still works. The server binds to `127.0.0.1` only. When the
 producer selects prompt blocks, run `timds check` first so the built
 `dist/…/index.json` can resolve them; a producer with no blocks needs no index.
+
+Renders include spoken narration by default. The browser offers an explicit
+**Silent preview** option, also available as `--silent` on the CLI. Planning
+and checks use estimated reading times without calling a speech service;
+preparation and rendering generate each scene's narration with Edge TTS,
+then finalize footage and captions using the measured word timings. A speech
+failure stops the render instead of returning a silent video.
+
+Use Python with `edge-tts` installed. TimDS selects `--python`, then
+`TIMDS_PYTHON`, then the client's `.venv-tts` Python if present, then `python3`.
+The default voice is `en-US-AriaNeural`; override it with `--voice` or declare
+`voiceover: { "voice": "en-US-AriaNeural", "rate": "+0%", "pitch": "+0Hz" }`
+in `video/contract.json`. Generated takes stay under ignored
+`video-local/lab/NAME/voiceover/`, keyed by the exact script, voice settings,
+and generator. Edits get new audio and timings; incomplete caches regenerate.
+Authored production scripts and locked takes remain untouched. Optional
+`brand.audio` bed/transition files are copied from `video-local/public/` when
+available; missing optional tracks are reported and narration still renders.
 
 Shorts use each master's published `vertical` derivative by default. A client
 can set `producer.footage.allowShortCrop: true` to use the published master

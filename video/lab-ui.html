@@ -144,6 +144,8 @@
     </div>
     <p class="note" id="plan-empty">Check the plan to see how the design system will cut this script, then render.</p>
     <div class="actions">
+      <label for="render-audio">Audio</label>
+      <select id="render-audio"><option value="narrated">Spoken narration</option><option value="silent">Silent preview</option></select>
       <button type="button" class="primary" id="btn-render" disabled>Render video</button>
       <span class="note" id="render-note"></span>
     </div>
@@ -427,7 +429,7 @@
     const log = $("render-log");
     log.hidden = false; log.textContent = "Starting render…";
     try {
-      const job = await api("POST", "/api/render", { name: state.savedName });
+      const job = await api("POST", "/api/render", { name: state.savedName, silent: $("render-audio").value === "silent" });
       await poll(job.id);
     } catch (caught) {
       log.textContent += `\n${caught.message}`;
