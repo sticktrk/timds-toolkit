@@ -34,10 +34,17 @@ user explicitly requests a reset that discards client component changes.
 
 `npm run timds -- video lab --serve` opens the local Video Lab (no Remotion
 Studio): draft or paste a compile request, edit the beats, check the plan,
-render headless, and review the MP4. Use it to confirm the client's contract,
+render headless, and review the MP4 with spoken narration. Use it to confirm the client's contract,
 components, banners, and catalog produce the frames the client expects before
 authoring a full production. Saved lab inputs land under `video/lab/` and are
-validated by `timds video check`.
+validated by `timds video check`. Planning estimates timing without synthesis;
+rendering generates narration and uses measured word timings. Ensure Python
+has `edge-tts` installed (select it with `TIMDS_PYTHON` or `--python`). The
+contract's `voiceover` block owns voice/rate/pitch; `--voice` overrides the
+voice for a local take. Use `--silent` or the browser's Silent preview option
+only when a silent result is wanted. Generated lab takes are cached separately
+from authored productions; never force-replace a production's locked take to
+repair a lab render.
 
 ## Author a production
 

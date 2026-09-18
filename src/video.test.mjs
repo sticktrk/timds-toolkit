@@ -486,7 +486,7 @@ test("prepares a lab input as the single-format project an automated Video Lab r
   await fs.writeFile(path.join(workspace.designSystemRoot, "video", "remotion.tsx"), "export default {};\n", "utf8");
   workspace.manifest.video = normalizeVideoManifest({ components: "video/remotion.tsx" });
 
-  const prepared = await prepareVideoLab(workspace, "records");
+  const prepared = await prepareVideoLab(workspace, "records", { silent: true });
   const project = prepared.project;
   assert.equal(project.records.production.outputFormat, "horizontal");
   assert.equal(project.records.production.cover.asset, "cover-subject-concern");
@@ -554,12 +554,12 @@ test("Shorts crop published masters only when opted in, prefer derivatives, and 
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => new Response("video-bytes");
   t.after(() => { globalThis.fetch = originalFetch; });
-  const staged = await prepareVideoLab(workspace, "records");
+  const staged = await prepareVideoLab(workspace, "records", { silent: true });
   assert.equal(staged.project.assets[scene.assets[0]].objectPosition, "85% 50%");
   assert.equal(staged.project.assets[scene.assets[0]].text, "lower");
   input.outputFormat = "horizontal";
   await writeJson(inputPath, input);
-  const wide = await prepareVideoLab(workspace, "records");
+  const wide = await prepareVideoLab(workspace, "records", { silent: true });
   assert.equal(wide.project.assets[scene.assets[0]].objectPosition, undefined);
   assert.equal(wide.project.assets[scene.assets[0]].text, "left-center");
   input.outputFormat = "short";
@@ -706,7 +706,7 @@ for (const cache of ["absent", "missing-file", "empty-file", "present", "stale-m
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async (url) => { urls.push(url); return new Response("cloud-video"); };
     t.after(() => { globalThis.fetch = originalFetch; });
-    const prepared = await prepareVideoLab(workspace, "records");
+    const prepared = await prepareVideoLab(workspace, "records", { silent: true });
     const staged = await fs.readFile(path.join(prepared.publicRoot, prepared.project.assets[key].src), "utf8");
     assert.equal(staged, "cloud-video");
     assert.equal(digest(staged), prepared.project.assets[key].sha256);

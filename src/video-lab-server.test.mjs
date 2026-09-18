@@ -204,6 +204,21 @@ test("render jobs refuse unknown inputs and run one at a time", async (t) => {
   await assert.rejects(jobs.start("Bad Name"), (caught) => caught.status === 400);
 });
 
+test("web render jobs default to narration and preserve an explicit silent choice", async (t) => {
+  const workspace = await labFixture(t);
+  const calls = [];
+  const jobs = createRenderJobs(workspace, { runLab: async (_workspace, name, options) => {
+    calls.push({ name, options });
+    return { outputRoot: path.join(workspace.designSystemRoot, "video-local/lab/records/out") };
+  } });
+  const { call } = await serve(t, workspace, { jobs });
+  assert.equal((await call("POST", "/api/render", { name: "records" })).status, 202);
+  assert.equal(calls[0].options.silent, false);
+  assert.equal((await call("POST", "/api/render", { name: "records", silent: true })).status, 202);
+  assert.equal(calls[1].options.silent, true);
+  assert.equal((await call("POST", "/api/render", { name: "records", silent: "false" })).status, 400);
+});
+
 test("credential probe and slugify are conservative", () => {
   assert.equal(hasClaudeCredentials({ ANTHROPIC_API_KEY: "sk-test" }), true);
   assert.equal(hasClaudeCredentials({ ANTHROPIC_AUTH_TOKEN: "token" }), true);
