@@ -4,7 +4,9 @@ Each JSON file here is one compile request for the `producer` block in
 `../contract.json`: the exact question, a two-to-four-word topic label, the
 engagement question when the block requires one, and ordered answer beats with
 a semantic role (`hook`, `rule`, `risk`, `process`, `exception`, `answer`), the
-spoken narration, and a complete micro-headline summary. It is the same input
+spoken narration, a complete micro-headline summary, and optionally `footage`:
+one to three registered clip keys, best match first, that the scene opens on.
+It is the same input
 an automated Video Lab hands `createVideoProducer().compileProduction()` after
 a model writes to the authoring contract, so the lab previews exactly what
 that lab would ship through this Design System's components.
@@ -21,8 +23,10 @@ npm run timds -- video lab --serve           # local Video Lab web app: draft, e
 
 The lab compiles the input through the producer block, generates spoken
 narration with Edge TTS, and uses its measured word timings to finalize
-footage and cover deterministically from the
-registered catalog, stages brand files and published media under ignored
+footage and cover from the registered catalog — each beat's optional
+`footage` keys open its scene in order, and the producer deterministically
+fills the rest from the least-played clips whose published title and tags
+best match the narration — stages brand files and published media under ignored
 `video-local/lab/`, and mounts TimDS's single-format root with the declared
 `video.components` module or the TimDS defaults.
 

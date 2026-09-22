@@ -123,6 +123,15 @@ export function stripSchemaExtensions(schema) {
   return Object.fromEntries(Object.entries(schema).filter(([key]) => !key.startsWith("x-")).map(([key, value]) => [key, stripSchemaExtensions(value)]));
 }
 
+/** The clips a beat may name, one per line, so the model picks by what each clip shows. */
+export function describeFootageCatalog(footage) {
+  const lines = footage.clips.map((clip) => {
+    const tags = clip.tags.length ? ` (${clip.tags.join(", ")})` : "";
+    return `- ${clip.key}: ${clip.title || clip.key}${tags} · ${clip.durationSeconds}s`;
+  });
+  return `Footage catalog (${footage.clips.length} clips). Set each answer beat's footage to 1–${footage.maximumPerBeat} of these keys, best match first:\n${lines.join("\n")}`;
+}
+
 export function buildDraftMessages(authoring, request) {
   const { question, topicLabel, notes, engagementQuestion, slug } = request;
   const constraints = authoring.constraints;
@@ -132,6 +141,7 @@ export function buildDraftMessages(authoring, request) {
     `Write for the ${authoring.outputFormat === "short" ? "short (vertical, under a minute)" : "horizontal long-form"} format.`,
     `Constraints: ${JSON.stringify(constraints)}`,
     authoring.prompt.brief ? `Design System brief:\n${authoring.prompt.brief}` : "",
+    authoring.footage ? describeFootageCatalog(authoring.footage) : "",
   ].filter(Boolean).join("\n\n");
   const user = [
     `schemaVersion: ${VIDEO_SCHEMA_VERSION}`,
@@ -153,7 +163,7 @@ async function producerFor(workspace) {
   const loaded = await loadVideoWorkspace(workspace);
   if (!loaded.video.contract.producer) throw new LabError(409, "video lab: the video contract has no producer block, so there is nothing to compile against; run timds video init to scaffold one");
   const { catalog: mediaCatalog } = await readMediaCatalog(workspace.designSystemRoot);
-  return { loaded, producer: createVideoProducer({ contract: loaded.video.contract, assetCatalog: loaded.video.assets, mediaCatalog, verticalMetadata: loaded.video.verticalMetadata }) };
+  return { loaded, mediaCatalog, producer: createVideoProducer({ contract: loaded.video.contract, assetCatalog: loaded.video.assets, mediaCatalog, verticalMetadata: loaded.video.verticalMetadata }) };
 }
 
 export async function compileVideoLabInput(workspace, input) {
@@ -212,7 +222,7 @@ export async function saveVideoLabInput(workspace, input) {
 // --- draft with Claude ---------------------------------------------------------------
 
 export async function draftVideoLabInput(workspace, request, { client, model = VIDEO_LAB_MODEL } = {}) {
-  const { loaded } = await producerFor(workspace);
+  const { loaded, mediaCatalog } = await producerFor(workspace);
   const outputFormat = request?.outputFormat === "short" ? "short" : "horizontal";
   const question = text(request?.question, "question");
   const slug = SLUG_PATTERN.test(String(request?.slug || "")) ? request.slug : slugify(question);
@@ -220,7 +230,10 @@ export async function draftVideoLabInput(workspace, request, { client, model = V
   const commit = await designSystemCommit(workspace.designSystemRoot);
   let authoring;
   try {
-    authoring = createVideoAuthoringContract({ contract: loaded.video.contract, manifest: workspace.manifest, designSystemIndex: index, provenance: { commit, version: workspace.manifest.version }, outputFormat });
+    authoring = createVideoAuthoringContract({
+      contract: loaded.video.contract, manifest: workspace.manifest, designSystemIndex: index, provenance: { commit, version: workspace.manifest.version }, outputFormat,
+      assetCatalog: loaded.video.assets, mediaCatalog, verticalMetadata: loaded.video.verticalMetadata,
+    });
   } catch (caught) {
     const message = caught instanceof Error ? caught.message : String(caught);
     throw new LabError(409, source ? message : `${message}. Run "timds check" to build the Design System index so the producer's prompt blocks can be resolved.`);

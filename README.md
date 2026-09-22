@@ -353,7 +353,8 @@ natural speed, and a scene fails when its approved footage chain is too short.
 labels and CTA templates. A lab input is what an automated Video Lab hands
 `compileProduction()` after a model writes to the authoring contract, and the
 lab takes it the rest of the way exactly as a render host does — compile,
-spoken narration and measured word timings, deterministic footage and cover, staged brand files
+spoken narration and measured word timings, footage (each beat's own picks first, then the
+deterministic fill) and cover, staged brand files
 and published media, `createSingleVideoProjectRoot` with the client's
 components — then opens Remotion Studio on the result so the Design System
 editor sees the frames the lab will ship.
@@ -379,9 +380,15 @@ npm run timds -- video lab --serve --port 4500
 Describe the source (the exact question, a topic label, notes or an article
 excerpt), let Claude draft the compile request against this Design System's
 authoring contract — the same prompt, brief, and JSON Schema
-`createVideoAuthoringContract()` hands an automated Video Lab — or paste one,
-edit the answer beats, check the compiled plan (scenes, estimated timings,
-footage chain, cover), save it under `video/lab/`, and render. Rendering runs
+`createVideoAuthoringContract()` hands an automated Video Lab, including the
+footage catalog (every eligible clip's key, published title, tags, and
+duration) so the draft names one to three clips per beat — or paste one, edit
+the answer beats and their footage keys, check the compiled plan (scenes,
+estimated timings, footage chain, cover), save it under `video/lab/`, and
+render. A beat's picks open its scene in order; the compiler fills any
+remaining time from the clips the production has played least, ranked by how
+many words their title and tags share with the narration, and still refuses a
+family back to back. Rendering runs
 headless through the same path as `video lab NAME --render` and the page hands
 back the MP4 and thumbnail. Drafting uses `claude-opus-5` with the Anthropic
 SDK's own credential lookup (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, or an
