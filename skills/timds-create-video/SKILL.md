@@ -107,6 +107,13 @@ npm run timds -- video studio SLUG
 npm run timds -- video render SLUG
 ```
 
+Every brand file in `video/contract.json` (logo, fonts, `brand.audio.bed`,
+`brand.audio.transition`) must be a committed Design System path or a
+published `{ "mediaKey": "..." }`. Never point one at a generated file under
+`video-local/`: it renders on your machine and fails on every render host.
+Publish generated audio through TimDS media and reference its key. `video
+check` enforces this.
+
 Voiceover generation replaces a timing fixture only with explicit approval to
 use `--force`. A render must fail when registered footage cannot cover a scene
 at natural speed; add another approved asset or shorten the scene instead of

@@ -1,9 +1,10 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, promises as fs } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { syncDefaults } from "./defaults.mjs";
 import { fileSha256, readLocalMediaManifest, readMediaCatalog } from "./media.mjs";
 import { createVideoProducer, validateVideoProducerConfig } from "./video-producer.mjs";
@@ -196,6 +197,39 @@ function normalizeVideoPublishing(input) {
   return normalized;
 }
 
+// A brand file is either a path committed to the Design System or a published
+// TimDS media record, `{ "mediaKey": "..." }`. Those are the only two sources
+// every render host has: a Design System checkout and media.json.
+function normalizeBrandSource(value, label) {
+  if (typeof value === "string") return safeRelativePath(value, label);
+  const source = object(value, label);
+  return { mediaKey: text(source.mediaKey, `${label}.mediaKey`) };
+}
+
+function nonNegativeNumber(value, label, { integer = false } = {}) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0 || (integer && !Number.isSafeInteger(number))) {
+    throw new Error(`${label} must be a non-negative ${integer ? "integer" : "number"}`);
+  }
+  return number;
+}
+
+function normalizeVideoAudio(input) {
+  if (input === undefined || input === null) return undefined;
+  const audio = { ...object(input, "video contract brand.audio") };
+  for (const key of ["bed", "transition"]) {
+    if (audio[key] === undefined || audio[key] === null || audio[key] === "") delete audio[key];
+    else audio[key] = normalizeBrandSource(audio[key], `video contract brand.audio.${key}`);
+  }
+  for (const key of ["voiceGain", "restVolume", "duckVolume"]) {
+    if (audio[key] !== undefined) audio[key] = nonNegativeNumber(audio[key], `video contract brand.audio.${key}`);
+  }
+  for (const key of ["attackFrames", "releaseFrames"]) {
+    if (audio[key] !== undefined) audio[key] = nonNegativeNumber(audio[key], `video contract brand.audio.${key}`, { integer: true });
+  }
+  return audio;
+}
+
 function normalizeTargetOverrides(input, label) {
   const policy = object(input, label);
   const result = {};
@@ -312,6 +346,7 @@ export function validateVideoContract(input) {
         right: text(brand.watermark?.right || brand.site, "video contract brand.watermark.right"),
       },
       banners: normalizeVideoBanners(brand.banners),
+      ...(brand.audio === undefined || brand.audio === null ? {} : { audio: normalizeVideoAudio(brand.audio) }),
     },
     publishing: normalizeVideoPublishing(contract.publishing),
   };
@@ -495,6 +530,8 @@ export async function checkVideoWorkspace(workspace, options = {}) {
   const loaded = await loadVideoWorkspace(workspace, options);
   const { catalog } = await readMediaCatalog(workspace.designSystemRoot);
   const registered = new Set(catalog.assets.map((asset) => asset.key));
+  const brandProblems = await checkVideoBrandSources({ designSystemRoot: workspace.designSystemRoot, contract: loaded.video.contract, mediaCatalog: catalog, localDir: loaded.video.local });
+  if (brandProblems.length) throw brandSourceError(brandProblems);
   const warnings = [];
   for (const [key, asset] of Object.entries(loaded.video.assets.assets)) {
     if (asset.mediaKey && !registered.has(asset.mediaKey)) warnings.push(`${key}: mediaKey ${asset.mediaKey} is not registered in media.json`);
@@ -662,24 +699,6 @@ async function prepareLabNarration(workspace, planned, labLocal, publicRoot, opt
   return { timings, script };
 }
 
-async function stageLabSoundDesign(planned, publicRoot, options) {
-  const audio = { ...planned.video.contract.brand.audio };
-  for (const key of ["bed", "transition"]) {
-    if (!audio[key]) continue;
-    const relative = safeRelativePath(audio[key], `video brand.audio.${key}`);
-    const source = path.join(planned.video.localRoot, "public", relative);
-    const stat = await fs.stat(source).catch((error) => { if (error.code === "ENOENT") return null; throw error; });
-    if (!stat?.isFile() || !stat.size) {
-      options.log?.(`Optional ${key} audio is unavailable; rendering narration without it.`);
-      delete audio[key];
-      continue;
-    }
-    await fs.mkdir(path.dirname(path.join(publicRoot, relative)), { recursive: true });
-    await fs.copyFile(source, path.join(publicRoot, relative));
-  }
-  return audio;
-}
-
 export async function prepareVideoLab(workspace, requestedName, options = {}) {
   const planned = await planVideoLab(workspace, requestedName);
   const { name } = planned.lab;
@@ -704,12 +723,11 @@ export async function prepareVideoLab(workspace, requestedName, options = {}) {
     stagedAssets[media.key] = await stageAsset(workspace, media.key, media, publicRoot, localManifest, mediaCatalog);
   }
   stagedAssets[finalized.coverSubject.key] = { ...stagedAssets[finalized.coverSubject.key], kind: "image" };
-  const stagedBrand = await stageBrandFiles(workspace, planned.video.contract, publicRoot);
-  if (!options.silent) stagedBrand.audio = await stageLabSoundDesign(planned, publicRoot, options);
+  const brand = await stageVideoBrand({ designSystemRoot: workspace.designSystemRoot, contract: planned.video.contract, publicRoot, mediaCatalog, localManifest, localDir: planned.video.local, sound: !options.silent });
   const project = {
     schemaVersion: VIDEO_SCHEMA_VERSION,
     engine: { name: "@dtconcepts/timds", version: (await readJson(path.join(packageRoot, "package.json"), "TimDS package.json")).version },
-    contract: { ...planned.video.contract, brand: { ...planned.video.contract.brand, ...stagedBrand } },
+    contract: { ...planned.video.contract, brand },
     assets: stagedAssets,
     records: {
       captions: { lines: finalized.plan.lines },
@@ -727,6 +745,7 @@ export async function prepareVideoLab(workspace, requestedName, options = {}) {
       script,
     },
   };
+  await assertVideoProjectStaged(project, publicRoot);
   const projectPath = path.join(generatedRoot, `${name}.json`);
   const entryPath = path.join(generatedRoot, `${name}.mjs`);
   const componentImport = planned.video.componentsPath
@@ -877,29 +896,168 @@ async function stageAsset(workspace, key, asset, publicRoot, localManifest, medi
   return { ...source.metadata, ...asset, key, src: relative };
 }
 
-async function stageBrandFiles(workspace, contract, publicRoot) {
-  const files = [
-    { kind: "logo", path: contract.brand.logo },
-    ...(contract.brand.fontFiles || []).map((font, index) => ({ kind: "font", index, path: font.path })),
+// --- brand files -------------------------------------------------------------------
+//
+// The contract names brand files (logo, fonts, sound design) that the
+// components load with staticFile(). A render host has exactly two sources for
+// them: the Design System checkout (committed files) and media.json (published
+// TimDS media). Anything else, such as a file generated under ignored
+// video-local/, exists only on the machine that generated it and 404s mid-render
+// everywhere else, so `video check` refuses it and staging never skips it.
+
+const execFileAsync = promisify(execFile);
+
+export function videoBrandSources(contract) {
+  const brand = contract?.brand || {};
+  const audio = brand.audio || {};
+  return [
+    { field: "brand.logo", kind: "logo", source: brand.logo },
+    ...(brand.fontFiles || []).map((font, index) => ({ field: `brand.fontFiles[${index}].path`, kind: "font", index, source: font.path })),
+    ...["bed", "transition"].filter((key) => audio[key]).map((key) => ({ field: `brand.audio.${key}`, kind: "audio", key, source: audio[key] })),
   ];
-  const staged = { fontFiles: [], logo: "" };
-  for (const file of files) {
-    const relative = file.path;
-    const safe = safeRelativePath(relative, "video brand file");
-    const source = path.join(workspace.designSystemRoot, safe);
-    if (!existsSync(source)) throw new Error(`video brand file is missing: ${safe}`);
-    const runtimePath = safe.startsWith("public/") ? safe.slice("public/".length) : `brand/${file.kind}-${file.index ?? 0}-${path.basename(safe)}`;
-    await fs.mkdir(path.dirname(path.join(publicRoot, runtimePath)), { recursive: true });
-    await fs.copyFile(source, path.join(publicRoot, runtimePath));
-    if (file.kind === "logo") staged.logo = runtimePath;
-    else staged.fontFiles.push({
-      ...contract.brand.fontFiles[file.index],
-      path: runtimePath,
-      format: fontFormatForPath(safe),
-      dataBase64: (await fs.readFile(source)).toString("base64"),
-    });
+}
+
+async function gitIgnored(designSystemRoot, relative) {
+  try {
+    await execFileAsync("git", ["-C", designSystemRoot, "check-ignore", "-q", "--", relative]);
+    return true;
+  } catch (caught) {
+    // Exit 1 is "not ignored"; anything else (no git, not a repository) cannot
+    // tell, and existence alone decides.
+    return false;
   }
-  return staged;
+}
+
+async function brandSourceProblem(designSystemRoot, entry, { mediaCatalog, localDir }) {
+  const { field, source } = entry;
+  if (source && typeof source === "object") {
+    const published = mediaCatalog?.assets?.find((asset) => asset.key === source.mediaKey);
+    if (!published) return `${field}: media key ${source.mediaKey} is not registered in media.json; publish it with timds assets first`;
+    if (!published.publicUrl) return `${field}: media key ${source.mediaKey} has no publicUrl in media.json; publish it before referencing it`;
+    return null;
+  }
+  const relative = safeRelativePath(source, `video contract ${field}`);
+  const local = localDir ? safeRelativePath(localDir, "timds.json video.local") : null;
+  if (local && (relative === local || relative.startsWith(`${local}/`))) {
+    return `${field}: ${relative} is generated under ignored ${local}/, which no render host has; commit the file or publish it with timds assets and reference { "mediaKey": "..." }`;
+  }
+  const absolute = path.join(designSystemRoot, relative);
+  const stat = await fs.stat(absolute).catch((caught) => { if (caught.code === "ENOENT") return null; throw caught; });
+  if (!stat?.isFile() || !stat.size) {
+    return `${field}: ${relative} is not a committed file in the Design System; commit it, or publish it with timds assets and reference { "mediaKey": "..." }`;
+  }
+  if (await gitIgnored(designSystemRoot, relative)) {
+    return `${field}: ${relative} is ignored by git, so render hosts never receive it; commit it or publish it with timds assets and reference { "mediaKey": "..." }`;
+  }
+  return null;
+}
+
+// Returns every contract brand file a render host could not obtain.
+export async function checkVideoBrandSources({ designSystemRoot, contract, mediaCatalog, localDir = "video-local" }) {
+  const problems = [];
+  for (const entry of videoBrandSources(contract)) {
+    const problem = await brandSourceProblem(designSystemRoot, entry, { mediaCatalog, localDir });
+    if (problem) problems.push(problem);
+  }
+  return problems;
+}
+
+const brandSourceError = (problems) => new Error(`video contract names brand files no render host can obtain:\n  ${problems.join("\n  ")}`);
+
+async function downloadBrandMedia(published, destination, cacheRoot) {
+  const cached = cacheRoot && published.sha256 ? path.join(cacheRoot, `${published.sha256}${path.extname(published.filename || "")}`) : null;
+  if (cached) {
+    const stat = await fs.stat(cached).catch(() => null);
+    if (stat?.isFile() && (!published.bytes || stat.size === published.bytes)) {
+      await fs.copyFile(cached, destination);
+      return;
+    }
+  }
+  const response = await fetch(published.publicUrl);
+  if (!response.ok) throw new Error(`video brand media ${published.key} download returned HTTP ${response.status}`);
+  const bytes = Buffer.from(await response.arrayBuffer());
+  if (!bytes.length) throw new Error(`video brand media ${published.key} downloaded empty`);
+  await fs.writeFile(destination, bytes);
+  if (cached) {
+    await fs.mkdir(cacheRoot, { recursive: true });
+    await fs.writeFile(cached, bytes);
+  }
+}
+
+// Stages every brand file the contract names into a Remotion public directory
+// and returns the brand with runtime paths. Render hosts call this instead of
+// copying brand files themselves, so a new contract field is staged everywhere
+// at once. `sound: false` leaves the bed and transition out (a silent preview).
+export async function stageVideoBrand({ designSystemRoot, contract, publicRoot, mediaCatalog, localManifest = { assets: [] }, localDir = "video-local", cacheRoot = null, sound = true }) {
+  const problems = await checkVideoBrandSources({ designSystemRoot, contract, mediaCatalog, localDir });
+  if (problems.length) throw brandSourceError(problems);
+  const brand = { ...contract.brand, logo: "", fontFiles: [] };
+  const audio = contract.brand.audio ? { ...contract.brand.audio } : undefined;
+  for (const entry of videoBrandSources(contract)) {
+    if (entry.kind === "audio" && !sound) {
+      delete audio[entry.key];
+      continue;
+    }
+    let runtimePath;
+    if (typeof entry.source === "object") {
+      const source = await sourceForAsset({ designSystemRoot }, { mediaKey: entry.source.mediaKey }, localManifest, mediaCatalog);
+      const extension = path.extname(typeof source === "string" ? source : source.filename || "").toLowerCase();
+      runtimePath = `brand/${entry.kind}-${entry.key ?? entry.index ?? 0}-${entry.source.mediaKey}${extension}`;
+      const destination = path.join(publicRoot, runtimePath);
+      await fs.mkdir(path.dirname(destination), { recursive: true });
+      if (typeof source === "string") await fs.copyFile(source, destination);
+      else await downloadBrandMedia(source.metadata, destination, cacheRoot);
+    } else {
+      const safe = safeRelativePath(entry.source, `video contract ${entry.field}`);
+      runtimePath = safe.startsWith("public/") ? safe.slice("public/".length) : `brand/${entry.kind}-${entry.key ?? entry.index ?? 0}-${path.basename(safe)}`;
+      await fs.mkdir(path.dirname(path.join(publicRoot, runtimePath)), { recursive: true });
+      await fs.copyFile(path.join(designSystemRoot, safe), path.join(publicRoot, runtimePath));
+    }
+    if (entry.kind === "logo") brand.logo = runtimePath;
+    else if (entry.kind === "audio") audio[entry.key] = runtimePath;
+    else {
+      const source = typeof entry.source === "string" ? path.join(designSystemRoot, entry.source) : path.join(publicRoot, runtimePath);
+      brand.fontFiles.push({
+        ...contract.brand.fontFiles[entry.index],
+        path: runtimePath,
+        format: fontFormatForPath(runtimePath),
+        dataBase64: (await fs.readFile(source)).toString("base64"),
+      });
+    }
+  }
+  if (audio) brand.audio = audio;
+  return brand;
+}
+
+// Every file the components will request through staticFile(), with the
+// project field that names it. Keep in step with video/remotion.tsx.
+export function videoProjectStaticFiles(project) {
+  const files = [];
+  const add = (field, value) => { if (typeof value === "string" && value) files.push({ field, path: value }); };
+  const brand = project.contract?.brand || {};
+  add("contract.brand.logo", brand.logo);
+  (brand.fontFiles || []).forEach((font, index) => { if (!font.dataBase64) add(`contract.brand.fontFiles[${index}].path`, font.path); });
+  add("contract.brand.audio.bed", brand.audio?.bed);
+  add("contract.brand.audio.transition", brand.audio?.transition);
+  for (const [key, asset] of Object.entries(project.assets || {})) add(`assets.${key}.src`, asset?.src);
+  const production = project.records?.production || {};
+  if (typeof production.audioSrc === "string") add("records.production.audioSrc", production.audioSrc);
+  else if (production.audioSrc === undefined) {
+    for (const line of project.records?.captions?.lines || []) add(`narration for line ${line.id}`, `audio/${production.slug}/${line.id}.mp3`);
+  }
+  return files;
+}
+
+// Fails before Remotion starts when any requested file is not in the public
+// directory, naming the project field instead of a 404 halfway through a render.
+export async function assertVideoProjectStaged(project, publicRoot) {
+  const missing = [];
+  for (const file of videoProjectStaticFiles(project)) {
+    const relative = safeRelativePath(file.path, file.field);
+    const stat = await fs.stat(path.join(publicRoot, relative)).catch(() => null);
+    if (!stat?.isFile() || !stat.size) missing.push(`${file.field} -> ${relative}`);
+  }
+  if (missing.length) throw new Error(`video project requests files that are not staged in ${publicRoot}:\n  ${missing.join("\n  ")}`);
 }
 
 export async function prepareVideoWorkspace(workspace, selectedSlug) {
@@ -915,13 +1073,13 @@ export async function prepareVideoWorkspace(workspace, selectedSlug) {
   for (const key of referencedAssetKeys(production)) {
     stagedAssets[key] = await stageAsset(workspace, key, loaded.video.assets.assets[key], publicRoot, localManifest, mediaCatalog);
   }
-  const stagedBrand = await stageBrandFiles(workspace, loaded.video.contract, publicRoot);
+  const brand = await stageVideoBrand({ designSystemRoot: workspace.designSystemRoot, contract: loaded.video.contract, publicRoot, mediaCatalog, localManifest, localDir: loaded.video.local });
   const project = {
     schemaVersion: VIDEO_SCHEMA_VERSION,
     engine: { name: "@dtconcepts/timds", version: (await readJson(path.join(packageRoot, "package.json"), "TimDS package.json")).version },
     contract: {
       ...loaded.video.contract,
-      brand: { ...loaded.video.contract.brand, ...stagedBrand },
+      brand,
     },
     assets: stagedAssets,
     records: {
@@ -1071,6 +1229,7 @@ async function writeVideoPublishing(prepared, paths) {
 
 export async function renderVideoWorkspace(workspace, selectedSlug, options = {}) {
   const prepared = await prepareVideoWorkspace(workspace, selectedSlug);
+  await assertVideoProjectStaged(prepared.project, prepared.publicRoot);
   const remotion = path.join(path.dirname(require.resolve("@remotion/cli/package.json")), "remotion-cli.js");
   const prefix = pascal(prepared.production.production.slug);
   const paths = renderPaths(prepared, options.date);

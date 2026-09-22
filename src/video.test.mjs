@@ -901,6 +901,9 @@ test("rendering keeps its original copy and output directory across midnight and
   const publishing = JSON.parse(await fs.readFile(recordPath, "utf8"));
   publishing.shorts[0].descriptions = { youtube_short: "Copy approved before rendering." };
   await writeJson(recordPath, publishing);
+  const narration = path.join(workspace.designSystemRoot, "video-local/public/audio/sample-topic");
+  await fs.mkdir(narration, { recursive: true });
+  for (const id of ["intro", "answer", "outro"]) await fs.writeFile(path.join(narration, `${id}.mp3`), "voice");
   t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-09-15T23:59:59Z") });
   const renderOutputs = [];
   const spawn = t.mock.method(childProcess, "spawn", (_command, args) => {
