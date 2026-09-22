@@ -6,9 +6,10 @@ export type ProducerCompileInput = {
   outputFormat: ProducerOutputFormat;
   exactQuestion: string;
   topic: {label: string; engagementQuestion?: string; coverEmotion?: string};
-  answerBeats: Array<{id: string; role: ProducerBeatRole; narration: string; summary: string}>;
+  /** `footage`: one to FOOTAGE_PICKS_PER_BEAT ordered clip keys from the authoring contract's footage.clips, best match first. */
+  answerBeats: Array<{id: string; role: ProducerBeatRole; narration: string; summary: string; footage?: string[]}>;
 };
-export type ProducerCompiledScene = {id: string; role: string; narration: string; eyebrow?: string; headline?: string; intro?: boolean; outro?: boolean};
+export type ProducerCompiledScene = {id: string; role: string; narration: string; eyebrow?: string; headline?: string; intro?: boolean; outro?: boolean; footage?: string[]};
 export type ProducerCompiledProduction = {
   schemaVersion: 1;
   producerContractVersion: number;
@@ -42,6 +43,8 @@ export type ProducerAuthoringContract = {
   designSystem: {id: string; name: string; version: string; commit: string; indexUrl?: string};
   outputFormat: ProducerOutputFormat;
   prompt: {instructions: string[]; blockIds: string[]; brief: string};
+  /** Present when the contract was built with the asset and media catalogs: the clips a beat may name. */
+  footage?: ProducerFootageCatalog;
   constraints: {
     headlineWords: number;
     topicLabelWords: {minimum: number; maximum: number};
@@ -53,6 +56,9 @@ export type ProducerAuthoringContract = {
   compilerOwns: string[];
   inputSchema: Record<string, unknown>;
 };
+export type ProducerFootageClip = {key: string; title?: string; tags: string[]; durationSeconds: number};
+export type ProducerFootageCatalog = {assetPrefix: string; maximumPerBeat: number; clips: ProducerFootageClip[]};
+export declare const FOOTAGE_PICKS_PER_BEAT: 3;
 export declare function validateVideoProducerConfig(input: unknown, contract: any): any | null;
 export declare function createVideoAuthoringContract(input: {
   contract: any;
@@ -60,6 +66,10 @@ export declare function createVideoAuthoringContract(input: {
   designSystemIndex: any;
   provenance: {version?: string; commit: string; indexUrl?: string};
   outputFormat: ProducerOutputFormat;
+  /** With `mediaCatalog`, the contract lists the eligible footage and the input schema accepts per-beat picks. */
+  assetCatalog?: any;
+  mediaCatalog?: any;
+  verticalMetadata?: VideoVerticalMetadata | null;
 }): ProducerAuthoringContract;
 export type VideoVerticalMetadata = {
   schemaVersion: 1;

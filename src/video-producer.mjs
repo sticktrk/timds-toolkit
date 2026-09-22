@@ -45,7 +45,74 @@ const promptBlockIds = (value, label) => {
 
 const renderTemplate = (template, values) => text(template, "video producer template").replace(/\{\{(question|topic|site|series)\}\}/gu, (_match, key) => values[key]);
 const tokens = (value) => new Set(String(value ?? "").toLocaleLowerCase().replace(/[^a-z0-9]+/gu, " ").split(/\s+/u).filter((token) => token.length >= 4));
-const score = (query, candidate) => [...query].reduce((sum, token) => sum + (tokens(candidate).has(token) ? 1 : 0), 0);
+const overlap = (query, candidateTokens) => [...query].reduce((sum, token) => sum + (candidateTokens.has(token) ? 1 : 0), 0);
+const score = (query, candidate) => overlap(query, tokens(candidate));
+/** The most clips one answer beat may name; the compiler fills any remaining time itself. */
+export const FOOTAGE_PICKS_PER_BEAT = 3;
+
+const stringList = (value) => (Array.isArray(value) ? value.filter((entry) => typeof entry === "string" && entry.trim()).map((entry) => entry.trim()) : []);
+
+/**
+ * The footage the producer may play, resolved once from the client's asset and
+ * media catalogs. The authoring contract describes these clips to the model and
+ * the producer selects from them, so both read one eligibility rule: a master
+ * under the footage prefix with a measured duration, and for Shorts a reviewed
+ * vertical derivative (or a reviewed crop when the client allows live cropping).
+ */
+function createFootageLibrary({ config, contractName, assetCatalog, mediaCatalog, verticalMetadata }) {
+  const assets = object(assetCatalog.assets || assetCatalog, "video producer asset catalog");
+  const crops = verticalMetadata == null ? {} : validateVideoVerticalMetadata(verticalMetadata, {
+    assetCatalog, mediaCatalog, footagePrefix: config.footage.assetPrefix,
+  }).assets;
+  const mediaEntries = Array.isArray(mediaCatalog.assets) ? mediaCatalog.assets : [];
+  const mediaByKey = new Map(mediaEntries.map((asset) => [asset.key, asset]));
+  const fail = (message) => { throw new Error(`${contractName} producer contract: ${message}`); };
+
+  const mediaFor = (key) => {
+    const declared = assets[key] || fail(`asset ${key} is not declared`);
+    const published = declared.mediaKey ? mediaByKey.get(declared.mediaKey) : null;
+    if (!published?.publicUrl || !published.filename) fail(`asset ${key} is not published in the media catalog`);
+    return { ...published, ...declared, key };
+  };
+
+  const masters = () => Object.keys(assets)
+    .filter((key) => key.startsWith(config.footage.assetPrefix) && Number.isFinite(assets[key].durationSeconds) && assets[key].durationSeconds > 0)
+    .filter((key) => !Object.values(assets).some((asset) => asset.vertical === key))
+    .map((key) => {
+      const master = mediaFor(key);
+      const verticalKey = assets[key].vertical;
+      // A wide subject-side label is not a reviewed vertical crop. Require the
+      // separate crop record, and keep its vertical text zone off the master.
+      const crop = crops[key];
+      const vertical = verticalKey
+        ? { ...mediaFor(verticalKey), ...(crop ? { text: crop.text } : {}) }
+        : config.footage.allowShortCrop && crop ? { ...master, objectPosition: crop.objectPosition, text: crop.text } : null;
+      return { master, vertical, durationSeconds: master.durationSeconds };
+    })
+    .sort((left, right) => left.master.key.localeCompare(right.master.key));
+
+  /** Clips that can play in `format`, each with the duration that format actually shows. */
+  const eligible = (format) => masters()
+    .filter((pair) => format !== "short" || (pair.vertical && Number.isFinite(pair.vertical.durationSeconds)))
+    .map((pair) => ({
+      ...pair,
+      effectiveDurationSeconds: format === "short" ? pair.vertical.durationSeconds : pair.master.durationSeconds,
+      // The words a model or the fallback ranker can match: the key, the
+      // published title, and the published tags. Keys alone rarely share a
+      // token with narration, which is how one clip ends up in every scene.
+      searchTokens: tokens(`${pair.master.key} ${pair.master.title || ""} ${stringList(pair.master.tags).join(" ")}`),
+    }));
+
+  /** What the authoring contract tells the model about each eligible clip. */
+  const describe = (format) => eligible(format).map((pair) => ({
+    key: pair.master.key,
+    ...(pair.master.title ? { title: String(pair.master.title) } : {}),
+    tags: stringList(pair.master.tags),
+    durationSeconds: Number(pair.effectiveDurationSeconds.toFixed(3)),
+  }));
+
+  return { assets, crops, mediaFor, eligible, describe, fail };
+}
 
 export function validateVideoProducerConfig(input, contract) {
   if (input === undefined || input === null || input === false) return null;
@@ -155,10 +222,21 @@ const yesNoQuestionPattern = "^(?:[Aa][Rr][Ee]|[Cc][Aa][Nn]|[Cc][Oo][Uu][Ll][Dd]
  * The client selects the published Design System blocks; TimDS turns those
  * choices and the executable video contract into one prompt/schema boundary.
  */
-export function createVideoAuthoringContract({ contract, manifest, designSystemIndex, provenance, outputFormat }) {
+export function createVideoAuthoringContract({ contract, manifest, designSystemIndex, provenance, outputFormat, assetCatalog, mediaCatalog, verticalMetadata }) {
   const config = validateVideoProducerConfig(contract.producer, contract);
   if (!config) throw new Error(`${contract.name} has no video producer contract`);
   if (!["horizontal", "short"].includes(outputFormat)) throw new Error("video authoring outputFormat must be horizontal or short");
+  // With the catalogs, the contract lists every clip the model may name per
+  // beat. Without them (an older caller), footage stays compiler-owned and the
+  // producer falls back to its own ranking for every scene.
+  const footage = assetCatalog && mediaCatalog
+    ? createFootageLibrary({ config, contractName: contract.name, assetCatalog, mediaCatalog, verticalMetadata }).describe(outputFormat)
+    : null;
+  if (footage && !footage.length) {
+    throw new Error(outputFormat === "short"
+      ? `${contract.name} has no Shorts footage under ${config.footage.assetPrefix}; publish and link vertical derivatives, or configure video.verticalMetadata with reviewed crops and enable producer.footage.allowShortCrop`
+      : `${contract.name} has no footage under ${config.footage.assetPrefix}; register published clips with positive durationSeconds`);
+  }
   const systemId = text(manifest?.systemId, "timds manifest systemId");
   const systemName = text(manifest?.name, "timds manifest name");
   const version = text(provenance?.version || manifest?.version, "video authoring Design System version");
@@ -248,11 +326,28 @@ export function createVideoAuthoringContract({ contract, manifest, designSystemI
               description: `A complete standalone micro-headline of at most ${headlineWords} words; never a truncated sentence fragment`,
               "x-timds-maxWords": headlineWords,
             },
+            ...(footage ? {
+              footage: {
+                type: "array",
+                minItems: 1,
+                maxItems: FOOTAGE_PICKS_PER_BEAT,
+                items: { type: "string", enum: footage.map((clip) => clip.key) },
+                description: `One to ${FOOTAGE_PICKS_PER_BEAT} ordered clip keys from footage.clips that picture this beat, best match first; the compiler plays them in order and fills any remaining time`,
+              },
+            } : {}),
           },
         },
       },
     },
   };
+  const footageInstructions = footage ? [
+    "Do not write role eyebrows, CTA template copy, intro/outro structure, cover subjects, timing, safe zones, or layout; the compiler owns them.",
+    `For every answer beat, set footage to one to ${FOOTAGE_PICKS_PER_BEAT} ordered clip keys from footage.clips whose picture matches what the beat says, best match first. Judge a clip by its title and tags, not by its key.`,
+    "Spread footage across the beats: do not name a clip in a second beat while an unused clip fits, and never place a clip directly after its own family (a key and its -mirrored, -offset, or -vertical sibling are one picture).",
+    "The compiler plays each beat's picks in order at natural speed, fills any remaining time from the catalog, and enforces the chain rules; you choose what the viewer sees first.",
+  ] : [
+    "Do not write role eyebrows, CTA template copy, intro/outro structure, cover subjects, footage, timing, safe zones, or layout; the compiler owns them.",
+  ];
   return {
     schemaVersion: PRODUCER_AUTHORING_SCHEMA_VERSION,
     producerContractVersion: config.schemaVersion,
@@ -269,7 +364,7 @@ export function createVideoAuthoringContract({ contract, manifest, designSystemI
         "Build the final compile request so it validates against inputSchema; do not invent compiler-input fields.",
         "Write answerBeats as ordered spoken answer content and choose the closest supported semantic role for each beat.",
         `Write every summary as a complete standalone micro-headline of at most ${headlineWords} words. Never truncate a longer sentence to meet the limit.`,
-        "Do not write role eyebrows, CTA template copy, intro/outro structure, cover subjects, footage, timing, safe zones, or layout; the compiler owns them.",
+        ...footageInstructions,
       ],
       blockIds,
       brief: blocks.map(renderPromptBlock).join("\n\n"),
@@ -282,12 +377,13 @@ export function createVideoAuthoringContract({ contract, manifest, designSystemI
       answerBeatRoles: [...beatRoles],
       reservedSceneIds: [...new Set([config.intro.id, config.engagement.id, config.outro.id])],
     },
+    ...(footage ? { footage: { assetPrefix: config.footage.assetPrefix, maximumPerBeat: FOOTAGE_PICKS_PER_BEAT, clips: footage } } : {}),
     compilerOwns: [
       "role eyebrows",
       "intro, engagement, and outro scene structure",
       "CTA template copy",
       "cover eyebrow and cover subject",
-      "footage chains",
+      footage ? "footage timing, fallback clips, and chain rules" : "footage chains",
       "timing, safe zones, and layout",
     ],
     inputSchema,
@@ -305,21 +401,21 @@ const validateQuestion = (fail, label, value, maximumWords, maximumCharacters) =
 export function createVideoProducer({ contract, assetCatalog, mediaCatalog, verticalMetadata }) {
   const config = validateVideoProducerConfig(contract.producer, contract);
   if (!config) throw new Error(`${contract.name} has no video producer contract`);
-  const assets = object(assetCatalog.assets || assetCatalog, "video producer asset catalog");
-  const crops = verticalMetadata == null ? {} : validateVideoVerticalMetadata(verticalMetadata, {
-    assetCatalog, mediaCatalog, footagePrefix: config.footage.assetPrefix,
-  }).assets;
-  const mediaEntries = Array.isArray(mediaCatalog.assets) ? mediaCatalog.assets : [];
-  const mediaByKey = new Map(mediaEntries.map((asset) => [asset.key, asset]));
-  const fail = (message) => { throw new Error(`${contract.name} producer contract: ${message}`); };
+  const library = createFootageLibrary({ config, contractName: contract.name, assetCatalog, mediaCatalog, verticalMetadata });
+  const { assets, mediaFor, fail } = library;
   const reservedIds = new Set([config.intro.id, config.engagement.id, config.outro.id]);
   const yesNoQuestion = /^(?:are|can|could|did|do|does|has|have|is|should|was|were|will|would)\b/iu;
 
-  const mediaFor = (key) => {
-    const declared = assets[key] || fail(`asset ${key} is not declared`);
-    const published = declared.mediaKey ? mediaByKey.get(declared.mediaKey) : null;
-    if (!published?.publicUrl || !published.filename) fail(`asset ${key} is not published in the media catalog`);
-    return { ...published, ...declared, key };
+  /** A beat's footage picks: declared, eligible for the format, deduplicated, at most the per-beat limit. */
+  const footagePicks = (beatId, value, format, eligibleKeys) => {
+    if (value === undefined || value === null) return [];
+    if (!Array.isArray(value) || value.some((key) => typeof key !== "string")) fail(`answer beat ${beatId}.footage must be an array of footage keys`);
+    const picks = [...new Set(value.map((key) => key.trim()).filter(Boolean))];
+    if (picks.length > FOOTAGE_PICKS_PER_BEAT) fail(`answer beat ${beatId}.footage names ${picks.length} clips; the limit is ${FOOTAGE_PICKS_PER_BEAT}`);
+    for (const key of picks) {
+      if (!eligibleKeys().has(key)) fail(`answer beat ${beatId}.footage names ${key}, which is not ${format} footage under ${config.footage.assetPrefix}`);
+    }
+    return picks;
   };
 
   const compileProduction = (input) => {
@@ -335,6 +431,13 @@ export function createVideoProducer({ contract, assetCatalog, mediaCatalog, vert
     if (!Array.isArray(input.answerBeats) || !input.answerBeats.length) fail("at least one approved answer beat is required");
     const ids = new Set();
     const headlineWords = input.outputFormat === "short" ? contract.copy.shortHeadlineWords : contract.copy.horizontalHeadlineWords;
+    // Resolved only when a beat names footage, so a request without picks
+    // still compiles against a catalog that cannot finalize yet.
+    let eligibleKeyCache = null;
+    const eligibleKeys = () => {
+      eligibleKeyCache ||= new Set(library.eligible(input.outputFormat).map((pair) => pair.master.key));
+      return eligibleKeyCache;
+    };
     const content = input.answerBeats.map((beat) => {
       const id = slugSafe(beat.id, "producer answer beat id");
       if (ids.has(id) || reservedIds.has(id)) fail(`answer beat id ${id} must be unique and not reserved by the producer`);
@@ -342,12 +445,14 @@ export function createVideoProducer({ contract, assetCatalog, mediaCatalog, vert
       if (!beatRoles.includes(beat.role)) fail(`answer beat ${id} has unsupported semantic role ${String(beat.role)}`);
       const summary = text(beat.summary, `producer answer beat ${id}.summary`);
       if (words(summary).length > headlineWords) fail(`answer beat ${id}.summary exceeds ${headlineWords} words`);
+      const footage = footagePicks(id, beat.footage, input.outputFormat, eligibleKeys);
       return {
         id,
         role: beat.role,
         narration: text(beat.narration, `producer answer beat ${id}.narration`),
         eyebrow: config.roleEyebrows[beat.role],
         headline: summary,
+        ...(footage.length ? { footage } : {}),
       };
     });
     const values = { question: exactQuestion, topic: topicLabel.toLocaleLowerCase(), site: contract.brand.site, series: contract.brand.series };
@@ -386,47 +491,49 @@ export function createVideoProducer({ contract, assetCatalog, mediaCatalog, vert
     return !["left", "right"].includes(asset.subject) || asset.subject !== side || asset.flip === true;
   }));
 
-  const horizontalFootage = () => Object.keys(assets)
-    .filter((key) => key.startsWith(config.footage.assetPrefix) && Number.isFinite(assets[key].durationSeconds) && assets[key].durationSeconds > 0)
-    .filter((key) => !Object.values(assets).some((asset) => asset.vertical === key))
-    .map((key) => {
-      const master = mediaFor(key);
-      const verticalKey = assets[key].vertical;
-      // A wide subject-side label is not a reviewed vertical crop. Require the
-      // separate crop record, and keep its vertical text zone off the master.
-      const crop = crops[key];
-      const vertical = verticalKey
-        ? { ...mediaFor(verticalKey), ...(crop ? { text: crop.text } : {}) }
-        : config.footage.allowShortCrop && crop ? { ...master, objectPosition: crop.objectPosition, text: crop.text } : null;
-      return { master, vertical, durationSeconds: master.durationSeconds };
-    })
-    .sort((left, right) => left.master.key.localeCompare(right.master.key));
-
   // Offset, mirrored, and vertical derivatives are the same footage; chaining
   // one directly into its sibling — within a scene or across a scene cut —
   // plays as a repeated clip. footageFamily comes from video/footage.mjs so the
   // producer, the Media component, and `timds video check` agree.
 
-  const selectFootage = (scene, seconds, format, previousFamily = "") => {
+  /**
+   * The clips a scene plays, in order. The beat's own picks lead: a model that
+   * read the catalog chose them for this narration. The rest of the library
+   * follows, ranked so the whole production spreads across the catalog rather
+   * than reopening every scene on the same clip: least played in this
+   * production first, then the clip whose title and tags share the most words
+   * with the narration, then the longer clip, then the key. Every candidate
+   * still obeys the family and text-side rules while the chain fills.
+   */
+  const selectFootage = (scene, seconds, format, previousFamily, usage) => {
     const query = tokens(`${scene.role} ${scene.narration} ${scene.headline || ""}`);
-    const ranked = horizontalFootage()
-      .filter((pair) => format !== "short" || (pair.vertical && Number.isFinite(pair.vertical.durationSeconds)))
-      .map((pair) => ({ ...pair, effectiveDurationSeconds: format === "short" ? pair.vertical.durationSeconds : pair.master.durationSeconds }))
-      .sort((left, right) => score(query, right.master.key) - score(query, left.master.key) || right.effectiveDurationSeconds - left.effectiveDurationSeconds || left.master.key.localeCompare(right.master.key));
-    if (!ranked.length) {
+    const eligible = library.eligible(format);
+    if (!eligible.length) {
       fail(format === "short"
         ? `no eligible Shorts footage under ${config.footage.assetPrefix}; publish and link vertical derivatives, or configure video.verticalMetadata with reviewed crops and enable producer.footage.allowShortCrop`
         : `no eligible footage under ${config.footage.assetPrefix}; register published clips with positive durationSeconds`);
     }
+    const byKey = new Map(eligible.map((pair) => [pair.master.key, pair]));
+    const preferred = (scene.footage || []).map((key) => byKey.get(key) || fail(`scene ${scene.id} names footage ${key}, which is not ${format} footage under ${config.footage.assetPrefix}`));
+    const played = (pair) => usage.get(pair.master.key) || 0;
+    const ranked = eligible
+      .filter((pair) => !preferred.includes(pair))
+      .map((pair) => ({ pair, relevance: overlap(query, pair.searchTokens) }))
+      .sort((left, right) => played(left.pair) - played(right.pair)
+        || right.relevance - left.relevance
+        || right.pair.effectiveDurationSeconds - left.pair.effectiveDurationSeconds
+        || left.pair.master.key.localeCompare(right.pair.master.key))
+      .map((entry) => entry.pair);
+    const ordered = [...preferred, ...ranked];
     // Default scenes and existing client snapshots hold the first clip's
     // headline placement for the whole scene. Try each zone in ranked order
     // so a short preferred chain cannot hide a complete chain in the other zone.
     const zones = format === "short"
-      ? [...new Set(ranked.filter((pair) => footageFamily(pair.master.key) !== previousFamily).map((pair) => verticalTextZone(pair.vertical.text)))]
+      ? [...new Set(ordered.filter((pair) => footageFamily(pair.master.key) !== previousFamily).map((pair) => verticalTextZone(pair.vertical.text)))]
       : [null];
     let maximumDuration = 0;
     for (const zone of zones) {
-      const candidates = zone === null ? ranked : ranked.filter((pair) => verticalTextZone(pair.vertical.text) === zone);
+      const candidates = zone === null ? ordered : ordered.filter((pair) => verticalTextZone(pair.vertical.text) === zone);
       const selected = [];
       const used = new Set();
       let duration = 0;
@@ -463,6 +570,9 @@ export function createVideoProducer({ contract, assetCatalog, mediaCatalog, vert
     if (!Array.isArray(input.timings) || input.timings.length !== input.compiled.scenes.length) fail("timings must match every compiled scene");
     const timingById = new Map(input.timings.map((line) => [line.id, line]));
     const selectedByScene = new Map();
+    // How often each clip has played so far in this production, so later
+    // scenes reach for clips the viewer has not seen yet.
+    const usage = new Map();
     // Intro and outro cards break the footage sequence; between them the last
     // clip of one scene must not share a family with the next scene's first.
     let previousFamily = "";
@@ -473,8 +583,9 @@ export function createVideoProducer({ contract, assetCatalog, mediaCatalog, vert
         previousFamily = "";
         continue;
       }
-      const selected = selectFootage(scene, timing.durationMs / 1000, input.compiled.outputFormat, previousFamily);
+      const selected = selectFootage(scene, timing.durationMs / 1000, input.compiled.outputFormat, previousFamily, usage);
       selectedByScene.set(scene.id, selected);
+      for (const pair of selected) usage.set(pair.master.key, (usage.get(pair.master.key) || 0) + 1);
       previousFamily = footageFamily(selected[selected.length - 1].master.key);
     }
     const coverSubject = chooseCover(input.compiled);

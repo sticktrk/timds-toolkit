@@ -49,6 +49,7 @@
   .beat .top select { flex: 0 0 150px; }
   .beat .top input { flex: 1; }
   .beat .tools { display: flex; gap: 2px; }
+  .beat .footage-keys { width: 100%; font: 12px/1.4 var(--mono); }
   .beat .count { font-size: 11px; color: var(--muted); text-align: right; }
   .beat .count.over { color: var(--bad); font-weight: 600; }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -115,7 +116,7 @@
   <!-- ===================== 2 · Script ===================== -->
   <section class="step" aria-labelledby="h-script">
     <h2 id="h-script"><span class="n">2</span> Script</h2>
-    <p class="note">Ordered answer beats. The compiler adds the question card, role eyebrows, the CTA outro, footage, and timing from the design system; you own the words.</p>
+    <p class="note">Ordered answer beats. The compiler adds the question card, role eyebrows, the CTA outro, and timing from the design system; you own the words and, per beat, up to three footage keys the scene opens on (the compiler fills the rest).</p>
     <div id="beats"></div>
     <div class="actions">
       <button type="button" class="secondary" id="btn-add">Add beat</button>
@@ -165,6 +166,7 @@
 (() => {
   const $ = (id) => document.getElementById(id);
   const ROLES = ["hook", "rule", "risk", "process", "exception", "answer"];
+  const footageKeys = (value) => [...new Set((Array.isArray(value) ? value : []).map((key) => String(key || "").trim()).filter(Boolean))];
   const state = { format: "horizontal", meta: null, beats: [], plan: null, savedName: null, job: null, revision: 0 };
 
   // ---- helpers -------------------------------------------------------------------
@@ -192,7 +194,7 @@
         ...(engagementRequired() || $("engagement").value.trim() ? { engagementQuestion: $("engagement").value.trim() } : {}),
         coverEmotion: state.coverEmotion || state.meta?.contract.producer?.cover?.defaultEmotion || "concern",
       },
-      answerBeats: state.beats.map((beat) => ({ id: beat.id, role: beat.role, narration: beat.narration, summary: beat.summary })),
+      answerBeats: state.beats.map((beat) => ({ id: beat.id, role: beat.role, narration: beat.narration, summary: beat.summary, ...(beat.footage.length ? { footage: beat.footage } : {}) })),
     };
   }
   function applyInput(input) {
@@ -203,7 +205,7 @@
     $("engagement").value = input.topic?.engagementQuestion || "";
     $("slug").value = input.slug || "";
     state.coverEmotion = input.topic?.coverEmotion;
-    state.beats = (input.answerBeats || []).map((beat, index) => ({ id: beat.id || `beat-${index + 1}`, role: ROLES.includes(beat.role) ? beat.role : "rule", narration: beat.narration || "", summary: beat.summary || "" }));
+    state.beats = (input.answerBeats || []).map((beat, index) => ({ id: beat.id || `beat-${index + 1}`, role: ROLES.includes(beat.role) ? beat.role : "rule", narration: beat.narration || "", summary: beat.summary || "", footage: footageKeys(beat.footage) }));
     renderBeats();
     syncFormatUi();
     $("json").value = JSON.stringify(currentInput(), null, 2);
@@ -234,7 +236,7 @@
     $("topic-hint").textContent = topic ? `${topic.minimumWords}–${topic.maximumWords} words` : "";
     $("q-hint").textContent = `≤ ${meta.contract.copy.coverHeadlineWords} words, ends with ?`;
     syncFormatUi();
-    if (!state.beats.length) { state.beats = [{ id: "beat-1", role: "hook", narration: "", summary: "" }]; renderBeats(); }
+    if (!state.beats.length) { state.beats = [{ id: "beat-1", role: "hook", narration: "", summary: "", footage: [] }]; renderBeats(); }
   }
   function syncFormatUi() {
     $("engagement-wrap").hidden = !engagementRequired();
@@ -260,6 +262,7 @@
           </div>
         </div>
         <textarea class="narration" rows="3" placeholder="Spoken narration for this beat" aria-label="Narration">${escapeHtml(beat.narration)}</textarea>
+        <input class="footage-keys" placeholder="Footage keys, comma-separated (optional)" value="${escapeAttr(beat.footage.join(", "))}" aria-label="Footage keys">
         <div class="count"></div>`;
       host.appendChild(card);
       updateCount(card);
@@ -280,6 +283,7 @@
       role: card.querySelector("select").value,
       summary: card.querySelector(".summary").value.trim(),
       narration: card.querySelector(".narration").value.trim(),
+      footage: footageKeys(card.querySelector(".footage-keys").value.split(",")),
     }));
   }
   const markDirty = () => {
@@ -304,7 +308,7 @@
     renderBeats();
     markDirty();
   });
-  $("btn-add").addEventListener("click", () => { readBeats(); state.beats.push({ id: `beat-${state.beats.length + 1}`, role: state.beats.length ? "rule" : "hook", narration: "", summary: "" }); renderBeats(); markDirty(); });
+  $("btn-add").addEventListener("click", () => { readBeats(); state.beats.push({ id: `beat-${state.beats.length + 1}`, role: state.beats.length ? "rule" : "hook", narration: "", summary: "", footage: [] }); renderBeats(); markDirty(); });
   $("btn-apply-json").addEventListener("click", () => {
     try { applyInput(JSON.parse($("json").value)); markDirty(); $("script-error").textContent = ""; }
     catch (caught) { $("script-error").textContent = `JSON: ${caught.message}`; }

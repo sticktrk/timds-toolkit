@@ -162,6 +162,40 @@ test("compiles programmatic productions with client-owned producer copy and asse
   assert.equal(finalized.coverSubject.key, "cover-subject-concern");
   assert.deepEqual(finalized.plan.scenes.find((scene) => scene.id === "records").assets, ["footage-one", "footage-two"]);
 
+  // A beat's own picks open its scene in that order; the compiler fills the rest.
+  const picked = producer.compileProduction({
+    schemaVersion: 1,
+    slug: "sample-answer-picked",
+    outputFormat: "horizontal",
+    exactQuestion: "Should I keep these records?",
+    topic: { label: "important records", engagementQuestion: "Are you keeping these records?", coverEmotion: "concern" },
+    answerBeats: [{ id: "records", role: "rule", narration: "Keep the records together and preserve every page.", summary: "Keep every record together", footage: ["footage-two", " footage-two "] }],
+  });
+  assert.deepEqual(picked.scenes.find((scene) => scene.id === "records").footage, ["footage-two"]);
+  const pickedFinal = producer.finalizeProduction({
+    schemaVersion: 1,
+    compiled: picked,
+    timings: picked.scenes.map((scene) => ({ id: scene.id, durationMs: scene.id === "records" ? 8_000 : 1_000, words: [{ text: scene.id, startMs: 0, endMs: 700 }] })),
+    audioSrc: "audio.mp3",
+  });
+  assert.deepEqual(pickedFinal.plan.scenes.find((scene) => scene.id === "records").assets, ["footage-two", "footage-one"]);
+  for (const [footage, message] of [
+    [["footage-nine"], /footage-nine, which is not horizontal footage under footage-/u],
+    [["cover-subject-concern"], /not horizontal footage/u],
+    [["footage-one-vertical"], /not horizontal footage/u],
+    [["footage-one", "footage-two", "footage-one-vertical", "footage-nine"], /names 4 clips; the limit is 3/u],
+    ["footage-one", /must be an array of footage keys/u],
+  ]) {
+    assert.throws(() => producer.compileProduction({
+      schemaVersion: 1,
+      slug: "sample-answer-bad-pick",
+      outputFormat: "horizontal",
+      exactQuestion: "Should I keep these records?",
+      topic: { label: "important records", engagementQuestion: "Are you keeping these records?", coverEmotion: "concern" },
+      answerBeats: [{ id: "records", role: "rule", narration: "Keep the records together.", summary: "Keep every record together", footage }],
+    }), message);
+  }
+
   const authoring = createVideoAuthoringContract({
     contract,
     manifest: { systemId: "example/core", name: "Example Design System", version: "2.3.4" },
@@ -176,6 +210,11 @@ test("compiles programmatic productions with client-owned producer copy and asse
     provenance: { version: "2.3.4", commit: "a".repeat(40), indexUrl: "https://example.com/artifact/design-system/index.json" },
     outputFormat: "short",
   });
+  // Without the catalogs, footage stays compiler-owned: no catalog, no pick field.
+  assert.equal(authoring.footage, undefined);
+  assert.equal(authoring.inputSchema.properties.answerBeats.items.properties.footage, undefined);
+  assert.ok(authoring.compilerOwns.includes("footage chains"));
+  assert.ok(authoring.prompt.instructions.some((line) => /cover subjects, footage, timing/u.test(line)));
   assert.equal(authoring.constraints.headlineWords, contract.copy.shortHeadlineWords);
   assert.equal(authoring.constraints.engagementQuestion.required, false);
   assert.equal(authoring.constraints.engagementQuestion.maximumWords, contract.copy.shortHeadlineWords);
@@ -208,6 +247,119 @@ test("compiles programmatic productions with client-owned producer copy and asse
   ]);
   assert.match("Are you keeping these records?", new RegExp(horizontalAuthoring.inputSchema.properties.topic.properties.engagementQuestion.allOf[2].pattern, "u"));
   assert.equal(authoring.designSystem.commit, "a".repeat(40));
+
+  // With the catalogs, the contract lists every eligible clip for the format
+  // and the schema lets each beat name up to three of them.
+  const catalogAuthoring = (outputFormat) => createVideoAuthoringContract({
+    contract,
+    manifest: { systemId: "example/core", name: "Example Design System", version: "2.3.4" },
+    designSystemIndex: {
+      schemaVersion: 1,
+      system: { id: "example/core", name: "Example Design System", version: "2.3.4" },
+      pages: [
+        { id: "brand/voice", blocks: [{ id: "brand/voice#plain-language", title: "Plain language", notes: [{ id: "direct", text: "Lead with the answer." }] }] },
+        { id: "social/shorts", blocks: [{ id: "social/shorts#writing", title: "Short writing", prose: [{ id: "fast", text: "Make the first beat immediate." }] }] },
+      ],
+    },
+    provenance: { version: "2.3.4", commit: "a".repeat(40) },
+    outputFormat,
+    assetCatalog,
+    mediaCatalog: { assets: mediaCatalog.assets.map((asset) => asset.key === "footage-one" ? { ...asset, title: "Night rear-end in rain", tags: ["b-roll", "night"] } : asset) },
+  });
+  const withCatalog = catalogAuthoring("horizontal");
+  assert.deepEqual(withCatalog.footage, {
+    assetPrefix: "footage-",
+    maximumPerBeat: 3,
+    clips: [
+      { key: "footage-one", title: "Night rear-end in rain", tags: ["b-roll", "night"], durationSeconds: 5 },
+      { key: "footage-two", tags: [], durationSeconds: 5 },
+    ],
+  });
+  assert.deepEqual(withCatalog.inputSchema.properties.answerBeats.items.properties.footage.items, { type: "string", enum: ["footage-one", "footage-two"] });
+  assert.equal(withCatalog.inputSchema.properties.answerBeats.items.properties.footage.maxItems, 3);
+  assert.ok(!withCatalog.inputSchema.properties.answerBeats.items.required.includes("footage"));
+  assert.ok(withCatalog.compilerOwns.includes("footage timing, fallback clips, and chain rules"));
+  assert.ok(!withCatalog.compilerOwns.includes("footage chains"));
+  assert.ok(withCatalog.prompt.instructions.some((line) => /set footage to one to 3 ordered clip keys/u.test(line)));
+  assert.ok(!withCatalog.prompt.instructions.some((line) => /cover subjects, footage, timing/u.test(line)));
+  // Shorts list only clips with a vertical derivative, at the derivative's duration.
+  assert.deepEqual(catalogAuthoring("short").footage.clips.map((clip) => clip.key), ["footage-one", "footage-two"]);
+});
+
+test("spreads fallback footage across a production and ranks it by published title and tags", () => {
+  const contract = validateVideoContract({
+    schemaVersion: 1,
+    id: "example-video",
+    name: "Example video",
+    package: { shortCount: 0 },
+    copy: {},
+    brand: {
+      colors: { background: "#000", accent: "#fc0", text: "#fff" },
+      fonts: {},
+      logo: "public/logo.svg",
+      series: "Example Answers",
+      site: "example.com",
+      tagline: "Clear answers",
+    },
+    producer: {
+      schemaVersion: 1,
+      authoring: { sharedPromptBlocks: [], formatPromptBlocks: {} },
+      roleEyebrows: { hook: "In brief", rule: "The rule", risk: "The risk", process: "Next step", exception: "The exception", answer: "The answer" },
+      intro: { enabled: false },
+      engagement: { enabled: false, eyebrow: "Your turn", narrationTemplate: "{{question}} Tell us below." },
+      outro: { enabled: false, narrationTemplate: "Learn more about {{topic}} at {{site}}." },
+      cover: { assetPrefix: "cover-subject-" },
+      footage: { assetPrefix: "dash-" },
+    },
+  });
+  const clips = {
+    "dash-16-red-light": { title: "Day car red-light runner", tags: ["intersection", "red light"] },
+    "dash-18-jackknife": { title: "Wet truck jackknife", tags: ["truck", "rain"] },
+    "dash-20-rear-end": { title: "Night car rear-end in rain", tags: ["rear-end", "rain", "night"] },
+    "dash-30-spinout": { title: "Day car spinout", tags: ["loss of control"] },
+  };
+  const assetCatalog = { assets: {
+    "cover-subject-concern": { mediaKey: "cover-subject-concern" },
+    ...Object.fromEntries(Object.keys(clips).map((key) => [key, { mediaKey: key, durationSeconds: 6, subject: "center", flip: false, text: "left-center" }])),
+  } };
+  const mediaCatalog = { assets: Object.keys(assetCatalog.assets).map((key) => ({
+    key,
+    filename: `${key}.${key.startsWith("cover-") ? "jpg" : "mp4"}`,
+    publicUrl: `https://example.com/${key}`,
+    contentType: key.startsWith("cover-") ? "image/jpeg" : "video/mp4",
+    durationSeconds: assetCatalog.assets[key].durationSeconds,
+    ...(clips[key] || {}),
+  })) };
+  const producer = createVideoProducer({ contract, assetCatalog, mediaCatalog });
+  const compiled = producer.compileProduction({
+    schemaVersion: 1,
+    slug: "sample-answer",
+    outputFormat: "horizontal",
+    exactQuestion: "Was the rear-end crash my fault?",
+    topic: { label: "rear-end crashes", coverEmotion: "concern" },
+    answerBeats: [
+      { id: "hook", role: "hook", narration: "Their job is to pay you less.", summary: "They pay less" },
+      { id: "rule", role: "rule", narration: "A rear-end crash in the rain is usually the trailing driver's fault.", summary: "Trailing driver is at fault" },
+      { id: "process", role: "process", narration: "Save the footage and get checked.", summary: "Save it and get checked" },
+      { id: "answer", role: "answer", narration: "Simple crash, complicated claim.", summary: "Simple crash, complicated claim" },
+    ],
+  });
+  const finalized = producer.finalizeProduction({
+    schemaVersion: 1,
+    compiled,
+    timings: compiled.scenes.map((scene) => ({ id: scene.id, durationMs: 8_000, words: [{ text: scene.id, startMs: 0, endMs: 700 }] })),
+    audioSrc: "audio.mp3",
+  });
+  const chains = Object.fromEntries(finalized.plan.scenes.map((scene) => [scene.id, scene.assets]));
+  // No words in common with any clip: the first scene takes the catalog in key order.
+  assert.deepEqual(chains.hook, ["dash-16-red-light", "dash-18-jackknife"]);
+  // Clips the production has not played yet come first, and among those the
+  // narration's "rear-end" and "rain" match the published title and tags.
+  assert.deepEqual(chains.rule, ["dash-20-rear-end", "dash-30-spinout"]);
+  // Everything has played once; the least-played rule restarts the catalog
+  // rather than reopening on the same clip every scene.
+  assert.deepEqual(chains.process, ["dash-16-red-light", "dash-18-jackknife"]);
+  assert.deepEqual(chains.answer, ["dash-20-rear-end", "dash-30-spinout"]);
 });
 
 test("rejects stale or incomplete published authoring context", () => {
@@ -366,8 +518,9 @@ test("never chains footage from one family back to back, within or across scenes
   // Within the first scene, footage-one-mirrored ranks directly after
   // footage-one but is the same footage; the chain must jump to footage-two.
   assert.deepEqual(finalized.plan.scenes.find((scene) => scene.id === "first").assets, ["footage-one", "footage-two"]);
-  // The first scene ended on footage-two, so the second reopens on footage-one.
-  assert.equal(finalized.plan.scenes.find((scene) => scene.id === "second").asset, "footage-one");
+  // The first scene ended on footage-two, and footage-one has already played,
+  // so the second reopens on the family's unplayed mirrored cut.
+  assert.equal(finalized.plan.scenes.find((scene) => scene.id === "second").asset, "footage-one-mirrored");
   // The third scene ranks footage-one and its mirrored sibling first, but the
   // second scene just played that family; the cut must land on footage-two.
   assert.equal(finalized.plan.scenes.find((scene) => scene.id === "third").asset, "footage-two");

@@ -8,6 +8,7 @@ import { labFixture, registerVerticalMetadata } from "./video.fixture.mjs";
 import {
   buildDraftMessages,
   compileVideoLabInput,
+  describeFootageCatalog,
   createRenderJobs,
   createVideoLabServer,
   describeVideoLabState,
@@ -127,6 +128,19 @@ test("builds the draft prompt from the client's authoring contract and strips Ti
   const stripped = JSON.stringify(stripSchemaExtensions(authoring.inputSchema));
   assert.doesNotMatch(stripped, /x-timds/u);
   assert.match(JSON.stringify(authoring.inputSchema), /x-timds/u);
+  assert.doesNotMatch(system, /Footage catalog/u);
+
+  // With the catalogs, the prompt lists every clip the draft may name per beat.
+  const media = JSON.parse(await fs.readFile(path.join(workspace.designSystemRoot, "media.json"), "utf8"));
+  const withCatalog = createVideoAuthoringContract({
+    contract: loaded.video.contract, manifest: workspace.manifest, designSystemIndex: index, provenance: { commit: "0".repeat(40), version: "1.2.3" }, outputFormat: "horizontal",
+    assetCatalog: loaded.video.assets, mediaCatalog: media, verticalMetadata: loaded.video.verticalMetadata,
+  });
+  assert.deepEqual(withCatalog.footage.clips.map((clip) => clip.key), ["footage-one", "footage-three", "footage-two"]);
+  const catalogPrompt = buildDraftMessages(withCatalog, { question: "Should I keep these records?", topicLabel: "important records", notes: "", engagementQuestion: "", slug: "records" }).system;
+  assert.match(catalogPrompt, /Footage catalog \(3 clips\)\. Set each answer beat's footage to 1–3 of these keys/u);
+  assert.match(catalogPrompt, /^- footage-two: two · 6s$/mu);
+  assert.equal(describeFootageCatalog({ maximumPerBeat: 3, clips: [{ key: "dash-1", title: "Night rear-end", tags: ["rain", "night"], durationSeconds: 6.042 }] }), "Footage catalog (1 clips). Set each answer beat's footage to 1–3 of these keys, best match first:\n- dash-1: Night rear-end (rain, night) · 6.042s");
 });
 
 test("drafts through an injected Claude client and validates the result through the producer", async (t) => {
