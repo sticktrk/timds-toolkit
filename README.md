@@ -294,6 +294,52 @@ npm run timds -- video studio TOPIC
 npm run timds -- video render TOPIC
 ```
 
+### Brand files every render host can reach
+
+The contract's brand files are `brand.logo`, `brand.fontFiles[].path`, and the
+optional sound design `brand.audio.bed` and `brand.audio.transition`. Each
+must be one of the two sources every render host has:
+
+- a path to a file committed in the Design System, such as
+  `"public/brand/logo.png"`; or
+- a published TimDS media record, `{ "mediaKey": "brand-music-bed" }`, whose
+  `media.json` entry has a stable `publicUrl`. Use this for audio and anything
+  else too large or of a format the repository does not commit.
+
+```json
+"audio": {
+  "bed": { "mediaKey": "brand-music-bed" },
+  "transition": { "mediaKey": "brand-transition" },
+  "voiceGain": 1, "restVolume": 1, "duckVolume": 0.3,
+  "attackFrames": 6, "releaseFrames": 20
+}
+```
+
+`video check` fails when a brand file is missing, is ignored by git, sits under
+the ignored `video-local/` directory, or names a media key that is not
+published. A file that exists only on the machine that generated it renders
+locally and 404s on every other host, so it is refused before merge rather
+than discovered in production. Staging never drops a declared file: the lab,
+`video render`, and silent previews fail with the contract field that names it.
+
+Render hosts (the lab, `video render`, and automated Video Lab servers) stage
+brand files through one exported function and check the finished project
+before Remotion starts:
+
+```js
+import { assertVideoProjectStaged, stageVideoBrand } from "@dtconcepts/timds/video";
+
+const brand = await stageVideoBrand({ designSystemRoot, contract, publicRoot, mediaCatalog, cacheRoot });
+const project = { ...rest, contract: { ...contract, brand } };
+await assertVideoProjectStaged(project, publicRoot); // names every missing staticFile() before rendering
+```
+
+`stageVideoBrand` validates the sources, copies committed files, downloads
+published media (cached by SHA-256 under `cacheRoot` when given), and returns
+the brand with runtime paths. `assertVideoProjectStaged` lists every file the
+components request, including the logo, fonts, sound design, footage, cover,
+and narration, and fails with each missing file's project field.
+
 Prepared media, generated audio, Remotion entry files, and review packages live
 under ignored `video-local/`. Registered source media remains governed by the
 normal TimDS media catalog. The committed production records refer only to
@@ -358,9 +404,7 @@ The default voice is `en-US-AriaNeural`; override it with `--voice` or declare
 in `video/contract.json`. Generated takes stay under ignored
 `video-local/lab/NAME/voiceover/`, keyed by the exact script, voice settings,
 and generator. Edits get new audio and timings; incomplete caches regenerate.
-Authored production scripts and locked takes remain untouched. Optional
-`brand.audio` bed/transition files are copied from `video-local/public/` when
-available; missing optional tracks are reported and narration still renders.
+Authored production scripts and locked takes remain untouched.
 
 Shorts use each master's published `vertical` derivative by default. A client
 can set `producer.footage.allowShortCrop: true` to use the published master
