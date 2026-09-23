@@ -30,6 +30,10 @@ export type VideoProjectScene = {
   assets?: string[];
   intro?: boolean;
   outro?: boolean;
+  /** Client-rendered graphic board (structure.<format>.graphicScenes). TimDS validates only `kind`. */
+  visual?: {kind: string; [key: string]: unknown};
+  /** Chapter id for client rails and published chapter lists. */
+  chapter?: string;
 };
 export type VideoProjectAsset = {
   key: string;
@@ -318,12 +322,25 @@ const SceneView: React.FC<VideoProjectSceneProps> = ({project, scene, line, dura
   const OutroComponent = components?.Outro ?? Outro;
   if (scene.intro) return <><IntroComponent project={project} question={scene.headline || line.words.map((word) => word.text).join(" ")} vertical={vertical} /><BrandWatermark project={project} vertical={vertical} sceneHasLogo /></>;
   if (scene.outro) return <><OutroComponent project={project} vertical={vertical} /><BrandWatermark project={project} vertical={vertical} sceneHasLogo /></>;
-  const firstAsset = project.assets[(scene.assets || [scene.asset])[0] || ""];
+  const assetKeys = sceneAssetKeys(scene);
+  if (scene.visual && !assetKeys.length) {
+    // A footage-free graphic scene. The client's components draw the board;
+    // the default set shows the scene copy on the brand background so a
+    // production still renders before the client has implemented the kind.
+    return <AbsoluteFill style={{backgroundColor: brand.colors.background, justifyContent: "center", padding: vertical ? "0 96px 430px" : "0 150px 190px"}}>
+      {scene.eyebrow ? <div style={{color: brand.colors.accent, fontFamily: brand.fonts.ui, fontSize: vertical ? 26 : 22, fontWeight: 700, letterSpacing: 5, textTransform: "uppercase", marginBottom: 18}}>{scene.eyebrow}</div> : null}
+      {scene.headline ? <div style={{color: brand.colors.text, fontFamily: brand.fonts.display, fontSize: vertical ? 110 : 84, fontWeight: 700, lineHeight: 0.98, textWrap: "pretty"}}><GoldHeadline headline={scene.headline} goldPhrase={scene.goldPhrase} color={brand.colors.accent} /></div> : null}
+      <BrandWatermark project={project} vertical={vertical} />
+      <CaptionPages project={project} line={line} lead={lead} vertical={vertical} />
+    </AbsoluteFill>;
+  }
+  const firstAsset = project.assets[assetKeys[0] || ""];
   const right = firstAsset?.text?.startsWith("right");
   const lower = verticalTextZone(firstAsset?.text) === "lower";
+  const top = Boolean(firstAsset?.text?.endsWith("top"));
   return <AbsoluteFill>
     <Media project={project} scene={scene} duration={duration} vertical={vertical} />
-    <AbsoluteFill style={{alignItems: vertical ? "center" : right ? "flex-end" : "flex-start", justifyContent: vertical ? lower ? "flex-end" : "flex-start" : lower ? "flex-end" : "center", padding: vertical ? lower ? "0 150px 430px 70px" : "240px 150px 0 70px" : "0 120px 150px"}}>
+    <AbsoluteFill style={{alignItems: vertical ? "center" : right ? "flex-end" : "flex-start", justifyContent: vertical ? lower ? "flex-end" : "flex-start" : lower ? "flex-end" : top ? "flex-start" : "center", padding: vertical ? lower ? "0 150px 430px 70px" : "240px 150px 0 70px" : top ? "110px 120px 150px" : "0 120px 150px"}}>
       <div style={{width: vertical ? "100%" : 830, padding: vertical ? 0 : "42px 50px 46px", textAlign: vertical ? "center" : "left", backgroundColor: vertical ? "transparent" : brand.colors.panel, borderLeft: vertical ? undefined : `9px solid ${brand.colors.accent}`, textShadow: vertical ? `0 3px 26px ${brand.colors.background}` : undefined}}>
         {scene.eyebrow ? <div style={{color: brand.colors.accent, fontFamily: brand.fonts.ui, fontSize: vertical ? 26 : 22, fontWeight: 700, letterSpacing: 5, textTransform: "uppercase", marginBottom: 18}}>{scene.eyebrow}</div> : null}
         <div style={{color: brand.colors.text, fontFamily: brand.fonts.display, fontSize: vertical ? 110 : 72, fontWeight: 700, lineHeight: 0.98, textWrap: "pretty"}}><GoldHeadline headline={scene.headline} goldPhrase={scene.goldPhrase} color={brand.colors.accent} /></div>

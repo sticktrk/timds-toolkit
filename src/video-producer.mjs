@@ -43,7 +43,7 @@ const promptBlockIds = (value, label) => {
   return value.map((entry, index) => promptBlockId(entry, `${label}[${index}]`));
 };
 
-const renderTemplate = (template, values) => text(template, "video producer template").replace(/\{\{(question|topic|site|series)\}\}/gu, (_match, key) => values[key]);
+const renderTemplate = (template, values) => text(template, "video producer template").replace(/\{\{(question|topic|solution|site|series)\}\}/gu, (_match, key) => values[key] ?? "");
 const tokens = (value) => new Set(String(value ?? "").toLocaleLowerCase().replace(/[^a-z0-9]+/gu, " ").split(/\s+/u).filter((token) => token.length >= 4));
 const overlap = (query, candidateTokens) => [...query].reduce((sum, token) => sum + (candidateTokens.has(token) ? 1 : 0), 0);
 const score = (query, candidate) => overlap(query, tokens(candidate));
@@ -123,6 +123,14 @@ export function validateVideoProducerConfig(input, contract) {
   const intro = object(config.intro || {}, "video contract producer.intro");
   const outro = object(config.outro || {}, "video contract producer.outro");
   const cover = object(config.cover || {}, "video contract producer.cover");
+  const subscribe = object(config.subscribe || {}, "video contract producer.subscribe");
+  if (subscribe.afterBeat !== undefined && (!Number.isInteger(subscribe.afterBeat) || subscribe.afterBeat < 1)) {
+    throw new Error("video contract producer.subscribe.afterBeat must be a positive integer");
+  }
+  const subscribeFormats = subscribe.formats || ["horizontal"];
+  if (!Array.isArray(subscribeFormats) || subscribeFormats.some((format) => !["horizontal", "short"].includes(format))) {
+    throw new Error("video contract producer.subscribe.formats may contain only horizontal or short");
+  }
   const footage = object(config.footage || {}, "video contract producer.footage");
   if (footage.allowShortCrop !== undefined && typeof footage.allowShortCrop !== "boolean") {
     throw new Error("video contract producer.footage.allowShortCrop must be a boolean");
@@ -167,6 +175,17 @@ export function validateVideoProducerConfig(input, contract) {
         if (value === undefined || value === null || value === "") return [];
         return [[format, text(value, `video contract producer.outro.narrationTemplates.${format}`)]];
       })),
+    },
+    // A full-frame subscribe board early in the video, once the topic is
+    // established: spoken from a template, drawn by the client's components
+    // as visual kind `subscribe`. Requires structure.<format>.graphicScenes.
+    subscribe: {
+      enabled: subscribe.enabled === true,
+      formats: subscribeFormats,
+      id: slugSafe(subscribe.id || "subscribe", "video contract producer.subscribe.id"),
+      afterBeat: subscribe.afterBeat ?? 1,
+      narrationTemplate: subscribe.enabled === true ? text(subscribe.narrationTemplate, "video contract producer.subscribe.narrationTemplate") : "",
+      requireSolution: subscribe.requireSolution !== false,
     },
     cover: {
       eyebrow: text(cover.eyebrow || contract.brand.series, "video contract producer.cover.eyebrow"),
@@ -403,7 +422,7 @@ export function createVideoProducer({ contract, assetCatalog, mediaCatalog, vert
   if (!config) throw new Error(`${contract.name} has no video producer contract`);
   const library = createFootageLibrary({ config, contractName: contract.name, assetCatalog, mediaCatalog, verticalMetadata });
   const { assets, mediaFor, fail } = library;
-  const reservedIds = new Set([config.intro.id, config.engagement.id, config.outro.id]);
+  const reservedIds = new Set([config.intro.id, config.engagement.id, config.outro.id, config.subscribe.id]);
   const yesNoQuestion = /^(?:are|can|could|did|do|does|has|have|is|should|was|were|will|would)\b/iu;
 
   /** A beat's footage picks: declared, eligible for the format, deduplicated, at most the per-beat limit. */
@@ -446,6 +465,13 @@ export function createVideoProducer({ contract, assetCatalog, mediaCatalog, vert
       const summary = text(beat.summary, `producer answer beat ${id}.summary`);
       if (words(summary).length > headlineWords) fail(`answer beat ${id}.summary exceeds ${headlineWords} words`);
       const footage = footagePicks(id, beat.footage, input.outputFormat, eligibleKeys);
+      const graphicFormat = input.outputFormat === "short" ? "short" : "longform";
+      if (beat.visual !== undefined && beat.visual !== null) {
+        if (!contract.structure[graphicFormat].graphicScenes) fail(`answer beat ${id}.visual needs structure.${graphicFormat}.graphicScenes enabled in the video contract`);
+        object(beat.visual, `producer answer beat ${id}.visual`);
+        slugSafe(beat.visual.kind, `producer answer beat ${id}.visual.kind`);
+      }
+      if (beat.chapter !== undefined && beat.chapter !== null) slugSafe(beat.chapter, `producer answer beat ${id}.chapter`);
       return {
         id,
         role: beat.role,
@@ -453,9 +479,17 @@ export function createVideoProducer({ contract, assetCatalog, mediaCatalog, vert
         eyebrow: config.roleEyebrows[beat.role],
         headline: summary,
         ...(footage.length ? { footage } : {}),
+        ...(beat.visual ? { visual: beat.visual } : {}),
+        ...(beat.chapter ? { chapter: beat.chapter } : {}),
       };
     });
-    const values = { question: exactQuestion, topic: topicLabel.toLocaleLowerCase(), site: contract.brand.site, series: contract.brand.series };
+    // The board needs a solution to promise. When the contract does not require
+    // one, a request without it simply gets no subscribe board.
+    const solution = config.subscribe.enabled && config.subscribe.requireSolution && config.subscribe.formats.includes(input.outputFormat)
+      ? text(input.topic?.solution, "producer topic.solution")
+      : String(input.topic?.solution ?? "").trim();
+    const subscribeEnabled = config.subscribe.enabled && config.subscribe.formats.includes(input.outputFormat) && Boolean(solution);
+    const values = { question: exactQuestion, topic: topicLabel.toLocaleLowerCase(), solution, site: contract.brand.site, series: contract.brand.series };
     const engagementEnabled = config.engagement.enabled && config.engagement.formats.includes(input.outputFormat);
     const engagementQuestion = engagementEnabled
       ? validateQuestion(fail, "topic.engagementQuestion", input.topic?.engagementQuestion, headlineWords, contract.copy.coverHeadlineCharacters)
@@ -465,13 +499,29 @@ export function createVideoProducer({ contract, assetCatalog, mediaCatalog, vert
     }
     const scenes = [];
     if (config.intro.enabled) scenes.push({ id: config.intro.id, role: "intro", narration: exactQuestion, headline: exactQuestion, intro: true });
-    scenes.push(...content);
+    if (subscribeEnabled) {
+      const graphicFormat = input.outputFormat === "short" ? "short" : "longform";
+      if (!contract.structure[graphicFormat].graphicScenes) fail(`producer.subscribe needs structure.${graphicFormat}.graphicScenes enabled in the video contract`);
+      const at = Math.min(config.subscribe.afterBeat, content.length);
+      scenes.push(...content.slice(0, at));
+      scenes.push({
+        id: config.subscribe.id,
+        role: "subscribe",
+        narration: renderTemplate(config.subscribe.narrationTemplate, values),
+        visual: { kind: "subscribe", topic: values.topic, solution },
+        ...(content[at - 1]?.chapter ? { chapter: content[at - 1].chapter } : {}),
+      });
+      scenes.push(...content.slice(at));
+    } else {
+      scenes.push(...content);
+    }
     if (engagementEnabled) scenes.push({
       id: config.engagement.id,
       role: "engage",
       narration: renderTemplate(config.engagement.narrationTemplate, { ...values, question: engagementQuestion }),
       eyebrow: config.engagement.eyebrow,
       headline: engagementQuestion,
+      ...(content.at(-1)?.chapter ? { chapter: content.at(-1).chapter } : {}),
     });
     if (config.outro.enabled) scenes.push({ id: config.outro.id, role: "outro", narration: renderTemplate(config.outro.narrationTemplates[input.outputFormat] || config.outro.narrationTemplate, values), outro: true });
     return {
@@ -579,7 +629,8 @@ export function createVideoProducer({ contract, assetCatalog, mediaCatalog, vert
     for (const scene of input.compiled.scenes) {
       const timing = timingById.get(scene.id) || fail(`scene ${scene.id} has no measured timing`);
       if (!Number.isFinite(timing.durationMs) || timing.durationMs <= 0) fail(`scene ${scene.id} needs a positive measured duration`);
-      if (scene.intro || scene.outro) {
+      if (scene.intro || scene.outro || (scene.visual && !scene.footage?.length && !(scene.visual.overFootage === true))) {
+        // Cards and footage-free boards break the footage sequence.
         previousFamily = "";
         continue;
       }
@@ -593,13 +644,19 @@ export function createVideoProducer({ contract, assetCatalog, mediaCatalog, vert
     const scenes = input.compiled.scenes.map((scene) => {
       if (scene.intro) return { id: scene.id, intro: true, headline: scene.headline };
       if (scene.outro) return { id: scene.id, outro: true };
+      const extras = {
+        ...(scene.visual ? { visual: scene.visual } : {}),
+        ...(scene.chapter ? { chapter: scene.chapter } : {}),
+      };
       const selected = selectedByScene.get(scene.id);
+      if (!selected) return { id: scene.id, ...(scene.eyebrow ? { eyebrow: scene.eyebrow } : {}), ...(scene.headline ? { headline: scene.headline } : {}), ...extras };
       const masters = selected.map((pair) => pair.master.key);
       const verticals = selected.map((pair) => pair.vertical?.key).filter(Boolean);
       return {
         id: scene.id,
         eyebrow: scene.eyebrow,
         headline: scene.headline,
+        ...extras,
         ...(masters.length === 1 ? { asset: masters[0], ...(verticals[0] ? { verticalAsset: verticals[0] } : {}) } : { assets: masters, ...(verticals.length ? { verticalAssets: verticals } : {}) }),
       };
     });
