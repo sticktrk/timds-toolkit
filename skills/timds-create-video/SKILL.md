@@ -73,7 +73,10 @@ When creating or registering B-roll, follow the
 [vertical crop authoring contract](references/vertical-crops.md). Include the
 client's `vertical-meta.json` record with the asset registration, inspect the
 subject and text zone in the first, middle, and last frames, and run
-`npm run timds -- video check` before handing off. A wide clip's subject-side
+`npm run timds -- video check` before handing off. A horizontal clip's `text`
+zone names where the copy box sits (`left-center`, `left-bottom`, `left-top`,
+`right-center`, `right-bottom`, `right-top`, or `bottom`); choose a top zone
+when the action crosses the middle band. A wide clip's subject-side
 label is not sufficient crop metadata. Prefer reviewed, published vertical
 derivatives; do not enable a blind center-crop fallback to make a plan pass.
 
@@ -81,19 +84,32 @@ derivatives; do not enable a blind center-crop fallback to make a plan pass.
 
 When the contract declares a `producer` block, put the answer into a compile
 request under the declared lab directory (`video/lab/NAME.json` by default:
-exact question, topic label, engagement question if required, ordered answer
-beats with role, narration, and a complete micro-headline) and run:
+exact question, topic label, engagement question if required, `topic.solution`
+when `producer.subscribe` is enabled for the format, and ordered answer beats
+with role, narration, a complete micro-headline, and optionally one to three
+`footage` keys) and run:
 
 ```bash
 npm run timds -- video lab NAME --plan
 npm run timds -- video lab NAME
 ```
 
-The plan prints every scene's timing, eyebrow, headline, footage chain, and
-cover as the producer resolved them; the studio shows the frames through the
-client's components. Fix the request, the catalog, or the components there
-before authoring a five-record production. `video check` compiles every lab
-input.
+The plan prints every scene's timing, eyebrow, headline, footage chain or
+board, and cover as the producer resolved them; the studio shows the frames
+through the client's components. Fix the request, the catalog, or the
+components there before authoring a five-record production. `video check`
+compiles every lab input.
+
+Graphic boards are client work. When `structure.<format>.graphicScenes` is
+true, a beat or production scene may carry `visual: { "kind": "...", ... }`
+plus an optional `chapter` slug; the Design System's `Graphic` component (or
+its full component snapshot) draws every kind, and TimDS only checks the shape.
+A board with no footage keys renders on the brand background and breaks the
+footage-family sequence; a board on a scene that names footage plays over that
+chain. Never invent a `kind` the client's components do not implement, and do
+not enable `graphicScenes` or `producer.subscribe` unless the client asked for
+boards: the subscribe board needs the opt-in for each format it plays in and a
+`topic.solution` in every request unless `requireSolution` is false.
 
 ## Use TimDS for deterministic work
 
@@ -112,7 +128,11 @@ Every brand file in `video/contract.json` (logo, fonts, `brand.audio.bed`,
 published `{ "mediaKey": "..." }`. Never point one at a generated file under
 `video-local/`: it renders on your machine and fails on every render host.
 Publish generated audio through TimDS media and reference its key. `video
-check` enforces this.
+check` enforces this. Files the client's components read with `staticFile()`
+(an illustration library, board artwork) are declared in `brand.staticFiles`
+as committed paths with a mount name; TimDS copies them into the render public
+root and refuses mounts that would shadow staged brand files, prepared media,
+or narration.
 
 Voiceover generation replaces a timing fixture only with explicit approval to
 use `--force`. A render must fail when registered footage cannot cover a scene

@@ -113,10 +113,26 @@ export type VideoProjectCoverProps = {
   vertical?: boolean;
 };
 
+/** A graphic scene's board. The Design System owns every `visual.kind`; TimDS draws the copy fallback. */
+export type VideoProjectGraphicProps = {
+  project: VideoProject;
+  scene: VideoProjectScene;
+  /** The scene's authored `visual` block: `kind` plus whatever the board needs. */
+  visual: {kind: string; [key: string]: unknown};
+  line: VideoProjectCaptionLine;
+  duration: number;
+  lead: number;
+  /** True when the scene's footage chain plays beneath the board. */
+  overFootage: boolean;
+  vertical?: boolean;
+};
+
 /** A client Design System may replace any subset of the TimDS defaults. */
 export type VideoProjectComponentOverrides = {
   Video?: React.ComponentType<VideoProjectVideoProps>;
   Scene?: React.ComponentType<VideoProjectSceneProps>;
+  /** Draws `scene.visual` boards; the default Scene mounts it over the footage chain or the brand background. */
+  Graphic?: React.ComponentType<VideoProjectGraphicProps>;
   Intro?: React.ComponentType<VideoProjectIntroProps>;
   Outro?: React.ComponentType<VideoProjectOutroProps>;
   Cover?: React.ComponentType<VideoProjectCoverProps>;
@@ -316,37 +332,65 @@ const CaptionPages: React.FC<{project: VideoProject; line: VideoProjectCaptionLi
   </div>;
 };
 
-const SceneView: React.FC<VideoProjectSceneProps> = ({project, scene, line, duration, lead, vertical, components}) => {
+// The eyebrow and headline pair every copy block draws. The panel over
+// footage and the full-frame board share this one brand treatment and differ
+// only in headline size, so a styling change reaches both.
+const SceneHeadline: React.FC<{project: VideoProject; scene: VideoProjectScene; headlineSize: number; vertical?: boolean}> = ({project, scene, headlineSize, vertical}) => {
   const brand = project.contract.brand;
+  return <>
+    {scene.eyebrow ? <div style={{color: brand.colors.accent, fontFamily: brand.fonts.ui, fontSize: vertical ? 26 : 22, fontWeight: 700, letterSpacing: 5, textTransform: "uppercase", marginBottom: 18}}>{scene.eyebrow}</div> : null}
+    {scene.headline ? <div style={{color: brand.colors.text, fontFamily: brand.fonts.display, fontSize: headlineSize, fontWeight: 700, lineHeight: 0.98, textWrap: "pretty"}}><GoldHeadline headline={scene.headline} goldPhrase={scene.goldPhrase} color={brand.colors.accent} /></div> : null}
+  </>;
+};
+
+// The copy box a footage scene shows: eyebrow, headline, optional subline,
+// placed by the first clip's declared text zone (left/right, top/center/lower).
+const SceneCopy: React.FC<{project: VideoProject; scene: VideoProjectScene; vertical?: boolean}> = ({project, scene, vertical}) => {
+  const brand = project.contract.brand;
+  const firstAsset = project.assets[sceneAssetKeys(scene)[0] || ""];
+  const right = firstAsset?.text?.startsWith("right");
+  const lower = verticalTextZone(firstAsset?.text) === "lower";
+  const top = Boolean(firstAsset?.text?.endsWith("top"));
+  return <AbsoluteFill style={{alignItems: vertical ? "center" : right ? "flex-end" : "flex-start", justifyContent: vertical ? lower ? "flex-end" : "flex-start" : lower ? "flex-end" : top ? "flex-start" : "center", padding: vertical ? lower ? "0 150px 430px 70px" : "240px 150px 0 70px" : top ? "110px 120px 150px" : "0 120px 150px"}}>
+    <div style={{width: vertical ? "100%" : 830, padding: vertical ? 0 : "42px 50px 46px", textAlign: vertical ? "center" : "left", backgroundColor: vertical ? "transparent" : brand.colors.panel, borderLeft: vertical ? undefined : `9px solid ${brand.colors.accent}`, textShadow: vertical ? `0 3px 26px ${brand.colors.background}` : undefined}}>
+      <SceneHeadline project={project} scene={scene} headlineSize={vertical ? 110 : 72} vertical={vertical} />
+      {scene.subline ? <div style={{color: brand.colors.muted, fontFamily: brand.fonts.body, fontSize: 32, marginTop: 20}}>{tieOrphan(scene.subline)}</div> : null}
+    </div>
+  </AbsoluteFill>;
+};
+
+// The default board for every `visual.kind`: the scene copy on the brand
+// background, or the ordinary copy box when footage plays beneath, so a
+// production renders before the Design System implements the kind. A client
+// replaces this through `components.Graphic` and reads `visual` for its data.
+const GraphicBoard: React.FC<VideoProjectGraphicProps> = ({project, scene, overFootage, vertical}) => {
+  if (overFootage) return <SceneCopy project={project} scene={scene} vertical={vertical} />;
+  return <AbsoluteFill style={{backgroundColor: project.contract.brand.colors.background, justifyContent: "center", padding: vertical ? "0 96px 430px" : "0 150px 190px"}}>
+    <SceneHeadline project={project} scene={scene} headlineSize={vertical ? 110 : 84} vertical={vertical} />
+  </AbsoluteFill>;
+};
+
+const SceneView: React.FC<VideoProjectSceneProps> = ({project, scene, line, duration, lead, vertical, components}) => {
   const IntroComponent = components?.Intro ?? Intro;
   const OutroComponent = components?.Outro ?? Outro;
+  const GraphicComponent = components?.Graphic ?? GraphicBoard;
   if (scene.intro) return <><IntroComponent project={project} question={scene.headline || line.words.map((word) => word.text).join(" ")} vertical={vertical} /><BrandWatermark project={project} vertical={vertical} sceneHasLogo /></>;
   if (scene.outro) return <><OutroComponent project={project} vertical={vertical} /><BrandWatermark project={project} vertical={vertical} sceneHasLogo /></>;
   const assetKeys = sceneAssetKeys(scene);
-  if (scene.visual && !assetKeys.length) {
-    // A footage-free graphic scene. The client's components draw the board;
-    // the default set shows the scene copy on the brand background so a
-    // production still renders before the client has implemented the kind.
-    return <AbsoluteFill style={{backgroundColor: brand.colors.background, justifyContent: "center", padding: vertical ? "0 96px 430px" : "0 150px 190px"}}>
-      {scene.eyebrow ? <div style={{color: brand.colors.accent, fontFamily: brand.fonts.ui, fontSize: vertical ? 26 : 22, fontWeight: 700, letterSpacing: 5, textTransform: "uppercase", marginBottom: 18}}>{scene.eyebrow}</div> : null}
-      {scene.headline ? <div style={{color: brand.colors.text, fontFamily: brand.fonts.display, fontSize: vertical ? 110 : 84, fontWeight: 700, lineHeight: 0.98, textWrap: "pretty"}}><GoldHeadline headline={scene.headline} goldPhrase={scene.goldPhrase} color={brand.colors.accent} /></div> : null}
+  if (scene.visual) {
+    // A graphic scene: the board plays over the footage chain when the scene
+    // names clips, otherwise on the brand background. Watermark and captions
+    // stay TimDS-owned so every board keeps the brand frame.
+    return <AbsoluteFill>
+      {assetKeys.length ? <Media project={project} scene={scene} duration={duration} vertical={vertical} /> : null}
+      <GraphicComponent project={project} scene={scene} visual={scene.visual} line={line} duration={duration} lead={lead} overFootage={assetKeys.length > 0} vertical={vertical} />
       <BrandWatermark project={project} vertical={vertical} />
       <CaptionPages project={project} line={line} lead={lead} vertical={vertical} />
     </AbsoluteFill>;
   }
-  const firstAsset = project.assets[assetKeys[0] || ""];
-  const right = firstAsset?.text?.startsWith("right");
-  const lower = verticalTextZone(firstAsset?.text) === "lower";
-  const top = Boolean(firstAsset?.text?.endsWith("top"));
   return <AbsoluteFill>
     <Media project={project} scene={scene} duration={duration} vertical={vertical} />
-    <AbsoluteFill style={{alignItems: vertical ? "center" : right ? "flex-end" : "flex-start", justifyContent: vertical ? lower ? "flex-end" : "flex-start" : lower ? "flex-end" : top ? "flex-start" : "center", padding: vertical ? lower ? "0 150px 430px 70px" : "240px 150px 0 70px" : top ? "110px 120px 150px" : "0 120px 150px"}}>
-      <div style={{width: vertical ? "100%" : 830, padding: vertical ? 0 : "42px 50px 46px", textAlign: vertical ? "center" : "left", backgroundColor: vertical ? "transparent" : brand.colors.panel, borderLeft: vertical ? undefined : `9px solid ${brand.colors.accent}`, textShadow: vertical ? `0 3px 26px ${brand.colors.background}` : undefined}}>
-        {scene.eyebrow ? <div style={{color: brand.colors.accent, fontFamily: brand.fonts.ui, fontSize: vertical ? 26 : 22, fontWeight: 700, letterSpacing: 5, textTransform: "uppercase", marginBottom: 18}}>{scene.eyebrow}</div> : null}
-        <div style={{color: brand.colors.text, fontFamily: brand.fonts.display, fontSize: vertical ? 110 : 72, fontWeight: 700, lineHeight: 0.98, textWrap: "pretty"}}><GoldHeadline headline={scene.headline} goldPhrase={scene.goldPhrase} color={brand.colors.accent} /></div>
-        {scene.subline ? <div style={{color: brand.colors.muted, fontFamily: brand.fonts.body, fontSize: 32, marginTop: 20}}>{tieOrphan(scene.subline)}</div> : null}
-      </div>
-    </AbsoluteFill>
+    <SceneCopy project={project} scene={scene} vertical={vertical} />
     <BrandWatermark project={project} vertical={vertical} />
     <CaptionPages project={project} line={line} lead={lead} vertical={vertical} />
   </AbsoluteFill>;
@@ -438,6 +482,7 @@ const Cover: React.FC<VideoProjectCoverProps> = (props) => props.vertical
 export const defaultVideoProjectComponents = {
   Video,
   Scene: SceneView,
+  Graphic: GraphicBoard,
   Intro,
   Outro,
   Cover,
@@ -450,6 +495,7 @@ export function resolveVideoProjectComponents(components: VideoProjectComponentO
   return {
     Video: components.Video ?? Video,
     Scene: components.Scene ?? SceneView,
+    Graphic: components.Graphic ?? GraphicBoard,
     Intro: components.Intro ?? Intro,
     Outro: components.Outro ?? Outro,
     Cover: components.Cover ?? Cover,
@@ -527,4 +573,4 @@ export function registerVideoProject(project: VideoProject, components: VideoPro
   registerRoot(createVideoProjectRoot(project, components));
 }
 
-export { BrandWatermark, Cover, GoldHeadline, HorizontalCover, Intro, Outro, SceneView, VerticalCover, Video };
+export { BrandWatermark, Cover, GoldHeadline, GraphicBoard, HorizontalCover, Intro, Outro, SceneView, VerticalCover, Video };

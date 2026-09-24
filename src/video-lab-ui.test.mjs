@@ -9,7 +9,7 @@ const tick = () => new Promise((resolve) => setImmediate(resolve));
 
 // Run the shipped UI script with deferred HTTP responses. Only the DOM methods
 // it uses are stubbed; load/compile/save handlers and revision checks are real.
-async function labUi() {
+async function labUi(producer = {}) {
   const elements = new Map();
   const element = () => {
     const fields = new Map();
@@ -40,7 +40,7 @@ async function labUi() {
   const pending = [];
   const meta = {
     designSystem: { name: "Example", version: "1" },
-    contract: { name: "Video", brand: { series: "Answers" }, copy: {}, producer: { roleEyebrows: {}, engagement: {} } },
+    contract: { name: "Video", brand: { series: "Answers" }, copy: {}, producer: { roleEyebrows: {}, engagement: {}, ...producer } },
     catalog: {}, drafting: {}, lab: { inputs: ["ready", "blocked"] },
   };
   const response = (body, ok = true) => ({ ok, json: async () => body });
@@ -79,6 +79,38 @@ async function labUi() {
 }
 
 const plan = (slug, renderable) => ({ slug, renderable, warning: renderable ? null : "no eligible Shorts footage", outputFormat: "short", scenes: [], totalSeconds: 2 });
+
+test("offers the Solution field only where the contract's subscribe board plays", async () => {
+  const open = async (producer) => {
+    const ui = await labUi(producer);
+    const loaded = await ui.load("ready");
+    loaded.compile.reply(plan("ready", true));
+    await loaded.done;
+    return ui;
+  };
+  const without = await open();
+  assert.equal(without.$("solution-wrap").hidden, true, "no subscribe block, no field");
+
+  const elsewhere = await open({ subscribe: { enabled: true, formats: ["horizontal"], requireSolution: true } });
+  assert.equal(elsewhere.$("solution-wrap").hidden, true, "a short input never sees a horizontal-only board");
+
+  const offered = await open({ subscribe: { enabled: true, formats: ["horizontal", "short"], requireSolution: false } });
+  assert.equal(offered.$("solution-wrap").hidden, false);
+  assert.match(offered.$("solution-hint").textContent, /leave empty to skip the board/u);
+});
+
+test("shows each scene's footage line exactly as the server describes it", async () => {
+  const ui = await labUi();
+  const loaded = await ui.load("ready");
+  loaded.compile.reply({ ...plan("ready", true), scenes: [
+    { id: "intro", intro: true, seconds: 2, narration: "Load ready?", footage: "card", footageLabel: "card" },
+    { id: "steps", role: "process", seconds: 4, narration: "Three steps.", footage: ["clip-a", "clip-b"], visual: "steps", footageLabel: "board steps over clip-a → clip-b" },
+  ] });
+  await loaded.done;
+  const rows = ui.$("plan-table").querySelector("tbody").innerHTML;
+  assert.match(rows, /<span class="footage">card<\/span>/u);
+  assert.match(rows, /<span class="footage">board steps over clip-a → clip-b<\/span>/u);
+});
 
 test("rendering requests narration unless the user selects a silent preview", async () => {
   const ui = await labUi();

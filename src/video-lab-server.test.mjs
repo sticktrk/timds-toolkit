@@ -52,6 +52,9 @@ test("describes the design system, producer, catalog, and lab inputs for the UI"
   assert.equal(state.contract.brand.series, "Answers");
   assert.deepEqual(Object.keys(state.contract.producer.roleEyebrows), ["hook", "rule", "risk", "process", "exception", "answer"]);
   assert.equal(state.contract.producer.engagement.requireYesNoQuestion, true);
+  // The UI decides from this whether to offer the Solution field, so the block ships even while the board is off.
+  assert.equal(state.contract.producer.subscribe.enabled, false);
+  assert.equal(state.contract.producer.subscribe.requireSolution, true);
   assert.deepEqual(state.catalog, { footage: 3, covers: 1 });
   assert.deepEqual(state.lab, { directory: "video/lab", inputs: ["records"] });
   assert.deepEqual(state.productions, ["sample-topic"]);
@@ -66,7 +69,9 @@ test("compiles a request into a plan the UI can show, and saves it as a lab inpu
   assert.equal(plan.warning, null);
   assert.deepEqual(plan.scenes.map((scene) => scene.id), ["intro", "keep", "copies", "engage", "outro"]);
   assert.equal(plan.scenes[0].footage, "card");
+  assert.equal(plan.scenes[0].footageLabel, "card");
   assert.ok(plan.scenes[1].footage.length >= 1);
+  assert.equal(plan.scenes[1].footageLabel, plan.scenes[1].footage.join(" → "), "the UI shows the same footage line the CLI prints");
   assert.equal(plan.cover.subject, "cover-subject-concern");
   assert.ok(plan.totalSeconds > 0);
   assert.match(plan.text, /records · horizontal/u);
@@ -141,6 +146,39 @@ test("builds the draft prompt from the client's authoring contract and strips Ti
   assert.match(catalogPrompt, /Footage catalog \(3 clips\)\. Set each answer beat's footage to 1–3 of these keys/u);
   assert.match(catalogPrompt, /^- footage-two: two · 6s$/mu);
   assert.equal(describeFootageCatalog({ maximumPerBeat: 3, clips: [{ key: "dash-1", title: "Night rear-end", tags: ["rain", "night"], durationSeconds: 6.042 }] }), "Footage catalog (1 clips). Set each answer beat's footage to 1–3 of these keys, best match first:\n- dash-1: Night rear-end (rain, night) · 6.042s");
+});
+
+test("offers the subscribe board's solution to the draft and carries it onto the compiled board", async (t) => {
+  const workspace = await labFixture(t);
+  const contractPath = path.join(workspace.designSystemRoot, "video/contract.json");
+  const contract = JSON.parse(await fs.readFile(contractPath, "utf8"));
+  contract.structure = { ...contract.structure, longform: { ...contract.structure?.longform, graphicScenes: true } };
+  contract.producer.subscribe = { enabled: true, afterBeat: 1, narrationTemplate: "Subscribe to learn how to {{solution}}." };
+  await fs.writeFile(contractPath, JSON.stringify(contract));
+  const state = await describeVideoLabState(workspace);
+  assert.equal(state.contract.producer.subscribe.enabled, true, "the lab UI offers the Solution field from this");
+  assert.deepEqual(state.contract.producer.subscribe.formats, ["horizontal"]);
+  const loaded = await loadVideoWorkspace(workspace);
+  const { index } = await loadDesignSystemIndex(workspace);
+  const authoring = createVideoAuthoringContract({ contract: loaded.video.contract, manifest: workspace.manifest, designSystemIndex: index, provenance: { commit: "0".repeat(40), version: "1.2.3" }, outputFormat: "horizontal" });
+  assert.ok(authoring.inputSchema.properties.topic.required.includes("solution"));
+  const { system, user } = buildDraftMessages(authoring, { question: "Should I keep these records?", topicLabel: "important records", notes: "", engagementQuestion: "", solution: "", slug: "records" });
+  assert.match(system, /topic\.solution/u);
+  assert.match(user, /Solution the subscribe board promises \(topic\.solution, a short verb phrase\): write one/u);
+  const supplied = buildDraftMessages(authoring, { question: "Should I keep these records?", topicLabel: "important records", notes: "", engagementQuestion: "", solution: "keep the records that matter", slug: "records" }).user;
+  assert.match(supplied, /a short verb phrase\): keep the records that matter/u);
+
+  const drafted = { ...recordsInput, topic: { ...recordsInput.topic, solution: "keep the records that matter" } };
+  const client = { beta: { messages: { create: async () => ({ model: "claude-opus-5", stop_reason: "end_turn", content: [{ type: "text", text: JSON.stringify(drafted) }] }) } } };
+  const result = await draftVideoLabInput(workspace, { outputFormat: "horizontal", question: "Should I keep these records?", solution: "keep the records that matter", slug: "records" }, { client });
+  const board = result.plan.scenes.find((scene) => scene.id === "subscribe");
+  assert.equal(board.visual, "subscribe");
+  assert.equal(board.narration, "Subscribe to learn how to keep the records that matter.");
+  assert.deepEqual(board.footage, []);
+  assert.deepEqual(result.plan.scenes.map((scene) => scene.id).slice(0, 3), ["intro", "keep", "subscribe"]);
+  // A draft that leaves the solution out is refused by the producer, not rendered without its board.
+  const bare = { beta: { messages: { create: async () => ({ model: "claude-opus-5", stop_reason: "end_turn", content: [{ type: "text", text: JSON.stringify(recordsInput) }] }) } } };
+  await assert.rejects(draftVideoLabInput(workspace, { outputFormat: "horizontal", question: "Should I keep these records?", slug: "records" }, { client: bare }), (caught) => caught.status === 400 && /topic\.solution/u.test(caught.message));
 });
 
 test("drafts through an injected Claude client and validates the result through the producer", async (t) => {

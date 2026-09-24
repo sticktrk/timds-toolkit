@@ -100,6 +100,9 @@
     <label id="engagement-wrap" hidden>Engagement question <span class="hint">asked at the end · yes/no</span>
       <input id="engagement" placeholder="Are you …?">
     </label>
+    <label id="solution-wrap" hidden>Solution <span class="hint" id="solution-hint">spoken on the subscribe board · a short verb phrase</span>
+      <input id="solution" placeholder="keep the records that matter">
+    </label>
     <label>Source notes <span class="hint">facts, an article excerpt, the client's answer — evidence for the draft, not instructions</span>
       <textarea id="notes" rows="7" placeholder="Paste the article or notes the script should draw on"></textarea>
     </label>
@@ -179,6 +182,10 @@
     return payload;
   }
   const headlineWords = () => state.meta ? (state.format === "short" ? state.meta.contract.copy.shortHeadlineWords : state.meta.contract.copy.horizontalHeadlineWords) : 8;
+  const subscribeOffered = () => {
+    const subscribe = state.meta?.contract.producer?.subscribe;
+    return Boolean(subscribe && subscribe.enabled && (subscribe.formats || ["horizontal"]).includes(state.format));
+  };
   const engagementRequired = () => {
     const engagement = state.meta?.contract.producer?.engagement;
     return Boolean(engagement && engagement.enabled && (engagement.formats || ["horizontal"]).includes(state.format));
@@ -192,9 +199,11 @@
       topic: {
         label: $("topic").value.trim(),
         ...(engagementRequired() || $("engagement").value.trim() ? { engagementQuestion: $("engagement").value.trim() } : {}),
+        ...($("solution").value.trim() ? { solution: $("solution").value.trim() } : {}),
         coverEmotion: state.coverEmotion || state.meta?.contract.producer?.cover?.defaultEmotion || "concern",
       },
-      answerBeats: state.beats.map((beat) => ({ id: beat.id, role: beat.role, narration: beat.narration, summary: beat.summary, ...(beat.footage.length ? { footage: beat.footage } : {}) })),
+      // chapter and visual are authored in the JSON, not the form; the editor carries them through untouched.
+      answerBeats: state.beats.map((beat) => ({ id: beat.id, role: beat.role, narration: beat.narration, summary: beat.summary, ...(beat.footage.length ? { footage: beat.footage } : {}), ...(beat.chapter ? { chapter: beat.chapter } : {}), ...(beat.visual ? { visual: beat.visual } : {}) })),
     };
   }
   function applyInput(input) {
@@ -203,9 +212,10 @@
     $("question").value = input.exactQuestion || "";
     $("topic").value = input.topic?.label || "";
     $("engagement").value = input.topic?.engagementQuestion || "";
+    $("solution").value = input.topic?.solution || "";
     $("slug").value = input.slug || "";
     state.coverEmotion = input.topic?.coverEmotion;
-    state.beats = (input.answerBeats || []).map((beat, index) => ({ id: beat.id || `beat-${index + 1}`, role: ROLES.includes(beat.role) ? beat.role : "rule", narration: beat.narration || "", summary: beat.summary || "", footage: footageKeys(beat.footage) }));
+    state.beats = (input.answerBeats || []).map((beat, index) => ({ id: beat.id || `beat-${index + 1}`, role: ROLES.includes(beat.role) ? beat.role : "rule", narration: beat.narration || "", summary: beat.summary || "", footage: footageKeys(beat.footage), ...(typeof beat.chapter === "string" && beat.chapter ? { chapter: beat.chapter } : {}), ...(beat.visual && typeof beat.visual === "object" ? { visual: beat.visual } : {}) }));
     renderBeats();
     syncFormatUi();
     $("json").value = JSON.stringify(currentInput(), null, 2);
@@ -240,6 +250,10 @@
   }
   function syncFormatUi() {
     $("engagement-wrap").hidden = !engagementRequired();
+    $("solution-wrap").hidden = !subscribeOffered();
+    $("solution-hint").textContent = state.meta?.contract.producer?.subscribe?.requireSolution === false
+      ? "spoken on the subscribe board · a short verb phrase · leave empty to skip the board"
+      : "spoken on the subscribe board · a short verb phrase · required";
     for (const el of document.querySelectorAll(".beat .count")) updateCount(el.closest(".beat"));
   }
 
@@ -263,6 +277,7 @@
         </div>
         <textarea class="narration" rows="3" placeholder="Spoken narration for this beat" aria-label="Narration">${escapeHtml(beat.narration)}</textarea>
         <input class="footage-keys" placeholder="Footage keys, comma-separated (optional)" value="${escapeAttr(beat.footage.join(", "))}" aria-label="Footage keys">
+        ${beat.chapter || beat.visual ? `<div class="note">${beat.chapter ? `chapter <code>${escapeHtml(beat.chapter)}</code>` : ""}${beat.chapter && beat.visual ? " · " : ""}${beat.visual ? `board <code>${escapeHtml(String(beat.visual.kind || ""))}</code>${beat.footage.length ? " over footage" : ""}` : ""} · edit in the JSON below</div>` : ""}
         <div class="count"></div>`;
       host.appendChild(card);
       updateCount(card);
@@ -284,6 +299,8 @@
       summary: card.querySelector(".summary").value.trim(),
       narration: card.querySelector(".narration").value.trim(),
       footage: footageKeys(card.querySelector(".footage-keys").value.split(",")),
+      ...(state.beats[index]?.chapter ? { chapter: state.beats[index].chapter } : {}),
+      ...(state.beats[index]?.visual ? { visual: state.beats[index].visual } : {}),
     }));
   }
   const markDirty = () => {
@@ -339,6 +356,7 @@
         question: $("question").value.trim(),
         topicLabel: $("topic").value.trim(),
         engagementQuestion: $("engagement").value.trim(),
+        solution: $("solution").value.trim(),
         notes: $("notes").value.trim(),
         slug: $("slug").value.trim() || slugify($("question").value),
       });
@@ -419,7 +437,7 @@
     table.querySelector("tbody").innerHTML = plan.scenes.map((scene) => `
       <tr>
         <td><code>${escapeHtml(scene.id)}</code><br><span class="note">${escapeHtml(scene.role || (scene.intro ? "intro" : scene.outro ? "outro" : ""))}</span></td>
-        <td>${scene.eyebrow ? `<span class="eyebrow">${escapeHtml(scene.eyebrow)}</span>` : ""}${escapeHtml(scene.headline || (scene.intro ? plan.exactQuestion : ""))}<br><span class="note">${escapeHtml(scene.narration)}</span>${Array.isArray(scene.footage) ? `<span class="footage">${escapeHtml(scene.footage.join(" → "))}</span>` : `<span class="footage">card</span>`}</td>
+        <td>${scene.eyebrow ? `<span class="eyebrow">${escapeHtml(scene.eyebrow)}</span>` : ""}${escapeHtml(scene.headline || (scene.intro ? plan.exactQuestion : ""))}<br><span class="note">${escapeHtml(scene.narration)}</span><span class="footage">${escapeHtml(scene.footageLabel)}</span></td>
         <td class="num">${scene.seconds.toFixed(1)}</td>
       </tr>`).join("");
   }
