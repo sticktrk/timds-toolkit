@@ -10,11 +10,13 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
   checkVideoWorkspace,
+  describeSceneFootage,
   describeVideoLabPlan,
   descriptionFor,
   exportVideoPublishing,
   initializeVideoComponents,
   initializeVideoWorkspace,
+  loadVideoWorkspace,
   normalizeVideoManifest,
   planVideoLab,
   prepareVideoLab,
@@ -23,6 +25,7 @@ import {
   runVideoLab,
   silentSceneTimings,
   singleFormatScenes,
+  stageVideoBrand,
   validateVideoContract,
   voiceoverVideoWorkspace,
 } from "./video.mjs";
@@ -1394,7 +1397,10 @@ test("static mounts cannot shadow staged brand files, prepared media, or each ot
   assert.throws(() => validateVideoContract(contract([{ path: "public/illustrations", mount: "media" }])), /staticFiles\[0\]\.mount media is reserved/u);
   assert.throws(() => validateVideoContract(contract([{ path: "public/illustrations", mount: "audio/beds" }])), /staticFiles\[0\]\.mount audio\/beds is reserved/u);
   assert.throws(() => validateVideoContract(contract([{ path: "public/illustrations" }, { path: "public/more", mount: "illustrations/extra" }])), /staticFiles\[1\]\.mount illustrations\/extra overlaps the earlier mount illustrations/u);
-  assert.throws(() => validateVideoContract(contract([{ path: "public/illustrations", mount: "../up" }])), /must be a relative mount path/u);
+  assert.throws(() => validateVideoContract(contract([{ path: "public/illustrations", mount: "../up" }])), /must be a lowercase relative mount path/u);
+  // Mixed case would pass a Mac and 404 on a Linux render host, and "Media" is media/ on a case-insensitive disk.
+  assert.throws(() => validateVideoContract(contract([{ path: "public/illustrations", mount: "Media" }])), /staticFiles\[0\]\.mount must be a lowercase relative mount path/u);
+  assert.throws(() => validateVideoContract(contract([{ path: "public/Illustrations" }])), /staticFiles\[0\]\.mount must be a lowercase relative mount path/u);
   assert.deepEqual(validateVideoContract(contract([{ path: "public/illustrations" }, { path: "public/icons/key.svg", mount: "icons/key.svg" }])).brand.staticFiles, [
     { path: "public/illustrations", mount: "illustrations" },
     { path: "public/icons/key.svg", mount: "icons/key.svg" },
@@ -1406,4 +1412,31 @@ test("static mounts cannot shadow staged brand files, prepared media, or each ot
   await fs.mkdir(source, { recursive: true });
   await fs.writeFile(path.join(source, "key-gold.webp"), "RIFF", "utf8");
   await assert.rejects(prepareVideoWorkspace(workspace, "sample-topic"), /brand\.staticFiles\[0\]\.path: mount logo\.svg would overwrite the staged brand file logo\.svg/u);
+
+  // A silent preview leaves the audio bed out, but a mount on the bed's public path is
+  // still refused, and before anything is written: otherwise the collision would pass
+  // the lab preview and surface only at the real render.
+  const silent = await videoFixture(t, { contract: { brand: { ...staticBrand([{ path: "public/sound", mount: "sound" }]), audio: { bed: "public/sound/bed.mp3" } } } });
+  const sound = path.join(silent.designSystemRoot, "public", "sound");
+  await fs.mkdir(sound, { recursive: true });
+  await fs.writeFile(path.join(sound, "bed.mp3"), "ID3", "utf8");
+  const publicRoot = path.join(silent.designSystemRoot, "video-local", "preview-public");
+  const loaded = await loadVideoWorkspace(silent);
+  await assert.rejects(
+    stageVideoBrand({ designSystemRoot: silent.designSystemRoot, contract: loaded.video.contract, publicRoot, mediaCatalog: { assets: [] }, sound: false }),
+    /brand\.staticFiles\[0\]\.path: mount sound would overwrite the staged brand file sound\/bed\.mp3/u,
+  );
+  assert.equal(await fs.stat(publicRoot).catch(() => null), null, "nothing is staged before the collision is refused");
+});
+
+test("describes a scene's footage line once for the CLI printout and the lab UI", () => {
+  assert.equal(describeSceneFootage({ intro: true, assets: ["ignored"] }), "card");
+  assert.equal(describeSceneFootage({ outro: true }), "card");
+  assert.equal(describeSceneFootage({ asset: "clip-a" }), "clip-a");
+  assert.equal(describeSceneFootage({ assets: ["clip-a", "clip-b"] }), "clip-a → clip-b");
+  assert.equal(describeSceneFootage({ visual: { kind: "subscribe" } }), "board subscribe");
+  assert.equal(describeSceneFootage({ visual: { kind: "steps" }, assets: ["clip-a", "clip-b"] }), "board steps over clip-a → clip-b");
+  // A compiled beat before finalize passes its own picks.
+  assert.equal(describeSceneFootage({ visual: { kind: "steps" } }, ["clip-b"]), "board steps over clip-b");
+  assert.equal(describeSceneFootage({}, undefined), "");
 });

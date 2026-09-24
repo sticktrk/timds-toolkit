@@ -273,11 +273,21 @@ function normalizeStructure(value, label) {
 // directories (an illustration library) or single files, mounted under a
 // stable name in the render's public root. Everything must be committed
 // Design System source so every render host can obtain it.
-// Top-level names the render public root already uses: staged brand media,
-// prepared footage and covers, and generated narration. A mount there would
-// overwrite them silently.
-const RESERVED_STATIC_MOUNTS = new Set(["brand", "media", "audio"]);
-const mountOverlaps = (left, right) => left === right || left.startsWith(`${right}/`) || right.startsWith(`${left}/`);
+// The top-level directories the render public root uses: staged brand files,
+// prepared footage and covers, and generated narration. Every stager below
+// writes beneath one of these, and a static mount may not, so the reserved
+// list is derived from the same names the stagers use.
+export const VIDEO_PUBLIC_ROOTS = Object.freeze({ brand: "brand", media: "media", audio: "audio" });
+const RESERVED_STATIC_MOUNTS = new Set(Object.values(VIDEO_PUBLIC_ROOTS));
+// Whether `child` is `parent` or a path beneath it. Case-folded because macOS
+// and Windows stage onto case-insensitive disks, where Media/ and media/ are
+// one directory.
+const pathWithin = (child, parent) => {
+  const inner = child.toLowerCase();
+  const outer = parent.toLowerCase();
+  return inner === outer || inner.startsWith(`${outer}/`);
+};
+const mountOverlaps = (left, right) => pathWithin(left, right) || pathWithin(right, left);
 
 function normalizeStaticFiles(value, label) {
   if (value === undefined || value === null) return [];
@@ -287,7 +297,9 @@ function normalizeStaticFiles(value, label) {
     const item = object(entry, `${label}[${index}]`);
     const source = safeRelativePath(text(item.path, `${label}[${index}].path`), `${label}[${index}].path`);
     const mount = text(item.mount || path.basename(source), `${label}[${index}].mount`).replace(/^\/+|\/+$/gu, "");
-    if (!/^[a-z0-9][a-z0-9._-]*(?:\/[a-z0-9][a-z0-9._-]*)*$/iu.test(mount)) throw new Error(`${label}[${index}].mount must be a relative mount path`);
+    // Lowercase only: Linux render hosts resolve staticFile() names exactly,
+    // so a mixed-case mount would work on a Mac and 404 in CI.
+    if (!/^[a-z0-9][a-z0-9._-]*(?:\/[a-z0-9][a-z0-9._-]*)*$/u.test(mount)) throw new Error(`${label}[${index}].mount must be a lowercase relative mount path`);
     if (RESERVED_STATIC_MOUNTS.has(mount.split("/")[0])) throw new Error(`${label}[${index}].mount ${mount} is reserved for staged brand files, prepared media, and narration; mount under another name`);
     const clash = mounts.find((other) => mountOverlaps(other, mount));
     if (clash) throw new Error(`${label}[${index}].mount ${mount} overlaps the earlier mount ${clash}`);
@@ -693,15 +705,24 @@ export async function planVideoLab(workspace, requestedName) {
   return { ...loaded, lab: { name, names, input, compiled, timings, finalized } };
 }
 
+/**
+ * The one-line footage summary a plan scene shows, shared by the CLI printout
+ * and the lab UI: the question card, the board, and the clips it plays over.
+ */
+export function describeSceneFootage(scene, keys = scene.assets || [scene.asset]) {
+  if (scene.intro || scene.outro) return "card";
+  const clips = (keys || []).filter(Boolean).join(" → ");
+  const board = scene.visual ? `board ${scene.visual.kind}` : "";
+  return [board, board && clips ? "over" : "", clips].filter(Boolean).join(" ");
+}
+
 export function describeVideoLabPlan({ compiled, timings, finalized }) {
   const byId = new Map(timings.map((line) => [line.id, line]));
   const lines = [`${compiled.slug} · ${compiled.outputFormat} · ${compiled.exactQuestion}`];
   for (const scene of finalized.plan.scenes) {
     const seconds = (byId.get(scene.id).durationMs / 1000).toFixed(1);
-    const keys = scene.intro || scene.outro ? [] : (scene.assets || [scene.asset]).filter(Boolean);
-    const footage = scene.intro || scene.outro ? "card" : `${scene.visual ? `board ${scene.visual.kind}` : ""}${scene.visual && keys.length ? " over " : ""}${keys.join(" → ")}`;
     lines.push(`  ${scene.id.padEnd(14)} ${seconds.padStart(5)}s  ${(scene.eyebrow || "").padEnd(22)} ${scene.headline || ""}`);
-    lines.push(`  ${"".padEnd(14)}        ${footage}`);
+    lines.push(`  ${"".padEnd(14)}        ${describeSceneFootage(scene)}`);
   }
   lines.push(`  cover          ${finalized.coverSubject.key} · ${finalized.plan.cover.eyebrow} · ${finalized.plan.cover.headline}`);
   return lines.join("\n");
@@ -763,7 +784,7 @@ async function prepareLabNarration(workspace, planned, labLocal, publicRoot, opt
       throw new Error(`Video Lab narration failed. Use Python with edge-tts installed (--python or TIMDS_PYTHON), or choose an explicit silent preview. ${cause.message}`, { cause });
     }
   } else options.log?.("Using cached spoken narration.");
-  const audioRoot = path.join(publicRoot, "audio", script.slug);
+  const audioRoot = path.join(publicRoot, VIDEO_PUBLIC_ROOTS.audio, script.slug);
   await fs.mkdir(audioRoot, { recursive: true });
   for (const line of timings) await fs.copyFile(path.join(cacheRoot, `${line.id}.mp3`), path.join(audioRoot, `${line.id}.mp3`));
   return { timings, script };
@@ -873,7 +894,7 @@ async function defaultVideoComponentsTemplate() {
   const end = remotionSource.indexOf(DEFAULT_COMPONENTS_END);
   if (start < 0 || end < start) throw new Error("TimDS default video component snapshot markers are missing");
   const componentSource = remotionSource.slice(start, end + DEFAULT_COMPONENTS_END.length);
-  return `// Generated once from the installed TimDS defaults. This file is now owned by this Design System.\n// TimDS upgrades do not overwrite it; use \`timds video components init --force\` only to reset it.\n// Footage-chain rules are imported from the toolkit on purpose: they are production rules, not styling,\n// and \`timds video check\` enforces the same module, so a toolkit fix reaches these frames without a reset.\nimport React, {useMemo} from "react";\nimport {Audio} from "@remotion/media";\nimport {AbsoluteFill, Img, OffthreadVideo, Sequence, interpolate, staticFile, useCurrentFrame, useVideoConfig} from "remotion";\nimport {MINIMUM_CHAIN_CLIP_SECONDS, adjacentFootageRepeats, chainClipFrames, sceneAssetKeys, verticalTextZone} from "@dtconcepts/timds/video/footage";\nimport type {\n  VideoProject,\n  VideoProjectAsset,\n  VideoProjectCaptionLine,\n  VideoProjectComponentOverrides,\n  VideoProjectCover,\n  VideoProjectCoverProps,\n  VideoProjectIntroProps,\n  VideoProjectOutroProps,\n  VideoProjectScene,\n  VideoProjectSceneProps,\n  VideoProjectVideoProps,\n} from "@dtconcepts/timds/video/remotion";\n\n${DEFAULT_VIDEO_TEXT_SOURCE}\n\n${componentSource}\n\nexport {BrandWatermark, CaptionPages, Cover, CoverVisual, GoldHeadline, HorizontalCover, Intro, Media, Outro, SceneView, VerticalCover, Video};\nexport default defaultVideoProjectComponents;\n`;
+  return `// Generated once from the installed TimDS defaults. This file is now owned by this Design System.\n// TimDS upgrades do not overwrite it; use \`timds video components init --force\` only to reset it.\n// Footage-chain rules are imported from the toolkit on purpose: they are production rules, not styling,\n// and \`timds video check\` enforces the same module, so a toolkit fix reaches these frames without a reset.\nimport React, {useMemo} from "react";\nimport {Audio} from "@remotion/media";\nimport {AbsoluteFill, Img, OffthreadVideo, Sequence, interpolate, staticFile, useCurrentFrame, useVideoConfig} from "remotion";\nimport {MINIMUM_CHAIN_CLIP_SECONDS, adjacentFootageRepeats, chainClipFrames, sceneAssetKeys, verticalTextZone} from "@dtconcepts/timds/video/footage";\nimport type {\n  VideoProject,\n  VideoProjectAsset,\n  VideoProjectCaptionLine,\n  VideoProjectComponentOverrides,\n  VideoProjectCover,\n  VideoProjectCoverProps,\n  VideoProjectGraphicProps,\n  VideoProjectIntroProps,\n  VideoProjectOutroProps,\n  VideoProjectScene,\n  VideoProjectSceneProps,\n  VideoProjectVideoProps,\n} from "@dtconcepts/timds/video/remotion";\n\n${DEFAULT_VIDEO_TEXT_SOURCE}\n\n${componentSource}\n\nexport {BrandWatermark, CaptionPages, Cover, CoverVisual, GoldHeadline, HorizontalCover, Intro, Media, Outro, SceneView, VerticalCover, Video};\nexport default defaultVideoProjectComponents;\n`;
 }
 
 export async function initializeVideoComponents(workspace, { force = false } = {}) {
@@ -950,7 +971,7 @@ async function stageAsset(workspace, key, asset, publicRoot, localManifest, medi
   const source = await sourceForAsset(workspace, asset, localManifest, mediaCatalog);
   const sourceName = typeof source === "string" ? path.basename(source) : source.filename;
   const extension = path.extname(sourceName).toLowerCase() || ".bin";
-  const relative = `media/${key}${extension}`;
+  const relative = `${VIDEO_PUBLIC_ROOTS.media}/${key}${extension}`;
   const destination = path.join(publicRoot, relative);
   await fs.mkdir(path.dirname(destination), { recursive: true });
   if (typeof source === "string") {
@@ -1012,11 +1033,11 @@ async function brandSourceProblem(designSystemRoot, entry, { mediaCatalog, local
   if (entry.kind === "static") {
     const stat = await fs.stat(path.join(designSystemRoot, relative)).catch(() => null);
     if (!stat) return `${field}: ${relative} does not exist`;
-    if (local && (relative === local || relative.startsWith(`${local}/`))) return `${field}: ${relative} is under ignored ${local}; commit static files as Design System source`;
+    if (local && pathWithin(relative, local)) return `${field}: ${relative} is under ignored ${local}; commit static files as Design System source`;
     if (await gitIgnored(designSystemRoot, relative)) return `${field}: ${relative} is ignored by git, so a clean checkout cannot render it`;
     return null;
   }
-  if (local && (relative === local || relative.startsWith(`${local}/`))) {
+  if (local && pathWithin(relative, local)) {
     return `${field}: ${relative} is generated under ignored ${local}/, which no render host has; commit the file or publish it with timds assets and reference { "mediaKey": "..." }`;
   }
   const absolute = path.join(designSystemRoot, relative);
@@ -1062,6 +1083,16 @@ async function downloadBrandMedia(published, destination, cacheRoot) {
   }
 }
 
+// Where a brand file lives under the render public root: a file already under
+// public/ keeps its path, so the staticFile() names client components use
+// still resolve; everything else is copied beneath brand/.
+function brandRuntimePath(entry, extension = "") {
+  const name = `${entry.kind}-${entry.key ?? entry.index ?? 0}`;
+  if (typeof entry.source === "object") return `${VIDEO_PUBLIC_ROOTS.brand}/${name}-${entry.source.mediaKey}${extension}`;
+  const safe = safeRelativePath(entry.source, `video contract ${entry.field}`);
+  return safe.startsWith("public/") ? safe.slice("public/".length) : `${VIDEO_PUBLIC_ROOTS.brand}/${name}-${path.basename(safe)}`;
+}
+
 // Stages every brand file the contract names into a Remotion public directory
 // and returns the brand with runtime paths. Render hosts call this instead of
 // copying brand files themselves, so a new contract field is staged everywhere
@@ -1072,35 +1103,38 @@ export async function stageVideoBrand({ designSystemRoot, contract, publicRoot, 
   const brand = { ...contract.brand, logo: "", fontFiles: [] };
   const audio = contract.brand.audio ? { ...contract.brand.audio } : undefined;
   const staticMounts = [];
-  const staticEntries = [];
-  // Runtime paths the brand files occupy under publicRoot, so a static mount
-  // cannot land on top of one of them.
-  const stagedPaths = [];
-  for (const entry of videoBrandSources(contract)) {
+  const sources = videoBrandSources(contract);
+  const staticEntries = sources.filter((entry) => entry.kind === "static");
+  const fileEntries = sources.filter((entry) => entry.kind !== "static");
+  // A mount may not land on any brand file's runtime path, whether or not this
+  // staging copies that file: a silent preview leaves the audio bed out, and a
+  // collision it let through would surface only at the real render. The check
+  // runs before anything is written. (A media-key extension is unknown here,
+  // but those files live under the reserved brand/ root anyway.)
+  const runtimePaths = fileEntries.map((entry) => brandRuntimePath(entry));
+  for (const entry of staticEntries) {
+    const collision = runtimePaths.find((staged) => mountOverlaps(staged, entry.mount));
+    if (collision) throw new Error(`video contract ${entry.field}: mount ${entry.mount} would overwrite the staged brand file ${collision}; mount it under another name`);
+  }
+  for (const entry of fileEntries) {
     if (entry.kind === "audio" && !sound) {
       delete audio[entry.key];
-      continue;
-    }
-    if (entry.kind === "static") {
-      staticEntries.push(entry);
       continue;
     }
     let runtimePath;
     if (typeof entry.source === "object") {
       const source = await sourceForAsset({ designSystemRoot }, { mediaKey: entry.source.mediaKey }, localManifest, mediaCatalog);
       const extension = path.extname(typeof source === "string" ? source : source.filename || "").toLowerCase();
-      runtimePath = `brand/${entry.kind}-${entry.key ?? entry.index ?? 0}-${entry.source.mediaKey}${extension}`;
+      runtimePath = brandRuntimePath(entry, extension);
       const destination = path.join(publicRoot, runtimePath);
       await fs.mkdir(path.dirname(destination), { recursive: true });
       if (typeof source === "string") await fs.copyFile(source, destination);
       else await downloadBrandMedia(source.metadata, destination, cacheRoot);
     } else {
-      const safe = safeRelativePath(entry.source, `video contract ${entry.field}`);
-      runtimePath = safe.startsWith("public/") ? safe.slice("public/".length) : `brand/${entry.kind}-${entry.key ?? entry.index ?? 0}-${path.basename(safe)}`;
+      runtimePath = brandRuntimePath(entry);
       await fs.mkdir(path.dirname(path.join(publicRoot, runtimePath)), { recursive: true });
-      await fs.copyFile(path.join(designSystemRoot, safe), path.join(publicRoot, runtimePath));
+      await fs.copyFile(path.join(designSystemRoot, safeRelativePath(entry.source, `video contract ${entry.field}`)), path.join(publicRoot, runtimePath));
     }
-    stagedPaths.push(runtimePath);
     if (entry.kind === "logo") brand.logo = runtimePath;
     else if (entry.kind === "audio") audio[entry.key] = runtimePath;
     else {
@@ -1114,8 +1148,6 @@ export async function stageVideoBrand({ designSystemRoot, contract, publicRoot, 
     }
   }
   for (const entry of staticEntries) {
-    const collision = stagedPaths.find((staged) => mountOverlaps(staged, entry.mount));
-    if (collision) throw new Error(`video contract ${entry.field}: mount ${entry.mount} would overwrite the staged brand file ${collision}; mount it under another name`);
     const source = path.join(designSystemRoot, safeRelativePath(entry.source, `video contract ${entry.field}`));
     const destination = path.join(publicRoot, entry.mount);
     await fs.mkdir(path.dirname(destination), { recursive: true });
@@ -1141,7 +1173,7 @@ export function videoProjectStaticFiles(project) {
   const production = project.records?.production || {};
   if (typeof production.audioSrc === "string") add("records.production.audioSrc", production.audioSrc);
   else if (production.audioSrc === undefined) {
-    for (const line of project.records?.captions?.lines || []) add(`narration for line ${line.id}`, `audio/${production.slug}/${line.id}.mp3`);
+    for (const line of project.records?.captions?.lines || []) add(`narration for line ${line.id}`, `${VIDEO_PUBLIC_ROOTS.audio}/${production.slug}/${line.id}.mp3`);
   }
   return files;
 }
@@ -1363,7 +1395,7 @@ export async function voiceoverVideoWorkspace(workspace, selectedSlug, options =
   const topicRoot = path.join(workspace.designSystemRoot, workspace.manifest.video.productions, productionSlug);
   const script = await readJson(path.join(topicRoot, "script.json"), `${productionSlug}/script.json`);
   if (script.slug && script.slug !== productionSlug) throw new Error(`${productionSlug}/script.json slug must match the production folder`);
-  const outputRoot = path.join(workspace.designSystemRoot, workspace.manifest.video.local, "public", "audio", productionSlug);
+  const outputRoot = path.join(workspace.designSystemRoot, workspace.manifest.video.local, "public", VIDEO_PUBLIC_ROOTS.audio, productionSlug);
   const production = { production: { slug: productionSlug } };
   const args = [path.join(packageRoot, "video", "generate_voiceover.py"), "--script", path.join(topicRoot, "script.json"), "--captions", path.join(topicRoot, "captions.json"), "--output", outputRoot];
   if (options.force) args.push("--force");

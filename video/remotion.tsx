@@ -332,6 +332,17 @@ const CaptionPages: React.FC<{project: VideoProject; line: VideoProjectCaptionLi
   </div>;
 };
 
+// The eyebrow and headline pair every copy block draws. The panel over
+// footage and the full-frame board share this one brand treatment and differ
+// only in headline size, so a styling change reaches both.
+const SceneHeadline: React.FC<{project: VideoProject; scene: VideoProjectScene; headlineSize: number; vertical?: boolean}> = ({project, scene, headlineSize, vertical}) => {
+  const brand = project.contract.brand;
+  return <>
+    {scene.eyebrow ? <div style={{color: brand.colors.accent, fontFamily: brand.fonts.ui, fontSize: vertical ? 26 : 22, fontWeight: 700, letterSpacing: 5, textTransform: "uppercase", marginBottom: 18}}>{scene.eyebrow}</div> : null}
+    {scene.headline ? <div style={{color: brand.colors.text, fontFamily: brand.fonts.display, fontSize: headlineSize, fontWeight: 700, lineHeight: 0.98, textWrap: "pretty"}}><GoldHeadline headline={scene.headline} goldPhrase={scene.goldPhrase} color={brand.colors.accent} /></div> : null}
+  </>;
+};
+
 // The copy box a footage scene shows: eyebrow, headline, optional subline,
 // placed by the first clip's declared text zone (left/right, top/center/lower).
 const SceneCopy: React.FC<{project: VideoProject; scene: VideoProjectScene; vertical?: boolean}> = ({project, scene, vertical}) => {
@@ -342,8 +353,7 @@ const SceneCopy: React.FC<{project: VideoProject; scene: VideoProjectScene; vert
   const top = Boolean(firstAsset?.text?.endsWith("top"));
   return <AbsoluteFill style={{alignItems: vertical ? "center" : right ? "flex-end" : "flex-start", justifyContent: vertical ? lower ? "flex-end" : "flex-start" : lower ? "flex-end" : top ? "flex-start" : "center", padding: vertical ? lower ? "0 150px 430px 70px" : "240px 150px 0 70px" : top ? "110px 120px 150px" : "0 120px 150px"}}>
     <div style={{width: vertical ? "100%" : 830, padding: vertical ? 0 : "42px 50px 46px", textAlign: vertical ? "center" : "left", backgroundColor: vertical ? "transparent" : brand.colors.panel, borderLeft: vertical ? undefined : `9px solid ${brand.colors.accent}`, textShadow: vertical ? `0 3px 26px ${brand.colors.background}` : undefined}}>
-      {scene.eyebrow ? <div style={{color: brand.colors.accent, fontFamily: brand.fonts.ui, fontSize: vertical ? 26 : 22, fontWeight: 700, letterSpacing: 5, textTransform: "uppercase", marginBottom: 18}}>{scene.eyebrow}</div> : null}
-      {scene.headline ? <div style={{color: brand.colors.text, fontFamily: brand.fonts.display, fontSize: vertical ? 110 : 72, fontWeight: 700, lineHeight: 0.98, textWrap: "pretty"}}><GoldHeadline headline={scene.headline} goldPhrase={scene.goldPhrase} color={brand.colors.accent} /></div> : null}
+      <SceneHeadline project={project} scene={scene} headlineSize={vertical ? 110 : 72} vertical={vertical} />
       {scene.subline ? <div style={{color: brand.colors.muted, fontFamily: brand.fonts.body, fontSize: 32, marginTop: 20}}>{tieOrphan(scene.subline)}</div> : null}
     </div>
   </AbsoluteFill>;
@@ -354,11 +364,9 @@ const SceneCopy: React.FC<{project: VideoProject; scene: VideoProjectScene; vert
 // production renders before the Design System implements the kind. A client
 // replaces this through `components.Graphic` and reads `visual` for its data.
 const GraphicBoard: React.FC<VideoProjectGraphicProps> = ({project, scene, overFootage, vertical}) => {
-  const brand = project.contract.brand;
   if (overFootage) return <SceneCopy project={project} scene={scene} vertical={vertical} />;
-  return <AbsoluteFill style={{backgroundColor: brand.colors.background, justifyContent: "center", padding: vertical ? "0 96px 430px" : "0 150px 190px"}}>
-    {scene.eyebrow ? <div style={{color: brand.colors.accent, fontFamily: brand.fonts.ui, fontSize: vertical ? 26 : 22, fontWeight: 700, letterSpacing: 5, textTransform: "uppercase", marginBottom: 18}}>{scene.eyebrow}</div> : null}
-    {scene.headline ? <div style={{color: brand.colors.text, fontFamily: brand.fonts.display, fontSize: vertical ? 110 : 84, fontWeight: 700, lineHeight: 0.98, textWrap: "pretty"}}><GoldHeadline headline={scene.headline} goldPhrase={scene.goldPhrase} color={brand.colors.accent} /></div> : null}
+  return <AbsoluteFill style={{backgroundColor: project.contract.brand.colors.background, justifyContent: "center", padding: vertical ? "0 96px 430px" : "0 150px 190px"}}>
+    <SceneHeadline project={project} scene={scene} headlineSize={vertical ? 110 : 84} vertical={vertical} />
   </AbsoluteFill>;
 };
 

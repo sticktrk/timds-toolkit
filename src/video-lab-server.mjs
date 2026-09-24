@@ -23,6 +23,7 @@ import { fileURLToPath } from "node:url";
 import { readMediaCatalog } from "./media.mjs";
 import { createVideoAuthoringContract, createVideoProducer } from "./video-producer.mjs";
 import {
+  describeSceneFootage,
   describeVideoLabPlan,
   listVideoLabInputs,
   loadVideoWorkspace,
@@ -200,6 +201,7 @@ export async function compileVideoLabInput(workspace, input) {
       headline: scene.headline || "",
       narration: scene.narration,
       footage: scene.intro || scene.outro ? "card" : keys.filter(Boolean),
+      footageLabel: describeSceneFootage(scene, keys),
       visual: scene.visual ? scene.visual.kind : null,
       chapter: scene.chapter || null,
       intro: Boolean(scene.intro),
@@ -312,6 +314,8 @@ export async function describeVideoLabState(workspace) {
         topicLabel: producer.topicLabel,
         intro: producer.intro,
         engagement: producer.engagement,
+        // The UI offers the Solution field only where the board plays.
+        subscribe: producer.subscribe,
         outro: { enabled: producer.outro.enabled, narrationTemplate: producer.outro.narrationTemplate, narrationTemplates: producer.outro.narrationTemplates || {} },
         coverPrefix: producer.cover.assetPrefix,
         footagePrefix: producer.footage.assetPrefix,

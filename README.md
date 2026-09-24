@@ -281,10 +281,11 @@ as `brand.staticFiles: [{ "path": "public/illustrations", "mount": "illustration
 and copied into the render public root under their mount. Each path must be a
 committed Design System file or directory, never under ignored `video-local/`;
 `video check` refuses missing or git-ignored sources the way it refuses a
-missing logo. Mounts cannot be `brand`, `media`, or `audio` (staged brand
-files, prepared footage, and narration live there), cannot overlap one
-another, and cannot land on a staged brand path such as a `public/`-relative
-logo. Asset `text` zones now include `left-top` and `right-top` for clips whose
+missing logo. Mounts are lowercase (Linux render hosts resolve `staticFile()`
+names exactly), cannot be `brand`, `media`, or `audio` (staged brand files,
+prepared footage, and narration live there), cannot overlap one another, and
+cannot land on a staged brand path such as a `public/`-relative logo or audio
+bed, even in a silent preview that leaves the bed out. Asset `text` zones now include `left-top` and `right-top` for clips whose
 action crosses the middle band; the default scene keeps the copy box under the
 wordmark for them.
 

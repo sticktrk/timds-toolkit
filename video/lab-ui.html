@@ -101,7 +101,7 @@
       <input id="engagement" placeholder="Are you …?">
     </label>
     <label id="solution-wrap" hidden>Solution <span class="hint" id="solution-hint">spoken on the subscribe board · a short verb phrase</span>
-      <input id="solution" placeholder="keep your house where your will says">
+      <input id="solution" placeholder="keep the records that matter">
     </label>
     <label>Source notes <span class="hint">facts, an article excerpt, the client's answer — evidence for the draft, not instructions</span>
       <textarea id="notes" rows="7" placeholder="Paste the article or notes the script should draw on"></textarea>
@@ -437,7 +437,7 @@
     table.querySelector("tbody").innerHTML = plan.scenes.map((scene) => `
       <tr>
         <td><code>${escapeHtml(scene.id)}</code><br><span class="note">${escapeHtml(scene.role || (scene.intro ? "intro" : scene.outro ? "outro" : ""))}</span></td>
-        <td>${scene.eyebrow ? `<span class="eyebrow">${escapeHtml(scene.eyebrow)}</span>` : ""}${escapeHtml(scene.headline || (scene.intro ? plan.exactQuestion : ""))}<br><span class="note">${escapeHtml(scene.narration)}</span>${Array.isArray(scene.footage) ? `<span class="footage">${escapeHtml([scene.visual ? `board ${scene.visual}` : "", scene.visual && scene.footage.length ? "over" : "", scene.footage.join(" → ")].filter(Boolean).join(" "))}</span>` : `<span class="footage">card</span>`}</td>
+        <td>${scene.eyebrow ? `<span class="eyebrow">${escapeHtml(scene.eyebrow)}</span>` : ""}${escapeHtml(scene.headline || (scene.intro ? plan.exactQuestion : ""))}<br><span class="note">${escapeHtml(scene.narration)}</span><span class="footage">${escapeHtml(scene.footageLabel)}</span></td>
         <td class="num">${scene.seconds.toFixed(1)}</td>
       </tr>`).join("");
   }

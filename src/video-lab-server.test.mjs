@@ -52,6 +52,9 @@ test("describes the design system, producer, catalog, and lab inputs for the UI"
   assert.equal(state.contract.brand.series, "Answers");
   assert.deepEqual(Object.keys(state.contract.producer.roleEyebrows), ["hook", "rule", "risk", "process", "exception", "answer"]);
   assert.equal(state.contract.producer.engagement.requireYesNoQuestion, true);
+  // The UI decides from this whether to offer the Solution field, so the block ships even while the board is off.
+  assert.equal(state.contract.producer.subscribe.enabled, false);
+  assert.equal(state.contract.producer.subscribe.requireSolution, true);
   assert.deepEqual(state.catalog, { footage: 3, covers: 1 });
   assert.deepEqual(state.lab, { directory: "video/lab", inputs: ["records"] });
   assert.deepEqual(state.productions, ["sample-topic"]);
@@ -66,7 +69,9 @@ test("compiles a request into a plan the UI can show, and saves it as a lab inpu
   assert.equal(plan.warning, null);
   assert.deepEqual(plan.scenes.map((scene) => scene.id), ["intro", "keep", "copies", "engage", "outro"]);
   assert.equal(plan.scenes[0].footage, "card");
+  assert.equal(plan.scenes[0].footageLabel, "card");
   assert.ok(plan.scenes[1].footage.length >= 1);
+  assert.equal(plan.scenes[1].footageLabel, plan.scenes[1].footage.join(" → "), "the UI shows the same footage line the CLI prints");
   assert.equal(plan.cover.subject, "cover-subject-concern");
   assert.ok(plan.totalSeconds > 0);
   assert.match(plan.text, /records · horizontal/u);
@@ -150,6 +155,9 @@ test("offers the subscribe board's solution to the draft and carries it onto the
   contract.structure = { ...contract.structure, longform: { ...contract.structure?.longform, graphicScenes: true } };
   contract.producer.subscribe = { enabled: true, afterBeat: 1, narrationTemplate: "Subscribe to learn how to {{solution}}." };
   await fs.writeFile(contractPath, JSON.stringify(contract));
+  const state = await describeVideoLabState(workspace);
+  assert.equal(state.contract.producer.subscribe.enabled, true, "the lab UI offers the Solution field from this");
+  assert.deepEqual(state.contract.producer.subscribe.formats, ["horizontal"]);
   const loaded = await loadVideoWorkspace(workspace);
   const { index } = await loadDesignSystemIndex(workspace);
   const authoring = createVideoAuthoringContract({ contract: loaded.video.contract, manifest: workspace.manifest, designSystemIndex: index, provenance: { commit: "0".repeat(40), version: "1.2.3" }, outputFormat: "horizontal" });

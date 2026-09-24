@@ -309,7 +309,7 @@ export function createVideoAuthoringContract({ contract, manifest, designSystemI
       solution: {
         type: "string",
         minLength: 2,
-        description: "The outcome this answer helps the viewer reach, as a short lowercase verb phrase that completes the subscribe board's promise (for example \"keep your house where your will says\")",
+        description: "The outcome this answer helps the viewer reach, as a short lowercase verb phrase that completes the subscribe board's promise (for example \"keep the records that matter\")",
       },
     } : {}),
     ...(engagementRequired ? {
