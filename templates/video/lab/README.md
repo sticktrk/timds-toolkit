@@ -2,10 +2,17 @@
 
 Each JSON file here is one compile request for the `producer` block in
 `../contract.json`: the exact question, a two-to-four-word topic label, the
-engagement question when the block requires one, and ordered answer beats with
-a semantic role (`hook`, `rule`, `risk`, `process`, `exception`, `answer`), the
-spoken narration, a complete micro-headline summary, and optionally `footage`:
-one to three registered clip keys, best match first, that the scene opens on.
+engagement question when the block requires one, the `topic.solution` the
+subscribe board promises when `producer.subscribe` is enabled for the format,
+and ordered answer beats with a semantic role (`hook`, `rule`, `risk`,
+`process`, `exception`, `answer`), the spoken narration, a complete
+micro-headline summary, and optionally `footage`: one to three registered clip
+keys, best match first, that the scene opens on. A beat may also carry a
+`chapter` slug and, when `structure.<format>.graphicScenes` is on, a
+`visual: { "kind": ... }` board drawn by this Design System's `Graphic`
+component; a board plays over the beat's `footage` picks when it names any and
+on the brand background otherwise. Claude drafts `solution` and `chapter` but
+never a `visual`; add boards by hand in the JSON.
 It is the same input
 an automated Video Lab hands `createVideoProducer().compileProduction()` after
 a model writes to the authoring contract, so the lab previews exactly what

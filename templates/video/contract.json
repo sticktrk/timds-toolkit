@@ -26,11 +26,13 @@
   "structure": {
     "longform": {
       "requireIntro": true,
-      "requireOutro": false
+      "requireOutro": false,
+      "graphicScenes": false
     },
     "short": {
       "requireIntro": true,
-      "requireOutro": false
+      "requireOutro": false,
+      "graphicScenes": false
     }
   },
   "copy": {

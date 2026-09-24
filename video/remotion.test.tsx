@@ -7,6 +7,7 @@ import {
   Cover,
   defaultVideoProjectComponents,
   GoldHeadline,
+  GraphicBoard,
   HORIZONTAL_COVER_DESIGN_HEIGHT,
   HORIZONTAL_COVER_DESIGN_WIDTH,
   HorizontalCover,
@@ -17,9 +18,10 @@ import {
   videoFontLoadWeight,
   VerticalCover,
 } from "./remotion.tsx";
-import type {VideoProjectCoverProps} from "./remotion.tsx";
+import type {VideoProjectCoverProps, VideoProjectGraphicProps} from "./remotion.tsx";
 
 const GeneralCover = (_props: VideoProjectCoverProps) => null;
+const ClientBoard = (_props: VideoProjectGraphicProps) => null;
 const CustomVerticalCover = (_props: VideoProjectCoverProps) => null;
 
 test("uses TimDS Remotion components as the defaults", () => {
@@ -28,7 +30,32 @@ test("uses TimDS Remotion components as the defaults", () => {
   assert.equal(resolved.Cover, Cover);
   assert.equal(resolved.HorizontalCover, HorizontalCover);
   assert.equal(resolved.VerticalCover, VerticalCover);
+  assert.equal(resolved.Graphic, GraphicBoard);
   assert.equal(defaultVideoProjectComponents.Cover, Cover);
+  assert.equal(defaultVideoProjectComponents.Graphic, GraphicBoard);
+});
+
+test("lets a Design System own graphic boards without replacing the whole scene", () => {
+  const resolved = resolveVideoProjectComponents({Graphic: ClientBoard});
+  assert.equal(resolved.Graphic, ClientBoard);
+  assert.equal(resolved.Scene, defaultVideoProjectComponents.Scene, "the TimDS scene still mounts footage, watermark, and captions around the client board");
+});
+
+test("the default board shows the scene copy and leaves the board data to the Design System", () => {
+  const project = {
+    schemaVersion: 1 as const,
+    engine: {name: "timds", version: "0"},
+    contract: {fps: 30, copy: {captionPageWords: 5}, brand: {colors: {background: "#101820", panel: "#101820", accent: "#d5b66f", text: "#fff", muted: "#eee"}, fonts: {display: "serif", body: "serif", ui: "sans-serif"}}},
+    assets: {},
+    records: {captions: {lines: []}, production: {}, publishing: {}, request: {}, script: {}},
+  };
+  const scene = {id: "board", eyebrow: "The rule", headline: "Two documents, two jobs", visual: {kind: "steps", steps: [{label: "Pull the deed"}]}};
+  const line = {id: "board", durationMs: 1000, words: []};
+  const markup = renderToStaticMarkup(<GraphicBoard project={project} scene={scene} visual={scene.visual} line={line} duration={30} lead={0} overFootage={false} />);
+  assert.match(markup, /background-color:#101820/u);
+  assert.match(markup, /The rule/u);
+  assert.match(markup, /Two documents, two .*<span[^>]*>jobs<\/span>/u, "the headline keeps the default gold final word");
+  assert.doesNotMatch(markup, /Pull the deed/u, "board data is the client's to draw");
 });
 
 test("allows a Design System to replace all covers or one format", () => {
