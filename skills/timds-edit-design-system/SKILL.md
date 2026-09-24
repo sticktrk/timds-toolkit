@@ -70,6 +70,15 @@ components or production records to adopt publishing defaults.
 4. Preserve the repository's framework and visual language unless the user asks
    for a migration or redesign.
 5. Never hand-edit `dist/`; generate it using the commands in `timds.json`.
+   `check` derives `tokens.json` from the built stylesheets and fills the
+   brand roles (`color.accent`, `font.display`, …) by convention; when it
+   warns that a role is unfilled, map the role to the system's token name in
+   `timds.json` `brand.roles` rather than copying a value anywhere. It also
+   derives `brand.json` from assets annotated `data-timds-role` (`logo`,
+   `photo`, `illustration`, …); annotate the logo and hero imagery on the
+   pages that present them instead of listing them elsewhere. Voice and
+   compliance guidance reach the kit from `brand/voice` and `*/compliance`
+   pages by convention, or from `timds.json` `brand.guidance` references.
 6. Keep `dist/` out of source pull requests when `artifact.publishRef` declares
    a separate CI publication branch.
 7. Use genuine licensed assets. Never invent client marks or usage rights.

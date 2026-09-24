@@ -63,6 +63,9 @@ export const artifactContentType = (file) =>
 
 const sha256Of = (data) => createHash("sha256").update(data).digest("hex");
 
+import { eachBrandKitMedia } from "./brand.mjs";
+import { PROVENANCE_FILE, derivedLayerPaths } from "./derived.mjs";
+
 const eachIndexMedia = (index, visit) => {
   for (const page of index.pages ?? []) {
     for (const block of page.blocks ?? []) {
@@ -110,10 +113,10 @@ export async function collectIndexAssetFiles(index, artifactRoot) {
  * `publicBase` and carry the integrity of the file that was uploaded there.
  * TimDS media records are already absolute and pass through untouched.
  */
-export function rewriteIndexForPublish(index, files, publicBase) {
+export function rewriteIndexForPublish(index, files, publicBase, each = eachIndexMedia) {
   const base = String(publicBase).replace(/\/+$/, "");
   const rewritten = structuredClone(index);
-  eachIndexMedia(rewritten, (media) => {
+  each(rewritten, (media) => {
     if (typeof media.url !== "string" || !media.url.startsWith("/")) return;
     const relative = media.url.split("?", 1)[0].replace(/^\/+/, "");
     const file = files.get(relative);
@@ -124,6 +127,9 @@ export function rewriteIndexForPublish(index, files, publicBase) {
   });
   return rewritten;
 }
+
+/** The brand kit's logos and imagery are index assets, so they resolve the same way. */
+export const rewriteBrandKitForPublish = (kit, files, publicBase) => rewriteIndexForPublish(kit, files, publicBase, eachBrandKitMedia);
 
 /** The extract-written page mirrors and llms.txt, as artifact-relative paths. */
 export async function collectMachineDocFiles(artifactRoot, entryDirectory) {
@@ -152,7 +158,7 @@ export function rewriteLlmsForPublish(text, publicBase) {
   const base = String(publicBase).replace(/\/+$/, "");
   return String(text)
     .replace(/\]\(\//g, `](${base}/`)
-    .replace(/^(Machine-readable index: )(\/\S+)/m, (_match, label, target) => `${label}${base}${target}`);
+    .replace(/^(Machine-readable index: |Design tokens: |Brand kit: )(\/\S+)/gm, (_match, label, target) => `${label}${base}${target}`);
 }
 
 export function detectSourceCommit(cwd) {
@@ -261,19 +267,39 @@ export async function publishExtractedIndex(workspace, options = {}) {
 
   const llmsRelative = entryDirectory === "." ? "llms.txt" : `${entryDirectory}/llms.txt`;
   const llmsSource = await fs.readFile(path.join(artifactRoot, ...llmsRelative.split("/")), "utf8").catch(() => null);
+  // tokens.json carries resolved CSS values and no artifact-local references,
+  // so it publishes as written; an older artifact without one still publishes.
+  const tokensRelative = entryDirectory === "." ? "tokens.json" : `${entryDirectory}/tokens.json`;
+  const tokensSource = await fs.readFile(path.join(artifactRoot, ...tokensRelative.split("/"))).catch(() => null);
+  // The brand kit names logos and imagery by artifact-local URL, rewritten to the CDN like the index.
+  const brandRelative = entryDirectory === "." ? "brand.json" : `${entryDirectory}/brand.json`;
+  const brandSource = await fs.readFile(path.join(artifactRoot, ...brandRelative.split("/")), "utf8").catch(() => null);
 
   const staging = await fs.mkdtemp(path.join(os.tmpdir(), "timds-artifact-"));
   try {
     const rewritten = rewriteIndexForPublish(index, files, publicBase);
     const metaFiles = [
       { body: Buffer.from(`${JSON.stringify(rewritten, null, 2)}\n`), contentType: "application/json", path: indexRelative },
+      ...(tokensSource === null ? [] : [{ body: tokensSource, contentType: "application/json", path: tokensRelative }]),
+      ...(brandSource === null
+        ? []
+        : [{ body: Buffer.from(`${JSON.stringify(rewriteBrandKitForPublish(JSON.parse(brandSource), files, publicBase), null, 2)}\n`), contentType: "application/json", path: brandRelative }]),
       ...(llmsSource === null
         ? []
         : [{ body: Buffer.from(rewriteLlmsForPublish(llmsSource, publicBase)), contentType: "text/plain; charset=utf-8", path: llmsRelative }]),
+      // The stamp is the one file a remote consumer must know: it names the
+      // version, the commit, and where every derived file sits under this base.
       {
-        body: Buffer.from(`${JSON.stringify({ schemaVersion: 1, sourceCommit, version: workspace.manifest.version }, null, 2)}\n`),
+        body: Buffer.from(`${JSON.stringify({
+          schemaVersion: 1,
+          sourceCommit,
+          version: workspace.manifest.version,
+          systemId: workspace.manifest.systemId,
+          entry: workspace.manifest.artifact.entry,
+          files: derivedLayerPaths(workspace.manifest.artifact.entry),
+        }, null, 2)}\n`),
         contentType: "application/json",
-        path: ".timds-artifact.json",
+        path: PROVENANCE_FILE,
       },
     ].map((file, position) => ({
       ...file,
@@ -294,11 +320,13 @@ export async function publishExtractedIndex(workspace, options = {}) {
     await fs.rm(staging, { force: true, recursive: true });
   }
 
-  const total = files.size + 2 + (llmsSource === null ? 0 : 1);
+  const total = files.size + 2 + (llmsSource === null ? 0 : 1) + (tokensSource === null ? 0 : 1) + (brandSource === null ? 0 : 1);
   return {
+    brandUrl: brandSource === null ? null : `${publicBase}/${brandRelative}`,
     docCount: docs.length,
     indexUrl: `${publicBase}/${indexRelative}`,
     llmsUrl: llmsSource === null ? null : `${publicBase}/${llmsRelative}`,
+    tokensUrl: tokensSource === null ? null : `${publicBase}/${tokensRelative}`,
     publicBase,
     skipped: total - uploaded,
     total,

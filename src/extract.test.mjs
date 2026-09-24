@@ -1,8 +1,13 @@
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 
 import {
+  blockToMarkdown,
   buildLlmsText,
+  extractArtifact,
   extractPage,
   normalizeMachineConfig,
   pageToMarkdown,
@@ -104,6 +109,11 @@ test("markdown mirror renders tables, notes, code, and assets", () => {
   assert.ok(markdown.includes("<!-- source: /design-system/social/shorts · id: social/shorts -->"));
 });
 
+test("a page mirror is its header plus every block's markdown", () => {
+  const rendered = pageToMarkdown(page);
+  for (const block of page.blocks) assert.ok(rendered.includes(blockToMarkdown(block).trimEnd()));
+});
+
 test("llms.txt groups pages by view and strips links from summaries", () => {
   const text = buildLlmsText(
     { name: "Acme", description: "Shared brand standards." },
@@ -114,6 +124,115 @@ test("llms.txt groups pages by view and strips links from summaries", () => {
   assert.ok(text.includes("> Shared brand standards."));
   assert.ok(text.includes("- [Short-form video](/design-system/social/shorts/index.md)"));
   assert.ok(!text.includes("(/spec)"));
+  assert.ok(!text.includes("Design tokens:"));
+  const withTokens = buildLlmsText({ name: "Acme" }, [page], "/design-system/index.json", "/design-system/tokens.json");
+  assert.ok(withTokens.includes("Machine-readable index: /design-system/index.json"));
+  assert.ok(withTokens.includes("Design tokens: /design-system/tokens.json"));
+});
+
+test("extractArtifact derives tokens.json from the stylesheets the pages load", async () => {
+  const artifactRoot = await fs.mkdtemp(path.join(os.tmpdir(), "timds-tokens-test-"));
+  try {
+    const files = {
+      "design-system/index.html": '<html><head><link rel="stylesheet" href="/_astro/site.css"></head><body><main><h1>Home</h1></main></body></html>',
+      "design-system/brand/color/index.html": '<html><head><link rel="stylesheet" href="/_astro/site.css"><link rel="stylesheet" href="../../theme.css"><style>.swatch{--swatch-gap:var(--space-1)}</style></head><body><main><h1>Color</h1></main></body></html>',
+      "design-system/theme.css": "[data-theme=dark]{--navy-900:#000}",
+      "design-system/brand/logo/index.html": '<html><body><main><h1>Logo</h1><section id="family"><h2>Family</h2><img src="/design-system/logo.svg" alt="Colour logo" data-timds-role="logo" data-timds-on="light"><img src="/design-system/logo-white.svg" alt="White logo" data-timds-role="logo primary" data-timds-on="dark"></section><section id="usage"><h2>Usage</h2><img src="/design-system/logo.svg" alt="Colour logo in use" data-timds-role="logo"><img src="/design-system/hero.webp" alt="Hero" data-timds-role="photo" data-timds-tags="hero"></section></main></body></html>',
+      "design-system/brand/voice/index.html": '<html><body><main><h1>Voice</h1><section id="clear"><h2>Clear</h2><p>Lead with the answer.</p><div class="note">Never hedge.</div></section></main></body></html>',
+      "design-system/social/compliance/index.html": '<html><body><main><h1>Compliance</h1><section id="claims"><h2>Claims</h2><p>No guarantees.</p></section></main></body></html>',
+      "design-system/logo.svg": "<svg/>",
+      "design-system/logo-white.svg": "<svg/>",
+      "design-system/hero.webp": "webp",
+      "design-system/missing-page.html": '<html><head><link rel="stylesheet" href="/nope.css"></head><body><main><h1>Orphan</h1></main></body></html>',
+      "_astro/site.css": '@import "ramps.css";:root{--navy:var(--navy-900);--space-1:4px;--accent:var(--navy)}',
+      "_astro/ramps.css": ":root{--navy-900:#0a1729}",
+      "_astro/unused.css": ":root{--never-loaded:1}",
+    };
+    for (const [relative, content] of Object.entries(files)) {
+      const target = path.join(artifactRoot, ...relative.split("/"));
+      await fs.mkdir(path.dirname(target), { recursive: true });
+      await fs.writeFile(target, content);
+    }
+    const manifest = { artifact: { entry: "design-system/index.html" }, name: "Client", systemId: "client/system", version: "2.0.0", machine: {}, brand: { roles: { "color.text": "--navy-900" }, guidance: { shorts: ["brand/voice#clear"] } } };
+
+    const result = await extractArtifact({ artifactRoot, manifest, write: true });
+    assert.equal(result.counts.tokens, 6);
+    assert.equal(result.counts.stylesheets, 4);
+    assert.equal(result.counts.roles, 2);
+    assert.deepEqual(result.index.tokens, { url: "/design-system/tokens.json", count: 6, stylesheets: 4, roles: 2 });
+    assert.equal(result.warnings.length, 6);
+    assert.match(result.warnings[0], /brand role color\.background is not filled/);
+    assert.ok(!result.warnings.some((warning) => warning.includes("no logo")));
+    assert.deepEqual(result.index.brand, { url: "/design-system/brand.json", logos: 2, imagery: 1, guidance: 3 });
+    assert.equal(result.counts.guidance, 3);
+    assert.equal(result.counts.logos, 2);
+    assert.equal(result.counts.imagery, 1);
+
+    const kit = JSON.parse(await fs.readFile(path.join(artifactRoot, "design-system", "brand.json"), "utf8"));
+    assert.deepEqual(kit.system, { id: "client/system", name: "Client", version: "2.0.0" });
+    assert.equal(kit.roles["color.text"].token, "--navy-900");
+    assert.deepEqual(kit.logos.map((logo) => [logo.name, logo.media.url, Boolean(logo.primary), logo.citations.length]), [
+      ["White logo", "/design-system/logo-white.svg", true, 1],
+      ["Colour logo", "/design-system/logo.svg", false, 2],
+    ]);
+    assert.deepEqual(kit.imagery.map((entry) => [entry.role, entry.tags, entry.block]), [["photo", ["hero"], "brand/logo#usage"]]);
+    // Voice and compliance fill by convention; the manifest adds a group. Each block carries its Markdown.
+    assert.deepEqual(Object.keys(kit.guidance).sort(), ["compliance", "shorts", "voice"]);
+    assert.equal(kit.guidance.voice.source, "convention");
+    assert.equal(kit.guidance.voice.blocks[0].id, "brand/voice#clear");
+    assert.equal(kit.guidance.voice.blocks[0].markdown, "## Clear   `#clear`\n\nLead with the answer.\n\n> **Note.** Never hedge.\n");
+    assert.equal(kit.guidance.compliance.blocks[0].page, "social/compliance");
+    assert.deepEqual(kit.guidance.shorts, { source: "manifest", blocks: [{ id: "brand/voice#clear", page: "brand/voice", title: "Clear", markdown: kit.guidance.voice.blocks[0].markdown }] });
+    assert.ok(result.written.includes(path.join(artifactRoot, "design-system", "tokens.json")));
+
+    const document = JSON.parse(await fs.readFile(path.join(artifactRoot, "design-system", "tokens.json"), "utf8"));
+    assert.deepEqual(document.system, { id: "client/system", name: "Client", version: "2.0.0" });
+    // Linked files first in path order (a file loaded by two pages is read once), then inline blocks.
+    assert.deepEqual(document.stylesheets.map((sheet) => sheet.path), [
+      "/_astro/ramps.css",
+      "/_astro/site.css",
+      "/design-system/theme.css",
+      "/design-system/brand/color/index.html#style-1",
+    ]);
+    assert.ok(document.stylesheets.every((sheet) => /^[a-f0-9]{64}$/.test(sheet.sha256) && sheet.bytes > 0));
+    assert.ok(!document.tokens.some((token) => token.name === "--never-loaded"));
+    const token = (name, selector = ":root") => document.tokens.find((entry) => entry.name === name && entry.selector === selector);
+    assert.equal(token("--navy").resolved, "#0a1729");
+    assert.equal(token("--navy").source, "/_astro/site.css");
+    assert.equal(token("--navy-900", "[data-theme=dark]").resolved, "#000");
+    assert.equal(token("--swatch-gap", ".swatch").resolved, "4px");
+    assert.equal(token("--swatch-gap", ".swatch").source, "/design-system/brand/color/index.html#style-1");
+    // The manifest mapping fills color.text; convention fills color.accent through the var() chain.
+    assert.deepEqual(document.roles["color.text"], { token: "--navy-900", value: "#0a1729", kind: "color", source: "manifest" });
+    assert.deepEqual(document.roles["color.accent"], { token: "--accent", value: "#0a1729", kind: "color", source: "convention" });
+    assert.ok(document.missingRoles.includes("font.display"));
+
+    const llms = await fs.readFile(path.join(artifactRoot, "design-system", "llms.txt"), "utf8");
+    assert.ok(llms.includes("Design tokens: /design-system/tokens.json"));
+    assert.ok(llms.includes("Brand kit: /design-system/brand.json"));
+  } finally {
+    await fs.rm(artifactRoot, { force: true, recursive: true });
+  }
+});
+
+test("assets carry the brand annotation of their element or nearest wrapper", () => {
+  const annotated = extractPage(
+    `<main><h1>Logo</h1><section id="family">
+      <h2>Family</h2>
+      <div data-timds-role="logo primary" data-timds-lockup="horizontal" data-timds-on="light"><div class="cell"><img src="/plg-colour.svg" alt="PLG colour logo"></div></div>
+      <figure data-timds-role="logo" data-timds-variant="white" data-timds-on="dark"><img src="/plg-white.svg"><figcaption>PLG white logo</figcaption></figure>
+      <img src="/plain.svg" alt="Plain">
+    </section></main>`,
+    { pageId: "brand/logo", url: "/brand/logo" },
+  );
+  const byName = (name) => annotated.blocks[0].assets.find((asset) => asset.name === name);
+  const [colour, white, plain] = [byName("PLG colour logo"), byName("PLG white logo"), byName("Plain")];
+  assert.deepEqual(colour.brand, { role: "logo", primary: true, lockup: "horizontal", on: "light" });
+  assert.deepEqual(white.brand, { role: "logo", variant: "white", on: "dark" });
+  assert.equal(plain.brand, undefined);
+  const markdown = pageToMarkdown(annotated);
+  assert.ok(markdown.includes("| PLG colour logo | `—` | **logo primary horizontal on light** |"));
+  assert.ok(markdown.includes("| Plain | `—` |  |"));
 });
 
 test("works with no section markup by treating the root as one block", () => {

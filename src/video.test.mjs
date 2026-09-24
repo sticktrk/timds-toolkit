@@ -9,6 +9,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+  brandDriftWarnings,
   checkVideoWorkspace,
   describeSceneFootage,
   describeVideoLabPlan,
@@ -22,6 +23,7 @@ import {
   prepareVideoLab,
   prepareVideoWorkspace,
   renderVideoWorkspace,
+  resolveVideoBrand,
   runVideoLab,
   silentSceneTimings,
   singleFormatScenes,
@@ -1471,4 +1473,97 @@ test("describes a scene's footage line once for the CLI printout and the lab UI"
   // A compiled beat before finalize passes its own picks.
   assert.equal(describeSceneFootage({ visual: { kind: "steps" } }, ["clip-b"]), "board steps over clip-b");
   assert.equal(describeSceneFootage({}, undefined), "");
+});
+
+const DERIVED_TOKENS = {
+  schemaVersion: 1,
+  roles: {
+    "color.accent": { token: "--gold-300", value: "#d4b876", kind: "color", source: "convention" },
+    "font.display": { token: "--font-display", value: '"Cormorant Garamond",Georgia,serif', kind: "font-family", source: "convention" },
+  },
+  tokens: [
+    { name: "--navy-900", resolved: "#0a1729", kind: "color", base: true },
+    { name: "--navy-900", resolved: "#000", kind: "color", base: false },
+    { name: "--gold-300", resolved: "#d4b876", kind: "color", base: true },
+    { name: "--step-1", resolved: "1rem", kind: "length", base: true },
+  ],
+};
+
+test("resolves brand role and token references in the video contract from derived tokens", async (t) => {
+  const workspace = await videoFixture(t, {
+    contract: {
+      brand: {
+        colors: { background: "{--navy-900}", accent: "{ color.accent }", text: "#fff" },
+        fonts: { display: "{font.display}", body: "serif", ui: "sans-serif" },
+        fontFiles: [{ family: "Example Serif", path: "public/example.woff2", style: "normal", weight: "700" }],
+        logo: "public/logo.svg",
+        series: "Answers",
+        site: "example.com",
+        tagline: "Clear answers.",
+      },
+    },
+  });
+  // Without derived tokens the reference is an error that names the fix.
+  await assert.rejects(loadVideoWorkspace(workspace, { slug: "sample-topic" }), /brand\.colors\.background references --navy-900, but dist tokens\.json has not been derived; run timds check first/);
+
+  await fs.mkdir(path.join(workspace.designSystemRoot, "dist"), { recursive: true });
+  await fs.writeFile(path.join(workspace.designSystemRoot, "dist", "tokens.json"), JSON.stringify(DERIVED_TOKENS));
+  const loaded = await loadVideoWorkspace(workspace, { slug: "sample-topic" });
+  assert.equal(loaded.video.contract.brand.colors.background, "#0a1729");
+  assert.equal(loaded.video.contract.brand.colors.accent, "#d4b876");
+  assert.equal(loaded.video.contract.brand.colors.panel, "#0a1729");
+  assert.equal(loaded.video.contract.brand.fonts.display, '"Cormorant Garamond",Georgia,serif');
+  // panel defaults to the background value, so it inherits and resolves the same reference.
+  assert.deepEqual(loaded.video.brandReferences.map((entry) => `${entry.field}=${entry.reference}`), [
+    "brand.colors.background=--navy-900",
+    "brand.colors.panel=--navy-900",
+    "brand.colors.accent=color.accent",
+    "brand.fonts.display=font.display",
+  ]);
+
+  // The prepared project carries values, never references, so a render host needs no tokens.
+  const prepared = await prepareVideoWorkspace(workspace, "sample-topic");
+  assert.equal(prepared.project.contract.brand.colors.accent, "#d4b876");
+});
+
+test("brand references must resolve to a token of the right kind", () => {
+  const contract = validateVideoContract({
+    schemaVersion: 1, id: "x", name: "X", fps: 30,
+    formats: { longform: { width: 1920, height: 1080 }, cover: { width: 3840, height: 2160 }, short: { width: 1080, height: 1920 } },
+    package: { shortCount: 0, timeZone: "UTC" },
+    structure: { longform: {}, short: {} },
+    brand: { colors: { background: "{--step-1}", accent: "#fc0", text: "#fff" }, fonts: {}, logo: "public/logo.svg", series: "S", site: "s.com", tagline: "T" },
+  });
+  assert.throws(() => resolveVideoBrand(contract, DERIVED_TOKENS), /references --step-1, which resolves to 1rem \(length\), not a color/);
+  const missingRole = { ...contract, brand: { ...contract.brand, colors: { ...contract.brand.colors, background: "{color.background}" } } };
+  assert.throws(() => resolveVideoBrand(missingRole, DERIVED_TOKENS), /references color\.background, which the derived tokens do not fill; map it in timds\.json brand\.roles/);
+  const missingToken = { ...contract, brand: { ...contract.brand, colors: { ...contract.brand.colors, background: "{--nope}" } } };
+  assert.throws(() => resolveVideoBrand(missingToken, DERIVED_TOKENS), /references --nope, which the derived tokens do not fill on :root/);
+});
+
+test("check warns when a literal brand value duplicates a derived token", async (t) => {
+  const workspace = await videoFixture(t, {
+    contract: {
+      brand: {
+        colors: { background: "#0A1729", accent: "#D4B876", text: "#fff" },
+        fonts: { display: "Cormorant Garamond, Georgia, serif", body: "serif", ui: "sans-serif" },
+        fontFiles: [{ family: "Example Serif", path: "public/example.woff2", style: "normal", weight: "700" }],
+        logo: "public/logo.svg",
+        series: "Answers",
+        site: "example.com",
+        tagline: "Clear answers.",
+      },
+    },
+  });
+  await fs.mkdir(path.join(workspace.designSystemRoot, "dist"), { recursive: true });
+  await fs.writeFile(path.join(workspace.designSystemRoot, "dist", "tokens.json"), JSON.stringify(DERIVED_TOKENS));
+  const checked = await checkVideoWorkspace(workspace, { slug: "sample-topic" });
+  const drift = checked.warnings.filter((warning) => warning.includes("duplicates design token"));
+  assert.deepEqual(drift, [
+    'brand.colors.background "#0A1729" duplicates design token --navy-900; reference it as "{--navy-900}" so it cannot drift',
+    'brand.colors.panel "#0A1729" duplicates design token --navy-900; reference it as "{--navy-900}" so it cannot drift',
+    'brand.colors.accent "#D4B876" duplicates design token color.accent; reference it as "{color.accent}" so it cannot drift',
+    'brand.fonts.display "Cormorant Garamond, Georgia, serif" duplicates design token font.display; reference it as "{font.display}" so it cannot drift',
+  ]);
+  assert.deepEqual(brandDriftWarnings(checked.video.contract, null), []);
 });

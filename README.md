@@ -107,10 +107,108 @@ npm run timds -- extract
 ```
 
 Beside the published pages this writes `index.json` (the structured tree, with
-assets joined to their media records), `llms.txt` (the page index), and an
-`index.md` Markdown mirror of every page. Every record carries a stable id such
-as `social/shorts#safe-zones/bottom-band`, so an agent can cite a rule and a
-reviewer can resolve the citation.
+assets joined to their media records), `tokens.json` (the design tokens), 
+`llms.txt` (the page index), and an `index.md` Markdown mirror of every page.
+Every record carries a stable id such as `social/shorts#safe-zones/bottom-band`,
+so an agent can cite a rule and a reviewer can resolve the citation.
+
+`tokens.json` is read from the stylesheets the built pages actually load —
+linked files, their `@import`s, and inline `<style>` blocks — never from
+authored source. Every CSS custom property is recorded with the selector and
+conditional at-rules it sits under, its `var()` chain resolved (own scope
+first, then `:root`), and a coarse kind such as `color`, `font-family`, or
+`length`. A theme scope like `[data-theme=dark]` or `.theme-admin` appears as
+its own records, so a consumer can ask for the base brand or a specific
+theme. Because the values come from the same CSS the pages render with, the
+tokens cannot drift from the system; there is no file to keep in sync.
+
+`tokens.json` also fills a small set of **brand roles** so a consumer can ask
+for "the accent color" or "the display font" without knowing a system's token
+names: `color.background`, `color.panel`, `color.accent`, `color.text`,
+`color.muted`, `font.display`, `font.body`, and `font.ui`. Each role is filled
+by convention from the `:root` scope — `--color-accent`, `--accent`, or
+`--primary` for the accent, `--font-display` or `--font-serif` for the display
+face, and so on — and `check` reports any role nothing fills. A system whose
+names differ maps the role in `timds.json`; the mapping names the token, never
+the value, so the value still comes from the CSS:
+
+```json
+"brand": {
+  "roles": {
+    "color.accent": "--gold-300",
+    "font.ui": "--font-sans"
+  }
+}
+```
+
+`check` fails when a mapped token is not declared on `:root` or is not the
+role's kind. Additional `color.*` and `font.*` roles may be mapped the same way.
+
+`brand.json` is the **brand kit**: the role colors and fonts above plus every
+logo and image the pages present as brand material. Pages already show each
+logo variant and hero photograph; a `data-timds-role` annotation on that
+markup — on the image, its figure, or any wrapper — is what puts the same
+asset in the kit, so the kit is generated from the page a designer already
+maintains:
+
+```html
+<div data-timds-role="logo primary" data-timds-lockup="horizontal" data-timds-on="light">
+  <img src="/design-system/plg-logo-colour.svg" alt="PLG colour logo">
+</div>
+<img src="/design-system/plg-logo-white.svg" alt="PLG white logo"
+     data-timds-role="logo" data-timds-variant="white" data-timds-on="dark">
+<figure data-timds-role="photo" data-timds-tags="hero, family">…</figure>
+```
+
+`logo` fills `logos`; any other role — `photo`, `illustration`, `graphic`,
+`icon`, `pattern` — fills `imagery` under that role. `variant`, `lockup`, `on`
+(the background the variant is for), and `tags` are free lowercase qualifiers,
+and the `primary` flag sorts a variant first. An asset shown on several pages
+appears once with every citation. `check` warns when no logo is annotated.
+
+The kit's **guidance groups** are the pages a consumer reads before producing
+anything. By convention `voice` is the `brand/voice` page and `compliance` is
+every page named `compliance`, each block carried with its Markdown so the kit
+answers "how does this brand speak" on its own. `timds.json` overrides a group
+or adds one with `page` or `page#block` references, which `check` verifies
+against the extracted index:
+
+```json
+"brand": {
+  "guidance": {
+    "voice": ["brand/voice#clear", "social/voice"],
+    "shorts": ["social/shorts#authoring"]
+  }
+}
+```
+
+### The derived layer is the contract consumers read
+
+Together `index.json`, `tokens.json`, `brand.json`, and `llms.txt` are the
+**derived layer**: generated on every `check`, published on every
+`extract --publish`, and the only thing a consumer — an MCP server, a render
+host, a pipeline, another agent — needs. Nothing in it is authored by hand,
+every document is stamped with the system version, and each file declares its
+`schemaVersion`; additions are compatible, and a breaking change bumps the
+version. `@dtconcepts/timds/derived` reads the layer the same way from a
+checkout or from the published prefix, and ships type declarations for every
+document:
+
+```js
+import { readDerivedLayer, fetchDerivedLayer } from "@dtconcepts/timds/derived";
+
+const local = await readDerivedLayer("/path/to/client-design-system", manifest);
+const published = await fetchDerivedLayer("https://assets.timds.com/.../artifact");
+published.brand.roles["color.accent"].value;   // "#d4b876"
+published.brand.logos[0].media.url;            // CDN URL of the primary logo
+published.brand.guidance.compliance.blocks;    // blocks with Markdown
+```
+
+The published prefix carries `.timds-artifact.json`, which names the version,
+source commit, and location of each derived file, so a remote reader needs
+only the base URL. `timds doctor` reports the kit's readiness in one line and
+`timds brand` prints it in full, with the fix for every gap; `--json` returns
+the kit itself.
 
 Extraction keys on HTML semantics — `main`, `section`, `h1`/`h2`, `table`,
 `figure`, `pre` — and needs no configuration. Content the vocabulary does not
@@ -348,6 +446,34 @@ npm run timds -- video check TOPIC
 npm run timds -- video prepare TOPIC
 npm run timds -- video studio TOPIC
 npm run timds -- video render TOPIC
+```
+
+### Brand colors and fonts come from the Design System
+
+`brand.colors` and `brand.fonts` accept a reference in place of a literal:
+`"{color.accent}"` names a brand role and `"{--navy-900}"` names a token, both
+from the `tokens.json` that `timds check` derives from the built stylesheets.
+References resolve when the workspace loads, so the renderer, the lab, and
+every prepared project see values. A literal that duplicates a derived token
+is reported by `check` with the reference to use instead. Video surfaces often
+pick a darker face of the same palette than the page does, which is what a
+token reference is for:
+
+```json
+"brand": {
+  "colors": {
+    "background": "{--navy-900}",
+    "panel": "rgba(10, 23, 41, 0.96)",
+    "accent": "{--gold-300}",
+    "text": "{--cream}",
+    "muted": "{--navy-200}"
+  },
+  "fonts": {
+    "display": "{font.display}",
+    "body": "{font.body}",
+    "ui": "{font.ui}"
+  }
+}
 ```
 
 ### Brand files every render host can reach

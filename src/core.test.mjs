@@ -67,7 +67,7 @@ async function createDesignSystemRepo(t, { broken = false } = {}) {
     `<link rel="stylesheet" href="/assets/site.css"><main>${broken ? '<img src="/missing.png">' : "Ready"}</main>`,
     "utf8",
   );
-  await fs.writeFile(path.join(repoRoot, "design-system", "dist", "assets", "site.css"), "body{color:#123}\n", "utf8");
+  await fs.writeFile(path.join(repoRoot, "design-system", "dist", "assets", "site.css"), ":root{--brand:#123}body{color:var(--brand)}\n", "utf8");
   return repoRoot;
 }
 
@@ -82,6 +82,16 @@ test("validates schema 2 manifests with argv workspace commands", () => {
   });
   assert.deepEqual(manifest.workspace.build, ["npm", "run", "build"]);
   assert.equal(manifest.artifact.entry, "index.html");
+});
+
+test("validates brand roles in the manifest and defaults them to empty", () => {
+  const base = { artifact: { entry: "index.html" }, name: "Roles", schemaVersion: 2, systemId: "roles/core", version: "1.0.0", workspace: {} };
+  assert.deepEqual(validateManifest(base).brand, { guidance: {}, roles: {} });
+  assert.deepEqual(validateManifest({ ...base, brand: { roles: { "color.accent": "--gold-300" } } }).brand.roles, { "color.accent": "--gold-300" });
+  assert.throws(() => validateManifest({ ...base, brand: { roles: { accent: "--gold-300" } } }), /brand\.roles accent must be color\.<name> or font\.<name>/);
+  assert.throws(() => validateManifest({ ...base, brand: "roles" }), /timds\.json brand must be/);
+  assert.deepEqual(validateManifest({ ...base, brand: { guidance: { voice: "brand/voice" } } }).brand.guidance, { voice: ["brand/voice"] });
+  assert.throws(() => validateManifest({ ...base, brand: { guidance: { voice: ["brand/voice#a b"] } } }), /must be page or page#block/);
 });
 
 test("rejects shell-string workspace commands", () => {
@@ -373,9 +383,47 @@ test("validates exact artifact files and local references", async (t) => {
   const paths = result.artifact.files.map((file) => file.path);
   assert.ok(paths.includes("index.html"));
   assert.ok(paths.includes("index.json"));
+  assert.ok(paths.includes("tokens.json"));
+  assert.ok(paths.includes("brand.json"));
   assert.ok(paths.includes("llms.txt"));
   assert.equal(result.artifact.fileCount, paths.length);
   assert.ok(result.machine.enabled);
+  // The token layer is read from the stylesheet the page links, not from tokens.json at the root.
+  assert.equal(result.machine.counts.tokens, 1);
+  assert.equal(result.machine.counts.stylesheets, 1);
+  assert.equal(result.machine.tokens.tokens[0].name, "--brand");
+  assert.equal(result.machine.tokens.tokens[0].resolved, "#123");
+  // --brand fills color.accent by convention; the other roles are reported, not fatal.
+  assert.equal(result.machine.counts.roles, 1);
+  assert.equal(result.machine.tokens.roles["color.accent"].token, "--brand");
+  // Seven unfilled roles, then the empty voice group and the missing logo annotation.
+  assert.equal(result.machine.warnings.length, 9);
+  assert.match(result.machine.warnings[7], /guidance group voice is empty/);
+  assert.match(result.machine.warnings[8], /no asset is annotated data-timds-role="logo"/);
+});
+
+test("check fails when a manifest guidance group references a block the artifact lacks", async (t) => {
+  const repoRoot = await createDesignSystemRepo(t);
+  const manifestPath = path.join(repoRoot, "design-system", "timds.json");
+  const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
+  manifest.brand = { guidance: { voice: ["index#tone"] } };
+  await writeJson(manifestPath, manifest);
+  // The fixture page has no <h1>, so extract records no page at all: the reference dangles at the page level.
+  await assert.rejects(checkWorkspace(repoRoot, { skipBuild: true }), /guidance group voice references index#tone, but the artifact has no page index/);
+});
+
+test("check fails when a manifest brand role names a token the stylesheets do not declare", async (t) => {
+  const repoRoot = await createDesignSystemRepo(t);
+  const manifestPath = path.join(repoRoot, "design-system", "timds.json");
+  const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
+  manifest.brand = { roles: { "color.text": "--ink" } };
+  await writeJson(manifestPath, manifest);
+  await assert.rejects(checkWorkspace(repoRoot, { skipBuild: true }), /brand role color\.text is mapped to --ink, which no loaded stylesheet declares/);
+  manifest.brand = { roles: { "color.text": "--brand" } };
+  await writeJson(manifestPath, manifest);
+  const result = await checkWorkspace(repoRoot, { skipBuild: true });
+  assert.equal(result.machine.tokens.roles["color.text"].source, "manifest");
+  assert.equal(result.machine.tokens.roles["color.accent"].source, "convention");
 });
 
 test("builds before running the workspace check on a clean artifact", async (t) => {
@@ -568,9 +616,10 @@ test("loads and validates a standalone repository contract", async (t) => {
   const checked = await checkWorkspace(repoRoot, { skipBuild: true });
   assert.deepEqual(
     checked.artifact.files.map((file) => file.path).sort(),
-    ["index.html", "index.json", "index.md", "llms.txt"],
+    ["brand.json", "index.html", "index.json", "index.md", "llms.txt", "tokens.json"],
   );
   assert.equal(checked.machine.counts.blocks, 1);
+  assert.equal(checked.machine.counts.tokens, 0);
 });
 
 test("initializes the reusable standalone repository shape", async (t) => {

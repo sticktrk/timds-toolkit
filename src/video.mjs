@@ -9,6 +9,7 @@ import { syncDefaults } from "./defaults.mjs";
 import { fileSha256, readLocalMediaManifest, readMediaCatalog } from "./media.mjs";
 import { createVideoProducer, validateVideoProducerConfig } from "./video-producer.mjs";
 import { validateVideoVerticalMetadata } from "./video-crops.mjs";
+import { readDerivedTokens } from "./tokens.mjs";
 import { adjacentFootageRepeats, truncatedHeadline } from "../video/footage.mjs";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -574,6 +575,73 @@ function validateProduction(records, contract, assetCatalog, label) {
   return { captions: { ...captions, lines }, production: { ...production, slug: productionSlug, longform: { ...longform, scenes: longScenes, cover }, shorts }, publishing, request, script, usedAssets };
 }
 
+// --- brand token references -------------------------------------------------
+//
+// The Design System declares its colors and fonts once, as CSS custom
+// properties that `timds check` derives into dist tokens.json. A video contract
+// can reference them — `"{color.accent}"` for a brand role, `"{--gold-300}"`
+// for a token — instead of copying values that then drift. References resolve
+// when the workspace loads, so the renderer and every consumer see values.
+
+const BRAND_REFERENCE = /^\{\s*((?:color|font)\.[a-z][a-z0-9-]*|--[a-zA-Z0-9_-]+)\s*\}$/;
+const BRAND_VALUE_FIELDS = [["colors", "background"], ["colors", "panel"], ["colors", "accent"], ["colors", "text"], ["colors", "muted"], ["fonts", "display"], ["fonts", "body"], ["fonts", "ui"]];
+
+export const parseBrandReference = (value) => BRAND_REFERENCE.exec(String(value ?? "").trim())?.[1] ?? null;
+
+function lookupBrandReference(name, tokens) {
+  if (name.startsWith("--")) {
+    const token = [...tokens.tokens].reverse().find((entry) => entry.name === name && entry.base);
+    return token ? { value: token.resolved, kind: token.kind } : null;
+  }
+  const role = tokens.roles?.[name];
+  return role ? { value: role.value, kind: role.kind } : null;
+}
+
+/**
+ * Replace every brand reference in the contract with its derived value.
+ * A reference without derived tokens is an error with the fix in it, since a
+ * render host cannot guess the brand.
+ */
+export function resolveVideoBrand(contract, tokens) {
+  const references = [];
+  const resolved = { ...contract, brand: { ...contract.brand, colors: { ...contract.brand.colors }, fonts: { ...contract.brand.fonts } } };
+  for (const [group, field] of BRAND_VALUE_FIELDS) {
+    const name = parseBrandReference(contract.brand[group][field]);
+    if (!name) continue;
+    const label = `video contract brand.${group}.${field}`;
+    if (!tokens) throw new Error(`${label} references ${name}, but dist tokens.json has not been derived; run timds check first`);
+    const found = lookupBrandReference(name, tokens);
+    if (!found) throw new Error(`${label} references ${name}, which the derived tokens do not fill${name.startsWith("--") ? " on :root" : "; map it in timds.json brand.roles"}`);
+    const expected = group === "colors" ? "color" : "font-family";
+    if (found.kind !== expected) throw new Error(`${label} references ${name}, which resolves to ${found.value} (${found.kind}), not a ${expected}`);
+    resolved.brand[group][field] = found.value;
+    references.push({ field: `brand.${group}.${field}`, reference: name, value: found.value });
+  }
+  return { contract: resolved, references };
+}
+
+// Quoting is optional around most font family names, so compare without it.
+const normalizeBrandValue = (value) => String(value ?? "").replace(/["']/g, "").replace(/\s+/g, " ").replace(/\s*,\s*/g, ",").trim().toLowerCase();
+
+/** Literal brand values that duplicate a derived token: they should be references. */
+export function brandDriftWarnings(contract, tokens) {
+  if (!tokens) return [];
+  const warnings = [];
+  const roleByValue = new Map();
+  for (const [role, entry] of Object.entries(tokens.roles ?? {})) if (!roleByValue.has(normalizeBrandValue(entry.value))) roleByValue.set(normalizeBrandValue(entry.value), role);
+  const tokenByValue = new Map();
+  for (const token of tokens.tokens ?? []) if (token.base && !tokenByValue.has(normalizeBrandValue(token.resolved))) tokenByValue.set(normalizeBrandValue(token.resolved), token.name);
+  for (const [group, field] of BRAND_VALUE_FIELDS) {
+    const raw = contract.brand[group][field];
+    if (parseBrandReference(raw)) continue;
+    const value = normalizeBrandValue(raw);
+    if (!value) continue;
+    const match = roleByValue.get(value) ?? tokenByValue.get(value);
+    if (match) warnings.push(`brand.${group}.${field} "${raw}" duplicates design token ${match}; reference it as "{${match}}" so it cannot drift`);
+  }
+  return warnings;
+}
+
 export async function loadVideoWorkspace(workspace, { slug: selectedSlug } = {}) {
   if (!workspace.manifest.video) throw new Error("timds.json does not enable the video contract; run timds video init");
   const video = workspace.manifest.video;
@@ -588,7 +656,8 @@ export async function loadVideoWorkspace(workspace, { slug: selectedSlug } = {})
   if (componentsPath && !existsSync(componentsPath)) {
     throw new Error(`video component override is required at ${componentsPath}`);
   }
-  const contract = validateVideoContract(await readJson(contractPath, "video contract"));
+  const tokens = await readDerivedTokens(workspace.designSystemRoot, workspace.manifest);
+  const { contract, references: brandReferences } = resolveVideoBrand(validateVideoContract(await readJson(contractPath, "video contract")), tokens);
   const assets = validateAssetCatalog(await readJson(assetsPath, "video assets"));
   const verticalMetadata = video.verticalMetadata ? validateVideoVerticalMetadata(
     await readJson(path.join(workspace.designSystemRoot, video.verticalMetadata), "video vertical metadata"),
@@ -604,7 +673,7 @@ export async function loadVideoWorkspace(workspace, { slug: selectedSlug } = {})
     productions.push(validateProduction(values, contract, assets, productionSlug));
   }
   if (selectedSlug && !productions.length) throw new Error(`video production ${selectedSlug} was not found`);
-  return { ...workspace, video: { ...video, assets, assetsPath, verticalMetadata, componentsPath, contract, contractPath, labRoot, localRoot, productions, productionsRoot } };
+  return { ...workspace, video: { ...video, assets, assetsPath, brandReferences, verticalMetadata, componentsPath, contract, contractPath, labRoot, localRoot, productions, productionsRoot, tokens } };
 }
 
 export async function checkVideoWorkspace(workspace, options = {}) {
@@ -613,7 +682,7 @@ export async function checkVideoWorkspace(workspace, options = {}) {
   const registered = new Set(catalog.assets.map((asset) => asset.key));
   const brandProblems = await checkVideoBrandSources({ designSystemRoot: workspace.designSystemRoot, contract: loaded.video.contract, mediaCatalog: catalog, localDir: loaded.video.local });
   if (brandProblems.length) throw brandSourceError(brandProblems);
-  const warnings = [];
+  const warnings = brandDriftWarnings(validateVideoContract(await readJson(loaded.video.contractPath, "video contract")), loaded.video.tokens);
   // A production is only as portable as its media. A scene or cover that
   // names a mediaKey media.json has not published renders on the machine that
   // staged the clip and fails on every other host, so it is refused here, the

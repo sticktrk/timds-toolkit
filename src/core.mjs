@@ -22,6 +22,9 @@ import {
 import { syncDefaults } from "./defaults.mjs";
 import { publishExtractedIndex } from "./artifact.mjs";
 import { extractArtifact, normalizeMachineConfig } from "./extract.mjs";
+import { normalizeBrandGuidance } from "./brand.mjs";
+import { describeBrandKit, readDerivedLayer, summarizeBrandKit } from "./derived.mjs";
+import { normalizeBrandRoles } from "./tokens.mjs";
 import {
   VIDEO_HELP,
   runVideoLab,
@@ -250,8 +253,13 @@ export function validateManifest(input) {
   // Validated with the contract so an unusable selector fails `doctor`/`check`
   // immediately rather than part-way through a build.
   const machine = normalizeMachineConfig(manifest.machine);
+  // Brand roles name which derived token plays which part; conventions fill
+  // the rest, so most systems declare nothing here.
+  const brandInput = manifest.brand === undefined || manifest.brand === null ? {} : objectValue(manifest.brand, "timds.json brand");
+  const brand = { guidance: normalizeBrandGuidance(brandInput.guidance), roles: normalizeBrandRoles(brandInput.roles) };
   return {
     artifact: { entry: artifactEntry, publishRef: artifactPublishRef },
+    brand,
     consumer: normalizeConsumer(manifest.consumer),
     description: String(manifest.description || "").trim(),
     machine,
@@ -961,19 +969,66 @@ export async function submitWorkspace(repoRootInput, message, options = {}) {
   return { baseBranch, branch, commands, dryRun: false, media };
 }
 
+/**
+ * The brand kit in plain language, with a fix for every gap: which token could
+ * fill an empty role, which page holds the logo that is not yet annotated,
+ * which page could be the voice. Written for the designer who maintains the
+ * pages, not for a pipeline.
+ */
+function brandReport(workspace, derived) {
+  const lines = [];
+  const { brand: kit, tokens, index } = derived;
+  if (!kit) return ["Brand kit: not derived yet. Run `npm run timds -- check` to build the pages and derive it."];
+  lines.push(`${kit.system.name} — brand kit derived for ${kit.system.version}${derived.stale ? ` (timds.json is now ${workspace.manifest.version}; run timds check)` : ""}`);
+  lines.push("", "Roles");
+  for (const [role, entry] of Object.entries(kit.roles)) lines.push(`  ${role.padEnd(18)} ${entry.value}  ← ${entry.token}${entry.source === "manifest" ? " (timds.json)" : ""}`);
+  const baseTokens = (tokens?.tokens ?? []).filter((token) => token.base);
+  for (const role of kit.missingRoles ?? []) {
+    const kind = role.startsWith("font.") ? "font-family" : "color";
+    const candidates = [...new Set(baseTokens.filter((token) => token.kind === kind).map((token) => token.name))].slice(0, 6);
+    lines.push(`  ${role.padEnd(18)} unfilled — add to timds.json brand.roles, e.g. "${role}": "${candidates[0] ?? "--your-token"}"${candidates.length > 1 ? ` (also on :root: ${candidates.slice(1).join(", ")})` : ""}`);
+  }
+  lines.push("", "Logos");
+  for (const logo of kit.logos) lines.push(`  ${logo.primary ? "★ " : "  "}${logo.name} — ${[logo.lockup, logo.variant, logo.on ? `on ${logo.on}` : null].filter(Boolean).join(", ") || "no qualifiers"} — ${logo.media.url} (${logo.page})`);
+  if (!kit.logos.length) {
+    const candidates = [];
+    for (const page of index?.pages ?? []) for (const block of page.blocks) for (const asset of block.assets ?? []) {
+      if (/logo|mark|wordmark|monogram/i.test(`${asset.name} ${asset.media.url}`)) candidates.push(`${page.id} (${asset.name})`);
+    }
+    lines.push('  none — add data-timds-role="logo" (and "logo primary" on the default variant) to the logo images on the page that presents them');
+    if (candidates.length) lines.push(`  likely place: ${[...new Set(candidates)].slice(0, 4).join("; ")}`);
+  }
+  lines.push("", "Imagery");
+  if (kit.imagery.length) for (const entry of kit.imagery) lines.push(`  ${entry.role}: ${entry.name}${entry.tags?.length ? ` [${entry.tags.join(", ")}]` : ""} — ${entry.media.url} (${entry.page})`);
+  else lines.push('  none — optional; add data-timds-role="photo" (or illustration, graphic, icon, pattern) to imagery a consumer may reuse');
+  lines.push("", "Guidance");
+  for (const [group, entry] of Object.entries(kit.guidance)) lines.push(`  ${group.padEnd(12)} ${entry.blocks.length} block${entry.blocks.length === 1 ? "" : "s"} — ${entry.blocks.map((block) => block.id).join(", ")}${entry.source === "manifest" ? " (timds.json)" : ""}`);
+  if (!kit.guidance.voice) {
+    const voicePages = (index?.pages ?? []).filter((page) => /voice|tone/.test(page.id)).map((page) => page.id);
+    lines.push(`  voice        empty — write the brand/voice page, or point timds.json brand.guidance.voice at ${voicePages.length ? voicePages.join(" or ") : "the page that describes how the brand speaks"}`);
+  }
+  if (!kit.guidance.compliance) lines.push("  compliance   none — optional; a page named compliance fills it, or timds.json brand.guidance.compliance");
+  return lines;
+}
+
 function machineSummary({ counts }) {
   const parts = [
     `${counts.blocks} blocks`,
     `${counts.rules} rules`,
     `${counts.notes} notes`,
     `${counts.assets} assets (${counts.linkedAssets} joined to media)`,
+    `${counts.tokens ?? 0} tokens from ${counts.stylesheets ?? 0} stylesheets`,
+    `${counts.roles ?? 0} brand roles`,
+    `${counts.logos ?? 0} logos`,
+    `${counts.imagery ?? 0} imagery`,
+    `${counts.guidance ?? 0} guidance groups`,
   ];
   const untyped = counts.untyped ? ` · ${counts.untyped} untyped prose records` : "";
   return `Machine artifacts: ${parts.join(", ")}${untyped}`;
 }
 
 function helpText() {
-  return `TimDS local design-system workflow\n\nUsage:\n  timds init [--root PATH] [--standalone] [--consumer-repository OWNER/REPO] [--consumer-branch BRANCH] [--consumer-path PATH] [--force]\n  timds upgrade [--root PATH] [--auto-release] [--force]\n  timds auth login [--token TOKEN] [--portal-url URL]\n  timds auth status [--portal-url URL]\n  timds auth logout [--portal-url URL]\n  timds defaults [--root PATH] [--apply]\n  timds doctor [--root PATH]\n  timds dev [--root PATH]\n  timds check [--root PATH] [--skip-build] [--require-clean-dist]\n  timds extract [--root PATH] [--skip-build] [--publish]\n  timds preview [--root PATH] [--port 4400] [--no-build]\n  timds diff [--root PATH] [--base origin/main]\n  timds assets list [--root PATH]\n  timds assets add FILE [--key LOGICAL_KEY] [--title TEXT] [--tags a,b]\n  timds assets backfill-metadata [--root PATH] [--force]\n  timds assets publish [--root PATH]\n  timds assets pull KEY [--output PATH] [--force]\n  timds video --help\n  timds submit --message "Change summary" [--dry-run] [--no-push] [--no-pr]\n\nCheck and extract derive index.json, llms.txt, and per-page Markdown from the built artifact so agents and pipelines can read the system without scraping HTML. Extract --publish uploads the index, llms.txt, the per-page Markdown mirrors, a .timds-artifact.json provenance stamp, and the artifact files the index references to the system's stable CDN prefix through the portal, so pipelines and agents consume the system from one stable URL. Large public media is copied into ignored media-local/ for authoring. assets add measures timed-media duration and dimensions before upload; backfill-metadata repairs older catalogs from their stable public URLs without re-uploading them. Video-enabled systems keep client rules and production data in the Design System while TimDS owns validation, voiceover orchestration, Remotion rendering, and packaging. Submit creates a review branch and draft pull request.`;
+  return `TimDS local design-system workflow\n\nUsage:\n  timds init [--root PATH] [--standalone] [--consumer-repository OWNER/REPO] [--consumer-branch BRANCH] [--consumer-path PATH] [--force]\n  timds upgrade [--root PATH] [--auto-release] [--force]\n  timds auth login [--token TOKEN] [--portal-url URL]\n  timds auth status [--portal-url URL]\n  timds auth logout [--portal-url URL]\n  timds defaults [--root PATH] [--apply]\n  timds doctor [--root PATH]\n  timds brand [--root PATH] [--json]\n  timds dev [--root PATH]\n  timds check [--root PATH] [--skip-build] [--require-clean-dist]\n  timds extract [--root PATH] [--skip-build] [--publish]\n  timds preview [--root PATH] [--port 4400] [--no-build]\n  timds diff [--root PATH] [--base origin/main]\n  timds assets list [--root PATH]\n  timds assets add FILE [--key LOGICAL_KEY] [--title TEXT] [--tags a,b]\n  timds assets backfill-metadata [--root PATH] [--force]\n  timds assets publish [--root PATH]\n  timds assets pull KEY [--output PATH] [--force]\n  timds video --help\n  timds submit --message "Change summary" [--dry-run] [--no-push] [--no-pr]\n\nCheck and extract derive index.json, tokens.json, brand.json, llms.txt, and per-page Markdown from the built artifact so agents and pipelines can read the system without scraping HTML or CSS. Brand prints the derived brand kit in plain language with a fix for every gap. Extract --publish uploads the index, tokens, brand kit, llms.txt, the per-page Markdown mirrors, a .timds-artifact.json provenance stamp, and the artifact files the index references to the system's stable CDN prefix through the portal, so pipelines and agents consume the system from one stable URL. Large public media is copied into ignored media-local/ for authoring. assets add measures timed-media duration and dimensions before upload; backfill-metadata repairs older catalogs from their stable public URLs without re-uploading them. Video-enabled systems keep client rules and production data in the Design System while TimDS owns validation, voiceover orchestration, Remotion rendering, and packaging. Submit creates a review branch and draft pull request.`;
 }
 
 export async function runCli(argv) {
@@ -1140,8 +1195,20 @@ export async function runCli(argv) {
       output(`Consumer: ${workspace.manifest.consumer.repository}@${workspace.manifest.consumer.branch}:${workspace.manifest.consumer.path}`);
     }
     output(`Branch: ${branch || "detached"}`);
+    const derived = await readDerivedLayer(workspace.designSystemRoot, workspace.manifest);
+    output(describeBrandKit(summarizeBrandKit(derived.brand)) + (derived.stale ? " — stale, run timds check" : ""));
     output("Contract: valid");
     return workspace;
+  }
+  if (command === "brand") {
+    const workspace = await loadWorkspace(root);
+    const derived = await readDerivedLayer(workspace.designSystemRoot, workspace.manifest);
+    if (options.json) {
+      output(JSON.stringify({ brand: derived.brand, stale: derived.stale }, null, 2));
+      return derived;
+    }
+    for (const line of brandReport(workspace, derived)) output(line);
+    return derived;
   }
   if (command === "check") {
     const result = await checkWorkspace(root, {
@@ -1149,7 +1216,11 @@ export async function runCli(argv) {
       skipBuild: options.skipBuild,
     });
     output(`TimDS check passed: ${result.artifact.fileCount} files, ${result.artifact.totalBytes} bytes, entry ${result.artifact.entryPath}`);
-    if (result.machine?.enabled) output(machineSummary(result.machine));
+    if (result.machine?.enabled) {
+      output(machineSummary(result.machine));
+      for (const warning of result.machine.warnings ?? []) output(`Warning: ${warning}`);
+    }
+    for (const warning of result.video?.warnings ?? []) output(`Warning: ${warning}`);
     if (result.video) output(`Video contract: ${result.video.productionCount} production${result.video.productionCount === 1 ? "" : "s"}`);
     return result;
   }
@@ -1163,6 +1234,7 @@ export async function runCli(argv) {
       return result;
     }
     output(machineSummary(result));
+    for (const warning of result.warnings ?? []) output(`Warning: ${warning}`);
     output(`Wrote ${result.written.length} machine-readable files into the artifact.`);
     if (options.publish) {
       const published = await publishExtractedIndex(workspace, {
@@ -1171,6 +1243,8 @@ export async function runCli(argv) {
         token: options.token,
       });
       output(`Published machine index: ${published.indexUrl} (${published.uploaded} uploaded, ${published.skipped} unchanged)`);
+      if (published.tokensUrl) output(`Published design tokens: ${published.tokensUrl}`);
+      if (published.brandUrl) output(`Published brand kit: ${published.brandUrl}`);
       if (published.llmsUrl) output(`Published agent docs: ${published.llmsUrl} (+${published.docCount} page mirrors)`);
       return { ...result, published };
     }

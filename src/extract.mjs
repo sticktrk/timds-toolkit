@@ -6,6 +6,8 @@
 // module harvests the built pages and emits, beside them:
 //
 //   <entry-dir>/index.json     structured tree, assets joined to media records
+//   <entry-dir>/tokens.json    every CSS custom property the pages load, resolved
+//   <entry-dir>/brand.json     the brand kit: role colors and fonts, logos, imagery
 //   <entry-dir>/llms.txt       page index in the llms.txt convention
 //   <page>/index.md            a Markdown mirror of every page
 //
@@ -13,6 +15,7 @@
 // so it works with no configuration. A design system whose markup needs a hint
 // declares one in timds.json `machine`; nothing here is design-system specific.
 
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 
@@ -30,6 +33,8 @@ import {
   textOf,
   walk,
 } from "./html.mjs";
+import { annotationFor, buildBrandKit } from "./brand.mjs";
+import { buildTokensDocument, importReferences, parseCssTokens, stylesheetReferences } from "./tokens.mjs";
 
 export const EXTRACT_SCHEMA_VERSION = 1;
 
@@ -165,7 +170,7 @@ function mediaSource(node) {
   return attr(node, "src") || attr(node, "data-src") || null;
 }
 
-function extractAsset(node, blockId, pageId, joinMedia, seen) {
+function extractAsset(node, blockId, pageId, joinMedia, seen, parents = new Map()) {
   const holder = node.tag === "figure" ? node : null;
   const carrier = holder
     ? findOne(holder, (child) => ["img", "video", "audio", "source"].includes(child.tag) && mediaSource(child))
@@ -191,11 +196,13 @@ function extractAsset(node, blockId, pageId, joinMedia, seen) {
   }
 
   const name = lines[0] || attr(carrier, "alt") || source.split("/").pop();
+  const brand = annotationFor(carrier, parents);
   return {
     id: uniqueId(seen, `${pageId}#${blockId}/${slugify(name, slugify(source.split("/").pop()))}`),
     name,
     lines: lines.slice(1).length ? lines.slice(1) : undefined,
     media: joinMedia(source),
+    ...(brand ? { brand } : {}),
   };
 }
 
@@ -220,8 +227,11 @@ function extractBlock(section, pageId, config, joinMedia, index, seenBlockIds, s
   const code = codeNodes
     .map((node, position) => ({ id: `${pageId}#${blockId}/code-${position + 1}`, text: rawTextOf(node) }))
     .filter((entry) => entry.text);
+  // Parent links let an asset inherit a brand annotation from any wrapper in its block.
+  const parents = new Map();
+  for (const node of [section, ...walk(section)]) for (const child of node.children ?? []) parents.set(child, node);
   const assets = [...figures, ...looseMedia]
-    .map((node) => extractAsset(node, blockId, pageId, joinMedia, seen))
+    .map((node) => extractAsset(node, blockId, pageId, joinMedia, seen, parents))
     .filter(Boolean);
   const noteRecords = notes
     .map((node, position) => ({ id: `${pageId}#${blockId}/note-${position + 1}`, text: textOf(node, { markdown: true }) }))
@@ -288,44 +298,54 @@ export function extractPage(html, { pageId, url, config = normalizeMachineConfig
 
 /* ── emitters ───────────────────────────────────────────────────────────── */
 
+/** One block as Markdown, heading included — the unit a guidance group or a citation hands to an agent. */
+export function blockToMarkdown(block) {
+  const lines = [];
+  const anchor = block.id.includes("#") ? block.id.slice(block.id.indexOf("#") + 1) : block.id;
+  lines.push(`## ${block.title || anchor}   \`#${anchor}\``, "");
+  if (block.intro) lines.push(block.intro, "");
+  for (const table of block.specs ?? []) {
+    const columns = table.columns.length ? table.columns : Object.keys(table.rows[0].fields);
+    lines.push(`| ${columns.join(" | ")} |`, `| ${columns.map(() => "---").join(" | ")} |`);
+    for (const row of table.rows) {
+      const source = row.markdown ?? row.fields;
+      lines.push(`| ${columns.map((column) => String(source[column] ?? "").replace(/\|/g, "\\|")).join(" | ")} |`);
+    }
+    lines.push("");
+  }
+  for (const note of block.notes ?? []) lines.push(`> **Note.** ${note.text}`, "");
+  for (const entry of block.code ?? []) lines.push("```", entry.text, "```", "");
+  if (block.assets?.length) {
+    lines.push("| Asset | Media key | Notes |", "| --- | --- | --- |");
+    for (const asset of block.assets) {
+      const brand = asset.brand
+        ? [asset.brand.role, asset.brand.primary ? "primary" : null, asset.brand.variant, asset.brand.lockup, asset.brand.on ? `on ${asset.brand.on}` : null].filter(Boolean).join(" ")
+        : null;
+      const detail = [brand ? `**${brand}**` : null, ...(asset.lines ?? [])].filter(Boolean).join(" · ").replace(/\|/g, "\\|");
+      lines.push(`| ${asset.name} | \`${asset.media.key ?? "—"}\` | ${detail} |`);
+    }
+    lines.push("");
+  }
+  for (const entry of block.prose ?? []) lines.push(entry.text, "");
+  return `${lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd()}\n`;
+}
+
 export function pageToMarkdown(page) {
   const lines = [`# ${page.title || page.id}`, ""];
   if (page.eyebrow) lines.push(`*${page.eyebrow}*`, "");
   if (page.lede) lines.push(page.lede, "");
   lines.push(`<!-- source: ${page.url} · id: ${page.id} -->`, "");
-
-  for (const block of page.blocks) {
-    const anchor = block.id.includes("#") ? block.id.slice(block.id.indexOf("#") + 1) : block.id;
-    lines.push(`## ${block.title || anchor}   \`#${anchor}\``, "");
-    if (block.intro) lines.push(block.intro, "");
-    for (const table of block.specs ?? []) {
-      const columns = table.columns.length ? table.columns : Object.keys(table.rows[0].fields);
-      lines.push(`| ${columns.join(" | ")} |`, `| ${columns.map(() => "---").join(" | ")} |`);
-      for (const row of table.rows) {
-        const source = row.markdown ?? row.fields;
-        lines.push(`| ${columns.map((column) => String(source[column] ?? "").replace(/\|/g, "\\|")).join(" | ")} |`);
-      }
-      lines.push("");
-    }
-    for (const note of block.notes ?? []) lines.push(`> **Note.** ${note.text}`, "");
-    for (const entry of block.code ?? []) lines.push("```", entry.text, "```", "");
-    if (block.assets?.length) {
-      lines.push("| Asset | Media key | Notes |", "| --- | --- | --- |");
-      for (const asset of block.assets) {
-        const detail = (asset.lines ?? []).join(" · ").replace(/\|/g, "\\|");
-        lines.push(`| ${asset.name} | \`${asset.media.key ?? "—"}\` | ${detail} |`);
-      }
-      lines.push("");
-    }
-    for (const entry of block.prose ?? []) lines.push(entry.text, "");
-  }
+  for (const block of page.blocks) lines.push(blockToMarkdown(block));
   return `${lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd()}\n`;
 }
 
-export function buildLlmsText(manifest, pages, indexUrl) {
+export function buildLlmsText(manifest, pages, indexUrl, tokensUrl = null, brandUrl = null) {
   const lines = [`# ${manifest.name}`, ""];
   if (manifest.description) lines.push(`> ${manifest.description}`, "");
-  lines.push(`Machine-readable index: ${indexUrl} — every page below also exists as \`index.md\`.`, "");
+  lines.push(`Machine-readable index: ${indexUrl} — every page below also exists as \`index.md\`.`);
+  if (tokensUrl) lines.push(`Design tokens: ${tokensUrl} — every CSS custom property the pages load, resolved by scope.`);
+  if (brandUrl) lines.push(`Brand kit: ${brandUrl} — role colors and fonts, logos, and imagery for on-brand production.`);
+  lines.push("");
   for (const view of [...new Set(pages.map((page) => page.view))]) {
     lines.push(`## ${view || "pages"}`, "");
     for (const page of pages.filter((page) => page.view === view)) {
@@ -335,6 +355,88 @@ export function buildLlmsText(manifest, pages, indexUrl) {
     lines.push("");
   }
   return `${lines.join("\n").trimEnd()}\n`;
+}
+
+/* ── stylesheet harvest ─────────────────────────────────────────────────── */
+
+const sha256Of = (content) => createHash("sha256").update(content).digest("hex");
+
+/** Resolve a page or stylesheet reference to an artifact-relative path, or null when it leaves the artifact. */
+function resolveArtifactReference(reference, fromRelative, artifactRoot) {
+  const clean = reference.split(/[?#]/, 1)[0];
+  if (!clean) return null;
+  let decoded;
+  try {
+    decoded = decodeURIComponent(clean);
+  } catch {
+    return null;
+  }
+  const relative = decoded.startsWith("/")
+    ? path.posix.normalize(decoded.replace(/^\/+/, ""))
+    : path.posix.normalize(path.posix.join(path.posix.dirname(fromRelative), decoded));
+  if (!relative || relative === "." || relative.startsWith("../") || relative === "..") return null;
+  return { absolutePath: path.join(artifactRoot, ...relative.split("/")), relative };
+}
+
+/**
+ * Every stylesheet the pages load — linked files (following `@import`) and
+ * inline `<style>` blocks — parsed into scoped custom-property records.
+ * A linked file is read once however many pages name it; a file the artifact
+ * lacks is skipped here and reported by artifact validation.
+ */
+async function harvestStylesheets(pageFiles, baseDirectory, artifactRoot) {
+  const stylesheets = [];
+  const records = [];
+  const queue = [];
+  const queued = new Set();
+  const enqueue = (reference, fromRelative) => {
+    const target = resolveArtifactReference(reference, fromRelative, artifactRoot);
+    if (!target || queued.has(target.relative)) return;
+    queued.add(target.relative);
+    queue.push(target);
+  };
+
+  for (const file of pageFiles) {
+    const pageRelative = path.relative(artifactRoot, file).split(path.sep).join("/");
+    const { links, inline } = stylesheetReferences(await fs.readFile(file, "utf8"));
+    for (const href of links) enqueue(href, pageRelative);
+    // An inline block is a source only when it declares a token; page chrome
+    // styles would otherwise list one empty entry per page.
+    inline.forEach((css, position) => {
+      const source = `/${pageRelative}#style-${position + 1}`;
+      const found = parseCssTokens(css, { source });
+      if (!found.length) return;
+      stylesheets.push({ path: source, bytes: Buffer.byteLength(css), sha256: sha256Of(css), inline: true });
+      records.push(...found);
+    });
+  }
+
+  while (queue.length) {
+    const target = queue.shift();
+    let css;
+    try {
+      css = await fs.readFile(target.absolutePath, "utf8");
+    } catch {
+      continue;
+    }
+    const source = `/${target.relative}`;
+    stylesheets.push({ path: source, bytes: Buffer.byteLength(css), sha256: sha256Of(css) });
+    for (const reference of importReferences(css)) enqueue(reference, target.relative);
+    records.push(...parseCssTokens(css, { source }));
+  }
+
+  // Linked files in path order, inline blocks in page order after them, so the
+  // document is stable across builds that only reorder page discovery.
+  const ordered = [
+    ...stylesheets.filter((sheet) => !sheet.inline).sort((left, right) => left.path.localeCompare(right.path)),
+    ...stylesheets.filter((sheet) => sheet.inline),
+  ];
+  const position = new Map(ordered.map((sheet, index) => [sheet.path, index]));
+  const orderedRecords = records
+    .map((record, index) => ({ record, index }))
+    .sort((left, right) => position.get(left.record.source) - position.get(right.record.source) || left.index - right.index)
+    .map(({ record }) => record);
+  return { stylesheets: ordered, records: orderedRecords };
 }
 
 /* ── artifact walk ──────────────────────────────────────────────────────── */
@@ -384,7 +486,8 @@ export async function extractArtifact({ artifactRoot, manifest, mediaCatalog = {
 
   const pages = [];
   const written = [];
-  for (const file of await htmlPages(baseDirectory)) {
+  const pageFiles = await htmlPages(baseDirectory);
+  for (const file of pageFiles) {
     const relativeDirectory = path.relative(baseDirectory, path.dirname(file)).split(path.sep).filter(Boolean).join("/");
     const name = path.basename(file, ".html");
     const pageId = name === "index" ? relativeDirectory || "index" : [relativeDirectory, name].filter(Boolean).join("/");
@@ -404,20 +507,32 @@ export async function extractArtifact({ artifactRoot, manifest, mediaCatalog = {
   }
   pages.sort((left, right) => left.id.localeCompare(right.id));
 
+  const harvested = await harvestStylesheets(pageFiles, baseDirectory, artifactRoot);
+  const tokens = buildTokensDocument({ manifest, stylesheets: harvested.stylesheets, records: harvested.records });
+  const tokensUrl = `${basePrefix}/tokens.json`;
+  const { kit: brand, warnings: brandWarnings } = buildBrandKit({ manifest, tokens, pages, renderBlock: blockToMarkdown });
+  const brandUrl = `${basePrefix}/brand.json`;
+
   const index = {
     schemaVersion: EXTRACT_SCHEMA_VERSION,
     system: { id: manifest.systemId, name: manifest.name, version: manifest.version },
     pageCount: pages.length,
+    tokens: { url: tokensUrl, count: tokens.count, stylesheets: tokens.stylesheets.length, roles: Object.keys(tokens.roles).length },
+    brand: { url: brandUrl, logos: brand.logos.length, imagery: brand.imagery.length, guidance: Object.keys(brand.guidance).length },
     pages,
   };
 
   if (write) {
     const indexPath = path.join(baseDirectory, "index.json");
+    const tokensPath = path.join(baseDirectory, "tokens.json");
+    const brandPath = path.join(baseDirectory, "brand.json");
     const llmsPath = path.join(baseDirectory, "llms.txt");
     // Markdown carries inline emphasis; JSON stays plain so consumers can match on it.
     await fs.writeFile(indexPath, `${JSON.stringify(index, (key, value) => (key === "markdown" ? undefined : value), 2)}\n`);
-    await fs.writeFile(llmsPath, buildLlmsText(manifest, pages, `${basePrefix}/index.json`));
-    written.push(indexPath, llmsPath);
+    await fs.writeFile(tokensPath, `${JSON.stringify(tokens, null, 2)}\n`);
+    await fs.writeFile(brandPath, `${JSON.stringify(brand, null, 2)}\n`);
+    await fs.writeFile(llmsPath, buildLlmsText(manifest, pages, `${basePrefix}/index.json`, tokensUrl, brandUrl));
+    written.push(indexPath, tokensPath, brandPath, llmsPath);
   }
 
   const counts = pages.reduce(
@@ -435,6 +550,17 @@ export async function extractArtifact({ artifactRoot, manifest, mediaCatalog = {
     },
     { blocks: 0, rules: 0, notes: 0, code: 0, assets: 0, linkedAssets: 0, untyped: 0 },
   );
+  counts.tokens = tokens.count;
+  counts.stylesheets = tokens.stylesheets.length;
+  counts.roles = Object.keys(tokens.roles).length;
+  counts.logos = brand.logos.length;
+  counts.imagery = brand.imagery.length;
+  counts.guidance = Object.keys(brand.guidance).length;
+  const warnings = [
+    ...(tokens.missingRoles ?? []).map((role) =>
+      `brand role ${role} is not filled: no loaded stylesheet declares a conventional token on :root; map it in timds.json brand.roles`),
+    ...brandWarnings,
+  ];
 
-  return { enabled: true, counts, index, pages, written };
+  return { enabled: true, brand, counts, index, pages, tokens, warnings, written };
 }

@@ -140,6 +140,10 @@ test("rewriteLlmsForPublish makes link targets and the index pointer absolute", 
   ].join("\n");
   const rewritten = rewriteLlmsForPublish(source, "https://cdn.example.com/artifact/");
   assert.match(rewritten, /Machine-readable index: https:\/\/cdn\.example\.com\/artifact\/design-system\/index\.json/);
+  assert.match(
+    rewriteLlmsForPublish("Design tokens: /design-system/tokens.json — resolved.\n", "https://cdn.example.com/artifact/"),
+    /^Design tokens: https:\/\/cdn\.example\.com\/artifact\/design-system\/tokens\.json — resolved\.$/m,
+  );
   assert.match(rewritten, /\]\(https:\/\/cdn\.example\.com\/artifact\/design-system\/social\/video-assets\/index\.md\)/);
   assert.doesNotMatch(rewritten, /\]\(\//);
 });
@@ -167,7 +171,9 @@ test("publishExtractedIndex uploads assets and mirrors first, then index, llms.t
       "dist/design-system/index.json": `${JSON.stringify(INDEX, null, 2)}\n`,
       "dist/design-system/photos/elder-hands.webp": "webp-bytes",
       "dist/design-system/social/video-assets/index.md": "# Video assets\n",
-      "dist/design-system/llms.txt": "Machine-readable index: /design-system/index.json\n\n- [Video assets](/design-system/social/video-assets/index.md)\n",
+      "dist/design-system/tokens.json": '{"schemaVersion":1,"tokens":[{"name":"--navy","resolved":"#0a1729"}]}\n',
+      "dist/design-system/brand.json": JSON.stringify({ schemaVersion: 1, roles: {}, logos: [{ name: "Mark", role: "logo", media: { url: "/design-system/photos/elder-hands.webp" } }], imagery: [] }),
+      "dist/design-system/llms.txt": "Machine-readable index: /design-system/index.json\nDesign tokens: /design-system/tokens.json\nBrand kit: /design-system/brand.json\n\n- [Video assets](/design-system/social/video-assets/index.md)\n",
     };
     for (const [relative, content] of Object.entries(artifact)) {
       const target = path.join(designSystemRoot, ...relative.split("/"));
@@ -216,10 +222,12 @@ test("publishExtractedIndex uploads assets and mirrors first, then index, llms.t
 
     assert.equal(published.indexUrl, "https://cdn.example.com/clients/c/design-systems/s/artifact/design-system/index.json");
     assert.equal(published.llmsUrl, "https://cdn.example.com/clients/c/design-systems/s/artifact/design-system/llms.txt");
+    assert.equal(published.tokensUrl, "https://cdn.example.com/clients/c/design-systems/s/artifact/design-system/tokens.json");
+    assert.equal(published.brandUrl, "https://cdn.example.com/clients/c/design-systems/s/artifact/design-system/brand.json");
     assert.equal(published.docCount, 1);
-    assert.equal(published.uploaded, 4);
+    assert.equal(published.uploaded, 6);
     assert.equal(published.skipped, 1);
-    assert.equal(published.total, 5);
+    assert.equal(published.total, 7);
 
     assert.equal(sessions.length, 2);
     assert.deepEqual(sessions[0].files.map((file) => file.path), [
@@ -230,14 +238,24 @@ test("publishExtractedIndex uploads assets and mirrors first, then index, llms.t
     assert.equal(sessions[0].version, "1.2.3");
     assert.deepEqual(sessions[1].files.map((file) => file.path).sort(), [
       ".timds-artifact.json",
+      "design-system/brand.json",
       "design-system/index.json",
       "design-system/llms.txt",
+      "design-system/tokens.json",
     ]);
+    // Kit media resolve on the CDN exactly like index assets, with the uploaded file's integrity.
+    const kit = JSON.parse(puts.get("design-system/brand.json"));
+    assert.equal(kit.logos[0].media.url, "https://cdn.example.com/clients/c/design-systems/s/artifact/design-system/photos/elder-hands.webp");
+    assert.match(kit.logos[0].media.sha256, /^[a-f0-9]{64}$/);
+    // Tokens carry resolved CSS values and no local references, so they publish verbatim.
+    assert.equal(puts.get("design-system/tokens.json"), artifact["dist/design-system/tokens.json"]);
 
     // Page mirrors upload verbatim; llms.txt links resolve on the CDN.
     assert.equal(puts.get("design-system/social/video-assets/index.md"), "# Video assets\n");
     const llms = puts.get("design-system/llms.txt");
     assert.match(llms, /Machine-readable index: https:\/\/cdn\.example\.com\/clients\/c\/design-systems\/s\/artifact\/design-system\/index\.json/);
+    assert.match(llms, /Design tokens: https:\/\/cdn\.example\.com\/clients\/c\/design-systems\/s\/artifact\/design-system\/tokens\.json/);
+    assert.match(llms, /Brand kit: https:\/\/cdn\.example\.com\/clients\/c\/design-systems\/s\/artifact\/design-system\/brand\.json/);
     assert.doesNotMatch(llms, /\]\(\//);
 
     const uploadedIndex = JSON.parse(puts.get("design-system/index.json"));
@@ -246,8 +264,16 @@ test("publishExtractedIndex uploads assets and mirrors first, then index, llms.t
       "https://cdn.example.com/clients/c/design-systems/s/artifact/design-system/photos/elder-hands.webp"
     );
     assert.match(uploadedIndex.pages[0].blocks[0].assets[0].media.sha256, /^[a-f0-9]{64}$/);
+    // The stamp is all a remote consumer needs: version, commit, and where each derived file sits.
     const stamp = JSON.parse(puts.get(".timds-artifact.json"));
-    assert.deepEqual(stamp, { schemaVersion: 1, sourceCommit: "a".repeat(40), version: "1.2.3" });
+    assert.deepEqual(stamp, {
+      schemaVersion: 1,
+      sourceCommit: "a".repeat(40),
+      version: "1.2.3",
+      systemId: "client/system",
+      entry: "design-system/index.html",
+      files: { index: "design-system/index.json", tokens: "design-system/tokens.json", brand: "design-system/brand.json", llms: "design-system/llms.txt" },
+    });
   } finally {
     await fs.rm(designSystemRoot, { force: true, recursive: true });
   }
