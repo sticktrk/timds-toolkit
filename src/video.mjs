@@ -273,14 +273,25 @@ function normalizeStructure(value, label) {
 // directories (an illustration library) or single files, mounted under a
 // stable name in the render's public root. Everything must be committed
 // Design System source so every render host can obtain it.
+// Top-level names the render public root already uses: staged brand media,
+// prepared footage and covers, and generated narration. A mount there would
+// overwrite them silently.
+const RESERVED_STATIC_MOUNTS = new Set(["brand", "media", "audio"]);
+const mountOverlaps = (left, right) => left === right || left.startsWith(`${right}/`) || right.startsWith(`${left}/`);
+
 function normalizeStaticFiles(value, label) {
   if (value === undefined || value === null) return [];
   if (!Array.isArray(value)) throw new Error(`${label} must be an array`);
+  const mounts = [];
   return value.map((entry, index) => {
     const item = object(entry, `${label}[${index}]`);
     const source = safeRelativePath(text(item.path, `${label}[${index}].path`), `${label}[${index}].path`);
     const mount = text(item.mount || path.basename(source), `${label}[${index}].mount`).replace(/^\/+|\/+$/gu, "");
     if (!/^[a-z0-9][a-z0-9._-]*(?:\/[a-z0-9][a-z0-9._-]*)*$/iu.test(mount)) throw new Error(`${label}[${index}].mount must be a relative mount path`);
+    if (RESERVED_STATIC_MOUNTS.has(mount.split("/")[0])) throw new Error(`${label}[${index}].mount ${mount} is reserved for staged brand files, prepared media, and narration; mount under another name`);
+    const clash = mounts.find((other) => mountOverlaps(other, mount));
+    if (clash) throw new Error(`${label}[${index}].mount ${mount} overlaps the earlier mount ${clash}`);
+    mounts.push(mount);
     return { path: source, mount };
   });
 }
@@ -687,7 +698,8 @@ export function describeVideoLabPlan({ compiled, timings, finalized }) {
   const lines = [`${compiled.slug} · ${compiled.outputFormat} · ${compiled.exactQuestion}`];
   for (const scene of finalized.plan.scenes) {
     const seconds = (byId.get(scene.id).durationMs / 1000).toFixed(1);
-    const footage = scene.intro || scene.outro ? "card" : (scene.assets || [scene.asset]).join(" → ");
+    const keys = scene.intro || scene.outro ? [] : (scene.assets || [scene.asset]).filter(Boolean);
+    const footage = scene.intro || scene.outro ? "card" : `${scene.visual ? `board ${scene.visual.kind}` : ""}${scene.visual && keys.length ? " over " : ""}${keys.join(" → ")}`;
     lines.push(`  ${scene.id.padEnd(14)} ${seconds.padStart(5)}s  ${(scene.eyebrow || "").padEnd(22)} ${scene.headline || ""}`);
     lines.push(`  ${"".padEnd(14)}        ${footage}`);
   }
@@ -1060,17 +1072,17 @@ export async function stageVideoBrand({ designSystemRoot, contract, publicRoot, 
   const brand = { ...contract.brand, logo: "", fontFiles: [] };
   const audio = contract.brand.audio ? { ...contract.brand.audio } : undefined;
   const staticMounts = [];
+  const staticEntries = [];
+  // Runtime paths the brand files occupy under publicRoot, so a static mount
+  // cannot land on top of one of them.
+  const stagedPaths = [];
   for (const entry of videoBrandSources(contract)) {
     if (entry.kind === "audio" && !sound) {
       delete audio[entry.key];
       continue;
     }
     if (entry.kind === "static") {
-      const source = path.join(designSystemRoot, safeRelativePath(entry.source, `video contract ${entry.field}`));
-      const destination = path.join(publicRoot, entry.mount);
-      await fs.mkdir(path.dirname(destination), { recursive: true });
-      await fs.cp(source, destination, { recursive: true, force: true });
-      staticMounts.push({ path: entry.source, mount: entry.mount });
+      staticEntries.push(entry);
       continue;
     }
     let runtimePath;
@@ -1088,6 +1100,7 @@ export async function stageVideoBrand({ designSystemRoot, contract, publicRoot, 
       await fs.mkdir(path.dirname(path.join(publicRoot, runtimePath)), { recursive: true });
       await fs.copyFile(path.join(designSystemRoot, safe), path.join(publicRoot, runtimePath));
     }
+    stagedPaths.push(runtimePath);
     if (entry.kind === "logo") brand.logo = runtimePath;
     else if (entry.kind === "audio") audio[entry.key] = runtimePath;
     else {
@@ -1099,6 +1112,15 @@ export async function stageVideoBrand({ designSystemRoot, contract, publicRoot, 
         dataBase64: (await fs.readFile(source)).toString("base64"),
       });
     }
+  }
+  for (const entry of staticEntries) {
+    const collision = stagedPaths.find((staged) => mountOverlaps(staged, entry.mount));
+    if (collision) throw new Error(`video contract ${entry.field}: mount ${entry.mount} would overwrite the staged brand file ${collision}; mount it under another name`);
+    const source = path.join(designSystemRoot, safeRelativePath(entry.source, `video contract ${entry.field}`));
+    const destination = path.join(publicRoot, entry.mount);
+    await fs.mkdir(path.dirname(destination), { recursive: true });
+    await fs.cp(source, destination, { recursive: true, force: true });
+    staticMounts.push({ path: entry.source, mount: entry.mount });
   }
   if (audio) brand.audio = audio;
   brand.staticFiles = staticMounts;
@@ -1345,7 +1367,8 @@ export async function voiceoverVideoWorkspace(workspace, selectedSlug, options =
   const production = { production: { slug: productionSlug } };
   const args = [path.join(packageRoot, "video", "generate_voiceover.py"), "--script", path.join(topicRoot, "script.json"), "--captions", path.join(topicRoot, "captions.json"), "--output", outputRoot];
   if (options.force) args.push("--force");
-  await run(options.python || "python3", args, { cwd: workspace.designSystemRoot });
+  const spawnRun = typeof options.run === "function" ? options.run : run;
+  await spawnRun(options.python || "python3", args, { cwd: workspace.designSystemRoot });
   return { outputRoot, production: production.production.slug };
 }
 

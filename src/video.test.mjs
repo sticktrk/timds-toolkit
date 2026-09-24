@@ -10,6 +10,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
   checkVideoWorkspace,
+  describeVideoLabPlan,
   descriptionFor,
   exportVideoPublishing,
   initializeVideoComponents,
@@ -1179,6 +1180,77 @@ test("stages committed static files for the client components and refuses ignore
   await assert.rejects(prepareVideoWorkspace(missing, "sample-topic"), /brand\.staticFiles\[0\]\.path: public\/nowhere does not exist/u);
 });
 
+const subscribeContract = () => ({
+  schemaVersion: 1,
+  id: "example-video",
+  name: "Example video",
+  package: { shortCount: 0 },
+  structure: { longform: { graphicScenes: true } },
+  copy: {},
+  brand: {
+    colors: { background: "#000", accent: "#fc0", text: "#fff" },
+    fonts: {},
+    logo: "public/logo.svg",
+    series: "Example Answers",
+    site: "example.com",
+    tagline: "Clear answers",
+  },
+  producer: {
+    schemaVersion: 1,
+    authoring: { sharedPromptBlocks: [], formatPromptBlocks: {} },
+    roleEyebrows: { hook: "In brief", rule: "The rule", risk: "The risk", process: "Next step", exception: "The exception", answer: "The answer" },
+    intro: { enabled: true, id: "intro" },
+    engagement: { enabled: false, eyebrow: "Your turn", narrationTemplate: "{{question}}" },
+    subscribe: { enabled: true, afterBeat: 1, narrationTemplate: "Do you want to know more about {{topic}}? Subscribe to learn how to {{solution}}." },
+    outro: { id: "outro", narrationTemplate: "Learn more at {{site}}." },
+    cover: { assetPrefix: "cover-subject-", defaultEmotion: "concern" },
+    footage: { assetPrefix: "footage-" },
+  },
+});
+
+test("a subscribe board needs the graphic-scene opt-in for each of its formats at contract validation", () => {
+  const raw = subscribeContract();
+  assert.doesNotThrow(() => validateVideoContract(raw));
+  assert.throws(() => validateVideoContract({ ...raw, structure: {} }), /producer\.subscribe needs structure\.longform\.graphicScenes: true to draw the board for horizontal renders/u);
+  const shorts = { ...raw, producer: { ...raw.producer, subscribe: { ...raw.producer.subscribe, formats: ["horizontal", "short"] } } };
+  assert.throws(() => validateVideoContract(shorts), /structure\.short\.graphicScenes: true to draw the board for short renders/u);
+  assert.doesNotThrow(() => validateVideoContract({ ...shorts, structure: { longform: { graphicScenes: true }, short: { graphicScenes: true } } }));
+  // A disabled board asks nothing of the structure.
+  assert.doesNotThrow(() => validateVideoContract({ ...raw, structure: {}, producer: { ...raw.producer, subscribe: { enabled: false } } }));
+});
+
+test("the authoring contract asks the drafting model for the subscribe board's solution and reserves the board's id", () => {
+  const authoringFor = (raw, outputFormat = "horizontal") => createVideoAuthoringContract({
+    contract: validateVideoContract(raw),
+    manifest: { systemId: "example", name: "Example", version: "1.0.0" },
+    designSystemIndex: { system: { id: "example", version: "1.0.0" }, pages: [] },
+    provenance: { commit: "0".repeat(40) },
+    outputFormat,
+  });
+  const required = authoringFor(subscribeContract());
+  assert.ok(required.inputSchema.properties.topic.required.includes("solution"));
+  assert.equal(required.inputSchema.properties.topic.properties.solution.type, "string");
+  assert.deepEqual(required.constraints.solution, { required: true, offered: true });
+  assert.ok(required.constraints.reservedSceneIds.includes("subscribe"));
+  assert.match(required.prompt.instructions.join("\n"), /Set topic\.solution to the outcome this answer helps the viewer reach/u);
+  assert.equal(required.inputSchema.properties.answerBeats.items.properties.chapter.pattern, "^[a-z0-9][a-z0-9-]*$");
+  assert.equal(required.inputSchema.properties.answerBeats.items.properties.visual, undefined, "board kinds belong to the Design System, never to the draft");
+  assert.match(required.prompt.instructions.join("\n"), /Never write a visual/u);
+
+  const raw = subscribeContract();
+  const optional = authoringFor({ ...raw, producer: { ...raw.producer, subscribe: { ...raw.producer.subscribe, requireSolution: false } } });
+  assert.ok(!optional.inputSchema.properties.topic.required.includes("solution"));
+  assert.equal(optional.inputSchema.properties.topic.properties.solution.type, "string");
+  assert.deepEqual(optional.constraints.solution, { required: false, offered: true });
+  assert.match(optional.prompt.instructions.join("\n"), /the board is then skipped/u);
+
+  // A format the board does not play in never hears about the solution.
+  const short = authoringFor({ ...raw, structure: { longform: { graphicScenes: true }, short: { graphicScenes: true } } }, "short");
+  assert.equal(short.inputSchema.properties.topic.properties.solution, undefined);
+  assert.deepEqual(short.constraints.solution, { required: false, offered: false });
+  assert.ok(!short.constraints.reservedSceneIds.includes("subscribe"));
+});
+
 test("the producer inserts a subscribe board after the topic is established and passes beat visuals through", () => {
   const contract = validateVideoContract({
     schemaVersion: 1,
@@ -1242,6 +1314,10 @@ test("the producer inserts a subscribe board after the topic is established and 
     audioSrc: null,
   });
   const byId = Object.fromEntries(finalized.plan.scenes.map((scene) => [scene.id, scene]));
+  const printed = describeVideoLabPlan({ compiled, timings: compiled.scenes.map((scene) => ({ id: scene.id, durationMs: 4000 })), finalized });
+  assert.match(printed, /^ {2}subscribe .*\n {24}board subscribe$/mu);
+  assert.match(printed, /^ {2}title .*\n {24}board chapter-title$/mu);
+  assert.match(printed, /^ {2}rule .*\n {24}footage-/mu);
   assert.equal(byId.subscribe.asset, undefined, "the subscribe board carries no footage");
   assert.equal(byId.title.asset, undefined, "a chapter title carries no footage");
   assert.ok(byId.rule.asset, "a plain beat still selects footage");
@@ -1282,9 +1358,52 @@ test("accepts top copy zones for clips whose action crosses the middle band", as
 
 test("voiceover runs for a new production before its first captions.json exists", async (t) => {
   const workspace = await videoFixture(t);
-  await fs.rm(path.join(workspace.designSystemRoot, "video", "productions", "sample-topic", "captions.json"));
+  const captionsPath = path.join(workspace.designSystemRoot, "video", "productions", "sample-topic", "captions.json");
+  await fs.rm(captionsPath);
   const calls = [];
-  const result = await voiceoverVideoWorkspace(workspace, "sample-topic", { python: process.execPath, run: (command, args) => { calls.push({ command, args }); } }).catch((error) => error);
-  // Without a real edge-tts the spawned script fails; the workspace itself must not.
-  assert.ok(!(result instanceof Error) || !/captions\.json is required/u.test(result.message), String(result));
+  const run = async (command, args, options) => { calls.push({ command, args, options }); };
+  const result = await voiceoverVideoWorkspace(workspace, "sample-topic", { python: "/opt/tts/bin/python", run });
+  assert.equal(result.production, "sample-topic");
+  assert.equal(result.outputRoot, path.join(workspace.designSystemRoot, workspace.manifest.video.local, "public", "audio", "sample-topic"));
+  assert.equal(calls.length, 1, "the generator is spawned once even though captions.json does not exist yet");
+  assert.equal(calls[0].command, "/opt/tts/bin/python");
+  assert.equal(calls[0].args[calls[0].args.indexOf("--captions") + 1], captionsPath);
+  assert.equal(calls[0].args[calls[0].args.indexOf("--script") + 1], path.join(path.dirname(captionsPath), "script.json"));
+  assert.equal(calls[0].options.cwd, workspace.designSystemRoot);
+  assert.ok(!calls[0].args.includes("--force"));
+  await voiceoverVideoWorkspace(workspace, "sample-topic", { run, force: true });
+  assert.ok(calls[1].args.includes("--force"));
+  // A production that has no script yet fails before anything is spawned.
+  await assert.rejects(voiceoverVideoWorkspace(workspace, "missing-topic", { run }), /missing-topic/u);
+  assert.equal(calls.length, 2);
+});
+
+const staticBrand = (staticFiles) => ({
+  colors: { background: "#000", accent: "#fc0", text: "#fff" },
+  fonts: { display: "serif", body: "serif", ui: "sans-serif" },
+  logo: "public/logo.svg",
+  series: "Answers",
+  site: "example.com",
+  tagline: "Clear answers.",
+  staticFiles,
+});
+
+test("static mounts cannot shadow staged brand files, prepared media, or each other", async (t) => {
+  const contract = (staticFiles) => ({ schemaVersion: 1, id: "x", name: "X", package: { shortCount: 0 }, copy: {}, brand: staticBrand(staticFiles) });
+  assert.throws(() => validateVideoContract(contract([{ path: "public/illustrations", mount: "brand/illustrations" }])), /staticFiles\[0\]\.mount brand\/illustrations is reserved/u);
+  assert.throws(() => validateVideoContract(contract([{ path: "public/illustrations", mount: "media" }])), /staticFiles\[0\]\.mount media is reserved/u);
+  assert.throws(() => validateVideoContract(contract([{ path: "public/illustrations", mount: "audio/beds" }])), /staticFiles\[0\]\.mount audio\/beds is reserved/u);
+  assert.throws(() => validateVideoContract(contract([{ path: "public/illustrations" }, { path: "public/more", mount: "illustrations/extra" }])), /staticFiles\[1\]\.mount illustrations\/extra overlaps the earlier mount illustrations/u);
+  assert.throws(() => validateVideoContract(contract([{ path: "public/illustrations", mount: "../up" }])), /must be a relative mount path/u);
+  assert.deepEqual(validateVideoContract(contract([{ path: "public/illustrations" }, { path: "public/icons/key.svg", mount: "icons/key.svg" }])).brand.staticFiles, [
+    { path: "public/illustrations", mount: "illustrations" },
+    { path: "public/icons/key.svg", mount: "icons/key.svg" },
+  ]);
+
+  // The logo stages at its public-relative path; a mount on that path is refused at staging, before anything is overwritten.
+  const workspace = await videoFixture(t, { contract: { brand: staticBrand([{ path: "public/illustrations", mount: "logo.svg" }]) } });
+  const source = path.join(workspace.designSystemRoot, "public", "illustrations");
+  await fs.mkdir(source, { recursive: true });
+  await fs.writeFile(path.join(source, "key-gold.webp"), "RIFF", "utf8");
+  await assert.rejects(prepareVideoWorkspace(workspace, "sample-topic"), /brand\.staticFiles\[0\]\.path: mount logo\.svg would overwrite the staged brand file logo\.svg/u);
 });

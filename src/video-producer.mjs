@@ -131,6 +131,17 @@ export function validateVideoProducerConfig(input, contract) {
   if (!Array.isArray(subscribeFormats) || subscribeFormats.some((format) => !["horizontal", "short"].includes(format))) {
     throw new Error("video contract producer.subscribe.formats may contain only horizontal or short");
   }
+  if (subscribe.enabled === true) {
+    // The board is a graphic scene, so the contract must have opted the
+    // format into client-drawn boards; refuse here rather than on the first
+    // request that carries a solution.
+    for (const format of subscribeFormats) {
+      const structureKey = format === "short" ? "short" : "longform";
+      if (contract.structure?.[structureKey]?.graphicScenes !== true) {
+        throw new Error(`video contract producer.subscribe needs structure.${structureKey}.graphicScenes: true to draw the board for ${format} renders`);
+      }
+    }
+  }
   const footage = object(config.footage || {}, "video contract producer.footage");
   if (footage.allowShortCrop !== undefined && typeof footage.allowShortCrop !== "boolean") {
     throw new Error("video contract producer.footage.allowShortCrop must be a boolean");
@@ -278,7 +289,12 @@ export function createVideoAuthoringContract({ contract, manifest, designSystemI
   });
   const headlineWords = outputFormat === "short" ? contract.copy.shortHeadlineWords : contract.copy.horizontalHeadlineWords;
   const engagementRequired = config.engagement.enabled && config.engagement.formats.includes(outputFormat);
-  const topicRequired = ["label", ...(engagementRequired ? ["engagementQuestion"] : [])];
+  // The subscribe board promises a solution; when the contract requires one
+  // the model must write it, otherwise it may, and a request without one
+  // simply gets no board.
+  const subscribeActive = config.subscribe.enabled && config.subscribe.formats.includes(outputFormat);
+  const solutionRequired = subscribeActive && config.subscribe.requireSolution;
+  const topicRequired = ["label", ...(engagementRequired ? ["engagementQuestion"] : []), ...(solutionRequired ? ["solution"] : [])];
   const topicProperties = {
     label: {
       type: "string",
@@ -289,6 +305,13 @@ export function createVideoAuthoringContract({ contract, manifest, designSystemI
       "x-timds-maxWords": config.topicLabel.maximumWords,
     },
     coverEmotion: { type: "string", minLength: 1, description: "The viewer feeling this answer resolves" },
+    ...(subscribeActive ? {
+      solution: {
+        type: "string",
+        minLength: 2,
+        description: "The outcome this answer helps the viewer reach, as a short lowercase verb phrase that completes the subscribe board's promise (for example \"keep your house where your will says\")",
+      },
+    } : {}),
     ...(engagementRequired ? {
       engagementQuestion: {
         type: "string",
@@ -354,6 +377,11 @@ export function createVideoAuthoringContract({ contract, manifest, designSystemI
                 description: `One to ${FOOTAGE_PICKS_PER_BEAT} ordered clip keys from footage.clips that picture this beat, best match first; the compiler plays them in order and fills any remaining time`,
               },
             } : {}),
+            chapter: {
+              type: "string",
+              pattern: "^[a-z0-9][a-z0-9-]*$",
+              description: "Optional chapter id shared by the consecutive beats of one section; set it only when the Design System brief asks for chapters",
+            },
           },
         },
       },
@@ -383,6 +411,10 @@ export function createVideoAuthoringContract({ contract, manifest, designSystemI
         "Build the final compile request so it validates against inputSchema; do not invent compiler-input fields.",
         "Write answerBeats as ordered spoken answer content and choose the closest supported semantic role for each beat.",
         `Write every summary as a complete standalone micro-headline of at most ${headlineWords} words. Never truncate a longer sentence to meet the limit.`,
+        ...(subscribeActive ? [
+          `Set topic.solution to the outcome this answer helps the viewer reach, as a short verb phrase; the compiler speaks it on the subscribe board after answer beat ${config.subscribe.afterBeat}.${solutionRequired ? "" : " Omit it only when the answer promises no concrete outcome, and the board is then skipped."}`,
+        ] : []),
+        "Group consecutive beats with a shared chapter id only when the brief asks for chapters; otherwise omit chapter. Never write a visual: board kinds belong to the Design System's components.",
         ...footageInstructions,
       ],
       blockIds,
@@ -393,13 +425,14 @@ export function createVideoAuthoringContract({ contract, manifest, designSystemI
       topicLabelWords: { minimum: config.topicLabel.minimumWords, maximum: config.topicLabel.maximumWords },
       exactQuestion: { maximumWords: contract.copy.coverHeadlineWords, maximumCharacters: contract.copy.coverHeadlineCharacters, mustEndWithQuestionMark: true },
       engagementQuestion: { required: engagementRequired, requireYesNoQuestion: engagementRequired && config.engagement.requireYesNoQuestion, maximumWords: headlineWords },
+      solution: { required: solutionRequired, offered: subscribeActive },
       answerBeatRoles: [...beatRoles],
-      reservedSceneIds: [...new Set([config.intro.id, config.engagement.id, config.outro.id])],
+      reservedSceneIds: [...new Set([config.intro.id, config.engagement.id, config.outro.id, ...(subscribeActive ? [config.subscribe.id] : [])])],
     },
     ...(footage ? { footage: { assetPrefix: config.footage.assetPrefix, maximumPerBeat: FOOTAGE_PICKS_PER_BEAT, clips: footage } } : {}),
     compilerOwns: [
       "role eyebrows",
-      "intro, engagement, and outro scene structure",
+      "intro, engagement, subscribe, and outro scene structure",
       "CTA template copy",
       "cover eyebrow and cover subject",
       footage ? "footage timing, fallback clips, and chain rules" : "footage chains",
@@ -450,6 +483,7 @@ export function createVideoProducer({ contract, assetCatalog, mediaCatalog, vert
     if (!Array.isArray(input.answerBeats) || !input.answerBeats.length) fail("at least one approved answer beat is required");
     const ids = new Set();
     const headlineWords = input.outputFormat === "short" ? contract.copy.shortHeadlineWords : contract.copy.horizontalHeadlineWords;
+    const graphicFormat = input.outputFormat === "short" ? "short" : "longform";
     // Resolved only when a beat names footage, so a request without picks
     // still compiles against a catalog that cannot finalize yet.
     let eligibleKeyCache = null;
@@ -465,7 +499,6 @@ export function createVideoProducer({ contract, assetCatalog, mediaCatalog, vert
       const summary = text(beat.summary, `producer answer beat ${id}.summary`);
       if (words(summary).length > headlineWords) fail(`answer beat ${id}.summary exceeds ${headlineWords} words`);
       const footage = footagePicks(id, beat.footage, input.outputFormat, eligibleKeys);
-      const graphicFormat = input.outputFormat === "short" ? "short" : "longform";
       if (beat.visual !== undefined && beat.visual !== null) {
         if (!contract.structure[graphicFormat].graphicScenes) fail(`answer beat ${id}.visual needs structure.${graphicFormat}.graphicScenes enabled in the video contract`);
         object(beat.visual, `producer answer beat ${id}.visual`);
@@ -500,8 +533,6 @@ export function createVideoProducer({ contract, assetCatalog, mediaCatalog, vert
     const scenes = [];
     if (config.intro.enabled) scenes.push({ id: config.intro.id, role: "intro", narration: exactQuestion, headline: exactQuestion, intro: true });
     if (subscribeEnabled) {
-      const graphicFormat = input.outputFormat === "short" ? "short" : "longform";
-      if (!contract.structure[graphicFormat].graphicScenes) fail(`producer.subscribe needs structure.${graphicFormat}.graphicScenes enabled in the video contract`);
       const at = Math.min(config.subscribe.afterBeat, content.length);
       scenes.push(...content.slice(0, at));
       scenes.push({
@@ -629,8 +660,10 @@ export function createVideoProducer({ contract, assetCatalog, mediaCatalog, vert
     for (const scene of input.compiled.scenes) {
       const timing = timingById.get(scene.id) || fail(`scene ${scene.id} has no measured timing`);
       if (!Number.isFinite(timing.durationMs) || timing.durationMs <= 0) fail(`scene ${scene.id} needs a positive measured duration`);
-      if (scene.intro || scene.outro || (scene.visual && !scene.footage?.length && !(scene.visual.overFootage === true))) {
-        // Cards and footage-free boards break the footage sequence.
+      if (scene.intro || scene.outro || (scene.visual && !scene.footage?.length)) {
+        // Cards and footage-free boards break the footage sequence. A board
+        // plays over footage only when its beat named the clips, so the plan
+        // and the components see the same rule: asset keys decide.
         previousFamily = "";
         continue;
       }

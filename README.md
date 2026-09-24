@@ -251,12 +251,67 @@ A Design System may instead hand-author a partial
 `VideoProjectComponentOverrides` object at the declared path. TimDS passes the
 module to the same `createVideoProjectRoot()`, `createSingleVideoProjectRoot()`,
 or `registerVideoProject()` APIs available to integrated renderers. `Video`,
-`Scene`, `Intro`, `Outro`, `Cover`,
+`Scene`, `Graphic`, `Intro`, `Outro`, `Cover`,
 `HorizontalCover`, and `VerticalCover` are independently replaceable; omitted
 components continue to use TimDS defaults, and format-specific covers take
 precedence over the shared `Cover` override. This keeps rendering mechanics in
 TimDS while allowing a reviewed client Design System to own its visual
 compositions.
+
+### Graphic scenes, chapters, and static files
+
+A scene may carry a client-drawn board instead of, or over, footage once the
+contract opts the format in with `structure.longform.graphicScenes: true` (and
+`structure.short.graphicScenes` for Shorts). The scene declares
+`visual: { "kind": "steps", ... }`; TimDS validates only that `kind` is a slug
+and the opt-in is on, and the Design System's `Graphic` component owns every
+kind, its copy budget, and its motion. A board without `asset`/`assets`
+renders on the brand background and breaks the footage-family sequence, so the
+next clip may repeat the family of the clip before the board; a board whose
+scene names footage plays over that chain under the normal natural-speed and
+family rules. Asset keys alone decide which: there is no separate flag. The
+default `Graphic` shows the scene's optional `eyebrow` and `headline` so a
+production renders before the client has implemented the kind; the TimDS
+`Scene` keeps the footage, watermark, and captions around whichever board is
+mounted. A scene's optional `chapter` slug groups consecutive scenes for client
+chapter rails; TimDS validates and carries it, nothing more.
+
+Committed files the client's components read with `staticFile()` are declared
+as `brand.staticFiles: [{ "path": "public/illustrations", "mount": "illustrations" }]`
+and copied into the render public root under their mount. Each path must be a
+committed Design System file or directory, never under ignored `video-local/`;
+`video check` refuses missing or git-ignored sources the way it refuses a
+missing logo. Mounts cannot be `brand`, `media`, or `audio` (staged brand
+files, prepared footage, and narration live there), cannot overlap one
+another, and cannot land on a staged brand path such as a `public/`-relative
+logo. Asset `text` zones now include `left-top` and `right-top` for clips whose
+action crosses the middle band; the default scene keeps the copy box under the
+wordmark for them.
+
+The producer can insert a spoken subscribe board early in the video with
+`producer.subscribe`:
+
+```json
+"subscribe": {
+  "enabled": true,
+  "formats": ["horizontal"],
+  "afterBeat": 1,
+  "narrationTemplate": "Want to know more about {{topic}}? Subscribe to learn how to {{solution}}.",
+  "requireSolution": true
+}
+```
+
+The board is a graphic scene of kind `subscribe` carrying `topic` and
+`solution`, placed after the Nth content beat and joining that beat's chapter,
+so the contract must enable `graphicScenes` for each format the board plays in;
+validation refuses the contract otherwise. `{{solution}}` comes from the compile
+request's `topic.solution`. The authoring contract asks the drafting model for
+it (required by default; with `requireSolution: false` a request without one
+simply gets no board), the lab offers a Solution field beside the engagement
+question, and `subscribe` joins the reserved scene ids. Hand-authored compile
+requests may also give beats a `chapter` and a `visual`; the drafting schema
+offers `chapter` but never `visual`, because board kinds belong to the client's
+components.
 
 Outros are rarely watched — least of all in vertical Shorts — so the default
 components keep a call to action on every frame when the contract asks for one.
@@ -315,9 +370,9 @@ must be one of the two sources every render host has:
 }
 ```
 
-`video check` fails when a brand file is missing, is ignored by git, sits under
-the ignored `video-local/` directory, or names a media key that is not
-published. A file that exists only on the machine that generated it renders
+`video check` fails when a brand file or `brand.staticFiles` source is missing,
+is ignored by git, sits under the ignored `video-local/` directory, or names a
+media key that is not published. A file that exists only on the machine that generated it renders
 locally and 404s on every other host, so it is refused before merge rather
 than discovered in production. Staging never drops a declared file: the lab,
 `video render`, and silent previews fail with the contract field that names it.
