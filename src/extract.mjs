@@ -455,6 +455,25 @@ async function htmlPages(root) {
 }
 
 /**
+ * Derive only the tokens document from a built artifact, in memory. The video
+ * workspace uses this when `timds check` has not written tokens.json yet but
+ * the pages are built, so a brand reference still resolves. Null when the
+ * artifact entry is not built.
+ */
+export async function deriveTokensFromArtifact({ artifactRoot, manifest }) {
+  const entry = manifest.artifact?.entry || "index.html";
+  const entryDirectory = path.posix.dirname(entry);
+  const baseDirectory = entryDirectory === "." ? artifactRoot : path.join(artifactRoot, entryDirectory);
+  try {
+    await fs.access(path.join(artifactRoot, ...entry.split("/")));
+  } catch {
+    return null;
+  }
+  const harvested = await harvestStylesheets(await htmlPages(baseDirectory), baseDirectory, artifactRoot);
+  return buildTokensDocument({ manifest, stylesheets: harvested.stylesheets, records: harvested.records });
+}
+
+/**
  * Harvest a built artifact and write the machine-readable files beside it.
  * Returns the index plus counts, and writes nothing when `machine.enabled` is false.
  */

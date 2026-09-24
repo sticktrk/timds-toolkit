@@ -1503,12 +1503,29 @@ test("resolves brand role and token references in the video contract from derive
       },
     },
   });
-  // Without derived tokens the reference is an error that names the fix.
-  await assert.rejects(loadVideoWorkspace(workspace, { slug: "sample-topic" }), /brand\.colors\.background references --navy-900, but dist tokens\.json has not been derived; run timds check first/);
+  // Without a built artifact, a path that needs values fails and names the fix,
+  // while a check passes and reports what it could not verify.
+  await assert.rejects(loadVideoWorkspace(workspace, { slug: "sample-topic" }), /brand\.colors\.background references --navy-900, but the design tokens are not derived; build the artifact with timds check first/);
+  await assert.rejects(prepareVideoWorkspace(workspace, "sample-topic"), /design tokens are not derived/);
+  const unverified = await checkVideoWorkspace(workspace, { slug: "sample-topic" });
+  assert.equal(unverified.video.contract.brand.colors.background, "{--navy-900}");
+  assert.deepEqual(unverified.video.brandUnresolved.map((entry) => entry.reference), ["--navy-900", "--navy-900", "color.accent", "font.display"]);
+  assert.ok(unverified.warnings.some((warning) => /brand references --navy-900, --navy-900, color\.accent, font\.display are not verified: the artifact is not built/.test(warning)));
+
+  // A built artifact without tokens.json is enough: the tokens derive in memory from the pages' stylesheets.
+  await fs.mkdir(path.join(workspace.designSystemRoot, "dist", "css"), { recursive: true });
+  await fs.writeFile(path.join(workspace.designSystemRoot, "dist", "index.html"), '<html><head><link rel="stylesheet" href="/css/site.css"></head><body><main><h1>Home</h1></main></body></html>');
+  await fs.writeFile(path.join(workspace.designSystemRoot, "dist", "css", "site.css"), ':root{--navy-900:#0a1729;--accent:#d4b876;--font-display:"Cormorant Garamond",Georgia,serif}');
+  const derived = await loadVideoWorkspace(workspace, { slug: "sample-topic" });
+  assert.equal(derived.video.contract.brand.colors.background, "#0a1729");
+  assert.equal(derived.video.contract.brand.colors.accent, "#d4b876");
+  assert.deepEqual(derived.video.brandUnresolved, []);
+  await fs.rm(path.join(workspace.designSystemRoot, "dist"), { recursive: true, force: true });
 
   await fs.mkdir(path.join(workspace.designSystemRoot, "dist"), { recursive: true });
   await fs.writeFile(path.join(workspace.designSystemRoot, "dist", "tokens.json"), JSON.stringify(DERIVED_TOKENS));
   const loaded = await loadVideoWorkspace(workspace, { slug: "sample-topic" });
+  assert.deepEqual(loaded.video.brandUnresolved, []);
   assert.equal(loaded.video.contract.brand.colors.background, "#0a1729");
   assert.equal(loaded.video.contract.brand.colors.accent, "#d4b876");
   assert.equal(loaded.video.contract.brand.colors.panel, "#0a1729");

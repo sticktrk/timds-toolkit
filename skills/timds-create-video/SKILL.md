@@ -22,8 +22,9 @@ content, media, compliance, and publishing decisions.
 5. Keep `brand.colors` and `brand.fonts` as references to the Design System's
    derived tokens (`"{color.accent}"` for a brand role, `"{--navy-900}"` for a
    token) rather than copied values; `timds check` reports literals that
-   duplicate a token, and references need `timds check` to have derived
-   `dist/…/tokens.json`.
+   duplicate a token. References resolve from the built artifact, so the lab,
+   prepare, studio, and render need `timds check` to have built it; `video
+   check` before a build only warns that references are unverified.
 
 If video is not enabled, report that `npm run timds -- video init` is required.
 Do not initialize or migrate the repository unless the user asked for that

@@ -7,6 +7,7 @@ import test from "node:test";
 import {
   blockToMarkdown,
   buildLlmsText,
+  deriveTokensFromArtifact,
   extractArtifact,
   extractPage,
   normalizeMachineConfig,
@@ -210,6 +211,12 @@ test("extractArtifact derives tokens.json from the stylesheets the pages load", 
     const llms = await fs.readFile(path.join(artifactRoot, "design-system", "llms.txt"), "utf8");
     assert.ok(llms.includes("Design tokens: /design-system/tokens.json"));
     assert.ok(llms.includes("Brand kit: /design-system/brand.json"));
+
+    // The in-memory derivation reads the same stylesheets and writes nothing.
+    const inMemory = await deriveTokensFromArtifact({ artifactRoot, manifest });
+    assert.equal(inMemory.count, document.count);
+    assert.deepEqual(inMemory.roles, document.roles);
+    assert.equal(await deriveTokensFromArtifact({ artifactRoot: path.join(artifactRoot, "nope"), manifest }), null);
   } finally {
     await fs.rm(artifactRoot, { force: true, recursive: true });
   }

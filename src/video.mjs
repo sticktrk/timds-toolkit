@@ -9,6 +9,7 @@ import { syncDefaults } from "./defaults.mjs";
 import { fileSha256, readLocalMediaManifest, readMediaCatalog } from "./media.mjs";
 import { createVideoProducer, validateVideoProducerConfig } from "./video-producer.mjs";
 import { validateVideoVerticalMetadata } from "./video-crops.mjs";
+import { deriveTokensFromArtifact } from "./extract.mjs";
 import { readDerivedTokens } from "./tokens.mjs";
 import { adjacentFootageRepeats, truncatedHeadline } from "../video/footage.mjs";
 
@@ -600,16 +601,25 @@ function lookupBrandReference(name, tokens) {
 /**
  * Replace every brand reference in the contract with its derived value.
  * A reference without derived tokens is an error with the fix in it, since a
- * render host cannot guess the brand.
+ * render host cannot guess the brand — unless the caller only validates
+ * (`optional`), in which case the reference stays as written and is reported
+ * in `unresolved` so a check can warn instead of failing before the build.
  */
-export function resolveVideoBrand(contract, tokens) {
+export function resolveVideoBrand(contract, tokens, { optional = false } = {}) {
   const references = [];
+  const unresolved = [];
   const resolved = { ...contract, brand: { ...contract.brand, colors: { ...contract.brand.colors }, fonts: { ...contract.brand.fonts } } };
   for (const [group, field] of BRAND_VALUE_FIELDS) {
     const name = parseBrandReference(contract.brand[group][field]);
     if (!name) continue;
     const label = `video contract brand.${group}.${field}`;
-    if (!tokens) throw new Error(`${label} references ${name}, but dist tokens.json has not been derived; run timds check first`);
+    if (!tokens) {
+      if (optional) {
+        unresolved.push({ field: `brand.${group}.${field}`, reference: name });
+        continue;
+      }
+      throw new Error(`${label} references ${name}, but the design tokens are not derived; build the artifact with timds check first`);
+    }
     const found = lookupBrandReference(name, tokens);
     if (!found) throw new Error(`${label} references ${name}, which the derived tokens do not fill${name.startsWith("--") ? " on :root" : "; map it in timds.json brand.roles"}`);
     const expected = group === "colors" ? "color" : "font-family";
@@ -617,7 +627,7 @@ export function resolveVideoBrand(contract, tokens) {
     resolved.brand[group][field] = found.value;
     references.push({ field: `brand.${group}.${field}`, reference: name, value: found.value });
   }
-  return { contract: resolved, references };
+  return { contract: resolved, references, unresolved };
 }
 
 // Quoting is optional around most font family names, so compare without it.
@@ -642,7 +652,23 @@ export function brandDriftWarnings(contract, tokens) {
   return warnings;
 }
 
-export async function loadVideoWorkspace(workspace, { slug: selectedSlug } = {}) {
+/**
+ * The derived tokens for a workspace: the tokens.json `timds check` wrote, or
+ * a derivation from the built pages when that file is missing, or null when
+ * nothing is built yet.
+ */
+async function loadWorkspaceTokens(workspace) {
+  return (await readDerivedTokens(workspace.designSystemRoot, workspace.manifest))
+    ?? deriveTokensFromArtifact({ artifactRoot: path.join(workspace.designSystemRoot, "dist"), manifest: workspace.manifest });
+}
+
+/**
+ * `brandValues: "optional"` is for validation before a build: brand references
+ * stay unresolved and are reported, instead of failing for want of tokens.
+ * Every path that hands the contract to a renderer or the lab keeps the
+ * default, where an unresolvable reference is an error.
+ */
+export async function loadVideoWorkspace(workspace, { slug: selectedSlug, brandValues = "required" } = {}) {
   if (!workspace.manifest.video) throw new Error("timds.json does not enable the video contract; run timds video init");
   const video = workspace.manifest.video;
   const contractPath = path.join(workspace.designSystemRoot, video.contract);
@@ -656,8 +682,12 @@ export async function loadVideoWorkspace(workspace, { slug: selectedSlug } = {})
   if (componentsPath && !existsSync(componentsPath)) {
     throw new Error(`video component override is required at ${componentsPath}`);
   }
-  const tokens = await readDerivedTokens(workspace.designSystemRoot, workspace.manifest);
-  const { contract, references: brandReferences } = resolveVideoBrand(validateVideoContract(await readJson(contractPath, "video contract")), tokens);
+  const tokens = await loadWorkspaceTokens(workspace);
+  const { contract, references: brandReferences, unresolved: brandUnresolved } = resolveVideoBrand(
+    validateVideoContract(await readJson(contractPath, "video contract")),
+    tokens,
+    { optional: brandValues === "optional" },
+  );
   const assets = validateAssetCatalog(await readJson(assetsPath, "video assets"));
   const verticalMetadata = video.verticalMetadata ? validateVideoVerticalMetadata(
     await readJson(path.join(workspace.designSystemRoot, video.verticalMetadata), "video vertical metadata"),
@@ -673,16 +703,21 @@ export async function loadVideoWorkspace(workspace, { slug: selectedSlug } = {})
     productions.push(validateProduction(values, contract, assets, productionSlug));
   }
   if (selectedSlug && !productions.length) throw new Error(`video production ${selectedSlug} was not found`);
-  return { ...workspace, video: { ...video, assets, assetsPath, brandReferences, verticalMetadata, componentsPath, contract, contractPath, labRoot, localRoot, productions, productionsRoot, tokens } };
+  return { ...workspace, video: { ...video, assets, assetsPath, brandReferences, brandUnresolved, verticalMetadata, componentsPath, contract, contractPath, labRoot, localRoot, productions, productionsRoot, tokens } };
 }
 
 export async function checkVideoWorkspace(workspace, options = {}) {
-  const loaded = await loadVideoWorkspace(workspace, options);
+  // A check may run before the artifact is built (CI often runs it first), so
+  // brand references are verified when tokens exist and reported otherwise.
+  const loaded = await loadVideoWorkspace(workspace, { ...options, brandValues: "optional" });
   const { catalog } = await readMediaCatalog(workspace.designSystemRoot);
   const registered = new Set(catalog.assets.map((asset) => asset.key));
   const brandProblems = await checkVideoBrandSources({ designSystemRoot: workspace.designSystemRoot, contract: loaded.video.contract, mediaCatalog: catalog, localDir: loaded.video.local });
   if (brandProblems.length) throw brandSourceError(brandProblems);
   const warnings = brandDriftWarnings(validateVideoContract(await readJson(loaded.video.contractPath, "video contract")), loaded.video.tokens);
+  if (loaded.video.brandUnresolved.length) {
+    warnings.push(`brand references ${loaded.video.brandUnresolved.map((entry) => entry.reference).join(", ")} are not verified: the artifact is not built, so no design tokens are derived; timds check resolves them`);
+  }
   // A production is only as portable as its media. A scene or cover that
   // names a mediaKey media.json has not published renders on the machine that
   // staged the clip and fails on every other host, so it is refused here, the
