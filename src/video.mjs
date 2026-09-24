@@ -259,10 +259,30 @@ function normalizeFormat(value, label, defaults) {
 
 function normalizeStructure(value, label) {
   const structure = object(value || {}, label);
+  if (structure.graphicScenes !== undefined && typeof structure.graphicScenes !== "boolean") throw new Error(`${label}.graphicScenes must be a boolean`);
   return {
     requireIntro: structure.requireIntro === true,
     requireOutro: structure.requireOutro === true,
+    // A graphic scene carries a client-rendered `visual` board instead of, or
+    // over, footage. Off by default: the client's components must draw it.
+    graphicScenes: structure.graphicScenes === true,
   };
+}
+
+// Static files a client's components read with staticFile(): whole
+// directories (an illustration library) or single files, mounted under a
+// stable name in the render's public root. Everything must be committed
+// Design System source so every render host can obtain it.
+function normalizeStaticFiles(value, label) {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) throw new Error(`${label} must be an array`);
+  return value.map((entry, index) => {
+    const item = object(entry, `${label}[${index}]`);
+    const source = safeRelativePath(text(item.path, `${label}[${index}].path`), `${label}[${index}].path`);
+    const mount = text(item.mount || path.basename(source), `${label}[${index}].mount`).replace(/^\/+|\/+$/gu, "");
+    if (!/^[a-z0-9][a-z0-9._-]*(?:\/[a-z0-9][a-z0-9._-]*)*$/iu.test(mount)) throw new Error(`${label}[${index}].mount must be a relative mount path`);
+    return { path: source, mount };
+  });
 }
 
 export function validateVideoContract(input) {
@@ -273,6 +293,7 @@ export function validateVideoContract(input) {
   const formats = object(contract.formats || {}, "video contract formats");
   const packagePolicy = object(contract.package || {}, "video contract package");
   const structure = object(contract.structure || {}, "video contract structure");
+  const staticFiles = normalizeStaticFiles(contract.brand?.staticFiles, "video contract brand.staticFiles");
   const copy = object(contract.copy || {}, "video contract copy");
   const brand = object(contract.brand || {}, "video contract brand");
   const colors = object(brand.colors || {}, "video contract brand.colors");
@@ -346,6 +367,7 @@ export function validateVideoContract(input) {
         right: text(brand.watermark?.right || brand.site, "video contract brand.watermark.right"),
       },
       banners: normalizeVideoBanners(brand.banners),
+      staticFiles,
       ...(brand.audio === undefined || brand.audio === null ? {} : { audio: normalizeVideoAudio(brand.audio) }),
     },
     publishing: normalizeVideoPublishing(contract.publishing),
@@ -369,7 +391,8 @@ function validateAssetCatalog(input) {
       throw new Error(`video asset ${key}.durationSeconds must be a positive number`);
     }
     if (asset.vertical) slug(asset.vertical, `video asset ${key}.vertical`);
-    if (asset.text && !["left-center", "left-bottom", "right-center", "right-bottom", "bottom", "upper", "lower"].includes(asset.text)) {
+    // Top zones keep the copy box above a clip whose action crosses the middle band.
+    if (asset.text && !["left-top", "left-center", "left-bottom", "right-top", "right-center", "right-bottom", "bottom", "upper", "lower"].includes(asset.text)) {
       throw new Error(`video asset ${key}.text is unsupported`);
     }
   }
@@ -379,6 +402,7 @@ function validateAssetCatalog(input) {
 function validateNaturalSpeedFootage(scene, line, pads, contract, assetCatalog, label) {
   if (scene.intro || scene.outro) return;
   const keys = scene.assets ?? (scene.asset ? [scene.asset] : []);
+  if (!keys.length && isGraphicScene(scene)) return;
   const sceneAssets = keys.map((key) => {
     const asset = assetCatalog.assets[key];
     if (!asset) throw new Error(`${label} references undeclared video asset ${key}`);
@@ -403,11 +427,45 @@ function validateCaptionLine(line, label) {
   return { ...line, id };
 }
 
+/**
+ * A graphic scene declares `visual: { kind, ... }`. TimDS validates only the
+ * shape and the client opt-in; the client's components own every board kind,
+ * its copy budget, and its motion. Without footage it renders on the brand
+ * background; with footage the board sits over the clip.
+ */
+export function isGraphicScene(scene) {
+  return Boolean(scene && !scene.intro && !scene.outro && scene.visual && typeof scene.visual === "object");
+}
+
+function validateSceneVisual(scene, label, contract, format) {
+  if (scene.visual === undefined || scene.visual === null) return undefined;
+  const structure = contract.structure[format === "short" ? "short" : "longform"];
+  if (!structure.graphicScenes) throw new Error(`${label}.visual needs structure.${format === "short" ? "short" : "longform"}.graphicScenes enabled in the video contract`);
+  const visual = object(scene.visual, `${label}.visual`);
+  const kind = slug(visual.kind, `${label}.visual.kind`);
+  return { ...visual, kind };
+}
+
 function validateScene(scene, label, contract, format) {
   object(scene, label);
   const id = slug(scene.id, `${label}.id`);
   if (scene.intro && scene.outro) throw new Error(`${label} cannot be both intro and outro`);
-  if (!scene.intro && !scene.outro) {
+  const visual = validateSceneVisual(scene, label, contract, format);
+  if (scene.chapter !== undefined && scene.chapter !== null) slug(scene.chapter, `${label}.chapter`);
+  if (!scene.intro && !scene.outro && visual) {
+    // A board owns its copy; a headline box is optional and, when present,
+    // holds the same budget as any footage scene.
+    if (scene.headline !== undefined && scene.headline !== null) {
+      const headline = text(scene.headline, `${label}.headline`);
+      const headlineLimit = format === "short" ? contract.copy.shortHeadlineWords : contract.copy.horizontalHeadlineWords;
+      if (words(headline).length > headlineLimit) throw new Error(`${label}.headline exceeds ${headlineLimit} words`);
+    }
+    if (scene.eyebrow && words(scene.eyebrow).length > contract.copy.eyebrowWords) throw new Error(`${label}.eyebrow exceeds ${contract.copy.eyebrowWords} words`);
+    const assetKeys = scene.assets ?? (scene.asset ? [scene.asset] : []);
+    if (!Array.isArray(assetKeys)) throw new Error(`${label}.assets must be an array`);
+    for (const asset of assetKeys) slug(asset, `${label} asset`);
+  }
+  if (!scene.intro && !scene.outro && !visual) {
     const headline = text(scene.headline, `${label}.headline`);
     const headlineLimit = format === "short" ? contract.copy.shortHeadlineWords : contract.copy.horizontalHeadlineWords;
     if (words(headline).length > headlineLimit) throw new Error(`${label}.headline exceeds ${headlineLimit} words`);
@@ -419,7 +477,7 @@ function validateScene(scene, label, contract, format) {
     if (!Array.isArray(assetKeys) || !assetKeys.length) throw new Error(`${label} needs asset or assets`);
     for (const asset of assetKeys) slug(asset, `${label} asset`);
   }
-  return { ...scene, id };
+  return { ...scene, id, ...(visual ? { visual } : {}) };
 }
 
 function validateCover(cover, label, contract) {
@@ -914,6 +972,7 @@ export function videoBrandSources(contract) {
     { field: "brand.logo", kind: "logo", source: brand.logo },
     ...(brand.fontFiles || []).map((font, index) => ({ field: `brand.fontFiles[${index}].path`, kind: "font", index, source: font.path })),
     ...["bed", "transition"].filter((key) => audio[key]).map((key) => ({ field: `brand.audio.${key}`, kind: "audio", key, source: audio[key] })),
+    ...(brand.staticFiles || []).map((entry, index) => ({ field: `brand.staticFiles[${index}].path`, kind: "static", index, source: entry.path, mount: entry.mount })),
   ];
 }
 
@@ -938,6 +997,13 @@ async function brandSourceProblem(designSystemRoot, entry, { mediaCatalog, local
   }
   const relative = safeRelativePath(source, `video contract ${field}`);
   const local = localDir ? safeRelativePath(localDir, "timds.json video.local") : null;
+  if (entry.kind === "static") {
+    const stat = await fs.stat(path.join(designSystemRoot, relative)).catch(() => null);
+    if (!stat) return `${field}: ${relative} does not exist`;
+    if (local && (relative === local || relative.startsWith(`${local}/`))) return `${field}: ${relative} is under ignored ${local}; commit static files as Design System source`;
+    if (await gitIgnored(designSystemRoot, relative)) return `${field}: ${relative} is ignored by git, so a clean checkout cannot render it`;
+    return null;
+  }
   if (local && (relative === local || relative.startsWith(`${local}/`))) {
     return `${field}: ${relative} is generated under ignored ${local}/, which no render host has; commit the file or publish it with timds assets and reference { "mediaKey": "..." }`;
   }
@@ -993,9 +1059,18 @@ export async function stageVideoBrand({ designSystemRoot, contract, publicRoot, 
   if (problems.length) throw brandSourceError(problems);
   const brand = { ...contract.brand, logo: "", fontFiles: [] };
   const audio = contract.brand.audio ? { ...contract.brand.audio } : undefined;
+  const staticMounts = [];
   for (const entry of videoBrandSources(contract)) {
     if (entry.kind === "audio" && !sound) {
       delete audio[entry.key];
+      continue;
+    }
+    if (entry.kind === "static") {
+      const source = path.join(designSystemRoot, safeRelativePath(entry.source, `video contract ${entry.field}`));
+      const destination = path.join(publicRoot, entry.mount);
+      await fs.mkdir(path.dirname(destination), { recursive: true });
+      await fs.cp(source, destination, { recursive: true, force: true });
+      staticMounts.push({ path: entry.source, mount: entry.mount });
       continue;
     }
     let runtimePath;
@@ -1026,6 +1101,7 @@ export async function stageVideoBrand({ designSystemRoot, contract, publicRoot, 
     }
   }
   if (audio) brand.audio = audio;
+  brand.staticFiles = staticMounts;
   return brand;
 }
 
@@ -1257,10 +1333,16 @@ export async function renderVideoWorkspace(workspace, selectedSlug, options = {}
 }
 
 export async function voiceoverVideoWorkspace(workspace, selectedSlug, options = {}) {
-  const loaded = await loadVideoWorkspace(workspace, { slug: selectedSlug });
-  const production = loaded.video.productions[0];
-  const topicRoot = path.join(loaded.video.productionsRoot, production.production.slug);
-  const outputRoot = path.join(loaded.video.localRoot, "public", "audio", production.production.slug);
+  // The first take of a new production has no captions.json yet, so the full
+  // workspace (which validates every scene against its caption line) cannot
+  // load. Voiceover needs only the script; validation follows with `video check`.
+  if (!workspace.manifest.video) throw new Error("timds.json does not enable the video contract; run timds video init");
+  const productionSlug = slug(selectedSlug, "video production slug");
+  const topicRoot = path.join(workspace.designSystemRoot, workspace.manifest.video.productions, productionSlug);
+  const script = await readJson(path.join(topicRoot, "script.json"), `${productionSlug}/script.json`);
+  if (script.slug && script.slug !== productionSlug) throw new Error(`${productionSlug}/script.json slug must match the production folder`);
+  const outputRoot = path.join(workspace.designSystemRoot, workspace.manifest.video.local, "public", "audio", productionSlug);
+  const production = { production: { slug: productionSlug } };
   const args = [path.join(packageRoot, "video", "generate_voiceover.py"), "--script", path.join(topicRoot, "script.json"), "--captions", path.join(topicRoot, "captions.json"), "--output", outputRoot];
   if (options.force) args.push("--force");
   await run(options.python || "python3", args, { cwd: workspace.designSystemRoot });

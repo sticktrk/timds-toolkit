@@ -23,8 +23,10 @@ import {
   silentSceneTimings,
   singleFormatScenes,
   validateVideoContract,
+  voiceoverVideoWorkspace,
 } from "./video.mjs";
 import { createVideoAuthoringContract, createVideoProducer } from "./video-producer.mjs";
+import { adjacentFootageRepeats } from "../video/footage.mjs";
 import { labFixture, registerVerticalMetadata, videoFixture, writeJson } from "./video.fixture.mjs";
 
 test("normalizes the optional video manifest", () => {
@@ -1084,4 +1086,205 @@ test("rendering keeps its original copy and output directory across midnight and
   const packaged = JSON.parse(await fs.readFile(path.join(directory, "publishing.json"), "utf8"));
   assert.equal(packaged.descriptions.youtube_short, "Copy approved before rendering.");
   await assert.rejects(fs.access(path.join(workspace.designSystemRoot, "video-local/out/Sample topic - 2026-09-16")), /ENOENT/);
+});
+
+const writeCaptionLines = async (workspace, ids) => writeJson(path.join(workspace.designSystemRoot, "video", "productions", "sample-topic", "captions.json"), {
+  lines: ids.map((id) => ({ id, durationMs: 1000, words: [{ text: id, startMs: 0, endMs: 650 }] })),
+});
+
+test("graphic scenes need the client opt-in and then render without footage", async (t) => {
+  const graphic = { id: "board", chapter: "the-rule", visual: { kind: "steps", steps: [{ label: "Pull the deed" }, { label: "Read it" }, { label: "Match the will" }] } };
+  const production = {
+    longform: {
+      cover: { headline: "What should I know?", asset: "cover" },
+      scenes: [
+        { id: "intro", intro: true },
+        { id: "answer", chapter: "the-rule", headline: "A clear answer", asset: "footage" },
+        { id: "board", ...graphic },
+        { id: "outro", outro: true },
+      ],
+    },
+  };
+  const closed = await videoFixture(t, { production });
+  await writeCaptionLines(closed, ["intro", "answer", "board", "outro"]);
+  await assert.rejects(checkVideoWorkspace(closed, { slug: "sample-topic" }), /visual needs structure\.longform\.graphicScenes enabled/u);
+
+  const open = await videoFixture(t, {
+    production,
+    contract: { structure: { longform: { requireIntro: true, requireOutro: true, graphicScenes: true }, short: {} } },
+  });
+  await writeCaptionLines(open, ["intro", "answer", "board", "outro"]);
+  const checked = await checkVideoWorkspace(open, { slug: "sample-topic" });
+  const scenes = checked.video.productions[0].production.longform.scenes;
+  assert.equal(scenes[2].visual.kind, "steps");
+  assert.equal(scenes[2].chapter, "the-rule");
+  assert.equal(scenes[2].asset, undefined, "a graphic scene needs no footage");
+  const prepared = await prepareVideoWorkspace(open, "sample-topic");
+  assert.equal(prepared.project.contract.structure.longform.graphicScenes, true);
+});
+
+test("a graphic scene may sit over footage and a footage-free board breaks the family sequence", async (t) => {
+  const workspace = await videoFixture(t, {
+    contract: { structure: { longform: { requireIntro: true, requireOutro: true, graphicScenes: true }, short: {} } },
+    production: {
+      longform: {
+        cover: { headline: "What should I know?", asset: "cover" },
+        scenes: [
+          { id: "intro", intro: true },
+          { id: "answer", headline: "A clear answer", asset: "footage" },
+          { id: "board", visual: { kind: "statement", text: "One plan." } },
+          { id: "again", eyebrow: "Over footage", asset: "footage", visual: { kind: "document", title: "Deed", lines: [] } },
+          { id: "outro", outro: true },
+        ],
+      },
+    },
+  });
+  await writeCaptionLines(workspace, ["intro", "answer", "board", "again", "outro"]);
+  const checked = await checkVideoWorkspace(workspace, { slug: "sample-topic" });
+  assert.deepEqual(checked.video.productions[0].usedAssets.sort(), ["cover", "footage"]);
+  assert.deepEqual(adjacentFootageRepeats(checked.video.productions[0].production.longform.scenes), []);
+});
+
+test("stages committed static files for the client components and refuses ignored ones", async (t) => {
+  const workspace = await videoFixture(t, {
+    contract: { brand: {
+      colors: { background: "#000", accent: "#fc0", text: "#fff" },
+      fonts: { display: "serif", body: "serif", ui: "sans-serif" },
+      fontFiles: [{ family: "Example Serif", path: "public/example.woff2", style: "normal", weight: "700" }],
+      logo: "public/logo.svg",
+      series: "Answers",
+      site: "example.com",
+      tagline: "Clear answers.",
+      staticFiles: [{ path: "public/illustrations", mount: "illustrations" }],
+    } },
+  });
+  const source = path.join(workspace.designSystemRoot, "public", "illustrations");
+  await fs.mkdir(source, { recursive: true });
+  await fs.writeFile(path.join(source, "key-gold.webp"), "RIFF", "utf8");
+  const prepared = await prepareVideoWorkspace(workspace, "sample-topic");
+  assert.deepEqual(prepared.project.contract.brand.staticFiles, [{ path: "public/illustrations", mount: "illustrations" }]);
+  await fs.access(path.join(prepared.publicRoot, "illustrations", "key-gold.webp"));
+
+  const missing = await videoFixture(t, {
+    contract: { brand: {
+      colors: { background: "#000", accent: "#fc0", text: "#fff" },
+      fonts: { display: "serif", body: "serif", ui: "sans-serif" },
+      logo: "public/logo.svg",
+      series: "Answers",
+      site: "example.com",
+      tagline: "Clear answers.",
+      staticFiles: [{ path: "public/nowhere" }],
+    } },
+  });
+  await assert.rejects(prepareVideoWorkspace(missing, "sample-topic"), /brand\.staticFiles\[0\]\.path: public\/nowhere does not exist/u);
+});
+
+test("the producer inserts a subscribe board after the topic is established and passes beat visuals through", () => {
+  const contract = validateVideoContract({
+    schemaVersion: 1,
+    id: "example-video",
+    name: "Example video",
+    package: { shortCount: 0 },
+    structure: { longform: { graphicScenes: true } },
+    copy: {},
+    brand: {
+      colors: { background: "#000", accent: "#fc0", text: "#fff" },
+      fonts: {},
+      logo: "public/logo.svg",
+      series: "Example Answers",
+      site: "example.com",
+      tagline: "Clear answers",
+    },
+    producer: {
+      schemaVersion: 1,
+      authoring: { sharedPromptBlocks: ["brand/voice#plain-language"], formatPromptBlocks: {} },
+      roleEyebrows: { hook: "In brief", rule: "The rule", risk: "The risk", process: "Next step", exception: "The exception", answer: "The answer" },
+      intro: { enabled: true, id: "intro" },
+      engagement: { enabled: false, eyebrow: "Your turn", narrationTemplate: "{{question}}" },
+      subscribe: { enabled: true, afterBeat: 1, narrationTemplate: "Do you want to know more about {{topic}}? Subscribe to learn how to {{solution}}." },
+      outro: { id: "outro", narrationTemplate: "Learn more at {{site}}." },
+      cover: { assetPrefix: "cover-subject-", defaultEmotion: "concern" },
+      footage: { assetPrefix: "footage-" },
+    },
+  });
+  const assetCatalog = { assets: {
+    "cover-subject-concern": { mediaKey: "cover-subject-concern" },
+    "footage-one": { mediaKey: "footage-one", durationSeconds: 5, subject: "right", flip: false, text: "left-center" },
+    "footage-two": { mediaKey: "footage-two", durationSeconds: 5, subject: "right", flip: false, text: "left-center" },
+  } };
+  const mediaCatalog = { assets: [
+    { key: "cover-subject-concern", filename: "concern.png", contentType: "image/png", publicUrl: "https://cdn.example/concern.png" },
+    { key: "footage-one", filename: "one.mp4", contentType: "video/mp4", publicUrl: "https://cdn.example/one.mp4", durationSeconds: 5, title: "One" },
+    { key: "footage-two", filename: "two.mp4", contentType: "video/mp4", publicUrl: "https://cdn.example/two.mp4", durationSeconds: 5, title: "Two" },
+  ] };
+  const producer = createVideoProducer({ contract, assetCatalog, mediaCatalog });
+  const compiled = producer.compileProduction({
+    schemaVersion: 1,
+    slug: "deed-and-will",
+    outputFormat: "horizontal",
+    exactQuestion: "Does your deed agree with your will?",
+    topic: { label: "house deeds", solution: "keep your house where your will says" },
+    answerBeats: [
+      { id: "promise", role: "hook", chapter: "question", narration: "The deed decides first.", summary: "The deed decides first" },
+      { id: "title", role: "rule", chapter: "two-jobs", narration: "Chapter one.", summary: "Two documents, two jobs", visual: { kind: "chapter-title", number: 1, title: "Two documents, two jobs", motif: "will" } },
+      { id: "rule", role: "rule", chapter: "two-jobs", narration: "A will is instructions.", summary: "A will is instructions" },
+    ],
+  });
+  assert.deepEqual(compiled.scenes.map((scene) => scene.id), ["intro", "promise", "subscribe", "title", "rule", "outro"]);
+  assert.equal(compiled.scenes[2].narration, "Do you want to know more about house deeds? Subscribe to learn how to keep your house where your will says.");
+  assert.deepEqual(compiled.scenes[2].visual, { kind: "subscribe", topic: "house deeds", solution: "keep your house where your will says" });
+  assert.equal(compiled.scenes[2].chapter, "question");
+  assert.equal(compiled.scenes[3].visual.kind, "chapter-title");
+  const finalized = producer.finalizeProduction({
+    schemaVersion: 1,
+    compiled,
+    timings: compiled.scenes.map((scene) => ({ id: scene.id, durationMs: 4000, words: [{ text: scene.id, startMs: 0, endMs: 500 }] })),
+    audioSrc: null,
+  });
+  const byId = Object.fromEntries(finalized.plan.scenes.map((scene) => [scene.id, scene]));
+  assert.equal(byId.subscribe.asset, undefined, "the subscribe board carries no footage");
+  assert.equal(byId.title.asset, undefined, "a chapter title carries no footage");
+  assert.ok(byId.rule.asset, "a plain beat still selects footage");
+  assert.equal(byId.rule.chapter, "two-jobs");
+  assert.throws(() => producer.compileProduction({
+    schemaVersion: 1,
+    slug: "deed-and-will",
+    outputFormat: "horizontal",
+    exactQuestion: "Does your deed agree with your will?",
+    topic: { label: "house deeds" },
+    answerBeats: [{ id: "promise", role: "hook", narration: "x", summary: "The deed decides first" }],
+  }), /producer topic\.solution/u);
+  // A contract that does not require a solution skips the board for requests without one.
+  const optional = createVideoProducer({ contract: validateVideoContract({ ...JSON.parse(JSON.stringify(contract)), producer: { ...contract.producer, subscribe: { ...contract.producer.subscribe, requireSolution: false } } }), assetCatalog, mediaCatalog });
+  const skipped = optional.compileProduction({
+    schemaVersion: 1,
+    slug: "deed-and-will",
+    outputFormat: "horizontal",
+    exactQuestion: "Does your deed agree with your will?",
+    topic: { label: "house deeds" },
+    answerBeats: [{ id: "promise", role: "hook", narration: "x", summary: "The deed decides first" }],
+  });
+  assert.deepEqual(skipped.scenes.map((scene) => scene.id), ["intro", "promise", "outro"]);
+});
+
+test("accepts top copy zones for clips whose action crosses the middle band", async (t) => {
+  const workspace = await videoFixture(t);
+  const assetsPath = path.join(workspace.designSystemRoot, "video", "assets.json");
+  const catalog = JSON.parse(await fs.readFile(assetsPath, "utf8"));
+  catalog.assets.footage.text = "left-top";
+  await writeJson(assetsPath, catalog);
+  const checked = await checkVideoWorkspace(workspace, { slug: "sample-topic" });
+  assert.equal(checked.video.assets.assets.footage.text, "left-top");
+  catalog.assets.footage.text = "middle";
+  await writeJson(assetsPath, catalog);
+  await assert.rejects(checkVideoWorkspace(workspace, { slug: "sample-topic" }), /footage\.text is unsupported/u);
+});
+
+test("voiceover runs for a new production before its first captions.json exists", async (t) => {
+  const workspace = await videoFixture(t);
+  await fs.rm(path.join(workspace.designSystemRoot, "video", "productions", "sample-topic", "captions.json"));
+  const calls = [];
+  const result = await voiceoverVideoWorkspace(workspace, "sample-topic", { python: process.execPath, run: (command, args) => { calls.push({ command, args }); } }).catch((error) => error);
+  // Without a real edge-tts the spawned script fails; the workspace itself must not.
+  assert.ok(!(result instanceof Error) || !/captions\.json is required/u.test(result.message), String(result));
 });

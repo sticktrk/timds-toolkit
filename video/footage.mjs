@@ -72,11 +72,14 @@ export function adjacentFootageRepeats(scenes) {
   const repeats = [];
   let previous;
   for (const scene of scenes) {
-    if (scene.intro || scene.outro) {
+    const keys = sceneAssetKeys(scene);
+    // Intro and outro cards, and a footage-free graphic board, break the
+    // footage sequence: the viewer has not seen a clip since.
+    if (scene.intro || scene.outro || (!keys.length && scene.visual)) {
       previous = undefined;
       continue;
     }
-    for (const key of sceneAssetKeys(scene)) {
+    for (const key of keys) {
       const current = { scene: scene.id, key, family: footageFamily(key) };
       if (previous && previous.family === current.family) repeats.push({ previous, current });
       previous = current;
