@@ -68,7 +68,11 @@ test("copies the installed default components into client-owned source exactly o
   assert.match(generated, /from "@dtconcepts\/timds\/video\/footage"/u);
   assert.match(generated, /chainClipFrames\(availableFrames, duration/u);
   assert.match(generated, /asset\.kind === "image"/u);
-  assert.ok(generated.includes(snapshot));
+  assert.ok(generated.includes(snapshot.replace("} satisfies Required<VideoProjectComponentOverrides>;", "} satisfies VideoProjectComponentOverrides;")));
+  // A client copy may leave a slot out; the toolkit fills it at runtime, so a
+  // new slot in a later release must not fail the client's typecheck.
+  assert.doesNotMatch(generated, /satisfies Required<VideoProjectComponentOverrides>/u);
+  assert.match(generated, /\} satisfies VideoProjectComponentOverrides;/u);
   assert.match(generated, /export default defaultVideoProjectComponents/u);
   await assert.rejects(initializeVideoComponents(workspace), /already exist/u);
 
@@ -405,6 +409,34 @@ test("rejects stale or incomplete published authoring context", () => {
     () => createVideoAuthoringContract({ ...input, designSystemIndex: { system: { id: "example/core", version: "2.3.4" }, pages: [] } }),
     /authoring block brand\/voice#plain-language is missing/u,
   );
+});
+
+test("refuses a production whose footage or cover is not published, and only warns about unused catalog entries", async (t) => {
+  const workspace = await videoFixture(t);
+  const assetsPath = path.join(workspace.designSystemRoot, "video/assets.json");
+  const assets = JSON.parse(await fs.readFile(assetsPath, "utf8"));
+  assets.assets["footage-staged"] = { mediaKey: "footage-staged", durationSeconds: 20, subject: "center", flip: false, text: "left-center" };
+  await writeJson(assetsPath, assets);
+  const checked = await checkVideoWorkspace(workspace, { slug: "sample-topic" });
+  assert.deepEqual(checked.warnings.filter((warning) => warning.includes("footage-staged")), ["footage-staged: mediaKey footage-staged is not registered in media.json"]);
+
+  const productionPath = path.join(workspace.designSystemRoot, "video/productions/sample-topic/production.json");
+  const production = JSON.parse(await fs.readFile(productionPath, "utf8"));
+  production.longform.scenes[1].asset = "footage-staged";
+  await writeJson(productionPath, production);
+  await assert.rejects(checkVideoWorkspace(workspace, { slug: "sample-topic" }), (error) => {
+    assert.match(error.message, /reference media that no render host can fetch/u);
+    assert.match(error.message, /timds assets publish/u);
+    assert.match(error.message, /- footage-staged: mediaKey footage-staged is not published in media\.json/u);
+    return true;
+  });
+
+  await writeJson(path.join(workspace.designSystemRoot, "media.json"), {
+    schemaVersion: 2,
+    assets: [{ id: "footage-staged-id", key: "footage-staged", kind: "video", title: "Staged", filename: "staged.mp4", contentType: "video/mp4", publicUrl: "https://media.example.com/staged.mp4", sha256: "a".repeat(64), bytes: 5, durationSeconds: 20 }],
+  });
+  const published = await checkVideoWorkspace(workspace, { slug: "sample-topic" });
+  assert.equal(published.warnings.some((warning) => warning.includes("footage-staged")), false);
 });
 
 test("validates and prepares a client-owned production with TimDS provenance", async (t) => {
