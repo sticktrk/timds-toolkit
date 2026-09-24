@@ -663,12 +663,14 @@ async function loadWorkspaceTokens(workspace) {
 }
 
 /**
- * `brandValues: "optional"` is for validation before a build: brand references
- * stay unresolved and are reported, instead of failing for want of tokens.
- * Every path that hands the contract to a renderer or the lab keeps the
- * default, where an unresolvable reference is an error.
+ * Brand references resolve here when the design tokens are available and
+ * otherwise stay as written, listed in `video.brandUnresolved`: checks, the
+ * lab's plan and compile, and every other reader work before a build. Only
+ * a path that hands the contract to Remotion needs values, and it calls
+ * `assertVideoBrandResolved` first. `brandValues: "required"` makes the load
+ * itself fail instead.
  */
-export async function loadVideoWorkspace(workspace, { slug: selectedSlug, brandValues = "required" } = {}) {
+export async function loadVideoWorkspace(workspace, { slug: selectedSlug, brandValues = "optional" } = {}) {
   if (!workspace.manifest.video) throw new Error("timds.json does not enable the video contract; run timds video init");
   const video = workspace.manifest.video;
   const contractPath = path.join(workspace.designSystemRoot, video.contract);
@@ -706,10 +708,17 @@ export async function loadVideoWorkspace(workspace, { slug: selectedSlug, brandV
   return { ...workspace, video: { ...video, assets, assetsPath, brandReferences, brandUnresolved, verticalMetadata, componentsPath, contract, contractPath, labRoot, localRoot, productions, productionsRoot, tokens } };
 }
 
+/** A renderer cannot guess the brand: refuse to stage a contract whose references never resolved. */
+export function assertVideoBrandResolved(loaded) {
+  const unresolved = loaded.video.brandUnresolved ?? [];
+  if (!unresolved.length) return loaded;
+  throw new Error(`video contract ${unresolved.map((entry) => `${entry.field} references ${entry.reference}`).join(", ")}, but the design tokens are not derived; build the artifact with timds check first`);
+}
+
 export async function checkVideoWorkspace(workspace, options = {}) {
   // A check may run before the artifact is built (CI often runs it first), so
   // brand references are verified when tokens exist and reported otherwise.
-  const loaded = await loadVideoWorkspace(workspace, { ...options, brandValues: "optional" });
+  const loaded = await loadVideoWorkspace(workspace, options);
   const { catalog } = await readMediaCatalog(workspace.designSystemRoot);
   const registered = new Set(catalog.assets.map((asset) => asset.key));
   const brandProblems = await checkVideoBrandSources({ designSystemRoot: workspace.designSystemRoot, contract: loaded.video.contract, mediaCatalog: catalog, localDir: loaded.video.local });
@@ -912,7 +921,8 @@ async function prepareLabNarration(workspace, planned, labLocal, publicRoot, opt
 }
 
 export async function prepareVideoLab(workspace, requestedName, options = {}) {
-  const planned = await planVideoLab(workspace, requestedName);
+  // Planning needs no brand values; staging the lab project for Remotion does.
+  const planned = assertVideoBrandResolved(await planVideoLab(workspace, requestedName));
   const { name } = planned.lab;
   const labLocal = path.join(planned.video.localRoot, "lab", name);
   const publicRoot = path.join(labLocal, "public");
@@ -1316,7 +1326,7 @@ export async function assertVideoProjectStaged(project, publicRoot) {
 }
 
 export async function prepareVideoWorkspace(workspace, selectedSlug) {
-  const loaded = await loadVideoWorkspace(workspace, { slug: selectedSlug });
+  const loaded = assertVideoBrandResolved(await loadVideoWorkspace(workspace, { slug: selectedSlug }));
   const production = loaded.video.productions[0];
   const publicRoot = path.join(loaded.video.localRoot, "public");
   const generatedRoot = path.join(loaded.video.localRoot, "generated");

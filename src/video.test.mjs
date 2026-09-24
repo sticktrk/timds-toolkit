@@ -9,6 +9,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+  assertVideoBrandResolved,
   brandDriftWarnings,
   checkVideoWorkspace,
   describeSceneFootage,
@@ -1503,10 +1504,14 @@ test("resolves brand role and token references in the video contract from derive
       },
     },
   });
-  // Without a built artifact, a path that needs values fails and names the fix,
-  // while a check passes and reports what it could not verify.
-  await assert.rejects(loadVideoWorkspace(workspace, { slug: "sample-topic" }), /brand\.colors\.background references --navy-900, but the design tokens are not derived; build the artifact with timds check first/);
-  await assert.rejects(prepareVideoWorkspace(workspace, "sample-topic"), /design tokens are not derived/);
+  // Without a built artifact the workspace still loads (checks, planning, and
+  // compiling need no colors); only handing the contract to Remotion fails,
+  // and the failure names the fix.
+  const unresolvedLoad = await loadVideoWorkspace(workspace, { slug: "sample-topic" });
+  assert.equal(unresolvedLoad.video.contract.brand.colors.accent, "{ color.accent }");
+  assert.throws(() => assertVideoBrandResolved(unresolvedLoad), /brand\.colors\.background references --navy-900, brand\.colors\.panel references --navy-900, brand\.colors\.accent references color\.accent, brand\.fonts\.display references font\.display, but the design tokens are not derived; build the artifact with timds check first/);
+  await assert.rejects(loadVideoWorkspace(workspace, { slug: "sample-topic", brandValues: "required" }), /brand\.colors\.background references --navy-900, but the design tokens are not derived/);
+  await assert.rejects(prepareVideoWorkspace(workspace, "sample-topic"), /design tokens are not derived; build the artifact with timds check first/);
   const unverified = await checkVideoWorkspace(workspace, { slug: "sample-topic" });
   assert.equal(unverified.video.contract.brand.colors.background, "{--navy-900}");
   assert.deepEqual(unverified.video.brandUnresolved.map((entry) => entry.reference), ["--navy-900", "--navy-900", "color.accent", "font.display"]);

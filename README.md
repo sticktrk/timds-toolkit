@@ -456,10 +456,12 @@ from the `tokens.json` that `timds check` derives from the built stylesheets.
 References resolve when the workspace loads, so the renderer, the lab, and
 every prepared project see values. The values come from the derived
 `tokens.json`, or straight from the built pages' stylesheets when that file
-is not written yet. `video check` and `video doctor` may run before the
-artifact is built: they then leave references unresolved and warn, and the
-full `check` verifies them once the pages are built. Anything that renders
-needs the build and fails with that instruction. A literal that duplicates a
+is not written yet. Before the artifact is built, checks, the lab's plan and
+compile, and every other reader still work: references stay unresolved and
+`video check` warns which ones are unverified, and the full `check` verifies
+them once the pages are built. Only handing the contract to Remotion — a
+production or lab prepare, studio, render — needs the values and fails with
+the instruction to build first. A literal that duplicates a
 derived token is reported by `check` with the reference to use instead. Video surfaces often
 pick a darker face of the same palette than the page does, which is what a
 token reference is for:
