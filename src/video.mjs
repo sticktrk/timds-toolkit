@@ -614,8 +614,25 @@ export async function checkVideoWorkspace(workspace, options = {}) {
   const brandProblems = await checkVideoBrandSources({ designSystemRoot: workspace.designSystemRoot, contract: loaded.video.contract, mediaCatalog: catalog, localDir: loaded.video.local });
   if (brandProblems.length) throw brandSourceError(brandProblems);
   const warnings = [];
+  // A production is only as portable as its media. A scene or cover that
+  // names a mediaKey media.json has not published renders on the machine that
+  // staged the clip and fails on every other host, so it is refused here, the
+  // same way an unpublished brand file is. A catalog entry nothing references
+  // yet only warns: a designer may register footage before a production uses it.
+  const published = new Set(catalog.assets.filter((asset) => asset.publicUrl).map((asset) => asset.key));
+  const referenced = new Set(loaded.video.productions.flatMap((production) => production.usedAssets));
+  const unpublished = [];
   for (const [key, asset] of Object.entries(loaded.video.assets.assets)) {
-    if (asset.mediaKey && !registered.has(asset.mediaKey)) warnings.push(`${key}: mediaKey ${asset.mediaKey} is not registered in media.json`);
+    if (!asset.mediaKey || registered.has(asset.mediaKey)) continue;
+    if (referenced.has(key)) unpublished.push(`${key}: mediaKey ${asset.mediaKey} is not published in media.json`);
+    else warnings.push(`${key}: mediaKey ${asset.mediaKey} is not registered in media.json`);
+  }
+  for (const key of referenced) {
+    const mediaKey = loaded.video.assets.assets[key]?.mediaKey;
+    if (mediaKey && registered.has(mediaKey) && !published.has(mediaKey)) unpublished.push(`${key}: mediaKey ${mediaKey} has no public URL in media.json`);
+  }
+  if (unpublished.length) {
+    throw new Error(`video productions reference media that no render host can fetch; publish it with timds assets publish (timds submit publishes staged media) before submitting:\n${unpublished.map((problem) => `- ${problem}`).join("\n")}`);
   }
   // Every lab input must compile: it is the request an automated Video Lab
   // hands the producer, so a broken one is a broken preview. Finalizing needs
@@ -893,7 +910,11 @@ async function defaultVideoComponentsTemplate() {
   const start = remotionSource.indexOf(DEFAULT_COMPONENTS_START);
   const end = remotionSource.indexOf(DEFAULT_COMPONENTS_END);
   if (start < 0 || end < start) throw new Error("TimDS default video component snapshot markers are missing");
-  const componentSource = remotionSource.slice(start, end + DEFAULT_COMPONENTS_END.length);
+  // The toolkit's own default object is Required<> so every slot has a
+  // fallback. A client copy is not: a slot the client leaves out resolves to
+  // the TimDS default at runtime, so a new slot in a later release must not
+  // break the client's typecheck.
+  const componentSource = remotionSource.slice(start, end + DEFAULT_COMPONENTS_END.length).replace("} satisfies Required<VideoProjectComponentOverrides>;", "} satisfies VideoProjectComponentOverrides;");
   return `// Generated once from the installed TimDS defaults. This file is now owned by this Design System.\n// TimDS upgrades do not overwrite it; use \`timds video components init --force\` only to reset it.\n// Footage-chain rules are imported from the toolkit on purpose: they are production rules, not styling,\n// and \`timds video check\` enforces the same module, so a toolkit fix reaches these frames without a reset.\nimport React, {useMemo} from "react";\nimport {Audio} from "@remotion/media";\nimport {AbsoluteFill, Img, OffthreadVideo, Sequence, interpolate, staticFile, useCurrentFrame, useVideoConfig} from "remotion";\nimport {MINIMUM_CHAIN_CLIP_SECONDS, adjacentFootageRepeats, chainClipFrames, sceneAssetKeys, verticalTextZone} from "@dtconcepts/timds/video/footage";\nimport type {\n  VideoProject,\n  VideoProjectAsset,\n  VideoProjectCaptionLine,\n  VideoProjectComponentOverrides,\n  VideoProjectCover,\n  VideoProjectCoverProps,\n  VideoProjectGraphicProps,\n  VideoProjectIntroProps,\n  VideoProjectOutroProps,\n  VideoProjectScene,\n  VideoProjectSceneProps,\n  VideoProjectVideoProps,\n} from "@dtconcepts/timds/video/remotion";\n\n${DEFAULT_VIDEO_TEXT_SOURCE}\n\n${componentSource}\n\nexport {BrandWatermark, CaptionPages, Cover, CoverVisual, GoldHeadline, HorizontalCover, Intro, Media, Outro, SceneView, VerticalCover, Video};\nexport default defaultVideoProjectComponents;\n`;
 }
 

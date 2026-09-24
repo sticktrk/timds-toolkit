@@ -373,7 +373,10 @@ must be one of the two sources every render host has:
 
 `video check` fails when a brand file or `brand.staticFiles` source is missing,
 is ignored by git, sits under the ignored `video-local/` directory, or names a
-media key that is not published. A file that exists only on the machine that generated it renders
+media key that is not published. It fails the same way when a production scene
+or cover names a `video/assets.json` entry whose `mediaKey` has no published
+entry in `media.json`; a catalog entry no production uses yet only warns, so
+footage can be registered ahead of the production that plays it. A file that exists only on the machine that generated it renders
 locally and 404s on every other host, so it is refused before merge rather
 than discovered in production. Staging never drops a declared file: the lab,
 `video render`, and silent previews fail with the contract field that names it.
