@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createReadStream, existsSync } from "node:fs";
@@ -77,8 +78,30 @@ const contentTypes = {
   ".woff2": "font/woff2",
 };
 
+// Where human-readable progress goes. The CLI writes to stdout; a long-lived
+// host whose stdout is a protocol stream (the stdio MCP server) routes it to
+// stderr, and a caller that wants the lines itself (an MCP tool call) runs its
+// work inside `runWithOutputSink`.
+const outputContext = new AsyncLocalStorage();
+let outputStream = process.stdout;
+
+/** Route CLI progress and inherited child output to another stream, such as stderr. */
+export function setOutputStream(stream) {
+  outputStream = stream || process.stdout;
+}
+
+/** Run a task with its progress lines and workspace command output delivered to `sink(line)`. */
+export function runWithOutputSink(sink, task) {
+  return outputContext.run(sink, task);
+}
+
 function output(message = "") {
-  process.stdout.write(`${message}\n`);
+  const sink = outputContext.getStore();
+  if (sink) {
+    for (const line of String(message).split("\n")) sink(line);
+    return;
+  }
+  outputStream.write(`${message}\n`);
 }
 
 function commandError(command, code, stderr) {
@@ -90,12 +113,16 @@ export function execute(command, options = {}) {
   if (!Array.isArray(command) || !command.length || command.some((part) => typeof part !== "string" || !part)) {
     throw new Error("Workspace commands must be non-empty string arrays");
   }
+  const sink = options.capture ? null : outputContext.getStore();
+  // Output that would be inherited is piped instead when stdout is not ours to
+  // write: forwarded line by line to the active sink, or to the output stream.
+  const redirect = !options.capture && (Boolean(sink) || outputStream !== process.stdout);
   return new Promise((resolve, reject) => {
     const child = spawn(command[0], command.slice(1), {
       cwd: options.cwd,
       env: options.env || process.env,
       shell: false,
-      stdio: options.capture ? ["ignore", "pipe", "pipe"] : "inherit",
+      stdio: options.capture || redirect ? ["ignore", "pipe", "pipe"] : "inherit",
     });
     let stdout = "";
     let stderr = "";
@@ -104,11 +131,31 @@ export function execute(command, options = {}) {
       child.stderr?.setEncoding("utf8");
       child.stdout?.on("data", (chunk) => { stdout += chunk; });
       child.stderr?.on("data", (chunk) => { stderr += chunk; });
+    } else if (redirect) {
+      const forward = (stream, append) => {
+        let buffered = "";
+        stream.setEncoding("utf8");
+        stream.on("data", (chunk) => {
+          append(chunk);
+          if (!sink) {
+            outputStream.write(chunk);
+            return;
+          }
+          buffered += chunk;
+          const lines = buffered.split(/\r?\n/u);
+          buffered = lines.pop() ?? "";
+          for (const line of lines) sink(line);
+        });
+        stream.on("end", () => { if (sink && buffered) sink(buffered); });
+      };
+      // Keep only a bounded tail for the failure message.
+      forward(child.stdout, (chunk) => { stdout = (stdout + chunk).slice(-20_000); });
+      forward(child.stderr, (chunk) => { stderr = (stderr + chunk).slice(-20_000); });
     }
     child.on("error", reject);
     child.on("close", (code) => {
       if (code !== 0 && !options.allowFailure) {
-        reject(commandError(command, code, stderr));
+        reject(commandError(command, code, redirect ? stderr || stdout : stderr));
         return;
       }
       resolve({ code: Number(code || 0), stderr, stdout });
@@ -975,7 +1022,7 @@ export async function submitWorkspace(repoRootInput, message, options = {}) {
  * which page could be the voice. Written for the designer who maintains the
  * pages, not for a pipeline.
  */
-function brandReport(workspace, derived) {
+export function brandReport(workspace, derived) {
   const lines = [];
   const { brand: kit, tokens, index } = derived;
   if (!kit) return ["Brand kit: not derived yet. Run `npm run timds -- check` to build the pages and derive it."];
@@ -1028,7 +1075,7 @@ function machineSummary({ counts }) {
 }
 
 function helpText() {
-  return `TimDS local design-system workflow\n\nUsage:\n  timds init [--root PATH] [--standalone] [--consumer-repository OWNER/REPO] [--consumer-branch BRANCH] [--consumer-path PATH] [--force]\n  timds upgrade [--root PATH] [--auto-release] [--force]\n  timds auth login [--token TOKEN] [--portal-url URL]\n  timds auth status [--portal-url URL]\n  timds auth logout [--portal-url URL]\n  timds defaults [--root PATH] [--apply]\n  timds doctor [--root PATH]\n  timds brand [--root PATH] [--json]\n  timds dev [--root PATH]\n  timds check [--root PATH] [--skip-build] [--require-clean-dist]\n  timds extract [--root PATH] [--skip-build] [--publish]\n  timds preview [--root PATH] [--port 4400] [--no-build]\n  timds diff [--root PATH] [--base origin/main]\n  timds assets list [--root PATH]\n  timds assets add FILE [--key LOGICAL_KEY] [--title TEXT] [--tags a,b]\n  timds assets backfill-metadata [--root PATH] [--force]\n  timds assets publish [--root PATH]\n  timds assets pull KEY [--output PATH] [--force]\n  timds video --help\n  timds submit --message "Change summary" [--dry-run] [--no-push] [--no-pr]\n\nCheck and extract derive index.json, tokens.json, brand.json, llms.txt, and per-page Markdown from the built artifact so agents and pipelines can read the system without scraping HTML or CSS. Brand prints the derived brand kit in plain language with a fix for every gap. Extract --publish uploads the index, tokens, brand kit, llms.txt, the per-page Markdown mirrors, a .timds-artifact.json provenance stamp, and the artifact files the index references to the system's stable CDN prefix through the portal, so pipelines and agents consume the system from one stable URL. Large public media is copied into ignored media-local/ for authoring. assets add measures timed-media duration and dimensions before upload; backfill-metadata repairs older catalogs from their stable public URLs without re-uploading them. Video-enabled systems keep client rules and production data in the Design System while TimDS owns validation, voiceover orchestration, Remotion rendering, and packaging. Submit creates a review branch and draft pull request.`;
+  return `TimDS local design-system workflow\n\nUsage:\n  timds init [--root PATH] [--standalone] [--consumer-repository OWNER/REPO] [--consumer-branch BRANCH] [--consumer-path PATH] [--force]\n  timds upgrade [--root PATH] [--auto-release] [--force]\n  timds auth login [--token TOKEN] [--portal-url URL]\n  timds auth status [--portal-url URL]\n  timds auth logout [--portal-url URL]\n  timds defaults [--root PATH] [--apply]\n  timds doctor [--root PATH]\n  timds brand [--root PATH] [--json]\n  timds dev [--root PATH]\n  timds check [--root PATH] [--skip-build] [--require-clean-dist]\n  timds extract [--root PATH] [--skip-build] [--publish]\n  timds preview [--root PATH] [--port 4400] [--no-build]\n  timds diff [--root PATH] [--base origin/main]\n  timds assets list [--root PATH]\n  timds assets add FILE [--key LOGICAL_KEY] [--title TEXT] [--tags a,b]\n  timds assets backfill-metadata [--root PATH] [--force]\n  timds assets publish [--root PATH]\n  timds assets pull KEY [--output PATH] [--force]\n  timds video --help\n  timds mcp [--root PATH]\n  timds submit --message "Change summary" [--dry-run] [--no-push] [--no-pr]\n\nCheck and extract derive index.json, tokens.json, brand.json, llms.txt, and per-page Markdown from the built artifact so agents and pipelines can read the system without scraping HTML or CSS. Brand prints the derived brand kit in plain language with a fix for every gap. Extract --publish uploads the index, tokens, brand kit, llms.txt, the per-page Markdown mirrors, a .timds-artifact.json provenance stamp, and the artifact files the index references to the system's stable CDN prefix through the portal, so pipelines and agents consume the system from one stable URL. Large public media is copied into ignored media-local/ for authoring. assets add measures timed-media duration and dimensions before upload; backfill-metadata repairs older catalogs from their stable public URLs without re-uploading them. Video-enabled systems keep client rules and production data in the Design System while TimDS owns validation, voiceover orchestration, Remotion rendering, and packaging. Mcp serves the Design System editing tools (guide, workspace description, guarded file reads and writes, check, derived layer, media catalog) over stdio for an MCP-capable agent; protected tooling and generated paths stay read-only. Submit creates a review branch and draft pull request.`;
 }
 
 export async function runCli(argv) {
@@ -1095,6 +1142,10 @@ export async function runCli(argv) {
       return result;
     }
     throw new Error(`Unknown video command ${videoCommand}`);
+  }
+  if (command === "mcp") {
+    const { runDesignSystemMcp } = await import("./mcp.mjs");
+    return runDesignSystemMcp({ root });
   }
   if (command === "auth") {
     const [authCommand = "status"] = positional;

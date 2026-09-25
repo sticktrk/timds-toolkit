@@ -96,6 +96,38 @@ This validates the artifact, creates or uses a `design-system/<change>` branch,
 pushes it, and opens a draft pull request against the default branch. It does
 not merge or publish without separate authorization.
 
+## Remote editing through MCP
+
+`npm run timds -- mcp` serves the Design System editing tools over stdio to any
+MCP-capable agent, bound to the current checkout. The server is named
+`timds-design-system` and provides:
+
+- `get_editing_guide` (also resource `timds://guide`): the editing rules for an
+  agent working without a checkout.
+- `describe_workspace`: system, layout, authored directories, protected paths,
+  workspace commands, and the brand kit report.
+- `list_files`, `read_file`, `write_file`, `delete_file`: guarded access to the
+  authored surface. Writes are atomic and take an optional change `note`.
+- `run_check`: `timds check` as structured findings (`passed`, `warnings`, or
+  `failed`, with errors, warnings, artifact counts, and brand kit gaps).
+- `read_derived`: the derived `brand`, `tokens`, or `index` document.
+- `list_media`: the `media.json` catalog, optionally filtered by tag.
+
+The guard is enforced, not requested. The tools refuse `.git/`, `.timds/`,
+`.agents/`, `.github/`, `package.json`, `package-lock.json`, `node_modules/`,
+`dist/`, `timds.json`, `media.json`, `.gitignore`, `media-local/`,
+`video-local/`, symbolic links, and anything outside the authored surface. In
+the embedded layout the authored surface is `design-system/**` only. stdout
+carries only the protocol; build output and progress go to stderr or into the
+`run_check` result.
+
+A host that serves drafts remotely imports the same tools from
+`@dtconcepts/timds/mcp`. `registerDesignSystemTools(server, { resolveWorkspace,
+hooks })` registers them on an `McpServer`. With `hooks.remote` set, every
+tool takes a `draftId` that is passed to `resolveWorkspace`, and
+`hooks.afterWrite(workspace, { paths, note })` runs after each write or delete.
+`isProtectedPath` and `authoredSurfaceRoot` expose the same guard.
+
 ## Machine-readable artifacts
 
 A design system is read by agents and downstream pipelines as well as by people.
