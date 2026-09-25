@@ -304,7 +304,10 @@ npm run timds -- video doctor
 ```
 
 The opt-in creates `video/contract.json`, `video/assets.json`, and
-`video/productions/`, and declares their paths in `timds.json`. The client
+`video/productions/`, and declares their paths in `timds.json`. The template
+contract names a logo file, so a fresh scaffold also writes a neutral starter
+logo at that path when nothing is there yet; replace it with the client's logo
+before publication. A logo already at that path is never overwritten. The client
 Design System owns every brand, content, compliance, media-selection, and
 publishing decision in those records. `@dtconcepts/timds` owns the shared
 schemas, validation, voiceover orchestration, natural-speed footage runtime,

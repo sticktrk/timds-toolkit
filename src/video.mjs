@@ -1068,6 +1068,19 @@ export async function initializeVideoWorkspace(workspace, { force = false } = {}
     const target = path.join(destination, name);
     if (!existsSync(target) || force) await copyTemplate(path.join(packageRoot, "templates", "video", name), target);
   }
+  // The template contract names a logo so the brand-file check stays strict,
+  // and a fresh scaffold must pass that check before the client supplies its
+  // own. Write a neutral starter logo at the contract's path only when nothing
+  // is there yet; a client's real logo at that path is never replaced.
+  const contract = JSON.parse(await fs.readFile(path.join(destination, "contract.json"), "utf8"));
+  const logo = typeof contract?.brand?.logo === "string"
+    ? path.join(workspace.designSystemRoot, safeRelativePath(contract.brand.logo, "video contract brand.logo"))
+    : null;
+  let starterLogo = null;
+  if (logo && scaffold && !existsSync(logo)) {
+    await copyTemplate(path.join(packageRoot, "templates", "video", "brand", "logo.svg"), logo);
+    starterLogo = logo;
+  }
   if (force) await fs.rm(path.join(workspace.designSystemRoot, ".timds", "defaults.json"), { force: true });
   await syncDefaults({ ...workspace, manifest: { ...workspace.manifest, video: rawManifest.video } }, { apply: true, scaffold });
   const skillDestination = path.join(workspace.repoRoot, ".agents", "skills", "timds-create-video");
@@ -1076,7 +1089,7 @@ export async function initializeVideoWorkspace(workspace, { force = false } = {}
   const ignorePath = path.join(workspace.designSystemRoot, ".gitignore");
   const currentIgnore = await fs.readFile(ignorePath, "utf8").catch(() => "");
   if (!currentIgnore.split(/\r?\n/).includes("video-local/")) await fs.appendFile(ignorePath, `${currentIgnore.endsWith("\n") || !currentIgnore ? "" : "\n"}video-local/\n`);
-  return { contract: path.join(destination, "contract.json"), assets: path.join(destination, "assets.json"), lab: path.join(destination, "lab"), skillDestination };
+  return { contract: path.join(destination, "contract.json"), assets: path.join(destination, "assets.json"), lab: path.join(destination, "lab"), skillDestination, starterLogo };
 }
 
 function referencedAssetKeys(production) {

@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import {
   assertVideoBrandResolved,
   brandDriftWarnings,
+  checkVideoBrandSources,
   checkVideoWorkspace,
   describeSceneFootage,
   describeVideoLabPlan,
@@ -591,8 +592,18 @@ test("video init scaffolds the lab beside the contract, with a producer block th
   assert.deepEqual(contract.publishing.targets, baseline.videoPublishing.targets);
   assert.deepEqual(contract.publishing.targetDefaults, baseline.videoPublishing.targetDefaults);
   assert.deepEqual(baseline.overrides, []);
-  await initializeVideoWorkspace({ designSystemRoot: root, repoRoot: root, manifestPath, manifest: {} }, { force: true });
+  // A fresh scaffold names a logo the client has not supplied yet; the starter
+  // logo at that path keeps the brand-file check green until it is replaced.
+  const logoPath = path.join(root, contract.brand.logo);
+  assert.equal(result.starterLogo, logoPath);
+  assert.match(await fs.readFile(logoPath, "utf8"), /<svg/);
+  assert.deepEqual(await checkVideoBrandSources({ designSystemRoot: root, contract, mediaCatalog: { assets: [] } }), []);
+  await fs.writeFile(logoPath, "<svg>client</svg>\n", "utf8");
+  const reset = await initializeVideoWorkspace({ designSystemRoot: root, repoRoot: root, manifestPath, manifest: {} }, { force: true });
   assert.deepEqual(JSON.parse(await fs.readFile(result.contract, "utf8")).publishing.targets, baseline.videoPublishing.targets);
+  // Forcing the contract back to the template never replaces a logo the client put there.
+  assert.equal(reset.starterLogo, null);
+  assert.equal(await fs.readFile(logoPath, "utf8"), "<svg>client</svg>\n");
 });
 
 test("a contact CTA already used as the series line is included once", () => {

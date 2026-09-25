@@ -622,6 +622,19 @@ test("loads and validates a standalone repository contract", async (t) => {
   assert.equal(checked.machine.counts.tokens, 0);
 });
 
+test("init creates a standalone root that does not exist yet", async (t) => {
+  const parent = await temporaryDirectory(t);
+  const repoRoot = path.join(parent, "fresh-design-system");
+
+  const result = await initializeRepository(repoRoot, { standalone: true });
+
+  assert.equal(result.repoRoot, repoRoot);
+  assert.equal(result.designSystemRoot, repoRoot);
+  const manifest = JSON.parse(await fs.readFile(path.join(repoRoot, "timds.json"), "utf8"));
+  assert.equal(manifest.systemId, "fresh-design-system/core");
+  await fs.access(path.join(repoRoot, "dist", "index.html"));
+});
+
 test("initializes the reusable standalone repository shape", async (t) => {
   const repoRoot = await temporaryDirectory(t);
   execFileSync("git", ["init", "-b", "main"], { cwd: repoRoot, stdio: "ignore" });
