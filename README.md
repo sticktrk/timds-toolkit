@@ -116,7 +116,11 @@ MCP-capable agent, bound to the current checkout. The server is named
 The guard is enforced, not requested. The tools refuse `.git/`, `.timds/`,
 `.agents/`, `.github/`, `package.json`, `package-lock.json`, `node_modules/`,
 `dist/`, `timds.json`, `media.json`, `.gitignore`, `media-local/`,
-`video-local/`, symbolic links, and anything outside the authored surface. In
+`video-local/`, the release automation scripts (`scripts/release.mjs`,
+`scripts/release.sh`, `scripts/check-versions.mjs`,
+`scripts/prepare-merge-release.mjs`, `scripts/prepare-merge-release.test.mjs`),
+symbolic links, and anything outside the authored surface. Build, dev, and
+check scripts stay editable. In
 the embedded layout the authored surface is `design-system/**` only. stdout
 carries only the protocol; build output and progress go to stderr or into the
 `run_check` result.

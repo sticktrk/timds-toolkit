@@ -76,6 +76,11 @@ const STANDALONE_PROTECTED = [
   "video-local/render.mp4",
   "src/node_modules/x.js",
   "src/.gitignore",
+  "scripts/release.mjs",
+  "scripts/release.sh",
+  "scripts/check-versions.mjs",
+  "scripts/prepare-merge-release.mjs",
+  "scripts/prepare-merge-release.test.mjs",
 ];
 
 test("refuses every protected path, traversal, and absolute path on a standalone system", async (t) => {
@@ -87,6 +92,9 @@ test("refuses every protected path, traversal, and absolute path on a standalone
   }
   assert.equal(isProtectedPath(workspace, "src/index.html"), false);
   assert.equal(isProtectedPath(workspace, "src/pages/new.html"), false);
+  for (const authored of ["scripts/build.mjs", "scripts/check.mjs", "scripts/dev.mjs", "scripts/optimize-images.mjs"]) {
+    assert.equal(isProtectedPath(workspace, authored), false, authored);
+  }
 
   const client = await connect(await createDesignSystemMcpServer({ root: repoRoot }));
   for (const protectedPath of [...STANDALONE_PROTECTED, "../outside.txt", "/tmp/outside.txt"]) {
@@ -201,7 +209,7 @@ test("restricts an embedded system to design-system/**", async (t) => {
   await fs.writeFile(path.join(repoRoot, "app.js"), "console.log('app')\n", "utf8");
   const workspace = await loadWorkspace(repoRoot);
   assert.equal(authoredSurfaceRoot(workspace), "design-system");
-  for (const outside of ["app.js", "README.md", "package.json", ".github/workflows/timds-design-system.yml", "design-system/timds.json", "design-system/media.json", "design-system/dist/index.html", "design-system/.timds/installation.json", "design-system/media-local/a.png", "design-system/.gitignore"]) {
+  for (const outside of ["app.js", "README.md", "package.json", ".github/workflows/timds-design-system.yml", "design-system/timds.json", "design-system/media.json", "design-system/dist/index.html", "design-system/.timds/installation.json", "design-system/media-local/a.png", "design-system/.gitignore", "design-system/scripts/release.mjs"]) {
     assert.equal(isProtectedPath(workspace, outside), true, outside);
   }
   assert.equal(isProtectedPath(workspace, "design-system/src/index.html"), false);

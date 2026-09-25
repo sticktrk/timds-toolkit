@@ -39,6 +39,16 @@ const MAX_LOG_LINES = 200;
 // everything beneath them; files protect exactly that path.
 const PROTECTED_DIRECTORIES = [".git", ".timds", ".agents", ".github", "node_modules", "dist", "media-local", "video-local"];
 const PROTECTED_FILES = ["package.json", "package-lock.json", "timds.json", "media.json", ".gitignore"];
+// Release automation the toolkit installs from templates/starter/scripts and
+// replaces through `upgrade --auto-release`. Other scripts, such as the build,
+// dev, and check scripts timds.json runs, stay client-authored.
+const RELEASE_AUTOMATION_FILES = [
+  "scripts/release.mjs",
+  "scripts/release.sh",
+  "scripts/check-versions.mjs",
+  "scripts/prepare-merge-release.mjs",
+  "scripts/prepare-merge-release.test.mjs",
+];
 // Protected wherever they appear.
 const PROTECTED_SEGMENTS = new Set([".git", "node_modules"]);
 const PROTECTED_BASENAMES = new Set([".gitignore"]);
@@ -88,10 +98,13 @@ change. Work only in the Design System the user gave you.
 - Protected tooling and generated paths are refused, not merely discouraged:
   \`.git/\`, \`.timds/\`, \`.agents/\`, \`.github/\`, \`package.json\`,
   \`package-lock.json\`, \`node_modules/\`, \`dist/\`, \`timds.json\`,
-  \`media.json\`, \`.gitignore\`, \`media-local/\`, \`video-local/\`, and any
-  symbolic link. The TimDS release line, lockfile, installation record, agent
-  skills, workspace commands, and workflows change only when the operator
-  updates TimDS. When a change needs a protected file, say so in your hand-off
+  \`media.json\`, \`.gitignore\`, \`media-local/\`, \`video-local/\`, the
+  release automation scripts (\`scripts/release.mjs\`, \`scripts/release.sh\`,
+  \`scripts/check-versions.mjs\`, \`scripts/prepare-merge-release.mjs\`,
+  \`scripts/prepare-merge-release.test.mjs\`), and any symbolic link. The
+  TimDS release line, lockfile, installation record, agent skills, workspace
+  commands, release automation, and workflows change only when the operator
+  updates TimDS. The build, dev, and check scripts stay editable. When a change needs a protected file, say so in your hand-off
   instead of working around it.
 - Edit authored tokens, source, documentation, components, navigation, and
   lightweight assets. Preserve the framework and visual language unless the
@@ -220,7 +233,7 @@ function protectedByPattern(workspace, dsRelative) {
   if (segments.some((segment) => PROTECTED_SEGMENTS.has(segment))) return true;
   if (PROTECTED_BASENAMES.has(segments.at(-1))) return true;
   if (PROTECTED_DIRECTORIES.includes(segments[0])) return true;
-  if (PROTECTED_FILES.includes(dsRelative)) return true;
+  if (PROTECTED_FILES.includes(dsRelative) || RELEASE_AUTOMATION_FILES.includes(dsRelative)) return true;
   const videoLocal = videoLocalDirectory(workspace);
   if (videoLocal && (dsRelative === videoLocal || dsRelative.startsWith(`${videoLocal}/`))) return true;
   return false;
@@ -510,6 +523,7 @@ async function describe(workspace) {
     protectedPaths: [
       ...PROTECTED_DIRECTORIES.map((name) => `${prefix}${name}/**`),
       ...PROTECTED_FILES.map((name) => `${prefix}${name}`),
+      ...RELEASE_AUTOMATION_FILES.map((name) => `${prefix}${name}`),
       ...(videoLocalDirectory(workspace) && !PROTECTED_DIRECTORIES.includes(videoLocalDirectory(workspace)) ? [`${prefix}${videoLocalDirectory(workspace)}/**`] : []),
       "**/.git/**",
       "**/node_modules/**",
