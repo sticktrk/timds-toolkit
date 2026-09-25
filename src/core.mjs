@@ -736,6 +736,9 @@ export async function initializeRepository(repoRootInput, {
   force = false,
   standalone = false,
 } = {}) {
+  // A fresh --root may not exist yet; git cannot run inside a missing
+  // directory, so create it before locating the repository.
+  await fs.mkdir(path.resolve(repoRootInput || process.cwd()), { recursive: true });
   const repoRoot = await findRepositoryRoot(repoRootInput);
   const designSystemRoot = standalone ? repoRoot : path.join(repoRoot, "design-system");
   const manifestPath = path.join(designSystemRoot, "timds.json");
@@ -1051,6 +1054,7 @@ export async function runCli(argv) {
       output(`TimDS video contract initialized: ${result.contract}`);
       output(`Video asset catalog: ${result.assets}`);
       output(`Agent skill: ${result.skillDestination}`);
+      if (result.starterLogo) output(`Starter logo: ${result.starterLogo} (replace it with the client's logo before publication)`);
       return result;
     }
     if (videoCommand === "components") {
