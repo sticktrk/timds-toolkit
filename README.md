@@ -596,10 +596,13 @@ brand files through one exported function and check the finished project
 before Remotion starts:
 
 ```js
-import { assertVideoProjectStaged, stageVideoBrand } from "@dtconcepts/timds/video";
+import { assertVideoProjectStaged, resolveVideoBrand, stageVideoBrand } from "@dtconcepts/timds/video";
 
-const brand = await stageVideoBrand({ designSystemRoot, contract, publicRoot, mediaCatalog, cacheRoot });
-const project = { ...rest, contract: { ...contract, brand } };
+// tokens comes from the same Design System release as the raw contract.
+// loadVideoWorkspace already resolves these when a built artifact is available.
+const { contract: resolved } = resolveVideoBrand(contract, tokens);
+const brand = await stageVideoBrand({ designSystemRoot, contract: resolved, publicRoot, mediaCatalog, cacheRoot });
+const project = { ...rest, contract: { ...resolved, brand } };
 await assertVideoProjectStaged(project, publicRoot); // names every missing staticFile() before rendering
 ```
 
@@ -608,6 +611,12 @@ published media (cached by SHA-256 under `cacheRoot` when given), and returns
 the brand with runtime paths. `assertVideoProjectStaged` lists every file the
 components request, including the logo, fonts, sound design, footage, cover,
 and narration, and fails with each missing file's project field.
+Both functions reject unresolved color/font references, including when a host
+reads the contract JSON directly instead of using `loadVideoWorkspace`. A value
+such as `{color.text}` must never reach CSS: the browser ignores it and may
+render black text. Hosted consumers must verify the published tokens' system
+and version and the artifact's source commit against their pinned Design System
+before calling `resolveVideoBrand`; no fallback palette is applied.
 
 Prepared media, generated audio, Remotion entry files, and review packages live
 under ignored `video-local/`. Registered source media remains governed by the

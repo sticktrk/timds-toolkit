@@ -715,6 +715,19 @@ export function assertVideoBrandResolved(loaded) {
   throw new Error(`video contract ${unresolved.map((entry) => `${entry.field} references ${entry.reference}`).join(", ")}, but the design tokens are not derived; build the artifact with timds check first`);
 }
 
+// External render hosts may never call loadVideoWorkspace, so inspect the
+// actual values at the shared staging/render boundary, not workspace metadata.
+function assertVideoBrandValuesResolved(contract) {
+  const unresolved = ["colors", "fonts"].flatMap((group) =>
+    Object.entries(contract?.brand?.[group] ?? {})
+      .filter(([, value]) => /[{}]/u.test(String(value)))
+      .map(([field, value]) => `brand.${group}.${field}=${JSON.stringify(value)}`),
+  );
+  if (unresolved.length) {
+    throw new Error(`video contract has unresolved brand values: ${unresolved.join(", ")}; call resolveVideoBrand(contract, tokens) with the Design System's derived tokens before staging or rendering`);
+  }
+}
+
 export async function checkVideoWorkspace(workspace, options = {}) {
   // A check may run before the artifact is built (CI often runs it first), so
   // brand references are verified when tokens exist and reported otherwise.
@@ -1246,6 +1259,7 @@ function brandRuntimePath(entry, extension = "") {
 // copying brand files themselves, so a new contract field is staged everywhere
 // at once. `sound: false` leaves the bed and transition out (a silent preview).
 export async function stageVideoBrand({ designSystemRoot, contract, publicRoot, mediaCatalog, localManifest = { assets: [] }, localDir = "video-local", cacheRoot = null, sound = true }) {
+  assertVideoBrandValuesResolved(contract);
   const problems = await checkVideoBrandSources({ designSystemRoot, contract, mediaCatalog, localDir });
   if (problems.length) throw brandSourceError(problems);
   const brand = { ...contract.brand, logo: "", fontFiles: [] };
@@ -1329,6 +1343,7 @@ export function videoProjectStaticFiles(project) {
 // Fails before Remotion starts when any requested file is not in the public
 // directory, naming the project field instead of a 404 halfway through a render.
 export async function assertVideoProjectStaged(project, publicRoot) {
+  assertVideoBrandValuesResolved(project.contract);
   const missing = [];
   for (const file of videoProjectStaticFiles(project)) {
     const relative = safeRelativePath(file.path, file.field);

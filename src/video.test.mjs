@@ -10,6 +10,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
   assertVideoBrandResolved,
+  assertVideoProjectStaged,
   brandDriftWarnings,
   checkVideoBrandSources,
   checkVideoWorkspace,
@@ -1557,6 +1558,39 @@ test("resolves brand role and token references in the video contract from derive
   // The prepared project carries values, never references, so a render host needs no tokens.
   const prepared = await prepareVideoWorkspace(workspace, "sample-topic");
   assert.equal(prepared.project.contract.brand.colors.accent, "#d4b876");
+});
+
+test("external render hosts cannot stage or render unresolved brand colors and fonts", async (t) => {
+  const workspace = await videoFixture(t);
+  const loaded = await loadVideoWorkspace(workspace);
+  const publicRoot = path.join(workspace.designSystemRoot, "staged-public");
+  const stage = (contract) => stageVideoBrand({designSystemRoot: workspace.designSystemRoot, contract, publicRoot, mediaCatalog: {assets: []}});
+  const brand = await stage(loaded.video.contract);
+  const project = {contract: {...loaded.video.contract, brand}, assets: {}, records: {production: {audioSrc: ""}}};
+  await assertVideoProjectStaged(project, publicRoot);
+
+  for (const [group, field, value] of [["colors", "text", "{--cream}"], ["colors", "accent", "{color.accent}"], ["fonts", "display", "{font.display}"], ["colors", "text", "{--malformed"]]) {
+    const contract = structuredClone(loaded.video.contract);
+    contract.brand[group][field] = value;
+    await assert.rejects(stage(contract), (error) => {
+      assert.match(error.message, /unresolved brand values.*call resolveVideoBrand/u);
+      assert.ok(error.message.includes(`brand.${group}.${field}=${JSON.stringify(value)}`));
+      return true;
+    });
+    // All requested files exist; the values alone must fail the final check.
+    const broken = structuredClone(project);
+    broken.contract.brand[group][field] = value;
+    await assert.rejects(assertVideoProjectStaged(broken, publicRoot), /unresolved brand values/u);
+  }
+
+  const contract = structuredClone(loaded.video.contract);
+  contract.brand.colors.accent = "{color.accent}";
+  contract.brand.fonts.display = "{font.display}";
+  const resolved = resolveVideoBrand(contract, DERIVED_TOKENS).contract;
+  const staged = await stage(resolved);
+  assert.equal(staged.colors.accent, DERIVED_TOKENS.roles["color.accent"].value);
+  assert.equal(staged.fonts.display, DERIVED_TOKENS.roles["font.display"].value);
+  await assertVideoProjectStaged({...project, contract: {...resolved, brand: staged}}, publicRoot);
 });
 
 test("brand references must resolve to a token of the right kind", () => {
