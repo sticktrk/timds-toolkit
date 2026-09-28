@@ -132,6 +132,44 @@ tool takes a `draftId` that is passed to `resolveWorkspace`, and
 `hooks.afterWrite(workspace, { paths, note })` runs after each write or delete.
 `isProtectedPath` and `authoredSurfaceRoot` expose the same guard.
 
+## Reading a system through MCP
+
+`npm run timds -- mcp read` serves the consumer read tools over stdio against
+the current checkout's derived layer (`dist/`, after `check`), and
+`timds mcp read --published <base URL>` serves the layer a system publishes at
+its stable CDN prefix. The server is named `timds-design-system-read`, is
+read-only apart from `report_gap`, and never sees authored source:
+
+- `get_consumer_guide` (also resource `timds://consumer-guide`): how to use a
+  system to produce on-brand work.
+- `list_design_systems`, `describe_system`: what is in scope, the served and
+  published versions (the current published version is always the default;
+  `version` selects an earlier release), the page directory, and counts.
+- `resolve_role`: a brand role (`color.accent`, `font.display`, ...) to the
+  token that fills it and its value; an unfilled role is a reported gap, never
+  a guessed value.
+- `get_tokens`: resolved custom properties by name, kind, scope, or base only.
+- `get_brand`: roles, logos, imagery, and guidance groups.
+- `list_pages`, `read_page`: the page directory and one page or block as
+  Markdown or structured blocks.
+- `search_guidance`: the blocks that answer a question, guidance groups first,
+  every result cited by page and block.
+- `list_media`: the published media catalog by tag or kind.
+- `report_gap`: files one gap into the client's review queue when the host
+  provides an intake; locally it reports that none exists.
+
+Resources `timds://brand.json`, `timds://tokens.json`, `timds://index.json`,
+`timds://llms.txt`, and `timds://guidance/{group}` serve the same documents.
+
+A host that serves consumers imports the tools from
+`@dtconcepts/timds/mcp/read`. `registerDesignSystemReadTools(server, {
+resolveSystem, listSystems, hooks })` registers them on an `McpServer`.
+`resolveSystem({ systemId, version })` returns `{ layer, media, published,
+pinned }`; with `hooks.remote` every tool takes an optional `systemId` and
+`version`, and resources live under `timds://systems/{system}/...` with the
+system id percent-encoded. `hooks.fileGap({ system, gap })` receives each
+reported gap.
+
 ## Machine-readable artifacts
 
 A design system is read by agents and downstream pipelines as well as by people.
