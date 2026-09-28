@@ -155,8 +155,8 @@ read-only apart from `report_gap`, and never sees authored source:
 - `search_guidance`: the blocks that answer a question, guidance groups first,
   every result cited by page and block.
 - `list_media`: the published media catalog by tag or kind.
-- `report_gap`: files one gap into the client's review queue when the host
-  provides an intake; locally it reports that none exists.
+- `report_gap`: files one gap into the client's request intake when the host
+  provides one; locally it reports that none exists.
 
 Resources `timds://brand.json`, `timds://tokens.json`, `timds://index.json`,
 `timds://llms.txt`, and `timds://guidance/{group}` serve the same documents.

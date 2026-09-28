@@ -98,8 +98,10 @@ pages, and the media catalog. Nothing here is editable; use it to be on-brand.
 
 \`report_gap\` files one gap — missing guidance, an unfilled role, a token or
 asset the system should have, or something that reads wrong — into the
-client's review queue with the version it was observed on. File a gap when
-the user agrees it is one; do not file duplicates or opinions about style.
+client's request intake, stamped with the version it was observed on, for
+the operator and designer to act on. File a gap when the user agrees it is
+one; an identical gap is not filed twice, and opinions about style are not
+gaps.
 
 ## Report the result
 
