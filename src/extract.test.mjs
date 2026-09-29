@@ -283,3 +283,16 @@ test("hints override the defaults", () => {
   assert.equal(hinted.blocks[0].id, "p#a");
   assert.equal(hinted.blocks[0].notes[0].text, "heads up");
 });
+
+test("the index carries the video board catalog summary only when the system has one", async (t) => {
+  const artifactRoot = await fs.mkdtemp(path.join(os.tmpdir(), "timds-boards-index-"));
+  t.after(() => fs.rm(artifactRoot, { recursive: true, force: true }));
+  await fs.writeFile(path.join(artifactRoot, "index.html"), "<html><body><main><h1>Home</h1><section id=\"a\"><h2>A</h2><p>Text.</p></section></main></body></html>");
+  const manifest = { artifact: { entry: "index.html" }, name: "Client", systemId: "client/system", version: "1.0.0", machine: {} };
+  const boards = { schemaVersion: 1, formats: { longform: true, short: false }, cadence: {}, kinds: [{ id: "cards", label: "Cards" }] };
+  const withBoards = await extractArtifact({ artifactRoot, manifest, video: { boards }, write: true });
+  assert.deepEqual(withBoards.index.video, { boards });
+  assert.deepEqual(JSON.parse(await fs.readFile(path.join(artifactRoot, "index.json"), "utf8")).video, { boards });
+  const without = await extractArtifact({ artifactRoot, manifest, write: false });
+  assert.equal("video" in without.index, false);
+});

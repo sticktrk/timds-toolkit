@@ -121,7 +121,20 @@ export async function designSystemCommit(designSystemRoot) {
 export function stripSchemaExtensions(schema) {
   if (Array.isArray(schema)) return schema.map(stripSchemaExtensions);
   if (!schema || typeof schema !== "object") return schema;
-  return Object.fromEntries(Object.entries(schema).filter(([key]) => !key.startsWith("x-")).map(([key, value]) => [key, stripSchemaExtensions(value)]));
+  // Board variants are told apart by their kind const, so anyOf accepts
+  // exactly what oneOf does, in the form structured outputs support. Numeric
+  // minimums and item minimums above 1 are not accepted there either; the
+  // compiler's board walker enforces the real values.
+  const result = {};
+  for (const [key, value] of Object.entries(schema)) {
+    if (key.startsWith("x-") || key === "minimum") continue;
+    if (key === "properties" && value && typeof value === "object") {
+      // Property names are data, not keywords: keep every one.
+      result.properties = Object.fromEntries(Object.entries(value).map(([name, child]) => [name, stripSchemaExtensions(child)]));
+    } else if (key === "minItems" && typeof value === "number" && value > 1) result.minItems = 1;
+    else result[key === "oneOf" ? "anyOf" : key] = stripSchemaExtensions(value);
+  }
+  return result;
 }
 
 /** The clips a beat may name, one per line, so the model picks by what each clip shows. */
@@ -167,7 +180,7 @@ async function producerFor(workspace) {
   const loaded = await loadVideoWorkspace(workspace);
   if (!loaded.video.contract.producer) throw new LabError(409, "video lab: the video contract has no producer block, so there is nothing to compile against; run timds video init to scaffold one");
   const { catalog: mediaCatalog } = await readMediaCatalog(workspace.designSystemRoot);
-  return { loaded, mediaCatalog, producer: createVideoProducer({ contract: loaded.video.contract, assetCatalog: loaded.video.assets, mediaCatalog, verticalMetadata: loaded.video.verticalMetadata }) };
+  return { loaded, mediaCatalog, producer: createVideoProducer({ contract: loaded.video.contract, assetCatalog: loaded.video.assets, mediaCatalog, verticalMetadata: loaded.video.verticalMetadata, boards: loaded.video.boards, motifs: loaded.video.motifs }) };
 }
 
 export async function compileVideoLabInput(workspace, input) {
@@ -203,6 +216,7 @@ export async function compileVideoLabInput(workspace, input) {
       footage: scene.intro || scene.outro ? "card" : keys.filter(Boolean),
       footageLabel: describeSceneFootage(scene, keys),
       visual: scene.visual ? scene.visual.kind : null,
+      boardGap: scene.boardGap || null,
       chapter: scene.chapter || null,
       intro: Boolean(scene.intro),
       outro: Boolean(scene.outro),
@@ -247,6 +261,7 @@ export async function draftVideoLabInput(workspace, request, { client, model = V
     authoring = createVideoAuthoringContract({
       contract: loaded.video.contract, manifest: workspace.manifest, designSystemIndex: index, provenance: { commit, version: workspace.manifest.version }, outputFormat,
       assetCatalog: loaded.video.assets, mediaCatalog, verticalMetadata: loaded.video.verticalMetadata,
+      boards: loaded.video.boards, motifs: loaded.video.motifs,
     });
   } catch (caught) {
     const message = caught instanceof Error ? caught.message : String(caught);

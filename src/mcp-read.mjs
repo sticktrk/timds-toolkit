@@ -385,7 +385,7 @@ export function registerDesignSystemReadTools(server, { resolveSystem, listSyste
   tool("describe_system", {
     title: "Describe a Design System",
     annotations: READ_ONLY,
-    description: "Describe a Design System at the served version: name, versions (served, pinned, published), page directory, token and role counts, brand kit summary, guidance groups, and media catalog size.",
+    description: "Describe a Design System at the served version: name, versions (served, pinned, published), page directory, token and role counts, brand kit summary, guidance groups, media catalog size, and the video board kinds it offers.",
   }, async (args) => {
     const resolved = await systemFor(args);
     const { layer } = resolved;
@@ -400,6 +400,7 @@ export function registerDesignSystemReadTools(server, { resolveSystem, listSyste
       tokens: tokens ? { count: tokens.count, kinds: tokens.kinds, roles: Object.keys(tokens.roles ?? {}), missingRoles: tokens.missingRoles ?? [], scopes: tokens.scopes?.length ?? 0 } : null,
       brand: kit ? { summary: summarizeBrandKit(kit), guidance: guidanceSummary(kit) } : null,
       media: { catalog: Boolean(resolved.media), assets: resolved.media?.assets?.length ?? 0 },
+      video: index?.video?.boards ? { boards: index.video.boards.kinds ?? [], cadence: index.video.boards.cadence ?? null, formats: index.video.boards.formats ?? null } : null,
       llms: layer.llms ?? null,
     };
   });

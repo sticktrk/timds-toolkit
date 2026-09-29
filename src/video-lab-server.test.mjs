@@ -278,3 +278,13 @@ test("credential probe and slugify are conservative", () => {
   assert.equal(slugify("Should I keep these records?"), "should-i-keep-these-records");
   assert.equal(slugify(""), "lab-input");
 });
+
+test("the draft schema offers board variants as anyOf, which structured outputs accept", () => {
+  const schema = { type: "object", properties: { visual: { oneOf: [{ type: "object", properties: { kind: { const: "cards" }, title: { type: "string", "x-timds-maxWords": 8 } } }] } } };
+  assert.deepEqual(stripSchemaExtensions(schema), { type: "object", properties: { visual: { anyOf: [{ type: "object", properties: { kind: { const: "cards" }, title: { type: "string" } } }] } } });
+});
+
+test("the draft schema drops numeric minimums and caps item minimums at one, keeping property names", () => {
+  const schema = { type: "object", properties: { minimum: { type: "integer", minimum: 1 }, items: { type: "array", minItems: 3, items: { type: "string" } }, one: { type: "array", minItems: 1, items: { type: "string" } } } };
+  assert.deepEqual(stripSchemaExtensions(schema), { type: "object", properties: { minimum: { type: "integer" }, items: { type: "array", minItems: 1, items: { type: "string" } }, one: { type: "array", minItems: 1, items: { type: "string" } } } });
+});

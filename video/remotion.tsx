@@ -6,6 +6,7 @@ import {
   Composition,
   continueRender,
   delayRender,
+  Easing,
   Img,
   OffthreadVideo,
   Sequence,
@@ -17,6 +18,7 @@ import {
 } from "remotion";
 import {fitCoverHeadline, splitGoldHeadline, tieOrphan} from "./text.mjs";
 import {MINIMUM_CHAIN_CLIP_SECONDS, adjacentFootageRepeats, chainClipFrames, sceneAssetKeys, verticalTextZone} from "./footage.mjs";
+import {DEFAULT_BOARD_KINDS, deriveVideoChapters, revealFrame} from "./boards.mjs";
 
 export type VideoProjectWordTiming = {text: string; startMs: number; endMs: number};
 export type VideoProjectCaptionLine = {id: string; words: VideoProjectWordTiming[]; durationMs: number};
@@ -34,6 +36,8 @@ export type VideoProjectScene = {
   visual?: {kind: string; [key: string]: unknown};
   /** Chapter id for client rails and published chapter lists. */
   chapter?: string;
+  /** Why no declared board kind fit this beat; the scene keeps its footage. */
+  boardGap?: string;
 };
 export type VideoProjectAsset = {
   key: string;
@@ -113,8 +117,12 @@ export type VideoProjectCoverProps = {
   vertical?: boolean;
 };
 
-/** A graphic scene's board. The Design System owns every `visual.kind`; TimDS draws the copy fallback. */
-export type VideoProjectGraphicProps = {
+/**
+ * A graphic scene's board. `components.Boards[visual.kind]` draws it; a kind
+ * with no registered board falls back to `components.Graphic`, which draws the
+ * scene copy. The Design System's video/boards.json declares each kind's data.
+ */
+export type VideoProjectBoardProps = {
   project: VideoProject;
   scene: VideoProjectScene;
   /** The scene's authored `visual` block: `kind` plus whatever the board needs. */
@@ -126,6 +134,8 @@ export type VideoProjectGraphicProps = {
   overFootage: boolean;
   vertical?: boolean;
 };
+/** The pre-catalog name for {@link VideoProjectBoardProps}; kept for existing client components. */
+export type VideoProjectGraphicProps = VideoProjectBoardProps;
 
 /** A client Design System may replace any subset of the TimDS defaults. */
 export type VideoProjectComponentOverrides = {
@@ -133,6 +143,12 @@ export type VideoProjectComponentOverrides = {
   Scene?: React.ComponentType<VideoProjectSceneProps>;
   /** Draws `scene.visual` boards; the default Scene mounts it over the footage chain or the brand background. */
   Graphic?: React.ComponentType<VideoProjectGraphicProps>;
+  /**
+   * One board per `visual.kind`, merged over the TimDS defaults so a client
+   * overrides or adds kinds one at a time. `timds video check` requires these
+   * keys to match the kinds the Design System's video/boards.json declares.
+   */
+  Boards?: Record<string, React.ComponentType<VideoProjectBoardProps>>;
   Intro?: React.ComponentType<VideoProjectIntroProps>;
   Outro?: React.ComponentType<VideoProjectOutroProps>;
   Cover?: React.ComponentType<VideoProjectCoverProps>;
@@ -370,20 +386,323 @@ const GraphicBoard: React.FC<VideoProjectGraphicProps> = ({project, scene, overF
   </AbsoluteFill>;
 };
 
+// Default boards, one per kind in the default video/boards.json. Each reads
+// only the fields that catalog declares and styles itself from brand tokens,
+// so a fresh Design System renders every default kind before it writes any
+// React. Reveals land on the item's `cue` word when the take speaks it and on
+// an even spread otherwise (revealFrame, shared with the producer's checks).
+// Every board keeps clear of the caption zone at the bottom and the
+// watermark corners, which SceneView draws above it.
+type BoardItem = {label: string; note?: string; cue?: string};
+type BoardRow = BoardItem & {value: string; highlight: boolean};
+
+const BOARD_EASE = Easing.bezier(0.16, 1, 0.3, 1);
+const boardClamp = {extrapolateLeft: "clamp", extrapolateRight: "clamp", easing: BOARD_EASE} as const;
+const boardFade = (frame: number, at: number, length = 12) => interpolate(frame, [at, at + length], [0, 1], boardClamp);
+const boardEnter = (frame: number, at: number, distance = 22) => ({
+  opacity: boardFade(frame, at),
+  transform: `translateY(${interpolate(frame, [at, at + 18], [distance, 0], boardClamp)}px)`,
+});
+const boardString = (value: unknown) => typeof value === "string" ? value.trim() : "";
+const boardRecords = (value: unknown) => (Array.isArray(value) ? value : [])
+  .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object");
+const boardItems = (value: unknown): BoardItem[] => boardRecords(value).map((item) => ({
+  label: boardString(item.label),
+  note: boardString(item.note) || undefined,
+  cue: boardString(item.cue) || undefined,
+}));
+const boardRows = (value: unknown): BoardRow[] => boardRecords(value).map((item) => ({
+  ...boardItems([item])[0],
+  value: boardString(item.value),
+  highlight: item.highlight === true,
+}));
+
+// The toolkit cannot know a motif's file from the visual alone. The catalog
+// names a brand.staticFiles mount (`motifs.mount`) and staging records each
+// motif stem's file under it (`motifs.files`, extension included), carried on
+// the project as `contract.boards.motifs`. A stem with no staged file is
+// skipped rather than requested and failed.
+const boardMotifSrc = (project: VideoProject, motif: unknown) => {
+  const motifs = project.contract.boards?.motifs;
+  const mount = boardString(motifs?.mount);
+  const name = boardString(motif);
+  const file = name && motifs?.files && Object.hasOwn(motifs.files, name) ? boardString(motifs.files[name]) : "";
+  return mount && file ? staticFile(`${mount}/${file}`) : null;
+};
+
+const useBoardTiming = ({project, line, duration, lead}: VideoProjectBoardProps) => {
+  const frame = useCurrentFrame();
+  const fps = project.contract.fps;
+  const at = (cue: string | undefined, index: number, count: number) =>
+    revealFrame({cue, words: line.words, index, count, duration, lead, fps});
+  return {frame, at};
+};
+
+// Full-frame brand background, or a scrim when footage plays beneath. The
+// padding is the safe area: logo and banner above, captions and watermark
+// labels below, and the Shorts UI along the right edge of vertical renders.
+const BoardStage: React.FC<{project: VideoProject; overFootage: boolean; vertical?: boolean; center?: boolean; children: React.ReactNode}> = ({project, overFootage, vertical, center, children}) => {
+  const background = project.contract.brand.colors.background;
+  return <AbsoluteFill style={{
+    backgroundColor: overFootage ? `color-mix(in srgb, ${background} 74%, transparent)` : background,
+    justifyContent: "center",
+    alignItems: center ? "center" : "stretch",
+    textAlign: center ? "center" : "left",
+    padding: vertical ? "330px 130px 440px 90px" : "150px 150px 210px",
+  }}>{children}</AbsoluteFill>;
+};
+
+const BoardKicker: React.FC<{project: VideoProject; text?: string; vertical?: boolean; style?: React.CSSProperties}> = ({project, text, vertical, style}) => {
+  const brand = project.contract.brand;
+  if (!text) return null;
+  return <div style={{color: brand.colors.accent, fontFamily: brand.fonts.ui, fontSize: vertical ? 26 : 22, fontWeight: 700, letterSpacing: 5, textTransform: "uppercase", marginBottom: 18, ...style}}>{text}</div>;
+};
+
+const BoardTitle: React.FC<{project: VideoProject; text: string; size: number; style?: React.CSSProperties}> = ({project, text, size, style}) => {
+  const brand = project.contract.brand;
+  if (!text) return null;
+  return <div style={{color: brand.colors.text, fontFamily: brand.fonts.display, fontSize: size, fontWeight: 700, lineHeight: 1.02, textWrap: "pretty", ...style}}>{tieOrphan(text)}</div>;
+};
+
+const BoardNote: React.FC<{project: VideoProject; text?: string; size: number; style?: React.CSSProperties}> = ({project, text, size, style}) => {
+  const brand = project.contract.brand;
+  if (!text) return null;
+  return <div style={{color: brand.colors.muted, fontFamily: brand.fonts.body, fontSize: size, lineHeight: 1.2, marginTop: 10, textWrap: "pretty", ...style}}>{tieOrphan(text)}</div>;
+};
+
+const ChapterTitleBoard: React.FC<VideoProjectBoardProps> = (props) => {
+  const {project, visual, lead, overFootage, vertical} = props;
+  const brand = project.contract.brand;
+  const {frame} = useBoardTiming(props);
+  const number = Number(visual.number);
+  const motif = boardMotifSrc(project, visual.motif);
+  return <BoardStage project={project} overFootage={overFootage} vertical={vertical}>
+    <div style={{display: "flex", flexDirection: vertical ? "column-reverse" : "row", alignItems: vertical ? "flex-start" : "center", gap: vertical ? 60 : 96}}>
+      <div style={{flex: 1}}>
+        {Number.isInteger(number) && number > 0
+          ? <div data-board-number style={{color: brand.colors.accent, fontFamily: brand.fonts.display, fontSize: vertical ? 150 : 132, fontWeight: 700, lineHeight: 1, fontVariantNumeric: "lining-nums tabular-nums", ...boardEnter(frame, lead)}}>{String(number).padStart(2, "0")}</div>
+          : null}
+        <div style={{width: vertical ? 180 : 150, height: 5, margin: vertical ? "34px 0 38px" : "28px 0 32px", backgroundColor: brand.colors.accent, transformOrigin: "0 50%", transform: `scaleX(${interpolate(frame, [lead + 6, lead + 26], [0, 1], boardClamp)})`}} />
+        <BoardTitle project={project} text={boardString(visual.title)} size={vertical ? 104 : 96} style={boardEnter(frame, lead + 10, 28)} />
+      </div>
+      {motif ? <Img src={motif} style={{width: vertical ? 420 : 520, height: vertical ? 420 : 520, objectFit: "contain", opacity: boardFade(frame, lead + 14, 20)}} /> : null}
+    </div>
+  </BoardStage>;
+};
+
+const StatementBoard: React.FC<VideoProjectBoardProps> = (props) => {
+  const {project, scene, visual, lead, overFootage, vertical} = props;
+  const brand = project.contract.brand;
+  const {frame} = useBoardTiming(props);
+  const motif = boardMotifSrc(project, visual.motif);
+  const goldPhrase = boardString(visual.goldPhrase) || undefined;
+  return <BoardStage project={project} overFootage={overFootage} vertical={vertical}>
+    <div style={{display: "flex", flexDirection: vertical ? "column-reverse" : "row", alignItems: vertical ? "flex-start" : "center", gap: vertical ? 56 : 90}}>
+      <div style={{flex: 1, borderLeft: `8px solid ${brand.colors.accent}`, paddingLeft: vertical ? 40 : 54}}>
+        <BoardKicker project={project} text={scene.eyebrow} vertical={vertical} style={boardEnter(frame, lead, 12)} />
+        <div style={{color: brand.colors.text, fontFamily: brand.fonts.display, fontSize: vertical ? 96 : 88, fontWeight: 700, lineHeight: 1.02, textWrap: "pretty", ...boardEnter(frame, lead + 4, 26)}}>
+          <GoldHeadline headline={boardString(visual.text)} goldPhrase={goldPhrase} color={brand.colors.accent} />
+        </div>
+        <BoardNote project={project} text={boardString(visual.subline)} size={vertical ? 40 : 36} style={{marginTop: 26, ...boardEnter(frame, lead + 18, 16)}} />
+      </div>
+      {motif ? <Img src={motif} style={{width: vertical ? 380 : 440, height: vertical ? 380 : 440, objectFit: "contain", opacity: boardFade(frame, lead + 12, 20)}} /> : null}
+    </div>
+  </BoardStage>;
+};
+
+const CardsBoard: React.FC<VideoProjectBoardProps> = (props) => {
+  const {project, scene, visual, lead, overFootage, vertical} = props;
+  const brand = project.contract.brand;
+  const {frame, at} = useBoardTiming(props);
+  const items = boardItems(visual.items);
+  const motif = boardMotifSrc(project, visual.motif);
+  const dense = items.length >= 4;
+  return <BoardStage project={project} overFootage={overFootage} vertical={vertical}>
+    <BoardKicker project={project} text={scene.eyebrow} vertical={vertical} style={boardEnter(frame, lead, 12)} />
+    <div style={{display: "flex", alignItems: "center", gap: 40, marginBottom: vertical ? 48 : 44}}>
+      <BoardTitle project={project} text={boardString(visual.title)} size={vertical ? 76 : 68} style={{flex: 1, ...boardEnter(frame, lead + 4, 18)}} />
+      {motif ? <Img src={motif} style={{width: vertical ? 180 : 160, height: vertical ? 180 : 160, objectFit: "contain", opacity: boardFade(frame, lead + 10, 20)}} /> : null}
+    </div>
+    <div style={{display: "flex", flexDirection: vertical ? "column" : "row", gap: vertical ? 22 : 26, alignItems: "stretch"}}>
+      {items.map((item, index) => <div key={`${item.label}-${index}`} style={{flex: 1, minWidth: 0, padding: vertical ? "26px 34px" : dense ? "26px 24px 28px" : "30px 32px 32px", backgroundColor: brand.colors.panel, borderTop: vertical ? undefined : `4px solid ${brand.colors.accent}`, borderLeft: vertical ? `6px solid ${brand.colors.accent}` : undefined, ...boardEnter(frame, at(item.cue, index, items.length))}}>
+        <div style={{color: brand.colors.text, fontFamily: brand.fonts.display, fontSize: vertical ? 54 : dense ? 40 : 46, fontWeight: 700, lineHeight: 1.05, textWrap: "pretty"}}>{tieOrphan(item.label)}</div>
+        <BoardNote project={project} text={item.note} size={vertical ? 34 : dense ? 26 : 30} />
+      </div>)}
+    </div>
+  </BoardStage>;
+};
+
+const CompareBoard: React.FC<VideoProjectBoardProps> = (props) => {
+  const {project, scene, visual, lead, overFootage, vertical} = props;
+  const brand = project.contract.brand;
+  const {frame, at} = useBoardTiming(props);
+  const sides = [visual.left, visual.right].map((side) => {
+    const record = side && typeof side === "object" ? side as Record<string, unknown> : {};
+    return {title: boardString(record.title), items: boardItems(record.items)};
+  });
+  // One reveal order across both sides: every left item, then every right item.
+  const count = sides[0].items.length + sides[1].items.length;
+  let index = 0;
+  const columns = sides.map((side, sideIndex) => {
+    const reveals = side.items.map((item) => at(item.cue, index++, count));
+    const titleAt = sideIndex === 0 ? lead : Math.max(lead, (reveals[0] ?? lead) - 10);
+    return <div key={sideIndex} style={{flex: 1, minWidth: 0}}>
+      <div style={{color: brand.colors.accent, fontFamily: brand.fonts.ui, fontSize: vertical ? 40 : 36, fontWeight: 700, letterSpacing: 3, textTransform: "uppercase", marginBottom: vertical ? 22 : 28, ...boardEnter(frame, titleAt, 14)}}>{side.title}</div>
+      {side.items.map((item, itemIndex) => <div key={`${item.label}-${itemIndex}`} style={{marginBottom: vertical ? 20 : 26, ...boardEnter(frame, reveals[itemIndex], 14)}}>
+        <div style={{color: brand.colors.text, fontFamily: brand.fonts.display, fontSize: vertical ? 56 : 52, fontWeight: 700, lineHeight: 1.05}}>{tieOrphan(item.label)}</div>
+        <BoardNote project={project} text={item.note} size={vertical ? 32 : 30} style={{marginTop: 6}} />
+      </div>)}
+    </div>;
+  });
+  const divider = interpolate(frame, [lead + 4, lead + 28], [0, 1], boardClamp);
+  return <BoardStage project={project} overFootage={overFootage} vertical={vertical}>
+    <BoardKicker project={project} text={scene.eyebrow} vertical={vertical} style={{marginBottom: vertical ? 40 : 36, ...boardEnter(frame, lead, 12)}} />
+    <div style={{display: "flex", flexDirection: vertical ? "column" : "row", gap: vertical ? 40 : 80, alignItems: "stretch"}}>
+      {columns[0]}
+      <div style={{flex: "none", backgroundColor: brand.colors.accent, opacity: 0.7, ...(vertical ? {height: 3, width: "100%", transformOrigin: "0 50%", transform: `scaleX(${divider})`} : {width: 3, transformOrigin: "50% 0", transform: `scaleY(${divider})`})}} />
+      {columns[1]}
+    </div>
+  </BoardStage>;
+};
+
+const FlowBoard: React.FC<VideoProjectBoardProps> = (props) => {
+  const {project, scene, visual, lead, overFootage, vertical} = props;
+  const brand = project.contract.brand;
+  const {frame, at} = useBoardTiming(props);
+  const nodes = boardItems(visual.nodes);
+  const reveals = nodes.map((node, index) => at(node.cue, index, nodes.length));
+  const outcome = boardString(visual.outcome);
+  const outcomeAt = (reveals.at(-1) ?? lead) + 16;
+  return <BoardStage project={project} overFootage={overFootage} vertical={vertical}>
+    <BoardKicker project={project} text={scene.eyebrow} vertical={vertical} style={{marginBottom: vertical ? 40 : 40, ...boardEnter(frame, lead, 12)}} />
+    <div style={{display: "flex", flexDirection: vertical ? "column" : "row", alignItems: vertical ? "stretch" : "center"}}>
+      {nodes.map((node, index) => <React.Fragment key={`${node.label}-${index}`}>
+        {index > 0 ? <div style={{flex: "none", backgroundColor: brand.colors.accent, ...(vertical
+          ? {width: 4, height: 44, marginLeft: 44, transformOrigin: "50% 0", transform: `scaleY(${interpolate(frame, [reveals[index] - 10, reveals[index]], [0, 1], boardClamp)})`}
+          : {height: 4, width: 56, transformOrigin: "0 50%", transform: `scaleX(${interpolate(frame, [reveals[index] - 10, reveals[index]], [0, 1], boardClamp)})`})}} /> : null}
+        <div style={{flex: vertical ? "none" : 1, minWidth: 0, padding: vertical ? "22px 30px" : "26px 26px 28px", border: `3px solid ${brand.colors.accent}`, backgroundColor: brand.colors.panel, ...boardEnter(frame, reveals[index], 16)}}>
+          <div style={{color: brand.colors.text, fontFamily: brand.fonts.display, fontSize: vertical ? 50 : 40, fontWeight: 700, lineHeight: 1.05}}>{tieOrphan(node.label)}</div>
+          <BoardNote project={project} text={node.note} size={vertical ? 30 : 26} style={{marginTop: 6}} />
+        </div>
+      </React.Fragment>)}
+    </div>
+    {outcome ? <div style={{marginTop: vertical ? 44 : 48, display: "flex", alignItems: "center", gap: 22, ...boardEnter(frame, outcomeAt, 16)}}>
+      <span style={{width: 0, height: 0, borderTop: "14px solid transparent", borderBottom: "14px solid transparent", borderLeft: `22px solid ${brand.colors.accent}`}} />
+      <span style={{color: brand.colors.accent, fontFamily: brand.fonts.display, fontSize: vertical ? 60 : 54, fontWeight: 700, lineHeight: 1.05}}>{tieOrphan(outcome)}</span>
+    </div> : null}
+  </BoardStage>;
+};
+
+const StepsBoard: React.FC<VideoProjectBoardProps> = (props) => {
+  const {project, scene, visual, lead, overFootage, vertical} = props;
+  const brand = project.contract.brand;
+  const {frame, at} = useBoardTiming(props);
+  const steps = boardItems(visual.steps);
+  const reveals = steps.map((step, index) => at(step.cue, index, steps.length));
+  const badge = vertical ? 76 : 72;
+  return <BoardStage project={project} overFootage={overFootage} vertical={vertical}>
+    <BoardKicker project={project} text={scene.eyebrow} vertical={vertical} style={boardEnter(frame, lead, 12)} />
+    <BoardTitle project={project} text={boardString(visual.title)} size={vertical ? 76 : 68} style={{marginBottom: vertical ? 48 : 56, ...boardEnter(frame, lead + 4, 18)}} />
+    <div style={{display: "flex", flexDirection: vertical ? "column" : "row", gap: vertical ? 30 : 28}}>
+      {steps.map((step, index) => <div key={`${step.label}-${index}`} style={{flex: 1, minWidth: 0, position: "relative", display: "flex", flexDirection: vertical ? "row" : "column", alignItems: "flex-start", gap: vertical ? 30 : 22}}>
+        {!vertical && index < steps.length - 1 ? <div style={{position: "absolute", top: badge / 2 - 2, left: badge + 14, right: -14, height: 4, backgroundColor: brand.colors.accent, opacity: 0.55, transformOrigin: "0 50%", transform: `scaleX(${interpolate(frame, [reveals[index] + 6, Math.max(reveals[index] + 7, reveals[index + 1])], [0, 1], boardClamp)})`}} /> : null}
+        <div style={{flex: "none", width: badge, height: badge, borderRadius: badge, display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: brand.colors.accent, color: brand.colors.background, fontFamily: brand.fonts.ui, fontSize: badge * 0.46, fontWeight: 700, fontVariantNumeric: "lining-nums", opacity: boardFade(frame, reveals[index], 10)}}>{index + 1}</div>
+        <div style={{minWidth: 0, ...boardEnter(frame, reveals[index], 16)}}>
+          <div style={{color: brand.colors.text, fontFamily: brand.fonts.display, fontSize: vertical ? 52 : 42, fontWeight: 700, lineHeight: 1.05, textWrap: "pretty"}}>{tieOrphan(step.label)}</div>
+          <BoardNote project={project} text={step.note} size={vertical ? 32 : 28} style={{marginTop: 8}} />
+        </div>
+      </div>)}
+    </div>
+  </BoardStage>;
+};
+
+const DocumentBoard: React.FC<VideoProjectBoardProps> = (props) => {
+  const {project, scene, visual, lead, overFootage, vertical} = props;
+  const brand = project.contract.brand;
+  const {frame, at} = useBoardTiming(props);
+  const rows = boardRows(visual.lines);
+  return <BoardStage project={project} overFootage={overFootage} vertical={vertical} center>
+    <div style={{width: vertical ? "100%" : 1140, textAlign: "left", padding: vertical ? "48px 46px 52px" : "54px 64px 60px", backgroundColor: brand.colors.panel, borderTop: `8px solid ${brand.colors.accent}`, boxShadow: `0 30px 80px color-mix(in srgb, ${brand.colors.background} 60%, transparent)`, ...boardEnter(frame, lead, 30)}}>
+      <BoardKicker project={project} text={scene.eyebrow} vertical={vertical} style={{marginBottom: 14}} />
+      <BoardTitle project={project} text={boardString(visual.title)} size={vertical ? 70 : 62} />
+      <div style={{height: 2, backgroundColor: brand.colors.muted, opacity: 0.35, margin: vertical ? "30px 0 16px" : "32px 0 18px"}} />
+      {rows.map((row, index) => {
+        const reveal = at(row.cue, index, rows.length);
+        return <div key={`${row.label}-${index}`} data-highlight={row.highlight ? "" : undefined} style={{display: "flex", flexDirection: vertical ? "column" : "row", alignItems: vertical ? "flex-start" : "baseline", gap: vertical ? 4 : 32, padding: "16px 0", ...boardEnter(frame, reveal, 12)}}>
+          <div style={{flex: "none", width: vertical ? undefined : 340, color: brand.colors.muted, fontFamily: brand.fonts.ui, fontSize: vertical ? 28 : 26, fontWeight: 700, letterSpacing: 2, textTransform: "uppercase"}}>{row.label}</div>
+          <div style={{position: "relative", color: row.highlight ? brand.colors.accent : brand.colors.text, fontFamily: brand.fonts.body, fontSize: vertical ? 48 : 44, fontWeight: 700, lineHeight: 1.1}}>
+            {tieOrphan(row.value)}
+            {row.highlight ? <div style={{position: "absolute", left: 0, right: 0, bottom: -6, height: 4, backgroundColor: brand.colors.accent, transformOrigin: "0 50%", transform: `scaleX(${interpolate(frame, [reveal + 10, reveal + 26], [0, 1], boardClamp)})`}} /> : null}
+          </div>
+        </div>;
+      })}
+    </div>
+  </BoardStage>;
+};
+
+// The compiler inserts this board from producer.subscribe with `topic` and
+// `solution`; `question` and `line` are optional authored overrides. The
+// default copy is generic on purpose: a Design System replaces it by authoring the
+// fields or registering its own `Boards.subscribe`. SceneView draws the
+// brand watermark above every board, so the logo is already on screen.
+const SubscribeBoard: React.FC<VideoProjectBoardProps> = (props) => {
+  const {project, visual, lead, overFootage, vertical} = props;
+  const brand = project.contract.brand;
+  const {frame, at} = useBoardTiming(props);
+  const question = boardString(visual.question) || `Do you want to know more about ${boardString(visual.topic)}?`;
+  const cta = boardString(visual.line) || `Subscribe to learn how to ${boardString(visual.solution)}.`;
+  const ctaAt = Math.max(lead + 16, at("subscribe", 1, 2));
+  return <BoardStage project={project} overFootage={overFootage} vertical={vertical} center>
+    <BoardTitle project={project} text={question} size={vertical ? 88 : 80} style={{maxWidth: vertical ? undefined : 1400, ...boardEnter(frame, lead + 4, 24)}} />
+    <div style={{width: vertical ? 160 : 130, height: 4, backgroundColor: brand.colors.accent, margin: vertical ? "54px 0" : "42px 0", transform: `scaleX(${interpolate(frame, [ctaAt - 8, ctaAt + 10], [0, 1], boardClamp)})`}} />
+    <div style={{color: brand.colors.accent, fontFamily: brand.fonts.body, fontSize: vertical ? 54 : 48, fontWeight: 700, lineHeight: 1.12, maxWidth: vertical ? undefined : 1300, textWrap: "pretty", ...boardEnter(frame, ctaAt, 18)}}>{tieOrphan(cta)}</div>
+  </BoardStage>;
+};
+
+const defaultBoards = {
+  "chapter-title": ChapterTitleBoard,
+  statement: StatementBoard,
+  cards: CardsBoard,
+  compare: CompareBoard,
+  flow: FlowBoard,
+  steps: StepsBoard,
+  document: DocumentBoard,
+  subscribe: SubscribeBoard,
+} satisfies Record<(typeof DEFAULT_BOARD_KINDS)[number], React.ComponentType<VideoProjectBoardProps>>;
+
+/**
+ * The boards a scene may mount by kind. A client that supplies its own
+ * `Graphic` owns every kind it does not register in `Boards`, so the TimDS
+ * defaults apply only when it supplies no `Graphic`; any kind missing from
+ * this map draws through `Graphic`.
+ */
+const resolveVideoBoards = (components: VideoProjectComponentOverrides | undefined): Record<string, React.ComponentType<VideoProjectBoardProps>> =>
+  components?.Graphic ? {...components.Boards} : {...defaultBoards, ...components?.Boards};
+
+/**
+ * The component that draws `kind`: the client's `Boards[kind]`, then the
+ * client's `Graphic`, then the TimDS default board, then the copy fallback.
+ */
+const resolveVideoBoardComponent = (components: VideoProjectComponentOverrides | undefined, kind: string): React.ComponentType<VideoProjectBoardProps> => {
+  const boards = resolveVideoBoards(components);
+  return Object.hasOwn(boards, kind) ? boards[kind] : components?.Graphic ?? GraphicBoard;
+};
+
 const SceneView: React.FC<VideoProjectSceneProps> = ({project, scene, line, duration, lead, vertical, components}) => {
   const IntroComponent = components?.Intro ?? Intro;
   const OutroComponent = components?.Outro ?? Outro;
-  const GraphicComponent = components?.Graphic ?? GraphicBoard;
   if (scene.intro) return <><IntroComponent project={project} question={scene.headline || line.words.map((word) => word.text).join(" ")} vertical={vertical} /><BrandWatermark project={project} vertical={vertical} sceneHasLogo /></>;
   if (scene.outro) return <><OutroComponent project={project} vertical={vertical} /><BrandWatermark project={project} vertical={vertical} sceneHasLogo /></>;
   const assetKeys = sceneAssetKeys(scene);
   if (scene.visual) {
     // A graphic scene: the board plays over the footage chain when the scene
     // names clips, otherwise on the brand background. Watermark and captions
-    // stay TimDS-owned so every board keeps the brand frame.
+    // stay TimDS-owned so every board keeps the brand frame. A kind with no
+    // registered board falls back to Graphic, which draws the scene copy.
+    const BoardComponent = resolveVideoBoardComponent(components, scene.visual.kind);
     return <AbsoluteFill>
       {assetKeys.length ? <Media project={project} scene={scene} duration={duration} vertical={vertical} /> : null}
-      <GraphicComponent project={project} scene={scene} visual={scene.visual} line={line} duration={duration} lead={lead} overFootage={assetKeys.length > 0} vertical={vertical} />
+      <BoardComponent project={project} scene={scene} visual={scene.visual} line={line} duration={duration} lead={lead} overFootage={assetKeys.length > 0} vertical={vertical} />
       <BrandWatermark project={project} vertical={vertical} />
       <CaptionPages project={project} line={line} lead={lead} vertical={vertical} />
     </AbsoluteFill>;
@@ -483,6 +802,7 @@ export const defaultVideoProjectComponents = {
   Video,
   Scene: SceneView,
   Graphic: GraphicBoard,
+  Boards: defaultBoards,
   Intro,
   Outro,
   Cover,
@@ -496,6 +816,9 @@ export function resolveVideoProjectComponents(components: VideoProjectComponentO
     Video: components.Video ?? Video,
     Scene: components.Scene ?? SceneView,
     Graphic: components.Graphic ?? GraphicBoard,
+    // Only the kinds a scene mounts directly; any other kind draws through
+    // Graphic. A client-supplied Graphic keeps every kind it does not register.
+    Boards: resolveVideoBoards(components),
     Intro: components.Intro ?? Intro,
     Outro: components.Outro ?? Outro,
     Cover: components.Cover ?? Cover,
@@ -573,4 +896,30 @@ export function registerVideoProject(project: VideoProject, components: VideoPro
   registerRoot(createVideoProjectRoot(project, components));
 }
 
-export { BrandWatermark, Cover, GoldHeadline, GraphicBoard, HorizontalCover, Intro, Outro, SceneView, VerticalCover, Video };
+/** The kinds `defaultVideoProjectComponents.Boards` draws; the same list as `DEFAULT_BOARD_KINDS` in `@dtconcepts/timds/video/boards`. */
+export const defaultVideoBoardKinds: string[] = [...DEFAULT_BOARD_KINDS];
+
+export { deriveVideoChapters };
+/** Where a board's `motif` stem draws from, or null when the project stages no file for it. */
+export { boardMotifSrc as videoBoardMotifSrc };
+export {
+  BrandWatermark,
+  CardsBoard,
+  ChapterTitleBoard,
+  CompareBoard,
+  Cover,
+  DocumentBoard,
+  FlowBoard,
+  GoldHeadline,
+  GraphicBoard,
+  HorizontalCover,
+  Intro,
+  Outro,
+  resolveVideoBoardComponent,
+  SceneView,
+  StatementBoard,
+  StepsBoard,
+  SubscribeBoard,
+  VerticalCover,
+  Video,
+};

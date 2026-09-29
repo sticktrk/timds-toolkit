@@ -26,6 +26,7 @@ import {
   prepareVideoLab,
   prepareVideoWorkspace,
   renderVideoWorkspace,
+  resolveVideoBoardMotifs,
   resolveVideoBrand,
   runVideoLab,
   silentSceneTimings,
@@ -48,6 +49,7 @@ test("normalizes the optional video manifest", () => {
     local: "video-local",
     lab: "video/lab",
     components: null,
+    boards: null,
   });
   assert.equal(normalizeVideoManifest({ components: "video/remotion.tsx" }).components, "video/remotion.tsx");
   assert.throws(() => normalizeVideoManifest({ components: "../outside.tsx" }), /must stay inside the Design System/);
@@ -1633,4 +1635,322 @@ test("check warns when a literal brand value duplicates a derived token", async 
     'brand.fonts.display "Cormorant Garamond, Georgia, serif" duplicates design token font.display; reference it as "{font.display}" so it cannot drift',
   ]);
   assert.deepEqual(brandDriftWarnings(checked.video.contract, null), []);
+});
+
+// --- board catalog -------------------------------------------------------------
+
+const boardTemplate = async () => JSON.parse(await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "templates", "video", "boards.json"), "utf8"));
+const boardAssets = () => ({
+  assetCatalog: { assets: {
+    "cover-subject-concern": { mediaKey: "cover-subject-concern" },
+    ...Object.fromEntries(["one", "two", "three"].map((name) => [`footage-${name}`, { mediaKey: `footage-${name}`, durationSeconds: 30, subject: "right", flip: false, text: "left-center" }])),
+  } },
+  mediaCatalog: { assets: [
+    { key: "cover-subject-concern", filename: "concern.png", contentType: "image/png", publicUrl: "https://cdn.example/concern.png" },
+    ...["one", "two", "three"].map((name) => ({ key: `footage-${name}`, filename: `${name}.mp4`, contentType: "video/mp4", publicUrl: `https://cdn.example/${name}.mp4`, durationSeconds: 30, title: name })),
+  ] },
+});
+const boardRequest = (answerBeats) => ({
+  schemaVersion: 1,
+  slug: "deed-and-will",
+  outputFormat: "horizontal",
+  exactQuestion: "Does your deed agree with your will?",
+  topic: { label: "house deeds", solution: "keep your house where your will says" },
+  answerBeats,
+});
+const beat = (id, extra = {}) => ({ id, role: "rule", narration: `The ${id} matters for your deed and your will.`, summary: `The ${id} matters`, ...extra });
+
+test("with a board catalog the horizontal authoring contract offers the declared kinds and their rules", async () => {
+  const boards = await boardTemplate();
+  const authoringFor = (raw, extra = {}, outputFormat = "horizontal") => createVideoAuthoringContract({
+    contract: validateVideoContract(raw),
+    manifest: { systemId: "example", name: "Example", version: "1.0.0" },
+    designSystemIndex: { system: { id: "example", version: "1.0.0" }, pages: [] },
+    provenance: { commit: "0".repeat(40) },
+    outputFormat,
+    ...extra,
+  });
+  const plain = authoringFor(subscribeContract());
+  const authoring = authoringFor(subscribeContract(), { boards, motifs: ["house", "will"] });
+  assert.equal(authoring.schemaVersion, 2);
+  assert.equal(authoring.producerContractVersion, 1);
+  const beatSchema = authoring.inputSchema.properties.answerBeats.items;
+  const kinds = beatSchema.properties.visual.oneOf.map((entry) => entry.properties.kind.const);
+  assert.deepEqual(kinds, ["chapter-title", "statement", "cards", "compare", "flow", "steps", "document"], "subscribe stays compiler-owned");
+  assert.ok(beatSchema.properties.visual.oneOf.every((entry) => entry.additionalProperties === false && entry.required.includes("kind")));
+  assert.deepEqual(beatSchema.properties.visual.oneOf[0].properties.motif.enum, ["house", "will"]);
+  assert.equal(beatSchema.properties.boardGap.type, "string");
+  assert.match(beatSchema.properties.chapter.description, /chapter-title board/u);
+  const instructions = authoring.prompt.instructions.join("\n");
+  assert.doesNotMatch(instructions, /Never write a visual/u);
+  assert.match(instructions, /Choose only declared kinds; a beat with no fitting board keeps footage and records boardGap\./u);
+  for (const kind of Object.values(boards.kinds).filter((entry) => entry.label !== "Subscribe")) assert.ok(instructions.includes(kind.use), `instructions name ${kind.label}'s use`);
+  assert.match(instructions, /Never place more than 3 footage-free boards in a row/u);
+  assert.match(instructions, /Board chapter-title \(Chapter title\): .* Never over footage/u);
+  assert.match(instructions, /Never write a subscribe board; the compiler inserts it\./u);
+  assert.ok(authoring.compilerOwns.includes("compiler-inserted boards: subscribe"));
+  assert.equal(authoring.boards.active, true);
+  assert.deepEqual(authoring.boards.kinds.map((kind) => kind.id), Object.keys(boards.kinds));
+  // Everything else is the contract without a catalog.
+  assert.deepEqual({ ...authoring.inputSchema.properties.topic }, plain.inputSchema.properties.topic);
+  assert.deepEqual(authoring.constraints, plain.constraints);
+
+  // A format the catalog or the contract leaves closed keeps today's contract, plus the shelf summary.
+  const raw = subscribeContract();
+  const closed = authoringFor({ ...raw, structure: { longform: { graphicScenes: false } }, producer: { ...raw.producer, subscribe: { enabled: false } } }, { boards });
+  assert.equal(closed.inputSchema.properties.answerBeats.items.properties.visual, undefined);
+  assert.equal(closed.inputSchema.properties.answerBeats.items.properties.boardGap, undefined);
+  assert.match(closed.prompt.instructions.join("\n"), /Never write a visual/u);
+  assert.equal(closed.boards.active, false);
+  const short = authoringFor({ ...raw, structure: { longform: { graphicScenes: true }, short: { graphicScenes: true } } }, { boards }, "short");
+  assert.equal(short.inputSchema.properties.answerBeats.items.properties.visual, undefined, "the default catalog offers no Shorts boards");
+  assert.equal(plain.boards, undefined);
+});
+
+test("compileProduction holds each board to the catalog with a scene-level message", async () => {
+  const boards = await boardTemplate();
+  const producer = createVideoProducer({ contract: validateVideoContract(subscribeContract()), ...boardAssets(), boards });
+  const statement = (text) => ({ kind: "statement", text });
+  assert.throws(() => producer.compileProduction(boardRequest([beat("a", { visual: { kind: "timeline", dates: [] } })])),
+    /answer beat a\.visual\.kind timeline is not declared in the board catalog/u);
+  assert.throws(() => producer.compileProduction(boardRequest([beat("a", { visual: statement("one two three four five six seven eight nine ten eleven") })])),
+    /answer beat a\.visual\.text exceeds 10 words \(11\)/u);
+  assert.throws(() => producer.compileProduction(boardRequest([beat("a", { visual: { kind: "subscribe", topic: "x", solution: "y" } })])),
+    /answer beat a\.visual\.kind subscribe is compiler-owned/u);
+  assert.throws(() => producer.compileProduction(boardRequest([beat("a", { visual: { kind: "chapter-title", number: 1, title: "Start" }, footage: ["footage-one"] })])),
+    /scene a is a chapter-title board, which never sits over footage/u);
+  // The subscribe board after beat one plus three authored boards is four footage-free boards in a row.
+  assert.throws(() => producer.compileProduction(boardRequest([beat("a"), beat("b", { visual: statement("Rule one") }), beat("c", { visual: statement("Rule two") }), beat("d", { visual: statement("Rule three") })])),
+    /compile request deed-and-will scenes subscribe, b, c, d are 4 footage-free boards in a row; the catalog allows at most 3/u);
+  assert.throws(() => producer.compileProduction(boardRequest([beat("a", { chapter: "one" }), beat("b", { chapter: "two" })])),
+    /sets 2 chapters \(one, two\); a production that uses chapters needs at least 3/u);
+  assert.throws(() => producer.compileProduction(boardRequest([beat("a", { visual: statement("Rule one"), boardGap: "A timeline" })])),
+    /answer beat a carries both a visual and a boardGap/u);
+
+  const compiled = producer.compileProduction(boardRequest([
+    beat("a", { boardGap: " A timeline of filing dates " }),
+    beat("b", { visual: { kind: "cards", items: [{ label: "The deed", cue: "deed" }, { label: "The will", cue: "will" }] } }),
+    beat("c"),
+  ]));
+  assert.deepEqual(compiled.scenes.map((scene) => scene.id), ["intro", "a", "subscribe", "b", "c", "outro"]);
+  assert.equal(compiled.scenes[1].boardGap, "A timeline of filing dates");
+  const timings = silentSceneTimings(compiled.scenes);
+  const finalized = producer.finalizeProduction({ schemaVersion: 1, compiled, timings, audioSrc: null });
+  assert.equal(finalized.plan.scenes.find((scene) => scene.id === "a").boardGap, "A timeline of filing dates");
+
+  // A cue the take never says fails at finalize, naming the scene, the cue, and what was said.
+  const unspoken = producer.compileProduction(boardRequest([beat("a"), beat("b", { visual: { kind: "cards", items: [{ label: "The deed", cue: "deed" }, { label: "The title", cue: "title" }] } })]));
+  assert.throws(() => producer.finalizeProduction({ schemaVersion: 1, compiled: unspoken, timings: silentSceneTimings(unspoken.scenes), audioSrc: null }),
+    /finalize deed-and-will scene b: cue "title" \(visual\.items\[1\]\.cue\) is never spoken; the take says: The b matters for your deed and your will\./u);
+  // A timing without measured words carries no take, so cues are not checked there.
+  const wordless = silentSceneTimings(unspoken.scenes).map(({ words, ...line }) => line);
+  assert.doesNotThrow(() => producer.finalizeProduction({ schemaVersion: 1, compiled: unspoken, timings: wordless, audioSrc: null }));
+});
+
+test("the compiler's subscribe board is held to the catalog only when the catalog declares it", async () => {
+  const boards = await boardTemplate();
+  boards.kinds.subscribe.schema.properties.topic["x-timds-maxWords"] = 1;
+  const declared = createVideoProducer({ contract: validateVideoContract(subscribeContract()), ...boardAssets(), boards });
+  assert.throws(() => declared.compileProduction(boardRequest([beat("a")])), /scene subscribe\.visual\.topic exceeds 1 words \(2\)/u);
+  delete boards.kinds.subscribe;
+  const undeclared = createVideoProducer({ contract: validateVideoContract(subscribeContract()), ...boardAssets(), boards });
+  assert.deepEqual(undeclared.compileProduction(boardRequest([beat("a")])).scenes[2].visual, { kind: "subscribe", topic: "house deeds", solution: "keep your house where your will says" });
+});
+
+const boardProduction = (scenes) => ({
+  longform: { cover: { headline: "What should I know?", asset: "cover" }, scenes: [{ id: "intro", intro: true }, ...scenes, { id: "outro", outro: true }] },
+});
+const boardFixture = async (t, scenes, { boards, contract = {} } = {}) => {
+  const workspace = await videoFixture(t, {
+    production: boardProduction(scenes),
+    contract: { structure: { longform: { requireIntro: true, requireOutro: true, graphicScenes: true }, short: {} }, ...contract },
+  });
+  await writeCaptionLines(workspace, ["intro", ...scenes.map((scene) => scene.id), "outro"]);
+  await writeJson(path.join(workspace.designSystemRoot, "video", "boards.json"), boards ?? await boardTemplate());
+  return workspace;
+};
+
+test("video check holds committed boards to the catalog, its cadence, and its spoken cues", async (t) => {
+  const answer = { id: "answer", headline: "A clear answer", asset: "footage" };
+  const cards = (cue) => ({ id: "cards", visual: { kind: "cards", items: [{ label: "The deed", cue }, { label: "The will" }] } });
+  const passing = await boardFixture(t, [answer, cards("cards")]);
+  const checked = await checkVideoWorkspace(passing, { slug: "sample-topic" });
+  assert.equal(checked.video.boards.kinds.cards.label, "Cards");
+  assert.equal(checked.video.motifs, null);
+  const prepared = await prepareVideoWorkspace(passing, "sample-topic");
+  assert.equal(prepared.project.contract.boards.kinds.cards.label, "Cards", "the staged project carries the catalog for the default boards");
+
+  await assert.rejects(checkVideoWorkspace(await boardFixture(t, [answer, cards("deed")]), { slug: "sample-topic" }),
+    /sample-topic longform scene cards: cue "deed" \(visual\.items\[0\]\.cue\) is never spoken; the take says: cards/u);
+  await assert.rejects(checkVideoWorkspace(await boardFixture(t, [answer, { id: "board", visual: { kind: "timeline" } }]), { slug: "sample-topic" }),
+    /sample-topic longform scene 3\.visual\.kind timeline is not declared in the board catalog/u);
+  const run = ["b1", "b2", "b3", "b4"].map((id) => ({ id, visual: { kind: "statement", text: "One rule" } }));
+  await assert.rejects(checkVideoWorkspace(await boardFixture(t, [answer, ...run]), { slug: "sample-topic" }),
+    /sample-topic longform scenes b1, b2, b3, b4 are 4 footage-free boards in a row/u);
+
+  // A workspace without a catalog keeps today's behaviour for the same boards.
+  const legacy = await boardFixture(t, [answer, ...run]);
+  await fs.rm(path.join(legacy.designSystemRoot, "video", "boards.json"));
+  assert.equal((await checkVideoWorkspace(legacy, { slug: "sample-topic" })).video.boards, null);
+  // A catalog timds.json names explicitly is required.
+  legacy.manifest.video.boards = "video/boards.json";
+  await assert.rejects(checkVideoWorkspace(legacy, { slug: "sample-topic" }), /video boards is required at/u);
+});
+
+test("motif fields resolve from the catalog's static mount", async (t) => {
+  const boards = { ...(await boardTemplate()), motifs: { mount: "illustrations" } };
+  const scenes = [{ id: "answer", headline: "A clear answer", asset: "footage" }, { id: "board", visual: { kind: "statement", text: "Keep the deed", motif: "house" } }];
+  const undeclared = await boardFixture(t, scenes, { boards });
+  await assert.rejects(checkVideoWorkspace(undeclared, { slug: "sample-topic" }), /motifs\.mount illustrations is not a brand\.staticFiles mount/u);
+
+  const brand = { colors: { background: "#000", accent: "#fc0", text: "#fff" }, fonts: { display: "serif", body: "serif", ui: "sans-serif" }, fontFiles: [{ family: "Example Serif", path: "public/example.woff2", style: "normal", weight: "700" }], logo: "public/logo.svg", series: "Answers", site: "example.com", tagline: "Clear answers.", staticFiles: [{ path: "art/illustrations", mount: "illustrations" }] };
+  const mounted = await boardFixture(t, scenes, { boards, contract: { brand } });
+  const art = path.join(mounted.designSystemRoot, "art", "illustrations");
+  await fs.mkdir(art, { recursive: true });
+  for (const name of ["will.svg", "house.svg", "house.png", ".DS_Store"]) await fs.writeFile(path.join(art, name), "<svg/>");
+  const checked = await checkVideoWorkspace(mounted, { slug: "sample-topic" });
+  assert.deepEqual(checked.video.motifs, ["house", "will"]);
+  await fs.rm(path.join(art, "house.svg"));
+  await fs.rm(path.join(art, "house.png"));
+  await assert.rejects(checkVideoWorkspace(mounted, { slug: "sample-topic" }), /names motif "house", which is not a mounted motif \(available: will\)/u);
+});
+
+test("video check fails when the catalog's kinds and the registered Boards disagree", async (t) => {
+  const scenes = [{ id: "answer", headline: "A clear answer", asset: "footage" }];
+  const extended = await boardTemplate();
+  extended.kinds.timeline = { label: "Timeline", use: "Dates in order.", avoid: "Undated items.", schema: { type: "object", properties: { title: { type: "string", "x-timds-maxWords": 6 } } } };
+  await assert.rejects(checkVideoWorkspace(await boardFixture(t, scenes, { boards: extended }), { slug: "sample-topic" }),
+    /TimDS default video components disagree with the board catalog:\n {2}board kind timeline is declared in the catalog but no Boards component draws it/u);
+
+  const workspace = await boardFixture(t, scenes, { boards: extended });
+  const componentsPath = path.join(workspace.designSystemRoot, "video", "remotion.tsx");
+  await fs.writeFile(componentsPath, "const Board = (): null => null;\nexport default {Boards: {timeline: Board, gallery: Board}};\n", "utf8");
+  workspace.manifest.video.components = "video/remotion.tsx";
+  await assert.rejects(checkVideoWorkspace(workspace, { slug: "sample-topic" }),
+    /video components video\/remotion\.tsx disagree with the board catalog:\n {2}Boards registers gallery, which the board catalog does not declare/u);
+  await fs.writeFile(componentsPath, "const Board = (): null => null;\nexport default {Boards: {timeline: Board}};\n", "utf8");
+  const checked = await checkVideoWorkspace(workspace, { slug: "sample-topic" });
+  assert.equal(checked.productionCount, 1);
+});
+
+test("video init scaffolds the default board catalog and registers it", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "timds-video-boards-init-"));
+  t.after(() => fs.rm(root, { force: true, recursive: true }));
+  const manifestPath = path.join(root, "timds.json");
+  await writeJson(manifestPath, { schemaVersion: 2, systemId: "example/core", name: "Example", version: "1.0.0" });
+  const result = await initializeVideoWorkspace({ designSystemRoot: root, repoRoot: root, manifestPath, manifest: {} });
+  assert.equal(result.boards, path.join(root, "video", "boards.json"));
+  assert.deepEqual(JSON.parse(await fs.readFile(result.boards, "utf8")), await boardTemplate());
+  const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
+  assert.equal(manifest.video.boards, "video/boards.json");
+  assert.equal(normalizeVideoManifest(manifest.video).boards, "video/boards.json");
+  // The scaffolded contract keeps graphic scenes closed: the catalog's formats and the structure flag both open a format.
+  assert.equal(JSON.parse(await fs.readFile(result.contract, "utf8")).structure.longform.graphicScenes, false);
+});
+
+test("extract publishes the board catalog summary in the machine index", async (t) => {
+  const { extractWorkspace } = await import("./core.mjs");
+  const workspace = await boardFixture(t, [{ id: "answer", headline: "A clear answer", asset: "footage" }]);
+  workspace.manifest.artifact = { entry: "index.html" };
+  workspace.manifest.machine = {};
+  const dist = path.join(workspace.designSystemRoot, "dist");
+  await fs.mkdir(dist, { recursive: true });
+  await fs.writeFile(path.join(dist, "index.html"), "<html><body><main><h1>Home</h1><section id=\"a\"><h2>A</h2><p>Text.</p></section></main></body></html>");
+  const machine = await extractWorkspace(workspace, { write: false });
+  assert.deepEqual(machine.index.video.boards.kinds.map((kind) => kind.id), ["chapter-title", "statement", "cards", "compare", "flow", "steps", "document", "subscribe"]);
+  assert.equal(machine.index.video.boards.cadence.maxBoardWords, 28);
+  await fs.rm(path.join(workspace.designSystemRoot, "video", "boards.json"));
+  assert.equal("video" in (await extractWorkspace(workspace, { write: false })).index, false);
+});
+
+test("subscribe compiles in every producer format whatever the catalog's formats say", async () => {
+  const raw = subscribeContract();
+  const both = { ...raw, structure: { longform: { graphicScenes: true }, short: { graphicScenes: true } }, producer: { ...raw.producer, subscribe: { ...raw.producer.subscribe, formats: ["horizontal", "short"] } } };
+  const { assetCatalog, mediaCatalog } = boardAssets();
+  const shortsClosed = createVideoProducer({ contract: validateVideoContract(both), assetCatalog, mediaCatalog, boards: await boardTemplate() });
+  const short = shortsClosed.compileProduction({ ...boardRequest([beat("a")]), outputFormat: "short" });
+  assert.ok(short.scenes.some((scene) => scene.visual?.kind === "subscribe"));
+  const longClosed = createVideoProducer({ contract: validateVideoContract(both), assetCatalog, mediaCatalog, boards: { ...(await boardTemplate()), formats: { longform: false, short: true } } });
+  assert.ok(longClosed.compileProduction(boardRequest([beat("a")])).scenes.some((scene) => scene.visual?.kind === "subscribe"));
+});
+
+test("a catalog of only compiler-owned kinds offers the model no boards", async () => {
+  const boards = await boardTemplate();
+  boards.kinds = { subscribe: boards.kinds.subscribe };
+  const authoring = createVideoAuthoringContract({
+    contract: validateVideoContract(subscribeContract()),
+    manifest: { systemId: "example", name: "Example", version: "1.0.0" },
+    designSystemIndex: { system: { id: "example", version: "1.0.0" }, pages: [] },
+    provenance: { commit: "0".repeat(40) },
+    outputFormat: "horizontal",
+    boards,
+  });
+  assert.equal(authoring.inputSchema.properties.answerBeats.items.properties.visual, undefined);
+  assert.match(authoring.prompt.instructions.join("\n"), /Never write a visual/u);
+  assert.equal(authoring.boards.active, false);
+});
+
+test("motifs map each stem to the file a component draws, preferring svg", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "timds-motifs-"));
+  t.after(() => fs.rm(root, { force: true, recursive: true }));
+  const art = path.join(root, "art");
+  await fs.mkdir(art, { recursive: true });
+  for (const name of ["house.png", "house.svg", "will.png", "deed.webp", "deed.jpg"]) await fs.writeFile(path.join(art, name), "x");
+  const contract = { brand: { staticFiles: [{ path: "art", mount: "illustrations" }] } };
+  const resolved = await resolveVideoBoardMotifs({ designSystemRoot: root, catalog: { motifs: { mount: "illustrations" } }, contract });
+  assert.deepEqual(resolved, { names: ["deed", "house", "will"], files: { deed: "deed.jpg", house: "house.svg", will: "will.png" } });
+  assert.equal(await resolveVideoBoardMotifs({ designSystemRoot: root, catalog: {}, contract }), null);
+});
+
+test("a staged project carries each motif's file for the default boards", async (t) => {
+  const boards = { ...(await boardTemplate()), motifs: { mount: "illustrations" } };
+  const brand = { colors: { background: "#000", accent: "#fc0", text: "#fff" }, fonts: { display: "serif", body: "serif", ui: "sans-serif" }, fontFiles: [{ family: "Example Serif", path: "public/example.woff2", style: "normal", weight: "700" }], logo: "public/logo.svg", series: "Answers", site: "example.com", tagline: "Clear answers.", staticFiles: [{ path: "art/illustrations", mount: "illustrations" }] };
+  const workspace = await boardFixture(t, [{ id: "answer", headline: "A clear answer", asset: "footage" }, { id: "board", visual: { kind: "statement", text: "Keep the deed", motif: "house" } }], { boards, contract: { brand } });
+  const art = path.join(workspace.designSystemRoot, "art", "illustrations");
+  await fs.mkdir(art, { recursive: true });
+  await fs.writeFile(path.join(art, "house.png"), "png");
+  const prepared = await prepareVideoWorkspace(workspace, "sample-topic");
+  assert.deepEqual(prepared.project.contract.boards.motifs, { mount: "illustrations", files: { house: "house.png" } });
+});
+
+test("a client Graphic can draw every declared kind, and an ES module's load error is reported as is", async (t) => {
+  const scenes = [{ id: "answer", headline: "A clear answer", asset: "footage" }];
+  const extended = await boardTemplate();
+  extended.kinds.timeline = { label: "Timeline", use: "Dates in order.", avoid: "Undated items.", schema: { type: "object", properties: { title: { type: "string" } } } };
+  const workspace = await boardFixture(t, scenes, { boards: extended });
+  await writeJson(path.join(workspace.designSystemRoot, "package.json"), { type: "module" });
+  const componentsPath = path.join(workspace.designSystemRoot, "video", "remotion.tsx");
+  workspace.manifest.video.components = "video/remotion.tsx";
+  await fs.writeFile(componentsPath, "const Graphic = (): null => null;\nexport default {Graphic};\n", "utf8");
+  assert.equal((await checkVideoWorkspace(workspace, { slug: "sample-topic" })).productionCount, 1);
+  await fs.writeFile(componentsPath, "const Board = (): null => null;\nexport default {Boards: {timeline: Board}};\n", "utf8");
+  assert.equal((await checkVideoWorkspace(workspace, { slug: "sample-topic" })).productionCount, 1, "tsImport loads a module-typed Design System");
+  await fs.writeFile(componentsPath, "export default {Boards: {timeline: (: null}};\n", "utf8");
+  await assert.rejects(checkVideoWorkspace(workspace, { slug: "sample-topic" }), (caught) => {
+    assert.match(caught.message, /video components video\/remotion\.tsx could not be loaded/u);
+    assert.doesNotMatch(caught.message, /Unexpected token '\)'/u, "no second, misleading CommonJS error");
+    return true;
+  });
+});
+
+test("finalize derives YouTube chapters from chapter-title boards and the timed take", async () => {
+  const producer = createVideoProducer({ contract: validateVideoContract(subscribeContract()), ...boardAssets(), boards: await boardTemplate() });
+  const title = (number, text) => ({ kind: "chapter-title", number, title: text });
+  const compiled = producer.compileProduction(boardRequest([
+    beat("promise", { chapter: "the-question" }),
+    beat("one", { chapter: "two-jobs", visual: title(1, "Two documents, two jobs") }),
+    beat("rule", { chapter: "two-jobs" }),
+    beat("fix", { chapter: "fix-it" }),
+  ]));
+  const timings = compiled.scenes.map((scene) => ({ id: scene.id, durationMs: 2500, words: [] }));
+  const finalized = producer.finalizeProduction({ schemaVersion: 1, compiled, timings, audioSrc: null });
+  // intro, promise, subscribe, one, rule, fix, outro at 2.5s each.
+  assert.deepEqual(finalized.plan.chapters, [
+    { id: "the-question", label: "The Question", startMs: 2500 },
+    { id: "two-jobs", label: "Two documents, two jobs", startMs: 7500 },
+    { id: "fix-it", label: "Fix It", startMs: 12500 },
+  ]);
+  assert.match(describeVideoLabPlan({ compiled, timings, finalized }), /^ {2}chapter {8}0:07 Two documents, two jobs$/mu);
+  const plain = producer.compileProduction(boardRequest([beat("a")]));
+  assert.equal(producer.finalizeProduction({ schemaVersion: 1, compiled: plain, timings: plain.scenes.map((scene) => ({ id: scene.id, durationMs: 2500, words: [] })), audioSrc: null }).plan.chapters, undefined);
 });

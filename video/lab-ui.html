@@ -202,8 +202,8 @@
         ...($("solution").value.trim() ? { solution: $("solution").value.trim() } : {}),
         coverEmotion: state.coverEmotion || state.meta?.contract.producer?.cover?.defaultEmotion || "concern",
       },
-      // chapter and visual are authored in the JSON, not the form; the editor carries them through untouched.
-      answerBeats: state.beats.map((beat) => ({ id: beat.id, role: beat.role, narration: beat.narration, summary: beat.summary, ...(beat.footage.length ? { footage: beat.footage } : {}), ...(beat.chapter ? { chapter: beat.chapter } : {}), ...(beat.visual ? { visual: beat.visual } : {}) })),
+      // chapter, visual, and boardGap are authored in the JSON, not the form; the editor carries them through untouched.
+      answerBeats: state.beats.map((beat) => ({ id: beat.id, role: beat.role, narration: beat.narration, summary: beat.summary, ...(beat.footage.length ? { footage: beat.footage } : {}), ...(beat.chapter ? { chapter: beat.chapter } : {}), ...(beat.visual ? { visual: beat.visual } : {}), ...(beat.boardGap ? { boardGap: beat.boardGap } : {}) })),
     };
   }
   function applyInput(input) {
@@ -215,7 +215,7 @@
     $("solution").value = input.topic?.solution || "";
     $("slug").value = input.slug || "";
     state.coverEmotion = input.topic?.coverEmotion;
-    state.beats = (input.answerBeats || []).map((beat, index) => ({ id: beat.id || `beat-${index + 1}`, role: ROLES.includes(beat.role) ? beat.role : "rule", narration: beat.narration || "", summary: beat.summary || "", footage: footageKeys(beat.footage), ...(typeof beat.chapter === "string" && beat.chapter ? { chapter: beat.chapter } : {}), ...(beat.visual && typeof beat.visual === "object" ? { visual: beat.visual } : {}) }));
+    state.beats = (input.answerBeats || []).map((beat, index) => ({ id: beat.id || `beat-${index + 1}`, role: ROLES.includes(beat.role) ? beat.role : "rule", narration: beat.narration || "", summary: beat.summary || "", footage: footageKeys(beat.footage), ...(typeof beat.chapter === "string" && beat.chapter ? { chapter: beat.chapter } : {}), ...(beat.visual && typeof beat.visual === "object" ? { visual: beat.visual } : {}), ...(typeof beat.boardGap === "string" && beat.boardGap ? { boardGap: beat.boardGap } : {}) }));
     renderBeats();
     syncFormatUi();
     $("json").value = JSON.stringify(currentInput(), null, 2);
@@ -301,6 +301,7 @@
       footage: footageKeys(card.querySelector(".footage-keys").value.split(",")),
       ...(state.beats[index]?.chapter ? { chapter: state.beats[index].chapter } : {}),
       ...(state.beats[index]?.visual ? { visual: state.beats[index].visual } : {}),
+      ...(state.beats[index]?.boardGap ? { boardGap: state.beats[index].boardGap } : {}),
     }));
   }
   const markDirty = () => {
