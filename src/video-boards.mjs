@@ -22,7 +22,7 @@ const COMMON_KEYWORDS = ["type", "enum", "const", "description"];
 const TYPE_KEYWORDS = {
   object: ["properties", "required", "additionalProperties"],
   array: ["items", "minItems", "maxItems"],
-  string: ["minLength", "x-timds-maxWords", "x-timds-motif", "x-timds-cue", "x-timds-substringOf"],
+  string: ["minLength", "maxLength", "x-timds-maxWords", "x-timds-motif", "x-timds-cue", "x-timds-substringOf"],
   integer: ["minimum"],
   number: ["minimum"],
   boolean: [],
@@ -102,6 +102,8 @@ function normalizeSchemaNode(input, label) {
   }
   if (type === "string") {
     if (node.minLength !== undefined) result.minLength = nonNegativeInteger(node.minLength, `${label}.minLength`);
+    if (node.maxLength !== undefined) result.maxLength = nonNegativeInteger(node.maxLength, `${label}.maxLength`);
+    if (result.minLength !== undefined && result.maxLength !== undefined && result.minLength > result.maxLength) throw new Error(`${label}.minLength must not exceed maxLength`);
     if (node["x-timds-maxWords"] !== undefined) result["x-timds-maxWords"] = optionalPositiveInteger(node["x-timds-maxWords"], `${label}.x-timds-maxWords`);
     for (const flag of ["x-timds-motif", "x-timds-cue"]) {
       if (node[flag] === undefined) continue;
@@ -120,10 +122,65 @@ function normalizeSchemaNode(input, label) {
   return result;
 }
 
+const LIMIT_KEYS = ["minItems", "maxItems", "minLength", "maxLength", "x-timds-maxWords"];
+const catalogFormat = (format) => (format === "short" ? "short" : "longform");
+
+function schemaField(schema, path, label) {
+  let node = schema;
+  for (const key of path.split(".")) {
+    if (node.type !== "object" || !Object.hasOwn(node.properties, key)) throw new Error(`${label} names unknown schema field ${path}`);
+    node = node.properties[key];
+  }
+  return node;
+}
+
+function normalizeConstraint(input, schema, label) {
+  const rule = requireObject(input, label);
+  for (const key of Object.keys(rule)) if (!["when", "maxWords", "fields"].includes(key)) throw new Error(`${label} has unknown field ${key}`);
+  const when = requireObject(rule.when, `${label}.when`);
+  for (const key of Object.keys(when)) if (!["format", "overFootage"].includes(key)) throw new Error(`${label}.when has unknown field ${key}`);
+  if (when.format === undefined && when.overFootage === undefined) throw new Error(`${label}.when needs format or overFootage`);
+  if (when.format !== undefined && !["longform", "short"].includes(when.format)) throw new Error(`${label}.when.format must be longform or short`);
+  if (when.overFootage !== undefined && typeof when.overFootage !== "boolean") throw new Error(`${label}.when.overFootage must be a boolean`);
+  const fields = requireObject(rule.fields ?? {}, `${label}.fields`);
+  for (const [path, limits] of Object.entries(fields)) {
+    const node = schemaField(schema, path, label);
+    requireObject(limits, `${label}.fields.${path}`);
+    if (!Object.keys(limits).length) throw new Error(`${label}.fields.${path} needs a limit`);
+    for (const [key, value] of Object.entries(limits)) {
+      if (!LIMIT_KEYS.includes(key)) throw new Error(`${label}.fields.${path} has unsupported limit ${key}`);
+      if (node[key] !== undefined && (key.startsWith("min") ? value < node[key] : value > node[key])) throw new Error(`${label}.fields.${path}.${key} must not loosen the base schema`);
+    }
+    normalizeSchemaNode({...node, ...limits}, `${label}.fields.${path}`);
+  }
+  const maxWords = optionalPositiveInteger(rule.maxWords, `${label}.maxWords`);
+  if (!maxWords && !Object.keys(fields).length) throw new Error(`${label} needs maxWords or field limits`);
+  return {when: {...when}, ...(maxWords ? {maxWords} : {}), ...(Object.keys(fields).length ? {fields: structuredClone(fields)} : {})};
+}
+
+// Unknown footage at authoring time uses the intersection of the applicable
+// limits. Compile and video check pass the actual scene context, preserving
+// larger boards in layouts that permit them without offering unsafe drafts.
+function boardLimits(kind, {format, overFootage} = {}) {
+  const schema = structuredClone(kind.schema);
+  let maxWords = kind.maxWords ?? null;
+  const footage = overFootage ?? (kind.overFootage === "never" ? false : kind.overFootage === "always" ? true : undefined);
+  for (const rule of kind.constraints ?? []) {
+    if (format !== undefined && rule.when.format !== undefined && rule.when.format !== catalogFormat(format)) continue;
+    if (footage !== undefined && rule.when.overFootage !== undefined && rule.when.overFootage !== footage) continue;
+    if (rule.maxWords) maxWords = Math.min(maxWords ?? Infinity, rule.maxWords);
+    for (const [path, limits] of Object.entries(rule.fields ?? {})) {
+      const node = schemaField(schema, path, `board ${kind.id}`);
+      for (const [key, value] of Object.entries(limits)) node[key] = node[key] === undefined ? value : key.startsWith("min") ? Math.max(node[key], value) : Math.min(node[key], value);
+    }
+  }
+  return {schema: normalizeSchemaNode(schema, `board ${kind.id} effective schema`), maxWords};
+}
+
 function normalizeKind(id, input, label) {
   if (!SLUG.test(id)) throw new Error(`${label} kind id ${JSON.stringify(id)} must use lowercase letters, numbers, and hyphens`);
   const kind = requireObject(input, `${label}.kinds.${id}`);
-  const known = new Set(["label", "use", "avoid", "overFootage", "once", "schema"]);
+  const known = new Set(["label", "use", "avoid", "overFootage", "once", "schema", "formats", "maxWords", "constraints"]);
   for (const key of Object.keys(kind)) {
     // A normalized kind carries its own id; accept it back so validation stays idempotent.
     if (key === "id" && kind.id === id) continue;
@@ -134,7 +191,10 @@ function normalizeKind(id, input, label) {
   const schema = normalizeSchemaNode(kind.schema, `${label}.kinds.${id}.schema`);
   if (schema.type !== "object") throw new Error(`${label}.kinds.${id}.schema must describe an object`);
   if (schema.properties.kind) throw new Error(`${label}.kinds.${id}.schema must not declare kind; the catalog supplies it`);
-  return {
+  if (kind.formats !== undefined && (!Array.isArray(kind.formats) || !kind.formats.length || kind.formats.some((format) => !["longform", "short"].includes(format)))) throw new Error(`${label}.kinds.${id}.formats must contain longform or short`);
+  if (kind.constraints !== undefined && !Array.isArray(kind.constraints)) throw new Error(`${label}.kinds.${id}.constraints must be an array`);
+  const maxWords = optionalPositiveInteger(kind.maxWords, `${label}.kinds.${id}.maxWords`);
+  const result = {
     id,
     label: requireText(kind.label, `${label}.kinds.${id}.label`),
     use: requireText(kind.use, `${label}.kinds.${id}.use`),
@@ -142,7 +202,14 @@ function normalizeKind(id, input, label) {
     overFootage,
     once: optionalBoolean(kind.once, `${label}.kinds.${id}.once`, false),
     schema,
+    ...(kind.formats ? {formats: [...new Set(kind.formats)]} : {}),
+    ...(maxWords ? {maxWords} : {}),
+    ...(kind.constraints ? {constraints: kind.constraints.map((rule, index) => normalizeConstraint(rule, schema, `${label}.kinds.${id}.constraints[${index}]`))} : {}),
   };
+  for (const format of result.formats ?? ["longform", "short"]) {
+    for (const overFootage of [false, true, undefined]) boardLimits(result, {format, overFootage});
+  }
+  return result;
 }
 
 /**
@@ -190,8 +257,6 @@ export function validateBoardCatalog(input, { label = "video boards" } = {}) {
   };
 }
 
-const catalogFormat = (format) => (format === "short" ? "short" : "longform");
-
 /** Whether the catalog offers boards in a producer output format (horizontal/short) or a catalog format (longform/short). */
 export const boardFormatEnabled = (catalog, format) => Boolean(catalog?.formats?.[catalogFormat(format)]);
 
@@ -225,7 +290,19 @@ function authoringNode(node, motifs) {
 }
 
 /** Kinds a model may author in this catalog: every declared kind except the compiler's own. */
-export const authorableBoardKinds = (catalog) => Object.values(catalog.kinds).filter((kind) => !COMPILER_OWNED_BOARD_KINDS.includes(kind.id));
+export const authorableBoardKinds = (catalog, format) => Object.values(catalog.kinds).filter((kind) => !COMPILER_OWNED_BOARD_KINDS.includes(kind.id)
+  && (format === undefined || !kind.formats || kind.formats.includes(catalogFormat(format))));
+
+/** The same effective schema a client component may use for its layout budgets. */
+export function resolveBoardKind(input, kindId, context) {
+  const catalog = validateBoardCatalog(input);
+  const kind = catalog.kinds[kindId];
+  if (!kind) throw new Error(`board kind ${kindId} is not declared in the catalog`);
+  if (context?.format !== undefined && kind.formats && !kind.formats.includes(catalogFormat(context.format))) throw new Error(`board kind ${kindId} is not available in ${catalogFormat(context.format)}`);
+  const limits = boardLimits(kind, context);
+  const maximum = Math.min(catalog.cadence.maxBoardWords ?? Infinity, limits.maxWords ?? Infinity);
+  return {...kind, schema: limits.schema, ...(Number.isFinite(maximum) ? {maxWords: maximum} : {})};
+}
 
 /**
  * The `oneOf` entries the authoring contract offers for `answerBeats[].visual`:
@@ -233,15 +310,16 @@ export const authorableBoardKinds = (catalog) => Object.values(catalog.kinds).fi
  * and its use/avoid guidance as the description. Motif fields become an enum
  * when the mounted motif list is known.
  */
-export function boardKindSchemas(catalog, { motifs = null } = {}) {
-  return authorableBoardKinds(catalog).map((kind) => {
-    const data = authoringNode(kind.schema, motifs);
+export function boardKindSchemas(catalog, { motifs = null, format } = {}) {
+  return authorableBoardKinds(catalog, format).map((kind) => {
+    const {schema, maxWords} = boardLimits(kind, {format});
+    const data = authoringNode(schema, motifs);
     return {
       type: "object",
       additionalProperties: false,
       required: [...kind.schema.required, "kind"],
       properties: { kind: { const: kind.id }, ...data.properties },
-      description: `${kind.label}: ${kind.use} Avoid: ${kind.avoid}`,
+      description: `${kind.label}: ${kind.use} Avoid: ${kind.avoid}${maxWords ? ` At most ${Math.min(maxWords, catalog.cadence.maxBoardWords ?? Infinity)} visible words across this board.` : ""}`,
     };
   });
 }
@@ -262,6 +340,7 @@ function walk(node, value, pathLabel, state) {
   if (node.type === "string") {
     if (!value.trim()) fail("must not be blank");
     if (node.minLength !== undefined && value.length < node.minLength) fail(`must be at least ${node.minLength} characters`);
+    if (node.maxLength !== undefined && value.length > node.maxLength) fail(`allows at most ${node.maxLength} characters (${value.length})`);
     const maximum = node["x-timds-maxWords"];
     if (maximum) {
       const count = words(value).length;
@@ -307,16 +386,18 @@ function walk(node, value, pathLabel, state) {
  * catalog's per-board word total. Returns the kind, the board's word total
  * (the sum over every budgeted field), and each cue value with its path.
  */
-export function validateBoardVisual({ catalog, visual, label = "visual", motifs = null }) {
+export function validateBoardVisual({ catalog, visual, label = "visual", motifs = null, format, overFootage }) {
   const board = requireObject(visual, label);
   const kindId = typeof board.kind === "string" ? board.kind.trim() : "";
   if (!SLUG.test(kindId)) throw new Error(`${label}.kind must use lowercase letters, numbers, and hyphens`);
   const kind = catalog.kinds[kindId];
   if (!kind) throw new Error(`${label}.kind ${kindId} is not declared in the board catalog (declared: ${Object.keys(catalog.kinds).join(", ")})`);
+  if (format !== undefined && kind.formats && !kind.formats.includes(catalogFormat(format))) throw new Error(`${label}.kind ${kindId} is not available in ${catalogFormat(format)}`);
   const { kind: _kind, ...data } = board;
   const state = { words: 0, cues: [], motifs };
-  walk(kind.schema, data, label, state);
-  const maximum = catalog.cadence.maxBoardWords;
+  const limits = format === undefined && overFootage === undefined ? {schema: kind.schema, maxWords: kind.maxWords} : boardLimits(kind, {format, overFootage});
+  walk(limits.schema, data, label, state);
+  const maximum = Math.min(catalog.cadence.maxBoardWords ?? Infinity, limits.maxWords ?? Infinity);
   if (maximum && state.words > maximum) throw new Error(`${label} (${kindId}) holds ${state.words} words; the catalog allows at most ${maximum} per board`);
   return { kind: kindId, words: state.words, cues: state.cues };
 }
@@ -394,11 +475,11 @@ export function validateBoardCadence({ catalog, scenes, label = "scenes", format
  * array carries no measured take, so its scene is skipped; enforcement starts
  * when words are present.
  */
-export function validateBoardCues({ catalog, scenes, lines, label = "scenes" }) {
+export function validateBoardCues({ catalog, scenes, lines, label = "scenes", format }) {
   const byId = new Map((Array.isArray(lines) ? lines : []).filter(Boolean).map((line) => [line.id, line]));
   for (const scene of Array.isArray(scenes) ? scenes : []) {
     if (!isBoard(scene) || !catalog.kinds[scene.visual.kind]) continue;
-    const { cues } = validateBoardVisual({ catalog, visual: scene.visual, label: `${label} scene ${scene.id}.visual` });
+    const { cues } = validateBoardVisual({ catalog, visual: scene.visual, label: `${label} scene ${scene.id}.visual`, ...(format !== undefined ? {format, overFootage: sceneFootageKeys(scene).length > 0} : {}) });
     if (!cues.length) continue;
     const line = byId.get(scene.id);
     if (!line || !Array.isArray(line.words)) continue;
@@ -462,10 +543,12 @@ export function boardCatalogSummary(catalog) {
         avoid: kind.avoid,
         overFootage: kind.overFootage,
         once: kind.once,
+        ...(kind.formats ? {formats: [...kind.formats]} : {}),
+        ...(kind.constraints ? {constraints: structuredClone(kind.constraints)} : {}),
         compilerOwned: COMPILER_OWNED_BOARD_KINDS.includes(kind.id),
         required: [...kind.schema.required],
         budgets: {
-          ...(catalog.cadence.maxBoardWords ? { maxWords: catalog.cadence.maxBoardWords } : {}),
+          ...(kind.maxWords || catalog.cadence.maxBoardWords ? { maxWords: Math.min(kind.maxWords ?? Infinity, catalog.cadence.maxBoardWords ?? Infinity) } : {}),
           fields,
         },
         ...(cues.length ? { cues } : {}),

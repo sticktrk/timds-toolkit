@@ -1660,6 +1660,19 @@ const boardRequest = (answerBeats) => ({
 });
 const beat = (id, extra = {}) => ({ id, role: "rule", narration: `The ${id} matters for your deed and your will.`, summary: `The ${id} matters`, ...extra });
 
+test("producer compile and finalize enforce layout limits using the actual footage context", async () => {
+  const boards = await boardTemplate();
+  boards.kinds.flow.overFootage = "optional";
+  boards.kinds.flow.constraints = [{when: {overFootage: true}, fields: {nodes: {maxItems: 3}}}];
+  const producer = createVideoProducer({contract: validateVideoContract(subscribeContract()), ...boardAssets(), boards});
+  const visual = {kind: "flow", nodes: ["Find", "Read", "Check", "Keep"].map((label) => ({label}))};
+  assert.throws(() => producer.compileProduction(boardRequest([beat("a", {visual, footage: ["footage-one"]})])), /answer beat a\.visual\.nodes allows at most 3 items/u);
+  assert.doesNotThrow(() => producer.compileProduction(boardRequest([beat("a", {visual})])));
+  const compiled = producer.compileProduction(boardRequest([beat("a", {visual: {...visual, nodes: visual.nodes.slice(0, 3)}, footage: ["footage-one"]})]));
+  compiled.scenes.find((scene) => scene.id === "a").visual = visual;
+  assert.throws(() => producer.finalizeProduction({schemaVersion: 1, compiled, timings: silentSceneTimings(compiled.scenes), audioSrc: null}), /finalize.*scene a\.visual\.nodes allows at most 3 items/u);
+});
+
 test("with a board catalog the horizontal authoring contract offers the declared kinds and their rules", async () => {
   const boards = await boardTemplate();
   const authoringFor = (raw, extra = {}, outputFormat = "horizontal") => createVideoAuthoringContract({
@@ -1705,6 +1718,12 @@ test("with a board catalog the horizontal authoring contract offers the declared
   const short = authoringFor({ ...raw, structure: { longform: { graphicScenes: true }, short: { graphicScenes: true } } }, { boards }, "short");
   assert.equal(short.inputSchema.properties.answerBeats.items.properties.visual, undefined, "the default catalog offers no Shorts boards");
   assert.equal(plain.boards, undefined);
+  const longformOnly = await boardTemplate();
+  longformOnly.formats.short = true;
+  for (const kind of Object.values(longformOnly.kinds)) kind.formats = ["longform"];
+  const noShortKinds = authoringFor({...raw, structure: {longform: {graphicScenes: true}, short: {graphicScenes: true}}}, {boards: longformOnly}, "short");
+  assert.equal(noShortKinds.boards.active, false);
+  assert.equal(noShortKinds.inputSchema.properties.answerBeats.items.properties.visual, undefined);
 });
 
 test("compileProduction holds each board to the catalog with a scene-level message", async () => {
@@ -1769,6 +1788,16 @@ const boardFixture = async (t, scenes, { boards, contract = {} } = {}) => {
   await writeJson(path.join(workspace.designSystemRoot, "video", "boards.json"), boards ?? await boardTemplate());
   return workspace;
 };
+
+test("video check enforces contextual item limits on committed footage boards", async (t) => {
+  const boards = await boardTemplate();
+  boards.kinds.cards.constraints = [{when: {overFootage: true}, fields: {items: {maxItems: 3}}}];
+  const scene = {id: "answer", visual: {kind: "cards", items: Array.from({length: 4}, () => ({label: "Record"}))}};
+  const wide = await boardFixture(t, [scene], {boards});
+  await assert.doesNotReject(checkVideoWorkspace(wide, {slug: "sample-topic"}));
+  const withFootage = await boardFixture(t, [{...scene, asset: "footage"}], {boards});
+  await assert.rejects(checkVideoWorkspace(withFootage, {slug: "sample-topic"}), /scene 2\.visual\.items allows at most 3 items/u);
+});
 
 test("video check holds committed boards to the catalog, its cadence, and its spoken cues", async (t) => {
   const answer = { id: "answer", headline: "A clear answer", asset: "footage" };

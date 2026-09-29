@@ -11,7 +11,7 @@ import { createVideoProducer, validateVideoProducerConfig } from "./video-produc
 import { validateVideoVerticalMetadata } from "./video-crops.mjs";
 import { deriveTokensFromArtifact } from "./extract.mjs";
 import { readDerivedTokens } from "./tokens.mjs";
-import { adjacentFootageRepeats, truncatedHeadline } from "../video/footage.mjs";
+import { adjacentFootageRepeats, sceneAssetKeys, truncatedHeadline } from "../video/footage.mjs";
 import { DEFAULT_BOARD_KINDS } from "../video/boards.mjs";
 import {
   COMPILER_OWNED_BOARD_KINDS,
@@ -545,7 +545,7 @@ function validateSceneVisual(scene, label, contract, format, boards = null) {
   // production in checkVideoWorkspace. As at compile time, an undeclared
   // compiler-owned board does not require a catalog entry.
   if (boards?.catalog && (boards.catalog.kinds[kind] || !COMPILER_OWNED_BOARD_KINDS.includes(kind))) {
-    validateBoardVisual({ catalog: boards.catalog, visual, label: `${label}.visual`, motifs: boards.motifs });
+    validateBoardVisual({ catalog: boards.catalog, visual, label: `${label}.visual`, motifs: boards.motifs, format, overFootage: sceneAssetKeys(scene).length > 0 });
   }
   return { ...visual, kind };
 }
