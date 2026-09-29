@@ -28,6 +28,7 @@ import {
   horizontalCoverScale,
   resolveCoverObjectPosition,
   resolveVideoProjectComponents,
+  SceneView,
   videoFontDeclaration,
   videoFontLoadWeight,
   VerticalCover,
@@ -181,7 +182,7 @@ const boardProject = (extra: Record<string, unknown> = {}) => ({
 // shifts that to the frame under test, so the markup is deterministic.
 const atFrame = (frame: number, node: React.ReactNode) => renderToStaticMarkup(
   <Internals.CanUseRemotionHooksProvider>
-    <Internals.TimelineContext.Provider value={{frame: {}, playing: false, rootId: "board-test", imperativePlaying: {current: false}, audioAndVideoTags: {current: []}}}>
+    <Internals.TimelineContext.Provider value={{frame: {"board-test": 0}, playing: false, rootId: "board-test", imperativePlaying: {current: false}, audioAndVideoTags: {current: []}}}>
     <Internals.SequenceContext.Provider value={{absoluteFrom: -frame, cumulatedFrom: -frame, cumulatedNegativeFrom: 0, relativeFrom: 0, parentFrom: 0, durationInFrames: 100000, id: "board-test", width: null, height: null, premounting: false, postmounting: false, premountDisplay: null, postmountDisplay: null}}>
       {node}
     </Internals.SequenceContext.Provider>
@@ -199,6 +200,31 @@ const boardSamples: Record<string, {visual: {kind: string; [key: string]: unknow
   document: {visual: {kind: "document", title: "Filing receipt", lines: [{label: "Filed", value: "March 3"}, {label: "Status", value: "Accepted", highlight: true}]}, copy: ["Filing receipt", "Filed", "March 3", "Status", "Accepted"]},
   subscribe: {visual: {kind: "subscribe", topic: "filing deadlines", solution: "file on time"}, copy: ["Do you want to know more about filing deadlines?", "Subscribe to learn how to file on time."]},
 };
+
+test("scene dispatch preserves legacy copy without a catalog and still honors explicit board overrides", () => {
+  const project = boardProject();
+  Object.assign(project.contract.brand, {logo: "logo.svg", watermark: {left: "", right: ""}});
+  const scene = {id: "legacy", headline: "Existing board headline", visual: {kind: "statement"}};
+  const props = {project, scene, line: {id: "legacy", durationMs: 3000, words: []}, duration: 90, lead: 0};
+  const visibleText = (node: React.ReactNode) => atFrame(89,
+    <Internals.CompositionManager.Provider value={{
+      compositions: [{id: "board-test", component: () => null, width: 1920, height: 1080, fps: 30, durationInFrames: 100000, defaultProps: {}}],
+      folders: [], currentCompositionMetadata: null, canvasContent: {type: "composition", compositionId: "board-test"},
+    }}>{node}</Internals.CompositionManager.Provider>,
+  ).replace(/<[^>]*>/gu, "").replaceAll("\u2060", "");
+  for (const vertical of [false, true]) {
+    assert.ok(visibleText(<SceneView {...props} vertical={vertical} />).includes(scene.headline));
+    const ClientStatement = () => <div>Client statement</div>;
+    assert.ok(visibleText(<SceneView {...props} vertical={vertical} components={{Boards: {statement: ClientStatement}}} />).includes("Client statement"));
+    const ClientGraphic = () => <div>Client graphic</div>;
+    assert.ok(visibleText(<SceneView {...props} vertical={vertical} components={{Graphic: ClientGraphic}} />).includes("Client graphic"));
+    const catalogProject = {...project, contract: {...project.contract, boards: {kinds: {statement: {}}}}};
+    const boardScene = {...scene, visual: {...scene.visual, text: "Catalog board text"}};
+    const withCatalog = visibleText(<SceneView {...props} project={catalogProject} scene={boardScene} vertical={vertical} />);
+    assert.ok(withCatalog.includes("Catalog board text"));
+    assert.ok(!withCatalog.includes(scene.headline));
+  }
+});
 
 test("the default Boards map covers exactly the default board kinds", () => {
   assert.deepEqual(Object.keys(defaultVideoProjectComponents.Boards), [...DEFAULT_BOARD_KINDS]);

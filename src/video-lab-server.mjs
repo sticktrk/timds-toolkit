@@ -138,12 +138,15 @@ export function stripSchemaExtensions(schema) {
 }
 
 /** The clips a beat may name, one per line, so the model picks by what each clip shows. */
-export function describeFootageCatalog(footage) {
+export function describeFootageCatalog(footage, { boardsActive = false } = {}) {
   const lines = footage.clips.map((clip) => {
     const tags = clip.tags.length ? ` (${clip.tags.join(", ")})` : "";
     return `- ${clip.key}: ${clip.title || clip.key}${tags} · ${clip.durationSeconds}s`;
   });
-  return `Footage catalog (${footage.clips.length} clips). Set each answer beat's footage to 1–${footage.maximumPerBeat} of these keys, best match first:\n${lines.join("\n")}`;
+  const instruction = boardsActive
+    ? `Set footage only for beats that play footage, using 1–${footage.maximumPerBeat} of these keys, best match first; omit footage for footage-free boards according to the board's overFootage rule`
+    : `Set each answer beat's footage to 1–${footage.maximumPerBeat} of these keys, best match first`;
+  return `Footage catalog (${footage.clips.length} clips). ${instruction}:\n${lines.join("\n")}`;
 }
 
 export function buildDraftMessages(authoring, request) {
@@ -155,7 +158,7 @@ export function buildDraftMessages(authoring, request) {
     `Write for the ${authoring.outputFormat === "short" ? "short (vertical, under a minute)" : "horizontal long-form"} format.`,
     `Constraints: ${JSON.stringify(constraints)}`,
     authoring.prompt.brief ? `Design System brief:\n${authoring.prompt.brief}` : "",
-    authoring.footage ? describeFootageCatalog(authoring.footage) : "",
+    authoring.footage ? describeFootageCatalog(authoring.footage, { boardsActive: authoring.boards?.active === true }) : "",
   ].filter(Boolean).join("\n\n");
   const user = [
     `schemaVersion: ${VIDEO_SCHEMA_VERSION}`,

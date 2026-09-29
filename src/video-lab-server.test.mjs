@@ -181,6 +181,33 @@ test("offers the subscribe board's solution to the draft and carries it onto the
   await assert.rejects(draftVideoLabInput(workspace, { outputFormat: "horizontal", question: "Should I keep these records?", slug: "records" }, { client: bare }), (caught) => caught.status === 400 && /topic\.solution/u.test(caught.message));
 });
 
+test("drafting with boards exempts footage-free boards from every footage instruction", async (t) => {
+  const workspace = await labFixture(t);
+  const contractPath = path.join(workspace.designSystemRoot, "video/contract.json");
+  const contract = JSON.parse(await fs.readFile(contractPath, "utf8"));
+  contract.structure.longform.graphicScenes = true;
+  await fs.writeFile(contractPath, JSON.stringify(contract));
+  const boards = await fs.readFile(new URL("../templates/video/boards.json", import.meta.url), "utf8");
+  await fs.writeFile(path.join(workspace.designSystemRoot, "video/boards.json"), boards);
+  const drafted = structuredClone(recordsInput);
+  drafted.answerBeats[0].visual = { kind: "chapter-title", number: 1, title: "Keep your records" };
+  drafted.answerBeats[1].footage = ["footage-two"];
+  const client = { beta: { messages: { create: async ({ system }) => {
+    assert.match(system, /Never over footage: omit footage on this beat/u);
+    assert.doesNotMatch(system, /For every answer beat, set footage/u);
+    assert.doesNotMatch(system, /Set each answer beat's footage/u);
+    assert.match(system, /For every answer beat that plays footage, set footage/u);
+    assert.match(system, /Set footage only for beats that play footage/u);
+    return { stop_reason: "end_turn", content: [{ type: "text", text: JSON.stringify(drafted) }] };
+  } } } };
+  const result = await draftVideoLabInput(workspace, { outputFormat: "horizontal", question: drafted.exactQuestion, slug: "records" }, { client });
+  assert.equal(result.plan.renderable, true);
+  const title = result.plan.scenes.find((scene) => scene.id === "keep");
+  assert.equal(title.visual, "chapter-title");
+  assert.deepEqual(title.footage, []);
+  assert.equal(result.plan.scenes.find((scene) => scene.id === "copies").footage[0], "footage-two");
+});
+
 test("drafts through an injected Claude client and validates the result through the producer", async (t) => {
   const workspace = await labFixture(t);
   const calls = [];

@@ -441,7 +441,8 @@ export function createVideoAuthoringContract({ contract, manifest, designSystemI
   };
   const footageInstructions = footage ? [
     "Do not write role eyebrows, CTA template copy, intro/outro structure, cover subjects, timing, safe zones, or layout; the compiler owns them.",
-    `For every answer beat, set footage to one to ${FOOTAGE_PICKS_PER_BEAT} ordered clip keys from footage.clips whose picture matches what the beat says, best match first. Judge a clip by its title and tags, not by its key.`,
+    `For every answer beat${boardsActive ? " that plays footage" : ""}, set footage to one to ${FOOTAGE_PICKS_PER_BEAT} ordered clip keys from footage.clips whose picture matches what the beat says, best match first. Judge a clip by its title and tags, not by its key.`,
+    ...(boardsActive ? ["Omit footage for footage-free boards: always omit it when the kind's overFootage is never, always set it when overFootage is always, and choose either when overFootage is optional. A beat without a visual, including a boardGap beat, plays footage."] : []),
     "Spread footage across the beats: do not name a clip in a second beat while an unused clip fits, and never place a clip directly after its own family (a key and its -mirrored, -offset, or -vertical sibling are one picture).",
     "The compiler plays each beat's picks in order at natural speed, fills any remaining time from the catalog, and enforces the chain rules; you choose what the viewer sees first.",
   ] : [

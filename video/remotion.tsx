@@ -673,18 +673,19 @@ const defaultBoards = {
 /**
  * The boards a scene may mount by kind. A client that supplies its own
  * `Graphic` owns every kind it does not register in `Boards`, so the TimDS
- * defaults apply only when it supplies no `Graphic`; any kind missing from
- * this map draws through `Graphic`.
+ * defaults apply only when it supplies no `Graphic` and has adopted a board
+ * catalog; any kind missing from this map draws through `Graphic`.
  */
-const resolveVideoBoards = (components: VideoProjectComponentOverrides | undefined): Record<string, React.ComponentType<VideoProjectBoardProps>> =>
-  components?.Graphic ? {...components.Boards} : {...defaultBoards, ...components?.Boards};
+const resolveVideoBoards = (components: VideoProjectComponentOverrides | undefined, useDefaults = true): Record<string, React.ComponentType<VideoProjectBoardProps>> =>
+  components?.Graphic || !useDefaults ? {...components?.Boards} : {...defaultBoards, ...components?.Boards};
 
 /**
  * The component that draws `kind`: the client's `Boards[kind]`, then the
- * client's `Graphic`, then the TimDS default board, then the copy fallback.
+ * client's `Graphic`, then (with a catalog) the TimDS default board, then the
+ * copy fallback. Explicit client Boards work with or without a catalog.
  */
-const resolveVideoBoardComponent = (components: VideoProjectComponentOverrides | undefined, kind: string): React.ComponentType<VideoProjectBoardProps> => {
-  const boards = resolveVideoBoards(components);
+const resolveVideoBoardComponent = (components: VideoProjectComponentOverrides | undefined, kind: string, useDefaults = true): React.ComponentType<VideoProjectBoardProps> => {
+  const boards = resolveVideoBoards(components, useDefaults);
   return Object.hasOwn(boards, kind) ? boards[kind] : components?.Graphic ?? GraphicBoard;
 };
 
@@ -699,7 +700,7 @@ const SceneView: React.FC<VideoProjectSceneProps> = ({project, scene, line, dura
     // names clips, otherwise on the brand background. Watermark and captions
     // stay TimDS-owned so every board keeps the brand frame. A kind with no
     // registered board falls back to Graphic, which draws the scene copy.
-    const BoardComponent = resolveVideoBoardComponent(components, scene.visual.kind);
+    const BoardComponent = resolveVideoBoardComponent(components, scene.visual.kind, Boolean(project.contract.boards));
     return <AbsoluteFill>
       {assetKeys.length ? <Media project={project} scene={scene} duration={duration} vertical={vertical} /> : null}
       <BoardComponent project={project} scene={scene} visual={scene.visual} line={line} duration={duration} lead={lead} overFootage={assetKeys.length > 0} vertical={vertical} />

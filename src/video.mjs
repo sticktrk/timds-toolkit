@@ -14,6 +14,7 @@ import { readDerivedTokens } from "./tokens.mjs";
 import { adjacentFootageRepeats, truncatedHeadline } from "../video/footage.mjs";
 import { DEFAULT_BOARD_KINDS } from "../video/boards.mjs";
 import {
+  COMPILER_OWNED_BOARD_KINDS,
   boardCatalogSummary,
   validateBoardCadence,
   validateBoardCatalog,
@@ -541,8 +542,11 @@ function validateSceneVisual(scene, label, contract, format, boards = null) {
   const kind = slug(visual.kind, `${label}.visual.kind`);
   // With a board catalog, a committed board is held to its declared kind:
   // fields, budgets, and motifs. Cadence and cues run over the whole
-  // production in checkVideoWorkspace.
-  if (boards?.catalog) validateBoardVisual({ catalog: boards.catalog, visual, label: `${label}.visual`, motifs: boards.motifs });
+  // production in checkVideoWorkspace. As at compile time, an undeclared
+  // compiler-owned board does not require a catalog entry.
+  if (boards?.catalog && (boards.catalog.kinds[kind] || !COMPILER_OWNED_BOARD_KINDS.includes(kind))) {
+    validateBoardVisual({ catalog: boards.catalog, visual, label: `${label}.visual`, motifs: boards.motifs });
+  }
   return { ...visual, kind };
 }
 

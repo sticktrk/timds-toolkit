@@ -550,6 +550,12 @@ the mount (`.svg` preferred when several share a stem);
 client component file that exports `Graphic` counts as drawing every declared
 kind.
 
+Without a catalog, the default scene keeps rendering the existing headline
+fallback. Built-in board components are selected automatically only after
+catalog adoption; explicit client `Boards` and `Graphic` overrides still apply.
+Drafting instructions follow each kind's `overFootage` rule, so footage-free
+boards omit clip picks while ordinary beats keep them.
+
 When any scene has a `chapter`, `finalizeProduction` adds
 `plan.chapters: [{ id, label, startMs }]`. A `chapter-title` board's title
 labels its chapter, otherwise the id is title-cased, and `startMs` is where the

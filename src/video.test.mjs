@@ -1815,6 +1815,36 @@ test("motif fields resolve from the catalog's static mount", async (t) => {
   await assert.rejects(checkVideoWorkspace(mounted, { slug: "sample-topic" }), /names motif "house", which is not a mounted motif \(available: will\)/u);
 });
 
+test("committed subscribe boards may be absent from the catalog in longform and Shorts", async (t) => {
+  const boards = await boardTemplate();
+  delete boards.kinds.subscribe;
+  const subscribe = { id: "subscribe", visual: { kind: "subscribe", topic: "important records", solution: "keep every record" } };
+  const workspace = await boardFixture(t, [{ id: "answer", headline: "A clear answer", asset: "footage" }, subscribe], {
+    boards,
+    contract: { structure: { longform: { requireIntro: true, requireOutro: true, graphicScenes: true }, short: { graphicScenes: true } } },
+  });
+  const productionPath = path.join(workspace.designSystemRoot, "video/productions/sample-topic/production.json");
+  const production = JSON.parse(await fs.readFile(productionPath, "utf8"));
+  production.shorts[0].harvest.push(subscribe.id);
+  production.shorts[0].scenes.push(subscribe);
+  await writeJson(productionPath, production);
+  assert.equal((await checkVideoWorkspace(workspace)).productionCount, 1);
+  const prepared = await prepareVideoWorkspace(workspace, "sample-topic");
+  assert.deepEqual(prepared.project.records.production.longform.scenes.find((scene) => scene.id === "subscribe").visual, subscribe.visual);
+  assert.deepEqual(prepared.project.records.production.shorts[0].scenes.at(-1).visual, subscribe.visual);
+
+  // The exception is only for undeclared compiler-owned kinds. A declared
+  // subscribe still obeys its schema, and an unknown authored kind fails.
+  const declared = await boardTemplate();
+  declared.kinds.subscribe.schema.properties.topic["x-timds-maxWords"] = 1;
+  await writeJson(path.join(workspace.designSystemRoot, "video/boards.json"), declared);
+  await assert.rejects(checkVideoWorkspace(workspace), /scene 3\.visual\.topic exceeds 1 words/u);
+  await writeJson(path.join(workspace.designSystemRoot, "video/boards.json"), boards);
+  production.longform.scenes[2].visual.kind = "timeline";
+  await writeJson(productionPath, production);
+  await assert.rejects(checkVideoWorkspace(workspace), /visual\.kind timeline is not declared/u);
+});
+
 test("video check fails when the catalog's kinds and the registered Boards disagree", async (t) => {
   const scenes = [{ id: "answer", headline: "A clear answer", asset: "footage" }];
   const extended = await boardTemplate();
