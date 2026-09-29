@@ -56,10 +56,17 @@ export type BoardSchemaNode = {
   maxItems?: number;
   minimum?: number;
   minLength?: number;
+  maxLength?: number;
   "x-timds-maxWords"?: number;
   "x-timds-motif"?: true;
   "x-timds-cue"?: true;
   "x-timds-substringOf"?: string;
+};
+export type BoardConstraint = {
+  when: {format?: "longform" | "short"; overFootage?: boolean};
+  maxWords?: number;
+  /** Dot-separated object-property paths in the kind's schema. Limits only tighten the base schema. */
+  fields?: Record<string, Pick<BoardSchemaNode, "minItems" | "maxItems" | "minLength" | "maxLength" | "x-timds-maxWords">>;
 };
 /** A Design System's video/boards.json (raw or normalized). */
 export type VideoBoardCatalog = {
@@ -67,7 +74,7 @@ export type VideoBoardCatalog = {
   formats?: {longform?: boolean; short?: boolean};
   cadence?: {maxConsecutiveFootageFree?: number | null; chapterReturnsToFootage?: boolean; minimumChapters?: number | null; maxBoardWords?: number | null};
   motifs?: {mount: string};
-  kinds: Record<string, {label: string; use: string; avoid: string; overFootage?: "never" | "optional" | "always"; once?: boolean; schema: BoardSchemaNode}>;
+  kinds: Record<string, {label: string; use: string; avoid: string; overFootage?: "never" | "optional" | "always"; once?: boolean; schema: BoardSchemaNode; formats?: Array<"longform" | "short">; maxWords?: number; constraints?: BoardConstraint[]}>;
 };
 export type VideoBoardCatalogSummary = {
   schemaVersion: 1;
@@ -81,6 +88,8 @@ export type VideoBoardCatalogSummary = {
     avoid: string;
     overFootage: "never" | "optional" | "always";
     once: boolean;
+    formats?: Array<"longform" | "short">;
+    constraints?: BoardConstraint[];
     compilerOwned: boolean;
     required: string[];
     budgets: {maxWords?: number; fields: Record<string, number>};
@@ -88,6 +97,7 @@ export type VideoBoardCatalogSummary = {
     motifs?: string[];
   }>;
 };
+export declare function resolveBoardKind(catalog: VideoBoardCatalog, kind: string, context: {format: ProducerOutputFormat | "longform"; overFootage: boolean}): VideoBoardCatalog["kinds"][string];
 export type ProducerAuthoringContract = {
   schemaVersion: 2;
   producerContractVersion: number;

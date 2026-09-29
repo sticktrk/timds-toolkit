@@ -119,6 +119,18 @@ the `brand.staticFiles` mount named by `motifs.mount`), `x-timds-cue` fields
 chapter minimum once chapters are used, total words per board) apply to every
 production.
 
+Kinds may also declare `formats`, a `maxWords` total, and contextual
+`constraints`: `when.format` (`longform` or `short`) and/or
+`when.overFootage` selects tighter field limits and word budgets. Check the
+actual format and footage combination with the producer before rendering;
+a board that fits a footage-free horizontal frame may not fit over footage
+or in a Short. The drafting schema uses limits safe for every permitted
+footage layout of its format. Keep these rules in the client's catalog and
+have custom components read them with `resolveBoardKind` from
+`@dtconcepts/timds/video/producer`. Install a compatible TimDS release on all
+hosts before adopting contextual constraints; do not bypass an older host's
+unknown-field error or remove limits to make a render pass.
+
 A format offers boards only when both the catalog's `formats` and the
 contract's `structure.<format>.graphicScenes` are on; `video init` scaffolds
 the default catalog with `graphicScenes: false`, so turn the structure flag on

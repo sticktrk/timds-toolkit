@@ -279,7 +279,7 @@ const boardCatalogFor = (boards, motifs) => {
 const boardsActiveFor = (catalog, contract, outputFormat) => Boolean(catalog
   && boardFormatEnabled(catalog, outputFormat)
   // A catalog of compiler-owned kinds only has nothing a model may author.
-  && authorableBoardKinds(catalog).length > 0
+  && authorableBoardKinds(catalog, outputFormat).length > 0
   && contract.structure?.[outputFormat === "short" ? "short" : "longform"]?.graphicScenes === true);
 
 const yesNoQuestionPattern = "^(?:[Aa][Rr][Ee]|[Cc][Aa][Nn]|[Cc][Oo][Uu][Ll][Dd]|[Dd][Ii][Dd]|[Dd][Oo]|[Dd][Oo][Ee][Ss]|[Hh][Aa][Ss]|[Hh][Aa][Vv][Ee]|[Ii][Ss]|[Ss][Hh][Oo][Uu][Ll][Dd]|[Ww][Aa][Ss]|[Ww][Ee][Rr][Ee]|[Ww][Ii][Ll][Ll]|[Ww][Oo][Uu][Ll][Dd])\\b";
@@ -426,7 +426,7 @@ export function createVideoAuthoringContract({ contract, manifest, designSystemI
             ...(boardsActive ? {
               visual: {
                 description: "Optional graphic board for this beat, chosen only from the Design System's declared kinds; omit it when the beat is best shown as footage",
-                oneOf: boardKindSchemas(boardCatalog, { motifs: boardMotifs }),
+                oneOf: boardKindSchemas(boardCatalog, { motifs: boardMotifs, format: outputFormat }),
               },
               boardGap: {
                 type: "string",
@@ -467,7 +467,7 @@ export function createVideoAuthoringContract({ contract, manifest, designSystemI
         ...(subscribeActive ? [
           `Set topic.solution to the outcome this answer helps the viewer reach, as a short verb phrase; the compiler speaks it on the subscribe board after answer beat ${config.subscribe.afterBeat}.${solutionRequired ? "" : " Omit it only when the answer promises no concrete outcome, and the board is then skipped."}`,
         ] : []),
-        ...(boardsActive ? boardInstructions(boardCatalog) : [
+        ...(boardsActive ? boardInstructions(boardCatalog, outputFormat) : [
           "Group consecutive beats with a shared chapter id only when the brief asks for chapters; otherwise omit chapter. Never write a visual: board kinds belong to the Design System's components.",
         ]),
         ...footageInstructions,
@@ -500,11 +500,11 @@ export function createVideoAuthoringContract({ contract, manifest, designSystemI
 }
 
 /** What the drafting model reads about the shelf: one line per kind, then the cadence in words. */
-function boardInstructions(catalog) {
+function boardInstructions(catalog, format) {
   return [
     "Group consecutive beats with a shared chapter id when the brief asks for chapters; otherwise omit chapter.",
     "A beat may carry one graphic board in visual. Choose only declared kinds; a beat with no fitting board keeps footage and records boardGap.",
-    ...authorableBoardKinds(catalog).map((kind) => `Board ${kind.id} (${kind.label}): ${kind.use} Avoid: ${kind.avoid}${kind.overFootage === "never" ? " Never over footage: omit footage on this beat." : kind.overFootage === "always" ? " Always over footage: name footage on this beat." : ""}${kind.once ? " At most once per video." : ""}`),
+    ...authorableBoardKinds(catalog, format).map((kind) => `Board ${kind.id} (${kind.label}): ${kind.use} Avoid: ${kind.avoid}${kind.overFootage === "never" ? " Never over footage: omit footage on this beat." : kind.overFootage === "always" ? " Always over footage: name footage on this beat." : ""}${kind.once ? " At most once per video." : ""}`),
     ...describeBoardCadence(catalog),
     `Never write a ${COMPILER_OWNED_BOARD_KINDS.join(" or ")} board; the compiler inserts it.`,
   ];
@@ -582,7 +582,7 @@ export function createVideoProducer({ contract, assetCatalog, mediaCatalog, vert
         slugSafe(beat.visual.kind, `producer answer beat ${id}.visual.kind`);
         if (boardCatalog) {
           if (COMPILER_OWNED_BOARD_KINDS.includes(beat.visual.kind)) fail(`answer beat ${id}.visual.kind ${beat.visual.kind} is compiler-owned; the producer inserts it`);
-          guarded(() => validateBoardVisual({ catalog: boardCatalog, visual: beat.visual, label: `answer beat ${id}.visual`, motifs: boardMotifs }));
+          guarded(() => validateBoardVisual({ catalog: boardCatalog, visual: beat.visual, label: `answer beat ${id}.visual`, motifs: boardMotifs, format: input.outputFormat, overFootage: footage.length > 0 }));
         }
       }
       if (beat.chapter !== undefined && beat.chapter !== null) slugSafe(beat.chapter, `producer answer beat ${id}.chapter`);
@@ -647,7 +647,7 @@ export function createVideoProducer({ contract, assetCatalog, mediaCatalog, vert
       // declares it; a catalog without subscribe still gets the board as before.
       for (const scene of scenes) {
         if (scene.visual && COMPILER_OWNED_BOARD_KINDS.includes(scene.visual.kind) && boardCatalog.kinds[scene.visual.kind]) {
-          guarded(() => validateBoardVisual({ catalog: boardCatalog, visual: scene.visual, label: `scene ${scene.id}.visual`, motifs: boardMotifs }));
+          guarded(() => validateBoardVisual({ catalog: boardCatalog, visual: scene.visual, label: `scene ${scene.id}.visual`, motifs: boardMotifs, format: input.outputFormat, overFootage: false }));
         }
       }
       guarded(() => validateBoardCadence({ catalog: boardCatalog, scenes, label: `compile request ${productionSlug}`, format: input.outputFormat }));
@@ -749,7 +749,7 @@ export function createVideoProducer({ contract, assetCatalog, mediaCatalog, vert
     const timingById = new Map(input.timings.map((line) => [line.id, line]));
     // Cues are checked against the measured take. A timing without a words
     // array carries no take to check, so its scene is skipped.
-    if (boardCatalog) guarded(() => validateBoardCues({ catalog: boardCatalog, scenes: input.compiled.scenes, lines: input.timings, label: `finalize ${input.compiled.slug}` }));
+    if (boardCatalog) guarded(() => validateBoardCues({ catalog: boardCatalog, scenes: input.compiled.scenes, lines: input.timings, label: `finalize ${input.compiled.slug}`, format: input.compiled.outputFormat }));
     const selectedByScene = new Map();
     // How often each clip has played so far in this production, so later
     // scenes reach for clips the viewer has not seen yet.
@@ -835,3 +835,4 @@ export function createVideoProducer({ contract, assetCatalog, mediaCatalog, vert
 }
 
 export { PRODUCER_SCHEMA_VERSION as VIDEO_PRODUCER_CONTRACT_VERSION };
+export { resolveBoardKind } from "./video-boards.mjs";

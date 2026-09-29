@@ -517,7 +517,7 @@ unregistered). TimDS owns the mechanism, the client owns the vocabulary:
 
 Each kind's `schema` is a closed JSON-Schema subset (`type`, `properties`,
 `required`, `additionalProperties`, `items`, `minItems`, `maxItems`, `enum`,
-`const`, `minimum`, `minLength`, `description`) plus `x-timds-maxWords` (a
+`const`, `minimum`, `minLength`, `maxLength`, `description`) plus `x-timds-maxWords` (a
 field's word budget; budgeted fields also sum against `cadence.maxBoardWords`),
 `x-timds-motif` (a file stem in the `brand.staticFiles` mount named by
 `motifs.mount`), `x-timds-cue` (one word the scene's narration must speak), and
@@ -525,6 +525,26 @@ field's word budget; budgeted fields also sum against `cadence.maxBoardWords`),
 schema never declares `kind`. A format offers boards only when both the
 catalog's `formats` and the contract's `structure.<format>.graphicScenes` are
 on.
+
+Kinds may restrict `formats` to `["longform"]` or `["short"]`, set a
+`maxWords` total, and declare `constraints` for narrower layouts. For example,
+`{"when":{"overFootage":true},"maxWords":14,"fields":{"nodes":{"maxItems":3}}}`
+tightens a flow over footage; a separate rule with `when.format: "short"`
+applies to every Short. When both selectors occur in one `when`, both must
+match. Field paths name object properties in the base schema, such as
+`left.items`; their numeric limits may only tighten that schema. All matching
+rules apply, and the smallest word budget wins. These are client-owned limits:
+TimDS does not infer geometry or change visual components.
+
+Compilation, finalization, and `video check` use the scene's actual format and
+footage. The model's visual schema uses the intersection of permitted footage
+layouts for the requested format, because footage is chosen alongside the
+visual. This safe subset prevents a draft from requesting a board that only
+fits a wider layout; an explicit compile request can still use the larger
+board in its supported context. Existing catalogs need no migration. To adopt
+constraints, first release and install a compatible TimDS version on all
+producer and renderer hosts, then declare the client limits; older versions
+reject the new fields rather than silently ignoring them.
 
 With a catalog, the authoring contract (schema version 2) exposes
 `answerBeats[].visual` as a `oneOf` of the declared kinds with their use/avoid

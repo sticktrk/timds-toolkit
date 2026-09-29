@@ -8,6 +8,7 @@ import {
   boardCatalogSummary,
   boardKindSchemas,
   describeBoardCadence,
+  resolveBoardKind,
   validateBoardCadence,
   validateBoardCatalog,
   validateBoardComponents,
@@ -20,6 +21,75 @@ const templatePath = path.join(path.dirname(fileURLToPath(import.meta.url)), "..
 const template = async () => JSON.parse(await fs.readFile(templatePath, "utf8"));
 const catalogWith = async (patch = {}) => validateBoardCatalog({ ...(await template()), ...patch });
 const clone = (value) => JSON.parse(JSON.stringify(value));
+
+const constrainedCatalog = async () => {
+  const raw = await template();
+  raw.formats.short = true;
+  raw.kinds.flow.overFootage = "optional";
+  raw.kinds.flow.schema.properties.nodes.maxItems = 4;
+  raw.kinds.flow.maxWords = 24;
+  raw.kinds.flow.constraints = [
+    {when: {overFootage: true}, maxWords: 16, fields: {nodes: {maxItems: 3}}},
+    {when: {format: "short"}, maxWords: 16, fields: {nodes: {maxItems: 3}}},
+  ];
+  raw.kinds["chapter-title"].formats = ["longform"];
+  return validateBoardCatalog(raw);
+};
+
+test("context limits reject an oversized footage board while preserving its larger full-frame layout", async () => {
+  const catalog = await constrainedCatalog();
+  assert.deepEqual(validateBoardCatalog(catalog), catalog);
+  const visual = {kind: "flow", nodes: Array.from({length: 4}, () => ({label: "A step"}))};
+  const check = (format, overFootage) => validateBoardVisual({catalog, visual, format, overFootage});
+  assert.doesNotThrow(() => check("horizontal", false));
+  for (const [format, overFootage] of [["horizontal", true], ["short", false], ["short", true]]) {
+    assert.throws(() => check(format, overFootage), /nodes allows at most 3 items \(4\)/u);
+  }
+  for (const format of ["horizontal", "short"]) {
+    const flow = boardKindSchemas(catalog, {format}).find((entry) => entry.properties.kind.const === "flow");
+    assert.equal(flow.properties.nodes.maxItems, 3, "the drafting schema is safe before footage is chosen");
+    assert.match(flow.description, /At most 16 visible words/u);
+  }
+  assert.equal(resolveBoardKind(catalog, "flow", {format: "horizontal", overFootage: false}).schema.properties.nodes.maxItems, 4);
+  assert.equal(resolveBoardKind(catalog, "flow", {format: "short", overFootage: false}).maxWords, 16);
+  const summary = boardCatalogSummary(catalog).kinds.find((kind) => kind.id === "flow");
+  assert.deepEqual(summary.constraints, catalog.kinds.flow.constraints);
+});
+
+test("context word budgets and kind formats are enforced before rendering", async () => {
+  const catalog = await constrainedCatalog();
+  const visual = {kind: "flow", nodes: Array.from({length: 3}, () => ({label: "One two three four"})), outcome: "One two three four five"};
+  assert.doesNotThrow(() => validateBoardVisual({catalog, visual, format: "horizontal", overFootage: false}));
+  assert.throws(() => validateBoardVisual({catalog, visual, format: "horizontal", overFootage: true}), /holds 17 words.*at most 16/u);
+  assert.throws(() => validateBoardVisual({catalog, visual: {kind: "chapter-title", number: 1, title: "Start"}, format: "short", overFootage: false}), /not available in short/u);
+  assert.ok(!boardKindSchemas(catalog, {format: "short"}).some((entry) => entry.properties.kind.const === "chapter-title"));
+});
+
+test("constraint selectors and field limits are strict and cannot loosen a kind", async () => {
+  const catalog = await constrainedCatalog();
+  for (const [rule, error] of [
+    [{when: {}, maxWords: 16}, /needs format or overFootage/u],
+    [{when: {format: "portrait"}, maxWords: 16}, /must be longform or short/u],
+    [{when: {overFootage: "yes"}, maxWords: 16}, /must be a boolean/u],
+    [{when: {vertical: true}, maxWords: 16}, /unknown field vertical/u],
+    [{when: {overFootage: true}, fields: {missing: {maxItems: 2}}}, /unknown schema field missing/u],
+    [{when: {overFootage: true}, fields: {nodes: {maxItems: 5}}}, /must not loosen/u],
+    [{when: {overFootage: true}, fields: {nodes: {maxLength: 3}}}, /unsupported schema keyword maxLength for type array/u],
+    [{when: {overFootage: true}, fields: {nodes: {maxItems: 1}}}, /minItems must not exceed/u],
+  ]) {
+    const broken = clone(catalog);
+    broken.kinds.flow.constraints = [rule];
+    assert.throws(() => validateBoardCatalog(broken), error);
+  }
+});
+
+test("string character limits reach validation and the authoring schema", async () => {
+  const raw = await template();
+  raw.kinds.statement.schema.properties.text.maxLength = 5;
+  const catalog = validateBoardCatalog(raw);
+  assert.throws(() => validateBoardVisual({catalog, visual: {kind: "statement", text: "123456"}}), /at most 5 characters/u);
+  assert.equal(boardKindSchemas(catalog).find((entry) => entry.properties.kind.const === "statement").properties.text.maxLength, 5);
+});
 
 test("the default catalog declares exactly the default board kinds and validates idempotently", async () => {
   const raw = await template();
