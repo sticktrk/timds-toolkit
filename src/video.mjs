@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { existsSync, promises as fs } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { syncDefaults } from "./defaults.mjs";
 import { fileSha256, readLocalMediaManifest, readMediaCatalog } from "./media.mjs";
@@ -12,6 +12,16 @@ import { validateVideoVerticalMetadata } from "./video-crops.mjs";
 import { deriveTokensFromArtifact } from "./extract.mjs";
 import { readDerivedTokens } from "./tokens.mjs";
 import { adjacentFootageRepeats, truncatedHeadline } from "../video/footage.mjs";
+import { DEFAULT_BOARD_KINDS } from "../video/boards.mjs";
+import {
+  COMPILER_OWNED_BOARD_KINDS,
+  boardCatalogSummary,
+  validateBoardCadence,
+  validateBoardCatalog,
+  validateBoardComponents,
+  validateBoardCues,
+  validateBoardVisual,
+} from "./video-boards.mjs";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(import.meta.url);
@@ -142,8 +152,70 @@ export function normalizeVideoManifest(value) {
     components: video.components
       ? safeRelativePath(video.components, "timds.json video.components")
       : null,
+    // Null means "not named": the loader then reads video/boards.json when it
+    // exists. A named catalog is required.
+    boards: video.boards ? safeRelativePath(video.boards, "timds.json video.boards") : null,
   };
 }
+
+const DEFAULT_BOARDS_PATH = "video/boards.json";
+
+/**
+ * The Design System's board catalog, validated, or null when it has none: the
+ * file timds.json names under video.boards (required), else video/boards.json
+ * when present. Reading it needs no contract, so extract can publish the shelf
+ * even before the video workspace is complete.
+ */
+export async function readVideoBoardCatalog(workspace) {
+  const video = workspace.manifest?.video;
+  if (!video) return null;
+  const relative = video.boards || DEFAULT_BOARDS_PATH;
+  const boardsPath = path.join(workspace.designSystemRoot, relative);
+  const raw = await readJson(boardsPath, "video boards", { required: Boolean(video.boards) });
+  if (!raw) return null;
+  return { catalog: validateBoardCatalog(raw, { label: `video boards (${relative})` }), boardsPath };
+}
+
+/**
+ * The motifs a board catalog's `motifs.mount` offers: the files in that
+ * `brand.staticFiles` mount. `names` is the motif enum (file stems,
+ * deduplicated and sorted); `files` maps each stem to the file a component
+ * draws, relative to the mount, preferring `.svg` when several files share a
+ * stem and otherwise the first file name in sort order. Null when the catalog
+ * names no mount. A remote producer host calls this with the Design System
+ * checkout to enforce motifs the way `video check` does.
+ */
+export async function resolveVideoBoardMotifs({ designSystemRoot, catalog, contract }) {
+  if (!catalog?.motifs) return null;
+  const { mount } = catalog.motifs;
+  const staticFiles = contract?.brand?.staticFiles || [];
+  const entry = staticFiles.find((candidate) => candidate.mount === mount);
+  if (!entry) {
+    throw new Error(`video boards motifs.mount ${mount} is not a brand.staticFiles mount in the video contract (declared: ${staticFiles.map((candidate) => candidate.mount).join(", ") || "none"})`);
+  }
+  const directory = path.join(designSystemRoot, entry.path);
+  let entries;
+  try {
+    entries = await fs.readdir(directory, { withFileTypes: true });
+  } catch (caught) {
+    if (caught?.code === "ENOENT" || caught?.code === "ENOTDIR") throw new Error(`video boards motifs.mount ${mount} needs a directory at ${entry.path}`);
+    throw caught;
+  }
+  const names = entries.filter((file) => file.isFile() && !file.name.startsWith(".")).map((file) => file.name).sort();
+  const files = {};
+  for (const name of names) {
+    const stem = name.replace(/\.[^.]+$/u, "");
+    if (!stem) continue;
+    const current = files[stem];
+    if (!current || (!/\.svg$/iu.test(current) && /\.svg$/iu.test(name))) files[stem] = name;
+  }
+  return { names: Object.keys(files).sort(), files: Object.fromEntries(Object.keys(files).sort().map((stem) => [stem, files[stem]])) };
+}
+
+/** The catalog a staged project carries: default boards read the motif mount and each motif's file from it. */
+const stagedBoardCatalog = (video) => (video.boards
+  ? { ...video.boards, ...(video.boards.motifs ? { motifs: { ...video.boards.motifs, files: video.motifFiles || {} } } : {}) }
+  : null);
 
 const optionalText = (value, label) => (value === undefined || value === null || value === "" ? undefined : text(value, label));
 
@@ -462,20 +534,27 @@ export function isGraphicScene(scene) {
   return Boolean(scene && !scene.intro && !scene.outro && scene.visual && typeof scene.visual === "object");
 }
 
-function validateSceneVisual(scene, label, contract, format) {
+function validateSceneVisual(scene, label, contract, format, boards = null) {
   if (scene.visual === undefined || scene.visual === null) return undefined;
   const structure = contract.structure[format === "short" ? "short" : "longform"];
   if (!structure.graphicScenes) throw new Error(`${label}.visual needs structure.${format === "short" ? "short" : "longform"}.graphicScenes enabled in the video contract`);
   const visual = object(scene.visual, `${label}.visual`);
   const kind = slug(visual.kind, `${label}.visual.kind`);
+  // With a board catalog, a committed board is held to its declared kind:
+  // fields, budgets, and motifs. Cadence and cues run over the whole
+  // production in checkVideoWorkspace. As at compile time, an undeclared
+  // compiler-owned board does not require a catalog entry.
+  if (boards?.catalog && (boards.catalog.kinds[kind] || !COMPILER_OWNED_BOARD_KINDS.includes(kind))) {
+    validateBoardVisual({ catalog: boards.catalog, visual, label: `${label}.visual`, motifs: boards.motifs });
+  }
   return { ...visual, kind };
 }
 
-function validateScene(scene, label, contract, format) {
+function validateScene(scene, label, contract, format, boards = null) {
   object(scene, label);
   const id = slug(scene.id, `${label}.id`);
   if (scene.intro && scene.outro) throw new Error(`${label} cannot be both intro and outro`);
-  const visual = validateSceneVisual(scene, label, contract, format);
+  const visual = validateSceneVisual(scene, label, contract, format, boards);
   if (scene.chapter !== undefined && scene.chapter !== null) slug(scene.chapter, `${label}.chapter`);
   if (!scene.intro && !scene.outro && visual) {
     // A board owns its copy; a headline box is optional and, when present,
@@ -527,7 +606,7 @@ function assertNoAdjacentFootageRepeats(scenes, label) {
   }
 }
 
-function validateProduction(records, contract, assetCatalog, label) {
+function validateProduction(records, contract, assetCatalog, label, boards = null) {
   const { production, captions, publishing, request, script } = records;
   if (Number(production.schemaVersion) !== VIDEO_SCHEMA_VERSION) throw new Error(`${label}/production.json schemaVersion must be ${VIDEO_SCHEMA_VERSION}`);
   const productionSlug = slug(production.slug, `${label}/production.json slug`);
@@ -536,7 +615,7 @@ function validateProduction(records, contract, assetCatalog, label) {
   const lineIds = new Set(lines.map((line) => line.id));
   const linesById = new Map(lines.map((line) => [line.id, line]));
   const longform = object(production.longform, `${label}/production.json longform`);
-  const longScenes = (longform.scenes || []).map((scene, index) => validateScene(scene, `${label} longform scene ${index + 1}`, contract, "horizontal"));
+  const longScenes = (longform.scenes || []).map((scene, index) => validateScene(scene, `${label} longform scene ${index + 1}`, contract, "horizontal", boards));
   if (!longScenes.length) throw new Error(`${label} needs longform scenes`);
   if (contract.structure.longform.requireIntro && !longScenes[0].intro) throw new Error(`${label} longform must begin with intro`);
   if (contract.structure.longform.requireOutro && !longScenes.at(-1).outro) throw new Error(`${label} longform must end with outro`);
@@ -549,7 +628,7 @@ function validateProduction(records, contract, assetCatalog, label) {
     const harvest = Array.isArray(short.harvest) ? short.harvest.map((line) => slug(line, `${label} short ${id} harvest`)) : [];
     if (!harvest.length) throw new Error(`${label} short ${id} needs harvest line ids`);
     for (const line of harvest) if (!lineIds.has(line)) throw new Error(`${label} short ${id} references missing line ${line}`);
-    const scenes = (short.scenes || []).map((scene, index) => validateScene(scene, `${label} short ${id} scene ${index + 1}`, contract, "short"));
+    const scenes = (short.scenes || []).map((scene, index) => validateScene(scene, `${label} short ${id} scene ${index + 1}`, contract, "short", boards));
     if (!scenes.length) throw new Error(`${label} short ${id} needs scenes`);
     if (scenes.map((scene) => scene.id).join("|") !== harvest.join("|")) throw new Error(`${label} short ${id} scenes must match harvest order`);
     if (contract.structure.short.requireIntro && !scenes[0].intro) throw new Error(`${label} short ${id} must begin with intro`);
@@ -695,6 +774,11 @@ export async function loadVideoWorkspace(workspace, { slug: selectedSlug, brandV
     await readJson(path.join(workspace.designSystemRoot, video.verticalMetadata), "video vertical metadata"),
     { assetCatalog: assets, mediaCatalog: (await readMediaCatalog(workspace.designSystemRoot)).catalog, footagePrefix: contract.producer?.footage.assetPrefix },
   ) : null;
+  const boardCatalog = await readVideoBoardCatalog(workspace);
+  const boards = boardCatalog ? boardCatalog.catalog : null;
+  const resolvedMotifs = boards ? await resolveVideoBoardMotifs({ designSystemRoot: workspace.designSystemRoot, catalog: boards, contract }) : null;
+  const motifs = resolvedMotifs?.names ?? null;
+  const motifFiles = resolvedMotifs?.files ?? null;
   const entries = selectedSlug
     ? [slug(selectedSlug)]
     : (await fs.readdir(productionsRoot, { withFileTypes: true })).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
@@ -702,10 +786,10 @@ export async function loadVideoWorkspace(workspace, { slug: selectedSlug, brandV
   for (const productionSlug of entries) {
     const root = path.join(productionsRoot, productionSlug);
     const values = Object.fromEntries(await Promise.all(productionFiles.map(async (name) => [name.replace(".json", ""), await readJson(path.join(root, name), `${productionSlug}/${name}`)])));
-    productions.push(validateProduction(values, contract, assets, productionSlug));
+    productions.push(validateProduction(values, contract, assets, productionSlug, boards ? { catalog: boards, motifs } : null));
   }
   if (selectedSlug && !productions.length) throw new Error(`video production ${selectedSlug} was not found`);
-  return { ...workspace, video: { ...video, assets, assetsPath, brandReferences, brandUnresolved, verticalMetadata, componentsPath, contract, contractPath, labRoot, localRoot, productions, productionsRoot, tokens } };
+  return { ...workspace, video: { ...video, assets, assetsPath, boards, boardsPath: boardCatalog?.boardsPath ?? null, brandReferences, brandUnresolved, verticalMetadata, componentsPath, contract, contractPath, labRoot, localRoot, motifFiles, motifs, productions, productionsRoot, tokens } };
 }
 
 /** A renderer cannot guess the brand: refuse to stage a contract whose references never resolved. */
@@ -760,6 +844,23 @@ export async function checkVideoWorkspace(workspace, options = {}) {
   if (unpublished.length) {
     throw new Error(`video productions reference media that no render host can fetch; publish it with timds assets publish (timds submit publishes staged media) before submitting:\n${unpublished.map((problem) => `- ${problem}`).join("\n")}`);
   }
+  const boards = loaded.video.boards;
+  if (boards) {
+    // Cadence and cues need the whole scene list and the committed take, so
+    // they run here rather than per scene. A Short is a harvest of the
+    // long-form's lines, so its chapter rules belong to the long-form.
+    for (const { production, captions } of loaded.video.productions) {
+      const longLabel = `${production.slug} longform`;
+      validateBoardCadence({ catalog: boards, scenes: production.longform.scenes, label: longLabel, format: "horizontal" });
+      validateBoardCues({ catalog: boards, scenes: production.longform.scenes, lines: captions.lines, label: longLabel });
+      for (const short of production.shorts) {
+        const shortLabel = `${production.slug} short ${short.id}`;
+        validateBoardCadence({ catalog: boards, scenes: short.scenes, label: shortLabel, format: "short", chapters: false });
+        validateBoardCues({ catalog: boards, scenes: short.scenes, lines: captions.lines, label: shortLabel });
+      }
+    }
+    validateBoardComponents({ catalog: boards, ...(await boardComponentKinds(workspace, loaded)) });
+  }
   // Every lab input must compile: it is the request an automated Video Lab
   // hands the producer, so a broken one is a broken preview. Finalizing needs
   // registered footage and a cover library, which a new system may not have
@@ -767,6 +868,9 @@ export async function checkVideoWorkspace(workspace, options = {}) {
   const labInputs = [];
   for (const name of await listVideoLabInputs(loaded.video.labRoot)) {
     const { compiled, producer } = await compileVideoLabInput(loaded, catalog, name);
+    // A cue the narration never says is an authoring error, not a catalog
+    // gap, so it fails here even though finalizing below only warns.
+    if (boards) validateBoardCues({ catalog: boards, scenes: compiled.scenes, lines: silentSceneTimings(compiled.scenes), label: `lab input ${name}` });
     try {
       producer.finalizeProduction({ schemaVersion: VIDEO_SCHEMA_VERSION, compiled, timings: silentSceneTimings(compiled.scenes), audioSrc: null });
       labInputs.push({ name, finalized: true });
@@ -776,6 +880,67 @@ export async function checkVideoWorkspace(workspace, options = {}) {
     }
   }
   return { ...loaded, productionCount: loaded.video.productions.length, labInputs, warnings };
+}
+
+/**
+ * The board kinds the Design System's components draw. Without a component
+ * file the toolkit defaults draw every default kind. A client file's Boards
+ * object registers its own kinds on top of the defaults, the way
+ * resolveVideoProjectComponents merges them at render time.
+ */
+async function boardComponentKinds(workspace, loaded) {
+  const defaults = [...DEFAULT_BOARD_KINDS];
+  const componentsPath = loaded.video.componentsPath;
+  if (!componentsPath) return { defaults, registered: [], label: "TimDS default video components" };
+  const relative = path.relative(workspace.designSystemRoot, componentsPath).replaceAll(path.sep, "/");
+  let components;
+  try {
+    let loadedModule;
+    try {
+      // The content hash keeps a long-running host (the MCP check tool) from
+      // comparing against a stale module after the client edits the file.
+      const version = createHash("sha256").update(await fs.readFile(componentsPath)).digest("hex").slice(0, 16);
+      const { tsImport } = await import("tsx/esm/api");
+      loadedModule = await tsImport(`${pathToFileURL(componentsPath).href}?timds=${version}`, import.meta.url);
+    } catch (esmError) {
+      // Outside a "type": "module" package Node hands a .tsx file to the
+      // CommonJS loader, which tsImport does not hook; tsx's require does.
+      // Inside one, the ESM error is the real one: report it.
+      if (!(esmError instanceof SyntaxError) || await packageTypeIsModule(componentsPath)) throw esmError;
+      const { require: tsxRequire } = await import("tsx/cjs/api");
+      const realPath = await fs.realpath(componentsPath);
+      for (const key of Object.keys(require.cache)) if ([componentsPath, realPath].includes(key.split("?")[0])) delete require.cache[key];
+      loadedModule = tsxRequire(componentsPath, import.meta.url);
+    }
+    components = loadedModule.default ?? {};
+  } catch (caught) {
+    throw new Error(`video components ${relative} could not be loaded to compare its Boards with the board catalog: ${caught instanceof Error ? caught.message : String(caught)}`);
+  }
+  const registered = components?.Boards && typeof components.Boards === "object" ? Object.keys(components.Boards) : [];
+  // A client Graphic sits ahead of the default boards and receives every kind
+  // its Boards does not register, so it can draw every declared kind.
+  if (typeof components?.Graphic === "function" || (components?.Graphic && typeof components.Graphic === "object")) {
+    return { defaults: Object.keys(loaded.video.boards.kinds), registered, label: `video components ${relative}` };
+  }
+  return { defaults, registered, label: `video components ${relative}` };
+}
+
+/** Whether the nearest package.json above a file declares "type": "module". */
+async function packageTypeIsModule(filePath) {
+  let directory = path.dirname(filePath);
+  for (;;) {
+    const manifest = await fs.readFile(path.join(directory, "package.json"), "utf8").catch(() => null);
+    if (manifest !== null) {
+      try {
+        return JSON.parse(manifest).type === "module";
+      } catch {
+        return false;
+      }
+    }
+    const parent = path.dirname(directory);
+    if (parent === directory) return false;
+    directory = parent;
+  }
 }
 
 // --- video lab -----------------------------------------------------------------
@@ -824,7 +989,7 @@ export function silentSceneTimings(scenes, { wordsPerMinute = 150, minimumSceneS
 async function compileVideoLabInput(loaded, mediaCatalog, name) {
   if (!loaded.video.contract.producer) throw new Error(`video lab input ${name} needs a producer block in ${loaded.video.contract.name}'s video contract`);
   const input = await readJson(path.join(loaded.video.labRoot, `${name}.json`), `video lab input ${name}`);
-  const producer = createVideoProducer({ contract: loaded.video.contract, assetCatalog: loaded.video.assets, mediaCatalog, verticalMetadata: loaded.video.verticalMetadata });
+  const producer = createVideoProducer({ contract: loaded.video.contract, assetCatalog: loaded.video.assets, mediaCatalog, verticalMetadata: loaded.video.verticalMetadata, boards: loaded.video.boards, motifs: loaded.video.motifs });
   const compiled = producer.compileProduction(input);
   for (const scene of compiled.scenes) {
     if (truncatedHeadline(scene.headline)) throw new Error(`video lab input ${name}: scene ${scene.id} headline appears truncated: ${JSON.stringify(scene.headline)}`);
@@ -868,6 +1033,10 @@ export function describeVideoLabPlan({ compiled, timings, finalized }) {
     lines.push(`  ${"".padEnd(14)}        ${describeSceneFootage(scene)}`);
   }
   lines.push(`  cover          ${finalized.coverSubject.key} · ${finalized.plan.cover.eyebrow} · ${finalized.plan.cover.headline}`);
+  for (const chapter of finalized.plan.chapters || []) {
+    const seconds = Math.floor(chapter.startMs / 1000);
+    lines.push(`  chapter        ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")} ${chapter.label}`);
+  }
   return lines.join("\n");
 }
 
@@ -949,7 +1118,7 @@ export async function prepareVideoLab(workspace, requestedName, options = {}) {
     const narration = await prepareLabNarration(workspace, planned, labLocal, publicRoot, options);
     script = narration.script;
     planned.lab.timings = narration.timings;
-    const producer = createVideoProducer({ contract: planned.video.contract, assetCatalog: planned.video.assets, mediaCatalog, verticalMetadata: planned.video.verticalMetadata });
+    const producer = createVideoProducer({ contract: planned.video.contract, assetCatalog: planned.video.assets, mediaCatalog, verticalMetadata: planned.video.verticalMetadata, boards: planned.video.boards, motifs: planned.video.motifs });
     planned.lab.finalized = producer.finalizeProduction({ schemaVersion: VIDEO_SCHEMA_VERSION, compiled: planned.lab.compiled, timings: narration.timings });
   }
   const { finalized } = planned.lab;
@@ -962,7 +1131,8 @@ export async function prepareVideoLab(workspace, requestedName, options = {}) {
   const project = {
     schemaVersion: VIDEO_SCHEMA_VERSION,
     engine: { name: "@dtconcepts/timds", version: (await readJson(path.join(packageRoot, "package.json"), "TimDS package.json")).version },
-    contract: { ...planned.video.contract, brand },
+    // Default boards read the motif mount from contract.boards at render time.
+    contract: { ...planned.video.contract, brand, ...(planned.video.boards ? { boards: stagedBoardCatalog(planned.video) } : {}) },
     assets: stagedAssets,
     records: {
       captions: { lines: finalized.plan.lines },
@@ -1042,7 +1212,7 @@ async function defaultVideoComponentsTemplate() {
   // the TimDS default at runtime, so a new slot in a later release must not
   // break the client's typecheck.
   const componentSource = remotionSource.slice(start, end + DEFAULT_COMPONENTS_END.length).replace("} satisfies Required<VideoProjectComponentOverrides>;", "} satisfies VideoProjectComponentOverrides;");
-  return `// Generated once from the installed TimDS defaults. This file is now owned by this Design System.\n// TimDS upgrades do not overwrite it; use \`timds video components init --force\` only to reset it.\n// Footage-chain rules are imported from the toolkit on purpose: they are production rules, not styling,\n// and \`timds video check\` enforces the same module, so a toolkit fix reaches these frames without a reset.\nimport React, {useMemo} from "react";\nimport {Audio} from "@remotion/media";\nimport {AbsoluteFill, Img, OffthreadVideo, Sequence, interpolate, staticFile, useCurrentFrame, useVideoConfig} from "remotion";\nimport {MINIMUM_CHAIN_CLIP_SECONDS, adjacentFootageRepeats, chainClipFrames, sceneAssetKeys, verticalTextZone} from "@dtconcepts/timds/video/footage";\nimport type {\n  VideoProject,\n  VideoProjectAsset,\n  VideoProjectCaptionLine,\n  VideoProjectComponentOverrides,\n  VideoProjectCover,\n  VideoProjectCoverProps,\n  VideoProjectGraphicProps,\n  VideoProjectIntroProps,\n  VideoProjectOutroProps,\n  VideoProjectScene,\n  VideoProjectSceneProps,\n  VideoProjectVideoProps,\n} from "@dtconcepts/timds/video/remotion";\n\n${DEFAULT_VIDEO_TEXT_SOURCE}\n\n${componentSource}\n\nexport {BrandWatermark, CaptionPages, Cover, CoverVisual, GoldHeadline, HorizontalCover, Intro, Media, Outro, SceneView, VerticalCover, Video};\nexport default defaultVideoProjectComponents;\n`;
+  return `// Generated once from the installed TimDS defaults. This file is now owned by this Design System.\n// TimDS upgrades do not overwrite it; use \`timds video components init --force\` only to reset it.\n// Footage-chain rules are imported from the toolkit on purpose: they are production rules, not styling,\n// and \`timds video check\` enforces the same module, so a toolkit fix reaches these frames without a reset.\nimport React, {useMemo} from "react";\nimport {Audio} from "@remotion/media";\nimport {AbsoluteFill, Easing, Img, OffthreadVideo, Sequence, interpolate, staticFile, useCurrentFrame, useVideoConfig} from "remotion";\nimport {MINIMUM_CHAIN_CLIP_SECONDS, adjacentFootageRepeats, chainClipFrames, sceneAssetKeys, verticalTextZone} from "@dtconcepts/timds/video/footage";\nimport {DEFAULT_BOARD_KINDS, revealFrame} from "@dtconcepts/timds/video/boards";\nimport type {\n  VideoProject,\n  VideoProjectAsset,\n  VideoProjectBoardProps,\n  VideoProjectBrandBanners,\n  VideoProjectCaptionLine,\n  VideoProjectComponentOverrides,\n  VideoProjectCover,\n  VideoProjectCoverProps,\n  VideoProjectGraphicProps,\n  VideoProjectIntroProps,\n  VideoProjectOutroProps,\n  VideoProjectScene,\n  VideoProjectSceneProps,\n  VideoProjectVideoProps,\n} from "@dtconcepts/timds/video/remotion";\n\n${DEFAULT_VIDEO_TEXT_SOURCE}\n\n${componentSource}\n\nexport {BrandWatermark, CaptionPages, CardsBoard, ChapterTitleBoard, CompareBoard, Cover, CoverVisual, DocumentBoard, FlowBoard, GoldHeadline, HorizontalCover, Intro, Media, Outro, resolveVideoBoardComponent, SceneView, StatementBoard, StepsBoard, SubscribeBoard, VerticalCover, Video};\nexport default defaultVideoProjectComponents;\n`;
 }
 
 export async function initializeVideoComponents(workspace, { force = false } = {}) {
@@ -1071,13 +1241,15 @@ export async function initializeVideoWorkspace(workspace, { force = false } = {}
   rawManifest.video = {
     contract: "video/contract.json",
     assets: "video/assets.json",
-    ...(scaffold ? { verticalMetadata: "video/vertical-meta.json" } : {}),
+    ...(scaffold ? { verticalMetadata: "video/vertical-meta.json", boards: DEFAULT_BOARDS_PATH } : {}),
     productions: "video/productions",
     local: "video-local",
   };
   await fs.writeFile(manifestPath, `${JSON.stringify(rawManifest, null, 2)}\n`, "utf8");
   await fs.mkdir(path.join(destination, "productions"), { recursive: true });
-  for (const name of ["contract.json", "assets.json", ...(scaffold ? ["vertical-meta.json"] : []), "lab/README.md", "lab/sample-answer.json", "publishing.md"]) {
+  // A new scaffold gets the default board catalog; adopting an existing
+  // contract does not, so that system keeps behaving exactly as before.
+  for (const name of ["contract.json", "assets.json", ...(scaffold ? ["vertical-meta.json", "boards.json"] : []), "lab/README.md", "lab/sample-answer.json", "publishing.md"]) {
     const target = path.join(destination, name);
     if (!existsSync(target) || force) await copyTemplate(path.join(packageRoot, "templates", "video", name), target);
   }
@@ -1102,7 +1274,7 @@ export async function initializeVideoWorkspace(workspace, { force = false } = {}
   const ignorePath = path.join(workspace.designSystemRoot, ".gitignore");
   const currentIgnore = await fs.readFile(ignorePath, "utf8").catch(() => "");
   if (!currentIgnore.split(/\r?\n/).includes("video-local/")) await fs.appendFile(ignorePath, `${currentIgnore.endsWith("\n") || !currentIgnore ? "" : "\n"}video-local/\n`);
-  return { contract: path.join(destination, "contract.json"), assets: path.join(destination, "assets.json"), lab: path.join(destination, "lab"), skillDestination, starterLogo };
+  return { contract: path.join(destination, "contract.json"), assets: path.join(destination, "assets.json"), ...(scaffold ? { boards: path.join(destination, "boards.json") } : {}), lab: path.join(destination, "lab"), skillDestination, starterLogo };
 }
 
 function referencedAssetKeys(production) {
@@ -1373,6 +1545,8 @@ export async function prepareVideoWorkspace(workspace, selectedSlug) {
     contract: {
       ...loaded.video.contract,
       brand,
+      // Default boards read the motif mount from contract.boards at render time.
+      ...(loaded.video.boards ? { boards: stagedBoardCatalog(loaded.video) } : {}),
     },
     assets: stagedAssets,
     records: {
@@ -1567,6 +1741,6 @@ export async function voiceoverVideoWorkspace(workspace, selectedSlug, options =
   return { outputRoot, production: production.production.slug };
 }
 
-export const VIDEO_HELP = `TimDS video workflow\n\nUsage:\n  timds video init [--root PATH] [--force]\n  timds video components init [--root PATH] [--force]\n  timds video doctor [--root PATH]\n  timds video check [SLUG] [--root PATH]\n  timds video lab [NAME] [--root PATH] [--plan] [--prepare] [--render] [--silent] [--voice NAME] [--python PATH] [--list]\n  timds video lab --serve [--port 4410] [--root PATH]\n  timds video publishing SLUG [--root PATH] [--date YYYY-MM-DD]\n  timds video prepare SLUG [--root PATH]\n  timds video voiceover SLUG [--root PATH] [--force]\n  timds video studio SLUG [--root PATH]\n  timds video render SLUG [--root PATH] [--date YYYY-MM-DD]\n\nThe client Design System owns video/contract.json, video/assets.json, video/lab/ compile requests, brand files, production records, and any generated component snapshot. TimDS owns validation, the producer, media staging, voiceover orchestration, default components, the lab, rendering, and review packaging. Generating components copies the installed defaults once; upgrades never overwrite that client-owned file.\n\nThe lab runs a video/lab/NAME.json compile request the way an automated Video Lab does — producer compile, spoken narration with measured word timings, deterministic footage and cover, staged media — and opens Remotion Studio on the result with the client's components; --plan estimates timing without audio generation, --silent explicitly requests a silent preview, --prepare stages narration and media without launching, --render writes the video and cover under video-local/lab/NAME/out/. check compiles every lab input and warns when the catalog cannot finalize one yet.`;
+export const VIDEO_HELP = `TimDS video workflow\n\nUsage:\n  timds video init [--root PATH] [--force]\n  timds video components init [--root PATH] [--force]\n  timds video doctor [--root PATH]\n  timds video check [SLUG] [--root PATH]\n  timds video lab [NAME] [--root PATH] [--plan] [--prepare] [--render] [--silent] [--voice NAME] [--python PATH] [--list]\n  timds video lab --serve [--port 4410] [--root PATH]\n  timds video publishing SLUG [--root PATH] [--date YYYY-MM-DD]\n  timds video prepare SLUG [--root PATH]\n  timds video voiceover SLUG [--root PATH] [--force]\n  timds video studio SLUG [--root PATH]\n  timds video render SLUG [--root PATH] [--date YYYY-MM-DD]\n\nThe client Design System owns video/contract.json, video/assets.json, video/boards.json (its board catalog), video/lab/ compile requests, brand files, production records, and any generated component snapshot. TimDS owns validation, the producer, media staging, voiceover orchestration, default components, the lab, rendering, and review packaging. Generating components copies the installed defaults once; upgrades never overwrite that client-owned file.\n\nThe lab runs a video/lab/NAME.json compile request the way an automated Video Lab does — producer compile, spoken narration with measured word timings, deterministic footage and cover, staged media — and opens Remotion Studio on the result with the client's components; --plan estimates timing without audio generation, --silent explicitly requests a silent preview, --prepare stages narration and media without launching, --render writes the video and cover under video-local/lab/NAME/out/. check compiles every lab input and warns when the catalog cannot finalize one yet. With a board catalog, check also holds every committed board to its declared kind, the catalog's cadence, and its spoken cues, and fails when the components' Boards and the catalog's kinds disagree; graphic boards also need structure.<format>.graphicScenes in the contract.`;
 
 export { VIDEO_SCHEMA_VERSION };

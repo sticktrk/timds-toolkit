@@ -106,16 +106,40 @@ through the client's components. Fix the request, the catalog, or the
 components there before authoring a five-record production. `video check`
 compiles every lab input.
 
-Graphic boards are client work. When `structure.<format>.graphicScenes` is
-true, a beat or production scene may carry `visual: { "kind": "...", ... }`
-plus an optional `chapter` slug; the Design System's `Graphic` component (or
-its full component snapshot) draws every kind, and TimDS only checks the shape.
-A board with no footage keys renders on the brand background and breaks the
-footage-family sequence; a board on a scene that names footage plays over that
-chain. Never invent a `kind` the client's components do not implement, and do
-not enable `graphicScenes` or `producer.subscribe` unless the client asked for
-boards: the subscribe board needs the opt-in for each format it plays in and a
-`topic.solution` in every request unless `requireSolution` is false.
+Graphic boards are declared in the client's board catalog,
+`video/boards.json` (`video.boards` in `timds.json`). It names every board
+kind the Design System offers: its `label`, when to `use` it and what to
+`avoid`, whether it may sit over footage (`overFootage`: `never`, `optional`,
+`always`), whether it may appear only `once`, and a closed JSON-Schema for its
+fields with `x-timds-maxWords` budgets, `x-timds-motif` fields (a file stem in
+the `brand.staticFiles` mount named by `motifs.mount`), `x-timds-cue` fields
+(one word the scene's narration speaks; the item reveals on it), and
+`x-timds-substringOf` (an exact part of a sibling field). Its `formats` and
+`cadence` (footage-free boards in a row, every chapter containing footage, a
+chapter minimum once chapters are used, total words per board) apply to every
+production.
+
+A format offers boards only when both the catalog's `formats` and the
+contract's `structure.<format>.graphicScenes` are on; `video init` scaffolds
+the default catalog with `graphicScenes: false`, so turn the structure flag on
+only when the client asked for boards. Then a beat or production scene may
+carry `visual: { "kind": "...", ... }` plus an optional `chapter` slug. Use only
+declared kinds and fields; when no declared kind fits a beat, keep footage and
+record the gap in `boardGap` (one short sentence) instead of forcing a board, so
+the client can decide whether to add a kind. Never author `subscribe`: the
+producer inserts it from `producer.subscribe`, which needs the opt-in for each
+format it plays in and a `topic.solution` in every request unless
+`requireSolution` is false.
+
+Every declared kind needs a component in the Design System's `Boards` registry
+(`components.Boards`, keyed by kind; the TimDS defaults draw the default
+kinds), and a registered component needs a declared kind: `video check` fails
+when the two disagree. To add a kind, add it to `boards.json` and register its
+component in the same change. A board with no footage keys renders on the
+brand background and breaks the footage-family sequence; a board on a scene
+that names footage plays over that chain. `compileProduction`, finalize (cues
+against the measured take), and `video check` enforce the catalog; fix the
+catalog or the scene, never loosen a budget to fit copy.
 
 ## Use TimDS for deterministic work
 

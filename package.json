@@ -21,6 +21,7 @@
     "./media": "./src/media.mjs",
     "./tokens": "./src/tokens.mjs",
     "./video": "./src/video.mjs",
+    "./video/boards": "./video/boards.mjs",
     "./video/footage": "./video/footage.mjs",
     "./video/producer": "./src/video-producer.mjs",
     "./video/remotion": "./video/remotion.tsx"
@@ -51,6 +52,7 @@
     "src/brand.mjs",
     "src/tokens.mjs",
     "src/video-producer.mjs",
+    "src/video-boards.mjs",
     "src/video-crops.mjs",
     "src/video-producer.d.mts",
     "src/video.mjs",

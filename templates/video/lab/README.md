@@ -8,11 +8,13 @@ and ordered answer beats with a semantic role (`hook`, `rule`, `risk`,
 `process`, `exception`, `answer`), the spoken narration, a complete
 micro-headline summary, and optionally `footage`: one to three registered clip
 keys, best match first, that the scene opens on. A beat may also carry a
-`chapter` slug and, when `structure.<format>.graphicScenes` is on, a
-`visual: { "kind": ... }` board drawn by this Design System's `Graphic`
-component; a board plays over the beat's `footage` picks when it names any and
-on the brand background otherwise. Claude drafts `solution` and `chapter` but
-never a `visual`; add boards by hand in the JSON.
+`chapter` slug and, when `structure.<format>.graphicScenes` is on and
+`../boards.json` offers the format, a `visual: { "kind": ... }` board of a
+declared kind, drawn by this Design System's `Boards` components; a board plays
+over the beat's `footage` picks when it names any and on the brand background
+otherwise. A beat no declared kind fits may record `boardGap` instead. Claude
+drafts `solution`, `chapter`, and boards from the catalog when the format
+offers them; without a catalog it never writes a `visual`.
 It is the same input
 an automated Video Lab hands `createVideoProducer().compileProduction()` after
 a model writes to the authoring contract, so the lab previews exactly what

@@ -485,9 +485,85 @@ request's `topic.solution`. The authoring contract asks the drafting model for
 it (required by default; with `requireSolution: false` a request without one
 simply gets no board), the lab offers a Solution field beside the engagement
 question, and `subscribe` joins the reserved scene ids. Hand-authored compile
-requests may also give beats a `chapter` and a `visual`; the drafting schema
-offers `chapter` but never `visual`, because board kinds belong to the client's
-components.
+requests may also give beats a `chapter` and a `visual`. Without a board
+catalog the drafting schema offers `chapter` but never `visual`; with one, it
+offers the catalog's kinds (below).
+
+### Board catalog
+
+A Design System declares its board vocabulary in `video/boards.json`
+(registered as `video.boards` in `timds.json`; `timds video init` scaffolds the
+default catalog, and `video/boards.json` is read when present even if
+unregistered). TimDS owns the mechanism, the client owns the vocabulary:
+
+```json
+{
+  "schemaVersion": 1,
+  "formats": { "longform": true, "short": false },
+  "cadence": { "maxConsecutiveFootageFree": 3, "chapterReturnsToFootage": true, "minimumChapters": 3, "maxBoardWords": 28 },
+  "motifs": { "mount": "illustrations" },
+  "kinds": {
+    "cards": {
+      "label": "Cards",
+      "use": "A list of 2 to 5 parallel items.",
+      "avoid": "Sequences, contrasts, or a single rule.",
+      "overFootage": "optional",
+      "once": false,
+      "schema": { "type": "object", "required": ["items"], "properties": { "…": {} } }
+    }
+  }
+}
+```
+
+Each kind's `schema` is a closed JSON-Schema subset (`type`, `properties`,
+`required`, `additionalProperties`, `items`, `minItems`, `maxItems`, `enum`,
+`const`, `minimum`, `minLength`, `description`) plus `x-timds-maxWords` (a
+field's word budget; budgeted fields also sum against `cadence.maxBoardWords`),
+`x-timds-motif` (a file stem in the `brand.staticFiles` mount named by
+`motifs.mount`), `x-timds-cue` (one word the scene's narration must speak), and
+`x-timds-substringOf` (an exact part of a sibling field). Kinds are slugs and a
+schema never declares `kind`. A format offers boards only when both the
+catalog's `formats` and the contract's `structure.<format>.graphicScenes` are
+on.
+
+With a catalog, the authoring contract (schema version 2) exposes
+`answerBeats[].visual` as a `oneOf` of the declared kinds with their use/avoid
+guidance, describes `chapter`, adds `answerBeats[].boardGap` for a beat no
+declared kind fits (the beat keeps footage and the gap is carried onto the
+compiled and finalized scene), and returns a `boards` summary. `subscribe` is
+compiler-owned: never offered, refused when authored, and held to the catalog
+only when the catalog declares it. `compileProduction` validates every board
+against its kind and runs the cadence rules (footage-free runs, every chapter
+containing footage, the chapter minimum once any chapter is set, `once`,
+`overFootage`, `formats`); `finalizeProduction` fails a cue the measured take
+never says, skipping a timing that carries no `words`. `timds video check` holds
+committed productions to the same rules and fails when the catalog's kinds and
+the components' registered `Boards` disagree. The machine index carries the
+catalog summary under `video.boards`, and the MCP `describe_system` lists the
+kinds. The compiler's `subscribe` board follows `producer.subscribe.formats`,
+not the catalog's `formats`. A catalog that declares only compiler-owned kinds
+offers the model no boards. A staged project carries the catalog as
+`contract.boards`, with `motifs.files` mapping each motif stem to its file in
+the mount (`.svg` preferred when several share a stem);
+`resolveVideoBoardMotifs({ designSystemRoot, catalog, contract })` from
+`@dtconcepts/timds/video` resolves the same list for a remote producer host. A
+client component file that exports `Graphic` counts as drawing every declared
+kind.
+
+Without a catalog, the default scene keeps rendering the existing headline
+fallback. Built-in board components are selected automatically only after
+catalog adoption; explicit client `Boards` and `Graphic` overrides still apply.
+Drafting instructions follow each kind's `overFootage` rule, so footage-free
+boards omit clip picks while ordinary beats keep them.
+
+When any scene has a `chapter`, `finalizeProduction` adds
+`plan.chapters: [{ id, label, startMs }]`. A `chapter-title` board's title
+labels its chapter, otherwise the id is title-cased, and `startMs` is where the
+chapter's first scene starts in the timed take. The lab plan prints the
+chapters as `m:ss Label` lines. TimDS does not write them into publishing
+descriptions: those come from committed publishing records, which the client
+owns. The compile input stays at producer schema version 1: boards,
+`chapter`, and `boardGap` are additive.
 
 Outros are rarely watched — least of all in vertical Shorts — so the default
 components keep a call to action on every frame when the contract asks for one.

@@ -5,11 +5,15 @@ export type ProducerCompileInput = {
   slug: string;
   outputFormat: ProducerOutputFormat;
   exactQuestion: string;
-  topic: {label: string; engagementQuestion?: string; coverEmotion?: string};
-  /** `footage`: one to FOOTAGE_PICKS_PER_BEAT ordered clip keys from the authoring contract's footage.clips, best match first. */
-  answerBeats: Array<{id: string; role: ProducerBeatRole; narration: string; summary: string; footage?: string[]}>;
+  topic: {label: string; engagementQuestion?: string; coverEmotion?: string; solution?: string};
+  /**
+   * `footage`: one to FOOTAGE_PICKS_PER_BEAT ordered clip keys from the authoring contract's footage.clips, best match first.
+   * `visual`: a board of a kind the Design System's board catalog declares. `boardGap`: no declared kind fits this beat.
+   */
+  answerBeats: Array<{id: string; role: ProducerBeatRole; narration: string; summary: string; footage?: string[]; chapter?: string; visual?: ProducerBoardVisual; boardGap?: string}>;
 };
-export type ProducerCompiledScene = {id: string; role: string; narration: string; eyebrow?: string; headline?: string; intro?: boolean; outro?: boolean; footage?: string[]};
+export type ProducerBoardVisual = {kind: string; [field: string]: unknown};
+export type ProducerCompiledScene = {id: string; role: string; narration: string; eyebrow?: string; headline?: string; intro?: boolean; outro?: boolean; footage?: string[]; chapter?: string; visual?: ProducerBoardVisual; boardGap?: string};
 export type ProducerCompiledProduction = {
   schemaVersion: 1;
   producerContractVersion: number;
@@ -30,6 +34,8 @@ export type ProducerFinalized = {
     outputFormat: ProducerOutputFormat;
     lines: Array<{id: string; durationMs: number; words: Array<{text: string; startMs: number; endMs: number}>}>;
     scenes: Array<{id: string; asset?: string; verticalAsset?: string; assets?: string[]; verticalAssets?: string[]; intro?: boolean; outro?: boolean; [key: string]: unknown}>;
+    /** Present when any scene has a chapter: each chapter's label and where its first scene starts in the take. */
+    chapters?: Array<{id: string; label: string; startMs: number}>;
     pads: Record<string, {lead?: number; tail?: number}>;
     audioSrc?: string | null;
     cover: {image?: string; eyebrow: string; headline: string};
@@ -37,8 +43,53 @@ export type ProducerFinalized = {
   coverSubject: ProducerMedia;
   footage: ProducerMedia[];
 };
-export type ProducerAuthoringContract = {
+export type BoardSchemaNode = {
+  type: "object" | "array" | "string" | "integer" | "number" | "boolean";
+  description?: string;
+  enum?: unknown[];
+  const?: unknown;
+  properties?: Record<string, BoardSchemaNode>;
+  required?: string[];
+  additionalProperties?: boolean;
+  items?: BoardSchemaNode;
+  minItems?: number;
+  maxItems?: number;
+  minimum?: number;
+  minLength?: number;
+  "x-timds-maxWords"?: number;
+  "x-timds-motif"?: true;
+  "x-timds-cue"?: true;
+  "x-timds-substringOf"?: string;
+};
+/** A Design System's video/boards.json (raw or normalized). */
+export type VideoBoardCatalog = {
   schemaVersion: 1;
+  formats?: {longform?: boolean; short?: boolean};
+  cadence?: {maxConsecutiveFootageFree?: number | null; chapterReturnsToFootage?: boolean; minimumChapters?: number | null; maxBoardWords?: number | null};
+  motifs?: {mount: string};
+  kinds: Record<string, {label: string; use: string; avoid: string; overFootage?: "never" | "optional" | "always"; once?: boolean; schema: BoardSchemaNode}>;
+};
+export type VideoBoardCatalogSummary = {
+  schemaVersion: 1;
+  formats: {longform: boolean; short: boolean};
+  cadence: {maxConsecutiveFootageFree: number | null; chapterReturnsToFootage: boolean; minimumChapters: number | null; maxBoardWords: number | null};
+  motifs?: {mount: string};
+  kinds: Array<{
+    id: string;
+    label: string;
+    use: string;
+    avoid: string;
+    overFootage: "never" | "optional" | "always";
+    once: boolean;
+    compilerOwned: boolean;
+    required: string[];
+    budgets: {maxWords?: number; fields: Record<string, number>};
+    cues?: string[];
+    motifs?: string[];
+  }>;
+};
+export type ProducerAuthoringContract = {
+  schemaVersion: 2;
   producerContractVersion: number;
   designSystem: {id: string; name: string; version: string; commit: string; indexUrl?: string};
   outputFormat: ProducerOutputFormat;
@@ -54,6 +105,8 @@ export type ProducerAuthoringContract = {
     reservedSceneIds: string[];
   };
   compilerOwns: string[];
+  /** Present when the Design System has a board catalog; `active` says whether this format offers boards. */
+  boards?: VideoBoardCatalogSummary & {active: boolean};
   inputSchema: Record<string, unknown>;
 };
 export type ProducerFootageClip = {key: string; title?: string; tags: string[]; durationSeconds: number};
@@ -70,6 +123,10 @@ export declare function createVideoAuthoringContract(input: {
   assetCatalog?: any;
   mediaCatalog?: any;
   verticalMetadata?: VideoVerticalMetadata | null;
+  /** The Design System's board catalog. Without it the contract offers no boards, as before. */
+  boards?: VideoBoardCatalog | null;
+  /** Motif names resolved from the catalog's mount; motif fields become an enum when known. */
+  motifs?: string[] | null;
 }): ProducerAuthoringContract;
 export type VideoVerticalMetadata = {
   schemaVersion: 1;
@@ -80,7 +137,7 @@ export type VideoVerticalMetadata = {
     reviewedFrames: Array<"first" | "middle" | "last">;
   }>;
 };
-export declare function createVideoProducer(input: {contract: any; assetCatalog: any; mediaCatalog: any; verticalMetadata?: VideoVerticalMetadata | null}): {
+export declare function createVideoProducer(input: {contract: any; assetCatalog: any; mediaCatalog: any; verticalMetadata?: VideoVerticalMetadata | null; boards?: VideoBoardCatalog | null; motifs?: string[] | null}): {
   PRODUCER_CONTRACT_VERSION: number;
   compileProduction(input: ProducerCompileInput): ProducerCompiledProduction;
   finalizeProduction(input: {schemaVersion: 1; compiled: ProducerCompiledProduction; timings: ProducerFinalized["plan"]["lines"]; coverImage?: string; audioSrc?: string | null}): ProducerFinalized;

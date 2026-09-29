@@ -26,6 +26,7 @@ import { extractArtifact, normalizeMachineConfig } from "./extract.mjs";
 import { normalizeBrandGuidance } from "./brand.mjs";
 import { describeBrandKit, readDerivedLayer, summarizeBrandKit } from "./derived.mjs";
 import { normalizeBrandRoles } from "./tokens.mjs";
+import { boardCatalogSummary } from "./video-boards.mjs";
 import {
   VIDEO_HELP,
   runVideoLab,
@@ -35,6 +36,7 @@ import {
   initializeVideoWorkspace,
   normalizeVideoManifest,
   prepareVideoWorkspace,
+  readVideoBoardCatalog,
   renderVideoWorkspace,
   runVideoStudio,
   voiceoverVideoWorkspace,
@@ -477,10 +479,14 @@ async function verifyCleanDist(workspace) {
 
 /** Harvest the built artifact into its machine-readable companions. */
 export async function extractWorkspace(workspace, { write = true } = {}) {
+  // The board catalog is client source outside the built artifact; the index
+  // carries its summary so consumers can show the shelf without the repo.
+  const boards = await readVideoBoardCatalog(workspace);
   return extractArtifact({
     artifactRoot: path.join(workspace.designSystemRoot, "dist"),
     manifest: workspace.manifest,
     mediaCatalog: workspace.mediaCatalog,
+    video: boards ? { boards: boardCatalogSummary(boards.catalog) } : null,
     write,
   });
 }

@@ -477,7 +477,7 @@ export async function deriveTokensFromArtifact({ artifactRoot, manifest }) {
  * Harvest a built artifact and write the machine-readable files beside it.
  * Returns the index plus counts, and writes nothing when `machine.enabled` is false.
  */
-export async function extractArtifact({ artifactRoot, manifest, mediaCatalog = { assets: [] }, write = true }) {
+export async function extractArtifact({ artifactRoot, manifest, mediaCatalog = { assets: [] }, video = null, write = true }) {
   const config = normalizeMachineConfig(manifest.machine);
   if (!config.enabled) return { enabled: false, pages: [], written: [] };
 
@@ -538,6 +538,8 @@ export async function extractArtifact({ artifactRoot, manifest, mediaCatalog = {
     pageCount: pages.length,
     tokens: { url: tokensUrl, count: tokens.count, stylesheets: tokens.stylesheets.length, roles: Object.keys(tokens.roles).length },
     brand: { url: brandUrl, logos: brand.logos.length, imagery: brand.imagery.length, guidance: Object.keys(brand.guidance).length },
+    // The video board catalog summary (kinds, guidance, budgets, cadence) when the system has one.
+    ...(video?.boards ? { video: { boards: video.boards } } : {}),
     pages,
   };
 

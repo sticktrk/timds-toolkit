@@ -1,0 +1,395 @@
+{
+  "schemaVersion": 1,
+  "formats": {
+    "longform": true,
+    "short": false
+  },
+  "cadence": {
+    "maxConsecutiveFootageFree": 3,
+    "chapterReturnsToFootage": true,
+    "minimumChapters": 3,
+    "maxBoardWords": 28
+  },
+  "kinds": {
+    "chapter-title": {
+      "label": "Chapter title",
+      "use": "Opens a chapter: its number and a title of a few words.",
+      "avoid": "Mid-chapter emphasis; use statement instead.",
+      "overFootage": "never",
+      "once": false,
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "number",
+          "title"
+        ],
+        "properties": {
+          "number": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "title": {
+            "type": "string",
+            "x-timds-maxWords": 6
+          },
+          "motif": {
+            "type": "string",
+            "x-timds-motif": true
+          }
+        }
+      }
+    },
+    "statement": {
+      "label": "Statement",
+      "use": "One rule or takeaway in a single sentence, optionally with a subline.",
+      "avoid": "Lists, sequences, or contrasts.",
+      "overFootage": "optional",
+      "once": false,
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "text"
+        ],
+        "properties": {
+          "text": {
+            "type": "string",
+            "x-timds-maxWords": 10
+          },
+          "goldPhrase": {
+            "type": "string",
+            "x-timds-substringOf": "text"
+          },
+          "subline": {
+            "type": "string",
+            "x-timds-maxWords": 10
+          },
+          "motif": {
+            "type": "string",
+            "x-timds-motif": true
+          }
+        }
+      }
+    },
+    "cards": {
+      "label": "Cards",
+      "use": "A list of 2 to 5 parallel items.",
+      "avoid": "Sequences, contrasts, or a single rule.",
+      "overFootage": "optional",
+      "once": false,
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "x-timds-maxWords": 8
+          },
+          "items": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 5,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "label"
+              ],
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "x-timds-maxWords": 4
+                },
+                "note": {
+                  "type": "string",
+                  "x-timds-maxWords": 6
+                },
+                "cue": {
+                  "type": "string",
+                  "x-timds-cue": true
+                }
+              }
+            }
+          },
+          "motif": {
+            "type": "string",
+            "x-timds-motif": true
+          }
+        }
+      }
+    },
+    "compare": {
+      "label": "Compare",
+      "use": "Two sides set against each other, each with a title and up to 3 items.",
+      "avoid": "A list with no contrast, or a sequence.",
+      "overFootage": "never",
+      "once": false,
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "left",
+          "right"
+        ],
+        "properties": {
+          "left": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "title"
+            ],
+            "properties": {
+              "title": {
+                "type": "string",
+                "x-timds-maxWords": 4
+              },
+              "items": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 3,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "label"
+                  ],
+                  "properties": {
+                    "label": {
+                      "type": "string",
+                      "x-timds-maxWords": 4
+                    },
+                    "note": {
+                      "type": "string",
+                      "x-timds-maxWords": 6
+                    },
+                    "cue": {
+                      "type": "string",
+                      "x-timds-cue": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "right": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "title"
+            ],
+            "properties": {
+              "title": {
+                "type": "string",
+                "x-timds-maxWords": 4
+              },
+              "items": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 3,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "label"
+                  ],
+                  "properties": {
+                    "label": {
+                      "type": "string",
+                      "x-timds-maxWords": 4
+                    },
+                    "note": {
+                      "type": "string",
+                      "x-timds-maxWords": 6
+                    },
+                    "cue": {
+                      "type": "string",
+                      "x-timds-cue": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "flow": {
+      "label": "Flow",
+      "use": "A chain of 2 to 5 nodes that lead to an outcome.",
+      "avoid": "Unordered items or numbered instructions.",
+      "overFootage": "never",
+      "once": false,
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "nodes"
+        ],
+        "properties": {
+          "nodes": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 5,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "label"
+              ],
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "x-timds-maxWords": 4
+                },
+                "note": {
+                  "type": "string",
+                  "x-timds-maxWords": 6
+                },
+                "cue": {
+                  "type": "string",
+                  "x-timds-cue": true
+                }
+              }
+            }
+          },
+          "outcome": {
+            "type": "string",
+            "x-timds-maxWords": 6
+          }
+        }
+      }
+    },
+    "steps": {
+      "label": "Steps",
+      "use": "3 to 5 numbered instructions in the order the viewer follows them.",
+      "avoid": "Items with no order.",
+      "overFootage": "optional",
+      "once": false,
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "steps"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "x-timds-maxWords": 8
+          },
+          "steps": {
+            "type": "array",
+            "minItems": 3,
+            "maxItems": 5,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "label"
+              ],
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "x-timds-maxWords": 4
+                },
+                "note": {
+                  "type": "string",
+                  "x-timds-maxWords": 6
+                },
+                "cue": {
+                  "type": "string",
+                  "x-timds-cue": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "document": {
+      "label": "Document",
+      "use": "A record or form: a title and up to 4 labelled lines, one optionally highlighted.",
+      "avoid": "Anything that is not a document, list, or record the viewer would recognise.",
+      "overFootage": "never",
+      "once": false,
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "title",
+          "lines"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "x-timds-maxWords": 6
+          },
+          "lines": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 4,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "label",
+                "value"
+              ],
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "x-timds-maxWords": 4
+                },
+                "value": {
+                  "type": "string",
+                  "x-timds-maxWords": 6
+                },
+                "highlight": {
+                  "type": "boolean"
+                },
+                "cue": {
+                  "type": "string",
+                  "x-timds-cue": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "subscribe": {
+      "label": "Subscribe",
+      "use": "Compiler-owned subscribe promise; never authored.",
+      "avoid": "Do not write this kind.",
+      "overFootage": "never",
+      "once": true,
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "topic",
+          "solution"
+        ],
+        "properties": {
+          "topic": {
+            "type": "string"
+          },
+          "solution": {
+            "type": "string"
+          },
+          "question": {
+            "type": "string",
+            "x-timds-maxWords": 12
+          },
+          "line": {
+            "type": "string",
+            "x-timds-maxWords": 14
+          }
+        }
+      }
+    }
+  }
+}

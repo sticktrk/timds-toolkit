@@ -97,6 +97,7 @@ test("the local read server describes, resolves roles, lists tokens and pages, a
   assert.ok(described.tokens.count > 0);
   assert.ok(described.brand.summary.roles.filled > 0);
   assert.ok(typeof described.llms === "string");
+  assert.equal(described.video, null, "a system without a board catalog lists no boards");
 
   const roles = await ok(client, "resolve_role", { roles: ["color.accent", "font.display", "color.nonsense"] });
   assert.equal(roles.roles["color.accent"].filled, true);
@@ -292,6 +293,11 @@ test("remote mode takes systemId and version, serves the host's media and pins, 
   await ok(client, "describe_system", { systemId, version: layer.system.version });
   assert.deepEqual(calls.at(-1), { systemId, version: layer.system.version });
   const missing = await call(client, "describe_system", { systemId: "other/system" });
+  // A published index with a board catalog lists the kinds a producer may draw.
+  const boards = { schemaVersion: 1, formats: { longform: true, short: false }, cadence: { maxBoardWords: 28 }, kinds: [{ id: "cards", label: "Cards", use: "A list.", avoid: "A rule.", overFootage: "optional", once: false }] };
+  layer.index = { ...layer.index, video: { boards } };
+  const withBoards = await ok(client, "describe_system", { systemId });
+  assert.deepEqual(withBoards.video, { boards: boards.kinds, cadence: boards.cadence, formats: boards.formats });
   assert.equal(missing.isError, true);
   assert.match(missing.content[0].text, /not found/);
 

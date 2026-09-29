@@ -1,8 +1,25 @@
 import { footageFamily, verticalTextZone } from "../video/footage.mjs";
+import { deriveVideoChapters } from "../video/boards.mjs";
 import { validateVideoVerticalMetadata } from "./video-crops.mjs";
+import {
+  COMPILER_OWNED_BOARD_KINDS,
+  authorableBoardKinds,
+  boardCatalogSummary,
+  boardFormatEnabled,
+  boardKindSchemas,
+  describeBoardCadence,
+  validateBoardCadence,
+  validateBoardCatalog,
+  validateBoardCues,
+  validateBoardVisual,
+} from "./video-boards.mjs";
 
+// The compile input and compiled production stay at 1: boards, chapters, and
+// boardGap are additive, and bumping would break every client contract.json
+// and every stored compile request. The authoring contract moved to 2 when it
+// gained the board catalog.
 const PRODUCER_SCHEMA_VERSION = 1;
-const PRODUCER_AUTHORING_SCHEMA_VERSION = 1;
+const PRODUCER_AUTHORING_SCHEMA_VERSION = 2;
 const beatRoles = ["hook", "rule", "risk", "process", "exception", "answer"];
 
 const object = (value, label) => {
@@ -245,6 +262,26 @@ const renderPromptBlock = (block) => {
 
 const maximumWordsPattern = (maximum) => `^\\S+(?:\\s+\\S+){0,${maximum - 1}}$`;
 const wordRangePattern = (minimum, maximum) => `^\\S+(?:\\s+\\S+){${minimum - 1},${maximum - 1}}$`;
+/**
+ * The board catalog a producer or authoring contract works with, or null.
+ * Accepts the raw boards.json or an already-normalized catalog, and the
+ * motif stems resolved from the catalog's mount (null when unknown).
+ */
+const boardCatalogFor = (boards, motifs) => {
+  if (boards === undefined || boards === null) return { catalog: null, motifs: null };
+  if (motifs !== undefined && motifs !== null && (!Array.isArray(motifs) || motifs.some((motif) => typeof motif !== "string"))) {
+    throw new Error("video board motifs must be an array of motif names");
+  }
+  return { catalog: validateBoardCatalog(boards), motifs: motifs ?? null };
+};
+
+/** Boards reach a format only when the catalog offers it and the contract opted the format into graphic scenes. */
+const boardsActiveFor = (catalog, contract, outputFormat) => Boolean(catalog
+  && boardFormatEnabled(catalog, outputFormat)
+  // A catalog of compiler-owned kinds only has nothing a model may author.
+  && authorableBoardKinds(catalog).length > 0
+  && contract.structure?.[outputFormat === "short" ? "short" : "longform"]?.graphicScenes === true);
+
 const yesNoQuestionPattern = "^(?:[Aa][Rr][Ee]|[Cc][Aa][Nn]|[Cc][Oo][Uu][Ll][Dd]|[Dd][Ii][Dd]|[Dd][Oo]|[Dd][Oo][Ee][Ss]|[Hh][Aa][Ss]|[Hh][Aa][Vv][Ee]|[Ii][Ss]|[Ss][Hh][Oo][Uu][Ll][Dd]|[Ww][Aa][Ss]|[Ww][Ee][Rr][Ee]|[Ww][Ii][Ll][Ll]|[Ww][Oo][Uu][Ll][Dd])\\b";
 
 /**
@@ -252,10 +289,12 @@ const yesNoQuestionPattern = "^(?:[Aa][Rr][Ee]|[Cc][Aa][Nn]|[Cc][Oo][Uu][Ll][Dd]
  * The client selects the published Design System blocks; TimDS turns those
  * choices and the executable video contract into one prompt/schema boundary.
  */
-export function createVideoAuthoringContract({ contract, manifest, designSystemIndex, provenance, outputFormat, assetCatalog, mediaCatalog, verticalMetadata }) {
+export function createVideoAuthoringContract({ contract, manifest, designSystemIndex, provenance, outputFormat, assetCatalog, mediaCatalog, verticalMetadata, boards, motifs }) {
   const config = validateVideoProducerConfig(contract.producer, contract);
   if (!config) throw new Error(`${contract.name} has no video producer contract`);
   if (!["horizontal", "short"].includes(outputFormat)) throw new Error("video authoring outputFormat must be horizontal or short");
+  const { catalog: boardCatalog, motifs: boardMotifs } = boardCatalogFor(boards, motifs);
+  const boardsActive = boardsActiveFor(boardCatalog, contract, outputFormat);
   // With the catalogs, the contract lists every clip the model may name per
   // beat. Without them (an older caller), footage stays compiler-owned and the
   // producer falls back to its own ranking for every scene.
@@ -380,8 +419,21 @@ export function createVideoAuthoringContract({ contract, manifest, designSystemI
             chapter: {
               type: "string",
               pattern: "^[a-z0-9][a-z0-9-]*$",
-              description: "Optional chapter id shared by the consecutive beats of one section; set it only when the Design System brief asks for chapters",
+              description: boardsActive
+                ? "Optional chapter id shared by the consecutive beats of one section; open a chapter with its chapter-title board when the catalog declares one, and keep chapters consecutive"
+                : "Optional chapter id shared by the consecutive beats of one section; set it only when the Design System brief asks for chapters",
             },
+            ...(boardsActive ? {
+              visual: {
+                description: "Optional graphic board for this beat, chosen only from the Design System's declared kinds; omit it when the beat is best shown as footage",
+                oneOf: boardKindSchemas(boardCatalog, { motifs: boardMotifs }),
+              },
+              boardGap: {
+                type: "string",
+                minLength: 1,
+                description: "When a board would help this beat but no declared kind fits, say what board is missing in one short sentence; the beat keeps footage. Never set it together with visual.",
+              },
+            } : {}),
           },
         },
       },
@@ -389,7 +441,8 @@ export function createVideoAuthoringContract({ contract, manifest, designSystemI
   };
   const footageInstructions = footage ? [
     "Do not write role eyebrows, CTA template copy, intro/outro structure, cover subjects, timing, safe zones, or layout; the compiler owns them.",
-    `For every answer beat, set footage to one to ${FOOTAGE_PICKS_PER_BEAT} ordered clip keys from footage.clips whose picture matches what the beat says, best match first. Judge a clip by its title and tags, not by its key.`,
+    `For every answer beat${boardsActive ? " that plays footage" : ""}, set footage to one to ${FOOTAGE_PICKS_PER_BEAT} ordered clip keys from footage.clips whose picture matches what the beat says, best match first. Judge a clip by its title and tags, not by its key.`,
+    ...(boardsActive ? ["Omit footage for footage-free boards: always omit it when the kind's overFootage is never, always set it when overFootage is always, and choose either when overFootage is optional. A beat without a visual, including a boardGap beat, plays footage."] : []),
     "Spread footage across the beats: do not name a clip in a second beat while an unused clip fits, and never place a clip directly after its own family (a key and its -mirrored, -offset, or -vertical sibling are one picture).",
     "The compiler plays each beat's picks in order at natural speed, fills any remaining time from the catalog, and enforces the chain rules; you choose what the viewer sees first.",
   ] : [
@@ -414,7 +467,9 @@ export function createVideoAuthoringContract({ contract, manifest, designSystemI
         ...(subscribeActive ? [
           `Set topic.solution to the outcome this answer helps the viewer reach, as a short verb phrase; the compiler speaks it on the subscribe board after answer beat ${config.subscribe.afterBeat}.${solutionRequired ? "" : " Omit it only when the answer promises no concrete outcome, and the board is then skipped."}`,
         ] : []),
-        "Group consecutive beats with a shared chapter id only when the brief asks for chapters; otherwise omit chapter. Never write a visual: board kinds belong to the Design System's components.",
+        ...(boardsActive ? boardInstructions(boardCatalog) : [
+          "Group consecutive beats with a shared chapter id only when the brief asks for chapters; otherwise omit chapter. Never write a visual: board kinds belong to the Design System's components.",
+        ]),
         ...footageInstructions,
       ],
       blockIds,
@@ -437,9 +492,22 @@ export function createVideoAuthoringContract({ contract, manifest, designSystemI
       "cover eyebrow and cover subject",
       footage ? "footage timing, fallback clips, and chain rules" : "footage chains",
       "timing, safe zones, and layout",
+      ...(boardsActive ? [`compiler-inserted boards: ${COMPILER_OWNED_BOARD_KINDS.join(", ")}`] : []),
     ],
+    ...(boardCatalog ? { boards: { ...boardCatalogSummary(boardCatalog), active: boardsActive } } : {}),
     inputSchema,
   };
+}
+
+/** What the drafting model reads about the shelf: one line per kind, then the cadence in words. */
+function boardInstructions(catalog) {
+  return [
+    "Group consecutive beats with a shared chapter id when the brief asks for chapters; otherwise omit chapter.",
+    "A beat may carry one graphic board in visual. Choose only declared kinds; a beat with no fitting board keeps footage and records boardGap.",
+    ...authorableBoardKinds(catalog).map((kind) => `Board ${kind.id} (${kind.label}): ${kind.use} Avoid: ${kind.avoid}${kind.overFootage === "never" ? " Never over footage: omit footage on this beat." : kind.overFootage === "always" ? " Always over footage: name footage on this beat." : ""}${kind.once ? " At most once per video." : ""}`),
+    ...describeBoardCadence(catalog),
+    `Never write a ${COMPILER_OWNED_BOARD_KINDS.join(" or ")} board; the compiler inserts it.`,
+  ];
 }
 
 const validateQuestion = (fail, label, value, maximumWords, maximumCharacters) => {
@@ -450,11 +518,20 @@ const validateQuestion = (fail, label, value, maximumWords, maximumCharacters) =
   return normalized;
 };
 
-export function createVideoProducer({ contract, assetCatalog, mediaCatalog, verticalMetadata }) {
+export function createVideoProducer({ contract, assetCatalog, mediaCatalog, verticalMetadata, boards, motifs }) {
   const config = validateVideoProducerConfig(contract.producer, contract);
   if (!config) throw new Error(`${contract.name} has no video producer contract`);
+  const { catalog: boardCatalog, motifs: boardMotifs } = boardCatalogFor(boards, motifs);
   const library = createFootageLibrary({ config, contractName: contract.name, assetCatalog, mediaCatalog, verticalMetadata });
   const { assets, mediaFor, fail } = library;
+  // Board rules throw plain errors; report them with the producer's prefix.
+  const guarded = (check) => {
+    try {
+      return check();
+    } catch (caught) {
+      return fail(caught instanceof Error ? caught.message : String(caught));
+    }
+  };
   const reservedIds = new Set([config.intro.id, config.engagement.id, config.outro.id, config.subscribe.id]);
   const yesNoQuestion = /^(?:are|can|could|did|do|does|has|have|is|should|was|were|will|would)\b/iu;
 
@@ -503,8 +580,17 @@ export function createVideoProducer({ contract, assetCatalog, mediaCatalog, vert
         if (!contract.structure[graphicFormat].graphicScenes) fail(`answer beat ${id}.visual needs structure.${graphicFormat}.graphicScenes enabled in the video contract`);
         object(beat.visual, `producer answer beat ${id}.visual`);
         slugSafe(beat.visual.kind, `producer answer beat ${id}.visual.kind`);
+        if (boardCatalog) {
+          if (COMPILER_OWNED_BOARD_KINDS.includes(beat.visual.kind)) fail(`answer beat ${id}.visual.kind ${beat.visual.kind} is compiler-owned; the producer inserts it`);
+          guarded(() => validateBoardVisual({ catalog: boardCatalog, visual: beat.visual, label: `answer beat ${id}.visual`, motifs: boardMotifs }));
+        }
       }
       if (beat.chapter !== undefined && beat.chapter !== null) slugSafe(beat.chapter, `producer answer beat ${id}.chapter`);
+      let boardGap = "";
+      if (beat.boardGap !== undefined && beat.boardGap !== null) {
+        boardGap = text(beat.boardGap, `producer answer beat ${id}.boardGap`);
+        if (beat.visual) fail(`answer beat ${id} carries both a visual and a boardGap; a boardGap records that no declared board fits`);
+      }
       return {
         id,
         role: beat.role,
@@ -514,6 +600,7 @@ export function createVideoProducer({ contract, assetCatalog, mediaCatalog, vert
         ...(footage.length ? { footage } : {}),
         ...(beat.visual ? { visual: beat.visual } : {}),
         ...(beat.chapter ? { chapter: beat.chapter } : {}),
+        ...(boardGap ? { boardGap } : {}),
       };
     });
     // The board needs a solution to promise. When the contract does not require
@@ -555,6 +642,16 @@ export function createVideoProducer({ contract, assetCatalog, mediaCatalog, vert
       ...(content.at(-1)?.chapter ? { chapter: content.at(-1).chapter } : {}),
     });
     if (config.outro.enabled) scenes.push({ id: config.outro.id, role: "outro", narration: renderTemplate(config.outro.narrationTemplates[input.outputFormat] || config.outro.narrationTemplate, values), outro: true });
+    if (boardCatalog) {
+      // The compiler's own board is held to the catalog only when the catalog
+      // declares it; a catalog without subscribe still gets the board as before.
+      for (const scene of scenes) {
+        if (scene.visual && COMPILER_OWNED_BOARD_KINDS.includes(scene.visual.kind) && boardCatalog.kinds[scene.visual.kind]) {
+          guarded(() => validateBoardVisual({ catalog: boardCatalog, visual: scene.visual, label: `scene ${scene.id}.visual`, motifs: boardMotifs }));
+        }
+      }
+      guarded(() => validateBoardCadence({ catalog: boardCatalog, scenes, label: `compile request ${productionSlug}`, format: input.outputFormat }));
+    }
     return {
       schemaVersion: PRODUCER_SCHEMA_VERSION,
       producerContractVersion: config.schemaVersion,
@@ -650,6 +747,9 @@ export function createVideoProducer({ contract, assetCatalog, mediaCatalog, vert
     if (input.compiled.producerContractVersion !== config.schemaVersion) fail(`compiled production uses producer contract ${String(input.compiled.producerContractVersion)}; expected ${config.schemaVersion}`);
     if (!Array.isArray(input.timings) || input.timings.length !== input.compiled.scenes.length) fail("timings must match every compiled scene");
     const timingById = new Map(input.timings.map((line) => [line.id, line]));
+    // Cues are checked against the measured take. A timing without a words
+    // array carries no take to check, so its scene is skipped.
+    if (boardCatalog) guarded(() => validateBoardCues({ catalog: boardCatalog, scenes: input.compiled.scenes, lines: input.timings, label: `finalize ${input.compiled.slug}` }));
     const selectedByScene = new Map();
     // How often each clip has played so far in this production, so later
     // scenes reach for clips the viewer has not seen yet.
@@ -680,6 +780,7 @@ export function createVideoProducer({ contract, assetCatalog, mediaCatalog, vert
       const extras = {
         ...(scene.visual ? { visual: scene.visual } : {}),
         ...(scene.chapter ? { chapter: scene.chapter } : {}),
+        ...(scene.boardGap ? { boardGap: scene.boardGap } : {}),
       };
       const selected = selectedByScene.get(scene.id);
       if (!selected) return { id: scene.id, ...(scene.eyebrow ? { eyebrow: scene.eyebrow } : {}), ...(scene.headline ? { headline: scene.headline } : {}), ...extras };
@@ -693,6 +794,19 @@ export function createVideoProducer({ contract, assetCatalog, mediaCatalog, vert
         ...(masters.length === 1 ? { asset: masters[0], ...(verticals[0] ? { verticalAsset: verticals[0] } : {}) } : { assets: masters, ...(verticals.length ? { verticalAssets: verticals } : {}) }),
       };
     });
+    // YouTube chapters: each chapter starts where its first scene starts in the
+    // timed take (the producer plan has no pads). A chapter-title board's
+    // title labels its chapter; otherwise the id is title-cased.
+    const startById = new Map();
+    let cursor = 0;
+    for (const scene of input.compiled.scenes) {
+      startById.set(scene.id, cursor);
+      cursor += timingById.get(scene.id).durationMs;
+    }
+    const chapters = deriveVideoChapters(scenes).map((chapter) => ({
+      ...chapter,
+      startMs: Math.round(startById.get(scenes.find((scene) => scene.chapter === chapter.id).id)),
+    }));
     const selectedMedia = new Map();
     for (const pairs of selectedByScene.values()) for (const pair of pairs) {
       selectedMedia.set(pair.master.key, pair.master);
@@ -707,6 +821,7 @@ export function createVideoProducer({ contract, assetCatalog, mediaCatalog, vert
         outputFormat: input.compiled.outputFormat,
         lines: input.compiled.scenes.map((scene) => timingById.get(scene.id)),
         scenes,
+        ...(chapters.length ? { chapters } : {}),
         pads: Object.fromEntries(input.compiled.scenes.map((scene) => [scene.id, { lead: 0, tail: 0 }])),
         audioSrc: input.audioSrc,
         cover: { ...input.compiled.cover, image: input.coverImage || `cover${coverExtension.toLocaleLowerCase()}` },
