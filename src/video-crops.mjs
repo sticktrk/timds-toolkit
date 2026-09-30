@@ -1,14 +1,16 @@
 // Client-owned crop decisions. TimDS validates the record; a designer reviews
 // the actual subject across the shot before recording it here.
 export function validateVideoVerticalMetadata(input, { assetCatalog, mediaCatalog, footagePrefix }) {
+  // footagePrefix is one prefix or the contract's list of them.
+  const prefixes = (Array.isArray(footagePrefix) ? footagePrefix : [footagePrefix]).filter(Boolean);
   const fail = (message) => { throw new Error(`video vertical metadata: ${message}`); };
   if (!input || input.schemaVersion !== 1 || !input.assets || Array.isArray(input.assets) || typeof input.assets !== "object") {
     fail("expected schemaVersion 1 and an assets object");
   }
-  if (!footagePrefix) fail("the video contract needs producer.footage.assetPrefix");
+  if (!prefixes.length) fail("the video contract needs producer.footage.assetPrefix");
   const assets = assetCatalog.assets || assetCatalog;
   const derivatives = new Set(Object.values(assets).map((asset) => asset.vertical).filter(Boolean));
-  const masters = Object.keys(assets).filter((key) => key.startsWith(footagePrefix) && !derivatives.has(key));
+  const masters = Object.keys(assets).filter((key) => prefixes.some((prefix) => key.startsWith(prefix)) && !derivatives.has(key));
   const published = new Map(mediaCatalog.assets.map((asset) => [asset.key, asset]));
   const records = {};
   for (const key of masters) {

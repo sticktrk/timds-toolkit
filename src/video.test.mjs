@@ -36,6 +36,7 @@ import {
   voiceoverVideoWorkspace,
 } from "./video.mjs";
 import { createVideoAuthoringContract, createVideoProducer } from "./video-producer.mjs";
+import { validateVideoVerticalMetadata } from "./video-crops.mjs";
 import { adjacentFootageRepeats } from "../video/footage.mjs";
 import { labFixture, registerVerticalMetadata, videoFixture, writeJson } from "./video.fixture.mjs";
 
@@ -286,6 +287,7 @@ test("compiles programmatic productions with client-owned producer copy and asse
   const withCatalog = catalogAuthoring("horizontal");
   assert.deepEqual(withCatalog.footage, {
     assetPrefix: "footage-",
+    assetPrefixes: ["footage-"],
     maximumPerBeat: 3,
     clips: [
       { key: "footage-one", title: "Night rear-end in rain", tags: ["b-roll", "night"], durationSeconds: 5 },
@@ -377,6 +379,116 @@ test("spreads fallback footage across a production and ranks it by published tit
   // rather than reopening on the same clip every scene.
   assert.deepEqual(chains.process, ["dash-16-red-light", "dash-18-jackknife"]);
   assert.deepEqual(chains.answer, ["dash-20-rear-end", "dash-30-spinout"]);
+});
+
+test("admits footage under every listed asset prefix in both formats", () => {
+  const base = {
+    schemaVersion: 1,
+    id: "example-video",
+    name: "Example video",
+    package: { shortCount: 0 },
+    copy: {},
+    brand: {
+      colors: { background: "#000", accent: "#fc0", text: "#fff" },
+      fonts: {},
+      logo: "public/logo.svg",
+      series: "Example Answers",
+      site: "example.com",
+      tagline: "Clear answers",
+    },
+    producer: {
+      schemaVersion: 1,
+      authoring: { sharedPromptBlocks: [], formatPromptBlocks: {} },
+      roleEyebrows: { hook: "In brief", rule: "The rule", risk: "The risk", process: "Next step", exception: "The exception", answer: "The answer" },
+      intro: { enabled: false },
+      engagement: { enabled: false, eyebrow: "Your turn", narrationTemplate: "{{question}} Tell us below." },
+      outro: { enabled: false, narrationTemplate: "Learn more about {{topic}} at {{site}}." },
+      cover: { assetPrefix: "cover-subject-" },
+      footage: { assetPrefix: ["dash-", "char-broll-", "environment-broll-"] },
+    },
+  };
+  const contract = validateVideoContract(base);
+  assert.deepEqual(contract.producer.footage.assetPrefixes, ["dash-", "char-broll-", "environment-broll-"]);
+  assert.equal(contract.producer.footage.assetPrefix, "dash-, char-broll-, environment-broll-");
+  // A single string still works and reads back unchanged.
+  assert.deepEqual(validateVideoContract({ ...base, producer: { ...base.producer, footage: { assetPrefix: "dash-" } } }).producer.footage, { assetPrefixes: ["dash-"], assetPrefix: "dash-", allowShortCrop: false });
+  for (const [value, message] of [
+    [[], /at least one prefix/u],
+    [["dash-", "dash-"], /repeats a prefix/u],
+    [["char-", "char-broll-"], /char-broll-, which is already covered by char-/u],
+    [["dash-", "Char Broll"], /slug-safe prefix ending in a hyphen/u],
+  ]) {
+    assert.throws(() => validateVideoContract({ ...base, producer: { ...base.producer, footage: { assetPrefix: value } } }), message);
+  }
+
+  // Masters under every prefix; the character clip is the only one without a vertical.
+  const masters = ["dash-16-red-light", "char-broll-leslie-desk", "environment-broll-after-lobby", "object-broll-unlisted"];
+  const assetCatalog = { assets: {
+    "cover-subject-concern": { mediaKey: "cover-subject-concern" },
+    ...Object.fromEntries(masters.map((key) => [key, { mediaKey: key, durationSeconds: 6, subject: "center", flip: false, text: "left-center", ...(key.startsWith("char-") ? {} : { vertical: `${key}-vertical` }) }])),
+    ...Object.fromEntries(masters.filter((key) => !key.startsWith("char-")).map((key) => [`${key}-vertical`, { mediaKey: `${key}-vertical`, durationSeconds: 6, subject: "center", flip: false, text: "lower" }])),
+  } };
+  const mediaCatalog = { assets: Object.keys(assetCatalog.assets).map((key) => ({
+    key,
+    kind: key.startsWith("cover-") ? "image" : "video",
+    filename: `${key}.${key.startsWith("cover-") ? "jpg" : "mp4"}`,
+    publicUrl: `https://example.com/${key}`,
+    contentType: key.startsWith("cover-") ? "image/jpeg" : "video/mp4",
+    durationSeconds: assetCatalog.assets[key].durationSeconds,
+  })) };
+  const authoring = (outputFormat) => createVideoAuthoringContract({
+    contract,
+    manifest: { systemId: "example/core", name: "Example Design System", version: "2.3.4" },
+    designSystemIndex: { system: { id: "example/core", version: "2.3.4" }, pages: [] },
+    provenance: { version: "2.3.4", commit: "a".repeat(40) },
+    outputFormat,
+    assetCatalog,
+    mediaCatalog,
+  });
+  const horizontal = authoring("horizontal");
+  assert.deepEqual(horizontal.footage.assetPrefixes, ["dash-", "char-broll-", "environment-broll-"]);
+  // Every listed prefix contributes; an unlisted prefix stays out.
+  assert.deepEqual(horizontal.footage.clips.map((clip) => clip.key), ["char-broll-leslie-desk", "dash-16-red-light", "environment-broll-after-lobby"]);
+  // Shorts keep the same library minus clips without a vertical derivative.
+  assert.deepEqual(authoring("short").footage.clips.map((clip) => clip.key), ["dash-16-red-light", "environment-broll-after-lobby"]);
+
+  const producer = createVideoProducer({ contract, assetCatalog, mediaCatalog });
+  const production = (outputFormat) => {
+    const compiled = producer.compileProduction({
+      schemaVersion: 1,
+      slug: "sample-answer",
+      outputFormat,
+      exactQuestion: "Was the rear-end crash my fault?",
+      topic: { label: "rear-end crashes", coverEmotion: "concern" },
+      answerBeats: [
+        { id: "hook", role: "hook", narration: "Their job is to pay you less.", summary: "They pay less" },
+        { id: "answer", role: "answer", narration: "Simple crash, complicated claim.", summary: "Simple crash, complicated claim" },
+      ],
+    });
+    const finalized = producer.finalizeProduction({
+      schemaVersion: 1,
+      compiled,
+      timings: compiled.scenes.map((scene) => ({ id: scene.id, durationMs: 11_000, words: [{ text: scene.id, startMs: 0, endMs: 700 }] })),
+      audioSrc: "audio.mp3",
+    });
+    return Object.fromEntries(finalized.plan.scenes.map((scene) => [scene.id, scene.assets]));
+  };
+  // A chain crosses prefixes freely: nothing prefers one library over another.
+  assert.deepEqual(production("horizontal").hook, ["char-broll-leslie-desk", "dash-16-red-light"]);
+  assert.deepEqual(production("short").hook, ["dash-16-red-light", "environment-broll-after-lobby"]);
+
+  // Reviewed crops cover the masters under every prefix, and nothing else.
+  const crop = (key) => ({ sourceSha256: "a".repeat(64), objectPosition: "50% 50%", text: "lower", reviewedFrames: ["first", "middle", "last"] });
+  const published = { assets: mediaCatalog.assets.map((asset) => ({ ...asset, sha256: "a".repeat(64) })) };
+  const reviewed = validateVideoVerticalMetadata(
+    { schemaVersion: 1, assets: Object.fromEntries(masters.filter((key) => !key.startsWith("object-")).map((key) => [key, crop(key)])) },
+    { assetCatalog, mediaCatalog: published, footagePrefix: contract.producer.footage.assetPrefixes },
+  );
+  assert.deepEqual(Object.keys(reviewed.assets).sort(), ["char-broll-leslie-desk", "dash-16-red-light", "environment-broll-after-lobby"]);
+  assert.throws(
+    () => validateVideoVerticalMetadata({ schemaVersion: 1, assets: { "dash-16-red-light": crop() } }, { assetCatalog, mediaCatalog: published, footagePrefix: contract.producer.footage.assetPrefixes }),
+    /char-broll-leslie-desk needs a reviewed crop record/u,
+  );
 });
 
 test("rejects stale or incomplete published authoring context", () => {

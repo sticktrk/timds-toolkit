@@ -76,10 +76,13 @@ const stringList = (value) => (Array.isArray(value) ? value.filter((entry) => ty
  * under the footage prefix with a measured duration, and for Shorts a reviewed
  * vertical derivative (or a reviewed crop when the client allows live cropping).
  */
+/** Whether an asset key sits under any of the contract's footage prefixes. */
+const hasFootagePrefix = (config, key) => config.footage.assetPrefixes.some((prefix) => key.startsWith(prefix));
+
 function createFootageLibrary({ config, contractName, assetCatalog, mediaCatalog, verticalMetadata }) {
   const assets = object(assetCatalog.assets || assetCatalog, "video producer asset catalog");
   const crops = verticalMetadata == null ? {} : validateVideoVerticalMetadata(verticalMetadata, {
-    assetCatalog, mediaCatalog, footagePrefix: config.footage.assetPrefix,
+    assetCatalog, mediaCatalog, footagePrefix: config.footage.assetPrefixes,
   }).assets;
   const mediaEntries = Array.isArray(mediaCatalog.assets) ? mediaCatalog.assets : [];
   const mediaByKey = new Map(mediaEntries.map((asset) => [asset.key, asset]));
@@ -93,7 +96,7 @@ function createFootageLibrary({ config, contractName, assetCatalog, mediaCatalog
   };
 
   const masters = () => Object.keys(assets)
-    .filter((key) => key.startsWith(config.footage.assetPrefix) && Number.isFinite(assets[key].durationSeconds) && assets[key].durationSeconds > 0)
+    .filter((key) => hasFootagePrefix(config, key) && Number.isFinite(assets[key].durationSeconds) && assets[key].durationSeconds > 0)
     .filter((key) => !Object.values(assets).some((asset) => asset.vertical === key))
     .map((key) => {
       const master = mediaFor(key);
@@ -174,6 +177,24 @@ export function validateVideoProducerConfig(input, contract) {
     if (!/^[a-z0-9][a-z0-9-]*-$/u.test(result)) throw new Error(`${label} must be a slug-safe prefix ending in a hyphen`);
     return result;
   };
+  // Footage may live under several key prefixes (dashcam clips, character
+  // B-roll, environment inserts) that share one library. Accept one prefix or
+  // a list; every clip under any of them is eligible in every format it can play.
+  const prefixes = (value, label, fallback) => {
+    if (value === undefined || value === null || value === "") return [prefix(fallback, label, fallback)];
+    const list = Array.isArray(value) ? value : [value];
+    if (!list.length) throw new Error(`${label} must name at least one prefix`);
+    const result = list.map((entry) => prefix(entry, label, null));
+    if (new Set(result).size !== result.length) throw new Error(`${label} repeats a prefix`);
+    for (const entry of result) {
+      const parent = result.find((other) => other !== entry && entry.startsWith(other));
+      if (parent) throw new Error(`${label} lists ${entry}, which is already covered by ${parent}`);
+    }
+    return result;
+  };
+  // A normalized config carries assetPrefixes beside its joined label; read the
+  // list back first so validation stays idempotent.
+  const footagePrefixes = prefixes(footage.assetPrefixes ?? footage.assetPrefix, footage.assetPrefixes ? "video contract producer.footage.assetPrefixes" : "video contract producer.footage.assetPrefix", "footage-");
   return {
     ...config,
     schemaVersion: PRODUCER_SCHEMA_VERSION,
@@ -221,7 +242,10 @@ export function validateVideoProducerConfig(input, contract) {
       assetPrefix: prefix(cover.assetPrefix, "video contract producer.cover.assetPrefix", "cover-subject-"),
     },
     footage: {
-      assetPrefix: prefix(footage.assetPrefix, "video contract producer.footage.assetPrefix", "footage-"),
+      // assetPrefixes is canonical; assetPrefix keeps a readable label (the
+      // sole prefix, or the list joined) for messages and older readers.
+      assetPrefixes: footagePrefixes,
+      assetPrefix: footagePrefixes.join(", "),
       allowShortCrop: footage.allowShortCrop === true,
     },
     authoring: {
@@ -484,7 +508,7 @@ export function createVideoAuthoringContract({ contract, manifest, designSystemI
       answerBeatRoles: [...beatRoles],
       reservedSceneIds: [...new Set([config.intro.id, config.engagement.id, config.outro.id, ...(subscribeActive ? [config.subscribe.id] : [])])],
     },
-    ...(footage ? { footage: { assetPrefix: config.footage.assetPrefix, maximumPerBeat: FOOTAGE_PICKS_PER_BEAT, clips: footage } } : {}),
+    ...(footage ? { footage: { assetPrefix: config.footage.assetPrefix, assetPrefixes: [...config.footage.assetPrefixes], maximumPerBeat: FOOTAGE_PICKS_PER_BEAT, clips: footage } } : {}),
     compilerOwns: [
       "role eyebrows",
       "intro, engagement, subscribe, and outro scene structure",

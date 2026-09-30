@@ -319,7 +319,10 @@ export async function describeVideoLabState(workspace) {
   const contract = loaded.video.contract;
   const producer = contract.producer || null;
   const assetKeys = Object.keys(loaded.video.assets.assets || {});
-  const counting = (prefix) => (prefix ? assetKeys.filter((key) => key.startsWith(prefix)).length : 0);
+  const counting = (prefix) => {
+    const prefixes = (Array.isArray(prefix) ? prefix : [prefix]).filter(Boolean);
+    return prefixes.length ? assetKeys.filter((key) => prefixes.some((entry) => key.startsWith(entry))).length : 0;
+  };
   return {
     designSystem: { id: workspace.manifest.systemId, name: workspace.manifest.name, version: workspace.manifest.version },
     contract: {
@@ -337,9 +340,10 @@ export async function describeVideoLabState(workspace) {
         outro: { enabled: producer.outro.enabled, narrationTemplate: producer.outro.narrationTemplate, narrationTemplates: producer.outro.narrationTemplates || {} },
         coverPrefix: producer.cover.assetPrefix,
         footagePrefix: producer.footage.assetPrefix,
+        footagePrefixes: producer.footage.assetPrefixes,
       } : null,
     },
-    catalog: { footage: counting(producer?.footage?.assetPrefix), covers: counting(producer?.cover?.assetPrefix) },
+    catalog: { footage: counting(producer?.footage?.assetPrefixes), covers: counting(producer?.cover?.assetPrefix) },
     lab: { directory: path.relative(workspace.designSystemRoot, loaded.video.labRoot), inputs: await listVideoLabInputs(loaded.video.labRoot) },
     productions: loaded.video.productions.map((production) => production.production.slug),
     drafting: { model: VIDEO_LAB_MODEL, credentials: hasClaudeCredentials() },

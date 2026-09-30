@@ -772,7 +772,7 @@ export async function loadVideoWorkspace(workspace, { slug: selectedSlug, brandV
   const assets = validateAssetCatalog(await readJson(assetsPath, "video assets"));
   const verticalMetadata = video.verticalMetadata ? validateVideoVerticalMetadata(
     await readJson(path.join(workspace.designSystemRoot, video.verticalMetadata), "video vertical metadata"),
-    { assetCatalog: assets, mediaCatalog: (await readMediaCatalog(workspace.designSystemRoot)).catalog, footagePrefix: contract.producer?.footage.assetPrefix },
+    { assetCatalog: assets, mediaCatalog: (await readMediaCatalog(workspace.designSystemRoot)).catalog, footagePrefix: contract.producer?.footage.assetPrefixes },
   ) : null;
   const boardCatalog = await readVideoBoardCatalog(workspace);
   const boards = boardCatalog ? boardCatalog.catalog : null;
