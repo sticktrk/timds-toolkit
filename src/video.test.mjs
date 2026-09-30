@@ -409,17 +409,30 @@ test("admits footage under every listed asset prefix in both formats", () => {
   };
   const contract = validateVideoContract(base);
   assert.deepEqual(contract.producer.footage.assetPrefixes, ["dash-", "char-broll-", "environment-broll-"]);
-  assert.equal(contract.producer.footage.assetPrefix, "dash-, char-broll-, environment-broll-");
+  // With several prefixes there is no single one to hand a reader that still filters by it.
+  assert.equal(contract.producer.footage.assetPrefix, undefined);
+  // Validation reads its own output back unchanged.
+  assert.deepEqual(validateVideoContract(contract).producer.footage, contract.producer.footage);
   // A single string still works and reads back unchanged.
   assert.deepEqual(validateVideoContract({ ...base, producer: { ...base.producer, footage: { assetPrefix: "dash-" } } }).producer.footage, { assetPrefixes: ["dash-"], assetPrefix: "dash-", allowShortCrop: false });
   for (const [value, message] of [
     [[], /at least one prefix/u],
     [["dash-", "dash-"], /repeats a prefix/u],
     [["char-", "char-broll-"], /char-broll-, which is already covered by char-/u],
-    [["dash-", "Char Broll"], /slug-safe prefix ending in a hyphen/u],
+    [["dash-", "Char Broll"], /assetPrefix\[1\] must be a slug-safe prefix ending in a hyphen/u],
+    [["dash-", ""], /assetPrefix\[1\] is required/u],
   ]) {
     assert.throws(() => validateVideoContract({ ...base, producer: { ...base.producer, footage: { assetPrefix: value } } }), message);
   }
+  // A contract that carries both keys is ambiguous unless they plainly agree.
+  assert.throws(
+    () => validateVideoContract({ ...base, producer: { ...base.producer, footage: { assetPrefix: "dash-", assetPrefixes: ["char-broll-"] } } }),
+    /sets both assetPrefix and assetPrefixes/u,
+  );
+  assert.deepEqual(
+    validateVideoContract({ ...base, producer: { ...base.producer, footage: { assetPrefix: "dash-", assetPrefixes: ["dash-"] } } }).producer.footage.assetPrefixes,
+    ["dash-"],
+  );
 
   // Masters under every prefix; the character clip is the only one without a vertical.
   const masters = ["dash-16-red-light", "char-broll-leslie-desk", "environment-broll-after-lobby", "object-broll-unlisted"];
@@ -447,6 +460,7 @@ test("admits footage under every listed asset prefix in both formats", () => {
   });
   const horizontal = authoring("horizontal");
   assert.deepEqual(horizontal.footage.assetPrefixes, ["dash-", "char-broll-", "environment-broll-"]);
+  assert.equal("assetPrefix" in horizontal.footage, false);
   // Every listed prefix contributes; an unlisted prefix stays out.
   assert.deepEqual(horizontal.footage.clips.map((clip) => clip.key), ["char-broll-leslie-desk", "dash-16-red-light", "environment-broll-after-lobby"]);
   // Shorts keep the same library minus clips without a vertical derivative.
@@ -478,15 +492,15 @@ test("admits footage under every listed asset prefix in both formats", () => {
   assert.deepEqual(production("short").hook, ["dash-16-red-light", "environment-broll-after-lobby"]);
 
   // Reviewed crops cover the masters under every prefix, and nothing else.
-  const crop = (key) => ({ sourceSha256: "a".repeat(64), objectPosition: "50% 50%", text: "lower", reviewedFrames: ["first", "middle", "last"] });
+  const crop = () => ({ sourceSha256: "a".repeat(64), objectPosition: "50% 50%", text: "lower", reviewedFrames: ["first", "middle", "last"] });
   const published = { assets: mediaCatalog.assets.map((asset) => ({ ...asset, sha256: "a".repeat(64) })) };
   const reviewed = validateVideoVerticalMetadata(
-    { schemaVersion: 1, assets: Object.fromEntries(masters.filter((key) => !key.startsWith("object-")).map((key) => [key, crop(key)])) },
-    { assetCatalog, mediaCatalog: published, footagePrefix: contract.producer.footage.assetPrefixes },
+    { schemaVersion: 1, assets: Object.fromEntries(masters.filter((key) => !key.startsWith("object-")).map((key) => [key, crop()])) },
+    { assetCatalog, mediaCatalog: published, footagePrefixes: contract.producer.footage.assetPrefixes },
   );
   assert.deepEqual(Object.keys(reviewed.assets).sort(), ["char-broll-leslie-desk", "dash-16-red-light", "environment-broll-after-lobby"]);
   assert.throws(
-    () => validateVideoVerticalMetadata({ schemaVersion: 1, assets: { "dash-16-red-light": crop() } }, { assetCatalog, mediaCatalog: published, footagePrefix: contract.producer.footage.assetPrefixes }),
+    () => validateVideoVerticalMetadata({ schemaVersion: 1, assets: { "dash-16-red-light": crop() } }, { assetCatalog, mediaCatalog: published, footagePrefixes: contract.producer.footage.assetPrefixes }),
     /char-broll-leslie-desk needs a reviewed crop record/u,
   );
 });

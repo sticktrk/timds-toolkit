@@ -21,6 +21,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { readMediaCatalog } from "./media.mjs";
+import { matchesFootagePrefix } from "../video/footage.mjs";
 import { createVideoAuthoringContract, createVideoProducer } from "./video-producer.mjs";
 import {
   describeSceneFootage,
@@ -319,10 +320,7 @@ export async function describeVideoLabState(workspace) {
   const contract = loaded.video.contract;
   const producer = contract.producer || null;
   const assetKeys = Object.keys(loaded.video.assets.assets || {});
-  const counting = (prefix) => {
-    const prefixes = (Array.isArray(prefix) ? prefix : [prefix]).filter(Boolean);
-    return prefixes.length ? assetKeys.filter((key) => prefixes.some((entry) => key.startsWith(entry))).length : 0;
-  };
+  const counting = (prefixes) => assetKeys.filter((key) => matchesFootagePrefix(prefixes, key)).length;
   return {
     designSystem: { id: workspace.manifest.systemId, name: workspace.manifest.name, version: workspace.manifest.version },
     contract: {
@@ -339,11 +337,10 @@ export async function describeVideoLabState(workspace) {
         subscribe: producer.subscribe,
         outro: { enabled: producer.outro.enabled, narrationTemplate: producer.outro.narrationTemplate, narrationTemplates: producer.outro.narrationTemplates || {} },
         coverPrefix: producer.cover.assetPrefix,
-        footagePrefix: producer.footage.assetPrefix,
         footagePrefixes: producer.footage.assetPrefixes,
       } : null,
     },
-    catalog: { footage: counting(producer?.footage?.assetPrefixes), covers: counting(producer?.cover?.assetPrefix) },
+    catalog: { footage: counting(producer?.footage.assetPrefixes ?? []), covers: counting(producer ? [producer.cover.assetPrefix] : []) },
     lab: { directory: path.relative(workspace.designSystemRoot, loaded.video.labRoot), inputs: await listVideoLabInputs(loaded.video.labRoot) },
     productions: loaded.video.productions.map((production) => production.production.slug),
     drafting: { model: VIDEO_LAB_MODEL, credentials: hasClaudeCredentials() },
