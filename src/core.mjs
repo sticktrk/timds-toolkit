@@ -23,7 +23,7 @@ import {
 import { syncDefaults } from "./defaults.mjs";
 import { checkRuntimeDependencies, upgradeToRelease } from "./upgrade.mjs";
 import { migrateVideoComponents } from "./video-migration.mjs";
-import {assertVideoContractRuntime, runtimeIdentity} from "./runtime.mjs";
+import { acceptsToolkitReleaseRange, assertVideoContractRuntime, runtimeIdentity, toolkitReleaseRange } from "./runtime.mjs";
 import { publishExtractedIndex } from "./artifact.mjs";
 import { extractArtifact, normalizeMachineConfig } from "./extract.mjs";
 import { normalizeBrandGuidance } from "./brand.mjs";
@@ -55,10 +55,30 @@ const workspaceCommandNames = ["install", "dev", "build", "check"];
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const toolkitPackageName = "@dtconcepts/timds";
 const standaloneReleaseAutomation = "merge-patch-v1";
+const dependencyPrAutomation = "upgrade-pr-v1";
+// The managed automation boundary: [repository path, template name]. Both the
+// migration that writes these files and the installation record that hashes
+// them read this one table.
+const standaloneReleaseAutomationFiles = Object.freeze([
+  [".github/workflows/timds-design-system.yml", "timds-standalone.yml"],
+  [".github/workflows/update-consumer-submodule.yml", "update-consumer-submodule.yml"],
+  ["scripts/release.mjs", "starter/scripts/release.mjs"],
+  ["scripts/prepare-merge-release.mjs", "starter/scripts/prepare-merge-release.mjs"],
+  ["scripts/prepare-merge-release.test.mjs", "starter/scripts/prepare-merge-release.test.mjs"],
+]);
+const dependencyAutomationFiles = Object.freeze([
+  [".github/workflows/timds-upgrade.yml", "timds-upgrade.yml"],
+]);
+// Stock release files shipped before installation.json recorded managed-file
+// hashes. Every hash a template has had must stay here so an unmodified adopter
+// is never mistaken for a customized one.
 const legacyStandaloneAutomationHashes = new Map([
-  [".github/workflows/timds-design-system.yml", "203ba2218b7e9d9216166707d89707a8740c8e1835f0a1e3bd31e19768c34992"],
-  [".github/workflows/update-consumer-submodule.yml", "a93c345503d5c344b2ab7b3aa37ee901e71d48608ca94df5b145235f21a5ef6f"],
-  ["scripts/release.mjs", "ba1b6ec7e4022a7104d7d0c7e2497fb61a839c37394395ea3bdaa979def1260a"],
+  [".github/workflows/timds-design-system.yml", [
+    "203ba2218b7e9d9216166707d89707a8740c8e1835f0a1e3bd31e19768c34992",
+    "3d27e370cc596307a73a71617f95e1314c24de0229716af4cb9d2384dee5ae32",
+  ]],
+  [".github/workflows/update-consumer-submodule.yml", ["a93c345503d5c344b2ab7b3aa37ee901e71d48608ca94df5b145235f21a5ef6f"]],
+  ["scripts/release.mjs", ["ba1b6ec7e4022a7104d7d0c7e2497fb61a839c37394395ea3bdaa979def1260a"]],
 ]);
 
 const contentTypes = {
@@ -485,7 +505,11 @@ export async function extractWorkspace(workspace, { write = true } = {}) {
   // The board catalog is client source outside the built artifact; the index
   // carries its summary so consumers can show the shelf without the repo.
   const boards = await readVideoBoardCatalog(workspace);
-  const contract = workspace.manifest.video ? await readJsonObject(path.join(workspace.designSystemRoot, workspace.manifest.video.contract), "video contract") : null;
+  // A manifest may enable video before `video init` writes the contract; the
+  // index then simply carries no video section, as it did before runtime
+  // identity was published. `check` validates the contract in full.
+  const contractSource = workspace.manifest.video ? await readJsonObject(path.join(workspace.designSystemRoot, workspace.manifest.video.contract), "video contract", { required: false }) : {};
+  const contract = Object.keys(contractSource).length ? contractSource : null;
   if (contract) assertVideoContractRuntime(contract);
   return extractArtifact({
     artifactRoot: path.join(workspace.designSystemRoot, "dist"),
@@ -616,20 +640,6 @@ async function toolkitPackageIdentity(root = packageRoot) {
   return { name, version };
 }
 
-function toolkitReleaseRange(identity) {
-  const [major, minor] = identity.version.split(".");
-  return `${major}.${minor}.x`;
-}
-
-function acceptsToolkitReleaseRange(selectedVersion, identity) {
-  const releaseRange = toolkitReleaseRange(identity);
-  if (selectedVersion === releaseRange) return true;
-  const [major, minor, patch] = identity.version.split(".").map(Number);
-  if (major !== 0) return false;
-  const npmCaret = String(selectedVersion || "").match(/^\^0\.(\d+)\.(\d+)$/);
-  return Boolean(npmCaret && Number(npmCaret[1]) === minor && Number(npmCaret[2]) <= patch);
-}
-
 function managedToolkitPaths(repoRoot, designSystemRoot) {
   return {
     installationPath: path.join(designSystemRoot, ".timds", "installation.json"),
@@ -685,12 +695,10 @@ async function installManagedToolkit({ designSystemRoot, releaseAutomation, depe
   if (selectedDependencyAutomation) installation.dependencyAutomation = selectedDependencyAutomation;
   const managedFiles = {};
   const trackedAutomation = [
-    ...(selectedReleaseAutomation ? [".github/workflows/timds-design-system.yml", ".github/workflows/update-consumer-submodule.yml", "scripts/release.mjs", "scripts/prepare-merge-release.mjs", "scripts/prepare-merge-release.test.mjs"] : []),
-    ...(selectedDependencyAutomation ? [".github/workflows/timds-upgrade.yml"] : []),
+    ...(selectedReleaseAutomation ? standaloneReleaseAutomationFiles : []),
+    ...(selectedDependencyAutomation ? dependencyAutomationFiles : []),
   ];
-  for (const relative of trackedAutomation) {
-    const templateName = relative === ".github/workflows/timds-design-system.yml" ? "timds-standalone.yml"
-      : relative.startsWith(".github/workflows/") ? path.basename(relative) : `starter/${relative}`;
+  for (const [relative, templateName] of trackedAutomation) {
     managedFiles[relative] = createHash("sha256").update(await template(templateName)).digest("hex");
   }
   if (trackedAutomation.length) installation.managedFiles = managedFiles;
@@ -702,7 +710,7 @@ async function installManagedToolkit({ designSystemRoot, releaseAutomation, depe
   return { ...paths, package: installedIdentity };
 }
 
-async function planReleaseAutomationFile(repoRoot, relativePath, templateName, { force = false, legacyHash, managedHash } = {}) {
+async function planReleaseAutomationFile(repoRoot, relativePath, templateName, { force = false, legacyHashes = [], managedHash } = {}) {
   const destination = path.join(repoRoot, relativePath);
   const desired = await template(templateName);
   let current = null;
@@ -713,25 +721,18 @@ async function planReleaseAutomationFile(repoRoot, relativePath, templateName, {
   }
   if (current === desired) return { destination, desired, needsUpdate: false, relativePath };
   const currentHash = current === null ? null : createHash("sha256").update(current).digest("hex");
-  if (current !== null && !force && currentHash !== legacyHash && currentHash !== managedHash && !(relativePath === ".github/workflows/timds-design-system.yml" && currentHash === "3d27e370cc596307a73a71617f95e1314c24de0229716af4cb9d2384dee5ae32")) {
+  if (current !== null && !force && !legacyHashes.includes(currentHash) && currentHash !== managedHash) {
     throw new Error(`Refusing to replace customized release automation at ${relativePath}; review it or rerun upgrade with --force`);
   }
   return { destination, desired, needsUpdate: true, relativePath };
 }
 
 async function migrateStandaloneReleaseAutomation(repoRoot, { force = false, managedHashes = {} } = {}) {
-  const replacements = [
-    [".github/workflows/timds-design-system.yml", "timds-standalone.yml"],
-    [".github/workflows/update-consumer-submodule.yml", "update-consumer-submodule.yml"],
-    ["scripts/release.mjs", "starter/scripts/release.mjs"],
-    ["scripts/prepare-merge-release.mjs", "starter/scripts/prepare-merge-release.mjs"],
-    ["scripts/prepare-merge-release.test.mjs", "starter/scripts/prepare-merge-release.test.mjs"],
-  ];
   const planned = [];
-  for (const [relativePath, templateName] of replacements) {
+  for (const [relativePath, templateName] of standaloneReleaseAutomationFiles) {
     planned.push(await planReleaseAutomationFile(repoRoot, relativePath, templateName, {
       force,
-      legacyHash: legacyStandaloneAutomationHashes.get(relativePath),
+      legacyHashes: legacyStandaloneAutomationHashes.get(relativePath) ?? [],
       managedHash: managedHashes[relativePath],
     }));
   }
@@ -913,8 +914,9 @@ export async function upgradeRepository(repoRootInput, { autoRelease = false, de
   }
   const previousVersion = await readInstalledToolkitVersion(workspace.designSystemRoot);
   const previousInstallation = await readInstallationMetadata(workspace.designSystemRoot);
+  const [[dependencyWorkflow, dependencyTemplate]] = dependencyAutomationFiles;
   const dependencyPlan = dependencyPrs || previousInstallation.dependencyAutomation
-    ? await planReleaseAutomationFile(workspace.repoRoot, ".github/workflows/timds-upgrade.yml", "timds-upgrade.yml", {force, managedHash: previousInstallation.managedFiles?.[".github/workflows/timds-upgrade.yml"]})
+    ? await planReleaseAutomationFile(workspace.repoRoot, dependencyWorkflow, dependencyTemplate, {force, managedHash: previousInstallation.managedFiles?.[dependencyWorkflow]})
     : null;
   const releaseAutomationChanges = autoRelease || previousInstallation.releaseAutomation
     ? await migrateStandaloneReleaseAutomation(workspace.repoRoot, { force, managedHashes: previousInstallation.managedFiles || {} })
@@ -927,7 +929,7 @@ export async function upgradeRepository(repoRootInput, { autoRelease = false, de
   const installed = await installManagedToolkit({
     designSystemRoot: workspace.designSystemRoot,
     releaseAutomation: autoRelease ? standaloneReleaseAutomation : undefined,
-    dependencyAutomation: dependencyPrs ? "upgrade-pr-v1" : undefined,
+    dependencyAutomation: dependencyPrs ? dependencyPrAutomation : undefined,
     repoRoot: workspace.repoRoot,
     replace: true,
   });
@@ -1291,7 +1293,7 @@ export async function runCli(argv) {
   }
   if (command === "dependencies") {
     if (positional[0] !== "check") throw new Error("Usage: timds dependencies check [--root PATH]");
-    const result = await checkRuntimeDependencies((await loadWorkspace(root)).repoRoot);
+    const result = await checkRuntimeDependencies(await loadWorkspace(root));
     output(`TimDS ${result.toolkit}: one consistent React/Remotion dependency graph`);
     return result;
   }

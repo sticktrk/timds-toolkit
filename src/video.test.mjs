@@ -90,7 +90,7 @@ test("copies the installed default components into client-owned source exactly o
 
 test("keeps structure policy in the client video contract", () => {
   const contract = validateVideoContract({
-    schemaVersion: 1,
+    schemaVersion: "1",
     id: "client-video",
     name: "Client",
     package: { shortCount: 0 },
@@ -107,6 +107,8 @@ test("keeps structure policy in the client video contract", () => {
   assert.equal(contract.structure.longform.requireIntro, true);
   assert.equal(contract.structure.longform.requireOutro, false);
   assert.equal(contract.structure.short.requireIntro, false);
+  assert.equal(contract.schemaVersion, 1, "a version spelled as a string normalizes as it always did");
+  assert.throws(() => validateVideoContract({ ...contract, schemaVersion: 3, runtime: { videoSchema: 3 } }), /schemaVersion must be 1 or 2/u, "the range error precedes the runtime cross-check");
 });
 
 test("compiles programmatic productions with client-owned producer copy and assets", () => {
@@ -1925,6 +1927,9 @@ test("extract publishes the board catalog summary in the machine index", async (
   assert.ok(machine.index.video.engine.version);
   await fs.rm(path.join(workspace.designSystemRoot, "video", "boards.json"));
   assert.equal((await extractWorkspace(workspace, { write: false })).index.video.boards, undefined);
+  // Video may be enabled before `video init` writes the contract; extract still produces the index.
+  await fs.rm(path.join(workspace.designSystemRoot, workspace.manifest.video.contract));
+  assert.equal((await extractWorkspace(workspace, { write: false })).index.video, undefined);
 });
 
 test("subscribe compiles in every producer format whatever the catalog's formats say", async () => {

@@ -386,10 +386,11 @@ function normalizeStaticFiles(value, label) {
 
 export function validateVideoContract(input) {
   const contract = object(input, "video contract");
-  assertVideoContractRuntime(contract);
-  if (![1, 2].includes(contract.schemaVersion)) {
+  const schemaVersion = Number(contract.schemaVersion);
+  if (![1, 2].includes(schemaVersion)) {
     throw new Error("video contract schemaVersion must be 1 or 2");
   }
+  assertVideoContractRuntime({ ...contract, schemaVersion });
   const formats = object(contract.formats || {}, "video contract formats");
   const packagePolicy = object(contract.package || {}, "video contract package");
   const structure = object(contract.structure || {}, "video contract structure");
@@ -422,7 +423,7 @@ export function validateVideoContract(input) {
   };
   return {
     ...contract,
-    schemaVersion: contract.schemaVersion,
+    schemaVersion,
     id: slug(contract.id, "video contract id"),
     name: text(contract.name, "video contract name"),
     fps: positiveInteger(contract.fps || 30, "video contract fps"),

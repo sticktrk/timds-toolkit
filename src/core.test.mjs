@@ -745,11 +745,23 @@ test("migrates standalone release automation only with explicit replacement of c
   const result = await upgradeRepository(repoRoot, { autoRelease: true, force: true });
   assert.ok(result.releaseAutomationChanges.includes(".github/workflows/timds-design-system.yml"));
   assert.match(await fs.readFile(workflowPath, "utf8"), /prepare-release:/);
-  assert.equal(
-    JSON.parse(await fs.readFile(path.join(repoRoot, ".timds", "installation.json"), "utf8")).releaseAutomation,
-    "merge-patch-v1",
-  );
+  const installation = JSON.parse(await fs.readFile(path.join(repoRoot, ".timds", "installation.json"), "utf8"));
+  assert.equal(installation.releaseAutomation, "merge-patch-v1");
+  assert.deepEqual(Object.keys(installation.managedFiles), [
+    ".github/workflows/timds-design-system.yml",
+    ".github/workflows/update-consumer-submodule.yml",
+    "scripts/release.mjs",
+    "scripts/prepare-merge-release.mjs",
+    "scripts/prepare-merge-release.test.mjs",
+  ], "every file the migration writes is recorded, so the next upgrade recognizes it as stock");
   execFileSync("node", ["--test", "scripts/prepare-merge-release.test.mjs"], { cwd: repoRoot, stdio: "ignore" });
+  execFileSync("git", ["add", "--all"], { cwd: repoRoot });
+  execFileSync("git", ["commit", "--allow-empty", "-m", "Adopt release automation"], { cwd: repoRoot, stdio: "ignore" });
+  // Adopted automation now follows every plain upgrade; unmodified stock files never trip the guard.
+  assert.deepEqual((await upgradeRepository(repoRoot)).releaseAutomationChanges, []);
+  await fs.writeFile(workflowPath, "name: Customized again\n", "utf8");
+  await assert.rejects(upgradeRepository(repoRoot), /Refusing to replace customized release automation/);
+  assert.equal(await fs.readFile(workflowPath, "utf8"), "name: Customized again\n");
 });
 
 test("initializes an embedded contract with a committed starter artifact", async (t) => {

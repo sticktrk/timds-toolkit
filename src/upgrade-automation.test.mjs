@@ -39,6 +39,17 @@ test("opt-in automation opens and refreshes a reviewable dependency PR", async (
   assert.match(await fs.readFile(log, "utf8"), /pr edit 12/u);
   assert.match(await fs.readFile(log, "utf8"), /exact committed lockfile/u);
   git(["switch", "main"]); git(["branch", "-D", "timds/dependency-upgrade"]);
+  // Embedded layouts commit dist/; `timds check` rebuilds and re-extracts it, and the
+  // extracted index records the engine version. That is not authored source.
+  const ignorePath = path.join(root, ".gitignore");
+  await fs.writeFile(ignorePath, (await fs.readFile(ignorePath, "utf8")).replace(/^dist\/\n/mu, ""));
+  git(["add", "--all"]); git(["commit", "-m", "Track the built artifact"]);
+  await fs.mkdir(path.join(root, "dist"), {recursive: true});
+  await fs.writeFile(path.join(root, "dist", "index.json"), '{"video":{"engine":{"version":"0.1.900000"}}}\n');
+  run("12");
+  assert.equal(git(["diff", "--name-only", "main...timds/dependency-upgrade"]).toString().trim(), "dist/index.json");
+  git(["switch", "main"]); git(["branch", "-D", "timds/dependency-upgrade"]);
+  await fs.rm(path.join(root, "dist"), {recursive: true});
   await fs.writeFile(path.join(root, "src", "index.html"), "Unreviewed source change\n");
   assert.throws(() => run("12"), /Checks changed authored files/u);
 });

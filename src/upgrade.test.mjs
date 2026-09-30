@@ -60,13 +60,21 @@ test("explicit dependency selection keeps the bounded line and synchronizes usin
   assert.equal(JSON.parse(await fs.readFile(path.join(root, "package-lock.json"))).packages[""].devDependencies[toolkit.name], "0.1.x");
   assert.equal(await fs.readFile(workspace.manifestPath, "utf8"), before);
   assert.deepEqual(calls.slice(-3), [["npm", "run", "timds", "--", "upgrade"], ["npm", "run", "timds", "--", "dependencies", "check"], ["npm", "run", "timds", "--", "check"]]);
-  await assert.rejects(upgradeToRelease(workspace, {version: "latest", run}), /exact stable/u);
+  await assert.rejects(upgradeToRelease(workspace, {version: "latest", run}), /exact stable 0\.1\.x/u);
+  await assert.rejects(upgradeToRelease(workspace, {version: "0.2.0", run}), /exact stable 0\.1\.x release/u, "the line comes from the repository's bounded requirement");
   const shuffled = async (command, args, options) => args[0] === "view"
     ? {stdout: JSON.stringify([toolkit, {...toolkit, version:"0.1.1"}])} : run(command, args, options);
   assert.equal((await upgradeToRelease(workspace, {version:"0.1.x", run:shuffled})).version, toolkit.version);
   const failingInstall = async (command, args, options) => args[0] === "install" ? Promise.reject(new Error("Registry failed")) : run(command, args, options);
   await assert.rejects(upgradeToRelease(workspace, {version:toolkit.version, run:failingInstall}), /Registry failed/u);
   assert.equal(JSON.parse(await fs.readFile(path.join(root, "package.json"))).devDependencies[toolkit.name], "0.1.x");
+  // Moving to the next minor line is an explicit package.json edit; the command then follows it.
+  const packagePath = path.join(root, "package.json"), lockPath = path.join(root, "package-lock.json");
+  const pkg = JSON.parse(await fs.readFile(packagePath)), lock = JSON.parse(await fs.readFile(lockPath));
+  pkg.devDependencies[toolkit.name] = "0.2.x"; lock.packages[""].devDependencies[toolkit.name] = "0.2.x";
+  await fs.writeFile(packagePath, `${JSON.stringify(pkg, null, 2)}\n`); await fs.writeFile(lockPath, JSON.stringify(lock));
+  await assert.rejects(upgradeToRelease(workspace, {version: toolkit.version, run}), /exact stable 0\.2\.x release/u);
+  await assert.rejects(upgradeToRelease(workspace, {version: "0.2.0", run}), /unexpected TimDS release/u, "the registry mock still serves the current line");
 });
 
 test("adopted automation follows package releases and preserves authored source and defaults", async (t) => {

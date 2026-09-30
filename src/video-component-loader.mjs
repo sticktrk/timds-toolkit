@@ -6,9 +6,10 @@ import {createHash} from "node:crypto";
 import {promises as fs} from "node:fs";
 import path from "node:path";
 import {pathToFileURL} from "node:url";
-import ts from "typescript";
 
 export async function loadVideoComponentModule(componentsPath, localRoot) {
+  // The compiler loads only on this path; every other CLI and MCP start stays light.
+  const {default: ts} = await import("typescript");
   const source = await fs.readFile(componentsPath, "utf8");
   const key = createHash("sha256").update(componentsPath).update(source).digest("hex");
   const relocate = (context) => {

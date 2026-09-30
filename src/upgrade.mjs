@@ -1,17 +1,19 @@
 // Dependency selection is explicit. Normal synchronization stays in core.mjs;
 // this command prepares dependency and managed-file changes for review.
 import { execFile } from "node:child_process";
-import { existsSync, promises as fs } from "node:fs";
+import { promises as fs } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { promisify } from "node:util";
+import { declaredReleaseLine, isRuntimeDependency as isRuntime } from "./runtime.mjs";
+import { releaseLineOf } from "../video/runtime-compat.mjs";
 
 const execute = promisify(execFile);
 const readJson = async (file) => JSON.parse(await fs.readFile(file, "utf8"));
 const writeJson = async (file, value) => fs.writeFile(file, `${JSON.stringify(value, null, 2)}\n`);
 const packageName = "@dtconcepts/timds";
-const isRuntime = (name) => ["react", "react-dom", "remotion"].includes(name) || name.startsWith("@remotion/");
 const installedName = (location) => location.split("node_modules/").at(-1);
+const exactRelease = (version) => /^\d+\.\d+\.\d+$/u.test(version ?? "");
 
 export function validateLockedRuntime(lock, toolkit) {
   if (![2, 3].includes(lock.lockfileVersion) || !lock.packages) throw new Error("Commit an npm v2/v3 package-lock.json before checking the TimDS dependency graph");
@@ -33,7 +35,7 @@ export function validateLockedRuntime(lock, toolkit) {
   return {toolkit: toolkit.version, dependencies: required};
 }
 
-export async function checkRuntimeDependencies(repoRoot) {
+export async function checkRuntimeDependencies({repoRoot, designSystemRoot}) {
   const pkg = await readJson(path.join(repoRoot, "package.json"));
   const lock = await readJson(path.join(repoRoot, "package-lock.json"));
   for (const key of ["dependencies", "devDependencies", "optionalDependencies"]) {
@@ -59,28 +61,30 @@ export async function checkRuntimeDependencies(repoRoot) {
     }
   };
   visit(JSON.parse(installed.stdout).dependencies);
-  const designSystemRoot = existsSync(path.join(repoRoot, "timds.json")) ? repoRoot : path.join(repoRoot, "design-system");
   const metadata = await readJson(path.join(designSystemRoot, ".timds", "installation.json"));
   if (metadata.version !== toolkit.version) throw new Error(`Managed TimDS metadata is ${metadata.version}, installed runtime is ${toolkit.version}; run npm run timds -- upgrade and commit the synchronized managed files`);
   return result;
 }
 
 export async function upgradeToRelease(workspace, {version, ownRuntime = false, force = false, run = execute} = {}) {
-  if (!/^(?:0\.1\.\d+|0\.1\.x)$/u.test(version ?? "")) throw new Error("upgrade --version requires an exact stable 0.1.x release or 0.1.x to resolve the newest compatible release once");
   const root = workspace.repoRoot;
+  const packagePath = path.join(root, "package.json"), lockPath = path.join(root, "package-lock.json");
+  const pkg = await readJson(packagePath);
+  // The bounded line comes from the repository's own requirement, so moving to
+  // a new minor line is an explicit package.json edit, never a toolkit literal.
+  const line = declaredReleaseLine(pkg.devDependencies?.[packageName] ?? pkg.dependencies?.[packageName]);
+  if (pkg.scripts?.timds !== "timds" || !line) throw new Error("Keep scripts.timds at timds and select a bounded MAJOR.MINOR.x dependency line before upgrading");
+  if (version !== line && !(exactRelease(version) && releaseLineOf(version) === line)) throw new Error(`upgrade --version requires an exact stable ${line} release or ${line} to resolve the newest compatible release once`);
   const invoke = (command, args) => run(command, args, {cwd: root, maxBuffer: 20_000_000});
   const status = await invoke("git", ["status", "--porcelain", "--untracked-files=all"]);
   if (status.stdout.trim()) throw new Error("Dependency upgrades require a clean working tree; commit or restore existing changes before selecting a release");
-  const packagePath = path.join(root, "package.json"), lockPath = path.join(root, "package-lock.json");
-  const pkg = await readJson(packagePath);
-  if (pkg.scripts?.timds !== "timds" || !/^(?:0\.1\.x|\^0\.1\.\d+)$/u.test(pkg.devDependencies?.[packageName] ?? pkg.dependencies?.[packageName] ?? "")) throw new Error("Keep scripts.timds at timds and select the bounded 0.1.x dependency line before upgrading");
   const previousLock = await readJson(lockPath); // A committed baseline is required for rollback and review.
   const dependencyKey = pkg.devDependencies?.[packageName] ? "devDependencies" : "dependencies";
   if (![2, 3].includes(previousLock.lockfileVersion) || previousLock.packages?.[""]?.[dependencyKey]?.[packageName] !== pkg[dependencyKey][packageName]) throw new Error("Commit a matching npm v2/v3 package-lock.json before selecting a dependency upgrade");
   const metadataResult = await invoke("npm", ["view", `${packageName}@${version}`, "version", "dependencies", "--json"]);
   const resolved = JSON.parse(metadataResult.stdout);
   const selected = Array.isArray(resolved) ? [...resolved].sort((a, b) => Number(b.version?.split(".")[2]) - Number(a.version?.split(".")[2]))[0] : resolved;
-  if (!/^0\.1\.\d+$/u.test(selected?.version ?? "") || (version !== "0.1.x" && selected.version !== version)) throw new Error("Registry returned an unexpected TimDS release");
+  if (!exactRelease(selected?.version) || releaseLineOf(selected.version) !== line || (version !== line && selected.version !== version)) throw new Error("Registry returned an unexpected TimDS release");
   const installationPath = path.join(workspace.designSystemRoot, ".timds", "installation.json");
   const installation = await readJson(installationPath);
   const ownership = ownRuntime || installation.runtimeDependencyOwnership === "timds-v1";

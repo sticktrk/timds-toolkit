@@ -18,10 +18,10 @@ import {
 } from "remotion";
 import {fitCoverHeadline, splitGoldHeadline, tieOrphan} from "./text.mjs";
 import {assertSharedBoardLayout, resolveBoardLayout} from "./board-layouts.mjs";
-import {assertRuntimeCompatibility, VIDEO_RUNTIME_CAPABILITIES} from "./runtime-compat.mjs";
+import {assertRuntimeCompatibility, runtimeIdentityFor} from "./runtime-compat.mjs";
 import toolkitPackage from "../package.json" with {type: "json"};
 
-const componentRuntime = {...VIDEO_RUNTIME_CAPABILITIES, name: toolkitPackage.name, version: toolkitPackage.version};
+const componentRuntime = runtimeIdentityFor(toolkitPackage);
 import {MINIMUM_CHAIN_CLIP_SECONDS, adjacentFootageRepeats, chainClipFrames, sceneAssetKeys, verticalTextZone} from "./footage.mjs";
 import {DEFAULT_BOARD_KINDS, deriveVideoChapters, revealFrame} from "./boards.mjs";
 

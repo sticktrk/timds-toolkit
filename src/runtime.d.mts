@@ -2,6 +2,10 @@ export type RuntimeIdentity = {name: string; version: string; releaseLine: strin
 export type RuntimeRequirements = {releaseLine: string; minimumVersion: string; videoSchema: number; componentApi: number; features: string[]; testedVersions?: string[]};
 export declare const runtimeIdentity: Readonly<RuntimeIdentity>;
 export declare const runtimeDependencies: Readonly<Record<string, string>>;
+export declare function isRuntimeDependency(name: string): boolean;
+export declare function toolkitReleaseRange(identity?: {version: string}): string;
+export declare function declaredReleaseLine(requirement: unknown): string | null;
+export declare function acceptsToolkitReleaseRange(selectedVersion: unknown, identity?: {version: string}): boolean;
 export declare function sharedRuntimeRequirements(): RuntimeRequirements;
 export declare function assertRuntimeCompatibility(requirements?: RuntimeRequirements, selected?: RuntimeIdentity): RuntimeIdentity;
-export declare function assertVideoContractRuntime(contract: {schemaVersion: number; runtime?: RuntimeRequirements}): void;
+export declare function assertVideoContractRuntime(contract: {schemaVersion: number | string; runtime?: RuntimeRequirements}): void;

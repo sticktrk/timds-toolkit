@@ -4,16 +4,20 @@
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import ts from "typescript";
 import { defaultVideoComponentsTemplate } from "./video.mjs";
 import { assertRuntimeCompatibility, runtimeIdentity, sharedRuntimeRequirements } from "./runtime.mjs";
 
-const printer = ts.createPrinter({removeComments: true});
+// The TypeScript compiler is loaded on first use so that the CLI and the stdio
+// MCP servers, which import this module through core, do not pay for it.
+let compiler = null;
+const typescript = async () => (compiler ??= (await import("typescript")).default);
 const hash = (value) => createHash("sha256").update(value).digest("hex");
 const slots = {Video: "Video", Scene: "SceneView", Graphic: "GraphicBoard", Intro: "Intro", Outro: "Outro", Cover: "Cover", HorizontalCover: "HorizontalCover", VerticalCover: "VerticalCover"};
 const boards = {"chapter-title": "ChapterTitleBoard", statement: "StatementBoard", cards: "CardsBoard", compare: "CompareBoard", flow: "FlowBoard", steps: "StepsBoard", document: "DocumentBoard", subscribe: "SubscribeBoard"};
 
-export function snapshotInventory(source) {
+export async function snapshotInventory(source) {
+  const ts = await typescript();
+  const printer = ts.createPrinter({removeComments: true});
   const file = ts.createSourceFile("remotion.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   if (file.parseDiagnostics.length) throw new Error("Component snapshot contains invalid TypeScript; review it before migration");
   const declarations = new Map(), imports = [], exports = [], unsupported = [], directExports = [], typeExports = [];
@@ -38,15 +42,15 @@ export function snapshotInventory(source) {
   return {declarations, imports, exports, unsupported, directExports, typeExports};
 }
 
-export function snapshotBaseline(source) {
-  const inventory = snapshotInventory(source);
+export async function snapshotBaseline(source) {
+  const inventory = await snapshotInventory(source);
   return {declarations: Object.fromEntries([...inventory.declarations].map(([name, entry]) => [name, entry.hash])), imports: inventory.imports, exports: inventory.exports};
 }
 
 export async function planComponentMigration(source) {
   const current = await defaultVideoComponentsTemplate();
-  const baselines = [snapshotBaseline(current), ...Object.values(JSON.parse(await fs.readFile(new URL("../video/component-baselines.json", import.meta.url), "utf8")))];
-  const inventory = snapshotInventory(source);
+  const baselines = [await snapshotBaseline(current), ...Object.values(JSON.parse(await fs.readFile(new URL("../video/component-baselines.json", import.meta.url), "utf8")))];
+  const inventory = await snapshotInventory(source);
   // Choose one known release, never a mixture that could hide incompatible copies.
   const score = (baseline) => [...inventory.declarations].filter(([name, entry]) => baseline.declarations[name] === entry.hash).length;
   const baseline = baselines.sort((a, b) => score(b) - score(a))[0];
@@ -84,6 +88,13 @@ export async function planComponentMigration(source) {
   const sharedTypes = allExports.filter((name) => !retained.has(name) && inventory.typeExports.includes(name));
   const customNames = exportedNames.filter((name) => retained.has(name));
   const overrideEntries = retainedSlots.map(([slot, name]) => `${slot}: ${name}`);
+  // The snapshot registered HorizontalCover and VerticalCover explicitly, so a
+  // custom Cover never reached those slots there. The resolver falls back to
+  // Cover for both, so pin the shared ones to keep the snapshot's binding.
+  const retainedSlotNames = new Set(retainedSlots.map(([slot]) => slot));
+  if (retainedSlotNames.has("Cover")) {
+    for (const slot of ["HorizontalCover", "VerticalCover"]) if (!retainedSlotNames.has(slot)) overrideEntries.push(`${slot}: __timdsShared.${slot}`);
+  }
   const boardEntries = retainedBoards.map(([kind, name]) => `${JSON.stringify(kind)}: ${name}`);
   if (retainedSlots.some(([slot]) => slot === "Graphic")) boardEntries.unshift("...__timdsShared.Boards");
   if (boardEntries.length) overrideEntries.push(`Boards: {${boardEntries.join(", ")}}`);

@@ -18,6 +18,11 @@ test("snapshot inventory consolidates defaults and retains deliberate visual ove
   assert.match(plan.source, /const badge = vertical \? 74 : 70/u);
   assert.doesNotMatch(plan.source, /const CardsBoard:/u);
   assert.doesNotMatch(plan.source, /const SceneView:/u);
+  const coverOnly = await planComponentMigration(stock.replace("(props) => props.vertical\n  ? <VerticalCover", "(props) => props.vertical === true\n  ? <VerticalCover"));
+  assert.equal(coverOnly.status, "overrides");
+  assert.match(coverOnly.source, /Cover: Cover/u);
+  assert.match(coverOnly.source, /HorizontalCover: __timdsShared\.HorizontalCover/u, "the snapshot bound the format covers explicitly, so the resolver's Cover fallback must not reach them");
+  assert.match(coverOnly.source, /VerticalCover: __timdsShared\.VerticalCover/u);
   const review = await planComponentMigration(stock.replace('const SceneView:', 'const SceneView /* client scene */:').replace('if (scene.intro) return', 'if (scene.intro && false) return'));
   assert.equal(review.status, "review");
   assert.ok(review.review.some((reason) => reason.includes("custom Scene")));
