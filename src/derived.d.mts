@@ -1,4 +1,6 @@
 /** The derived layer: generated, contract-shaped documents a consumer reads without TimDS internals. */
+import type {RuntimeIdentity, RuntimeRequirements} from "./runtime.mjs";
+import type {VideoBoardCatalogSummary} from "./video-producer.mjs";
 
 export type SystemStamp = { id: string; name: string; version: string };
 
@@ -127,6 +129,7 @@ export type IndexDocument = {
   pageCount: number;
   tokens: { url: string; count: number; stylesheets: number; roles: number };
   brand: { url: string; logos: number; imagery: number; guidance: number };
+  video?: {runtime?: RuntimeRequirements | null; engine?: RuntimeIdentity; boards?: VideoBoardCatalogSummary};
   pages: IndexPage[];
 };
 

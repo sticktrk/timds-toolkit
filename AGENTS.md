@@ -30,6 +30,15 @@ explicit `upgrade --auto-release` migration; refuse customized files unless
 replacement is forced. Package and lockfile changes select the resolved package
 release.
 
+`upgrade --version VERSION` selects one exact tested resolution, restores the
+bounded requirement, runs `npm ci`, synchronizes adopted managed files with the
+selected CLI, and validates the graph and workspace. Explicit `--own-runtime`
+adoption lets it align existing React/Remotion declarations in package.json.
+Adopted stock automation follows recorded template hashes; customized files
+require explicit `--force`. `upgrade --dependency-prs` explicitly adds
+`.github/workflows/timds-upgrade.yml` to that boundary. Repository registrations
+and credentials stay in repository settings or an external fleet controller.
+
 Never extend upgrades to authored source, `timds.json`, tokens, `media.json`,
 framework configuration, documentation, or generated artifacts without an
 explicit contract change and migration plan.
@@ -63,6 +72,18 @@ visual overrides against that contract. Never overwrite a generated snapshot
 during `upgrade`; only `video components init --force` intentionally resets it.
 Keep component discovery, rendering, composition registration, media
 preparation, and other engine behavior here.
+
+New scaffolds use video contract schema 2, select shared board layout presets,
+and declare runtime schema,
+component API, minimum release, and feature requirements. Snapshot creation
+records exact tested runtime versions. `video components migrate` explicitly
+inventories recognized declarations, retains supported visual overrides, flags
+custom engine logic, and applies only on request. Rollback copies live under
+`.timds/component-migration/`; ordinary upgrades never touch them. Unchanged
+snapshots become shared re-exports, preserving registration and named exports.
+Custom overrides require reviewed exact runtime versions. Shared geometry and
+fit limits live in `video/board-layouts.mjs`. Keep packed-release checks with
+two brands and before/after visual comparisons in CI.
 
 Never add client-specific content, credentials, private URLs, access tokens,
 media, or portal-internal implementation to this public repository or npm

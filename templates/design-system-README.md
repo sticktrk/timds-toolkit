@@ -178,11 +178,30 @@ package requirement at `0.1.x` and update the resolved lockfile before syncing
 those managed files:
 
 ```bash
-npm update @dtconcepts/timds
-npm run timds -- upgrade --root .
+npm run timds -- upgrade --version 0.1.x
 npm run timds -- defaults
 npm run timds -- defaults --apply
 ```
+
+The selection command resolves one exact patch, restores the bounded requirement,
+installs with `npm ci`, synchronizes adopted managed files, and checks the runtime
+graph and workspace. Bootstrap an older CLI once with `npm update @dtconcepts/timds`
+and ordinary `upgrade`. Adopt `--own-runtime` once to align existing direct
+React/Remotion declarations. Define `check:timds-upgrade` for project producer,
+render, and visual checks. Review and commit the exact tested lockfile; ordinary
+PR checks and publication use it unchanged.
+
+Shared video components are the default. To consolidate copied components,
+preview `video components migrate`, then apply with `--apply` on a feature branch.
+Review the inventory, retained overrides, and horizontal/vertical images full
+frame and over footage. Rollback bytes live in `.timds/component-migration/`;
+revert the migration commit to restore the original contract and components.
+Custom overrides require reviewed exact `runtime.testedVersions`. Deploy the
+same compatible locked TimDS release on producer and renderer hosts.
+
+Opt into draft dependency PRs with `upgrade --dependency-prs` and configure
+`TIMDS_UPGRADE_TOKEN` in repository settings. This workflow does not merge or
+deploy. Fleet registrations and credentials belong outside the public package.
 
 Run defaults application on a feature branch. It migrates shared publishing
 wording and budgets, retaining inherited client policy and recording supplied

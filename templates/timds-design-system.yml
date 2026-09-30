@@ -31,5 +31,6 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm run timds -- dependencies check
       - name: Validate exact TimDS artifact
         run: npm run timds -- check --require-clean-dist

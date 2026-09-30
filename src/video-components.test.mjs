@@ -13,6 +13,7 @@ import { tsImport } from "tsx/esm/api";
 import { DEFAULT_BOARD_KINDS } from "../video/boards.mjs";
 import { videoFixture } from "./video.fixture.mjs";
 import { initializeVideoComponents } from "./video.mjs";
+import {planComponentMigration} from "./video-migration.mjs";
 
 const packageRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(import.meta.url);
@@ -46,4 +47,12 @@ test("the generated component snapshot registers every default board and typeche
   const snapshot = await tsImport(entry, import.meta.url);
   assert.deepEqual(Object.keys(snapshot.default.Boards), [...DEFAULT_BOARD_KINDS]);
   assert.equal(snapshot.CardsBoard, snapshot.default.Boards.cards);
+  const plan = await planComponentMigration(generated.replace("const badge = vertical ? 76 : 72;", "const badge = vertical ? 74 : 70;"));
+  assert.equal(plan.status, "overrides");
+  await fs.writeFile(path.join(scratch, "overrides.tsx"), plan.source);
+  await fs.writeFile(path.join(scratch, "tsconfig.json"), JSON.stringify({extends: "../tsconfig.json", include: ["remotion.tsx", "overrides.tsx"]}));
+  await promisify(execFile)(process.execPath, [tsc, "--noEmit", "-p", scratch], {cwd: packageRoot}).catch((error) => assert.fail(`migrated overrides failed to typecheck:\n${error.stdout}${error.stderr}`));
+  const overrides = await tsImport(path.join(scratch, "overrides.tsx"), import.meta.url);
+  assert.deepEqual(Object.keys(overrides.default.Boards), ["steps"]);
+  assert.equal(overrides.default.Scene, undefined);
 });

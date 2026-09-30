@@ -13,6 +13,8 @@ import { deriveTokensFromArtifact } from "./extract.mjs";
 import { readDerivedTokens } from "./tokens.mjs";
 import { adjacentFootageRepeats, sceneAssetKeys, truncatedHeadline } from "../video/footage.mjs";
 import { DEFAULT_BOARD_KINDS } from "../video/boards.mjs";
+import { assertRuntimeCompatibility, assertVideoContractRuntime, sharedRuntimeRequirements } from "./runtime.mjs";
+import {loadVideoComponentModule} from "./video-component-loader.mjs";
 import {
   COMPILER_OWNED_BOARD_KINDS,
   boardCatalogSummary,
@@ -384,8 +386,9 @@ function normalizeStaticFiles(value, label) {
 
 export function validateVideoContract(input) {
   const contract = object(input, "video contract");
-  if (Number(contract.schemaVersion) !== VIDEO_SCHEMA_VERSION) {
-    throw new Error(`video contract schemaVersion must be ${VIDEO_SCHEMA_VERSION}`);
+  assertVideoContractRuntime(contract);
+  if (![1, 2].includes(contract.schemaVersion)) {
+    throw new Error("video contract schemaVersion must be 1 or 2");
   }
   const formats = object(contract.formats || {}, "video contract formats");
   const packagePolicy = object(contract.package || {}, "video contract package");
@@ -419,7 +422,7 @@ export function validateVideoContract(input) {
   };
   return {
     ...contract,
-    schemaVersion: VIDEO_SCHEMA_VERSION,
+    schemaVersion: contract.schemaVersion,
     id: slug(contract.id, "video contract id"),
     name: text(contract.name, "video contract name"),
     fps: positiveInteger(contract.fps || 30, "video contract fps"),
@@ -776,6 +779,7 @@ export async function loadVideoWorkspace(workspace, { slug: selectedSlug, brandV
   ) : null;
   const boardCatalog = await readVideoBoardCatalog(workspace);
   const boards = boardCatalog ? boardCatalog.catalog : null;
+  if (boards?.layoutPreset && !contract.runtime?.features?.includes("shared-board-layouts-v1")) throw new Error("Shared board layouts require video contract runtime.features to declare shared-board-layouts-v1; run video components migrate or review runtime requirements before adoption");
   const resolvedMotifs = boards ? await resolveVideoBoardMotifs({ designSystemRoot: workspace.designSystemRoot, catalog: boards, contract }) : null;
   const motifs = resolvedMotifs?.names ?? null;
   const motifFiles = resolvedMotifs?.files ?? null;
@@ -904,13 +908,11 @@ async function boardComponentKinds(workspace, loaded) {
       loadedModule = await tsImport(`${pathToFileURL(componentsPath).href}?timds=${version}`, import.meta.url);
     } catch (esmError) {
       // Outside a "type": "module" package Node hands a .tsx file to the
-      // CommonJS loader, which tsImport does not hook; tsx's require does.
-      // Inside one, the ESM error is the real one: report it.
-      if (!(esmError instanceof SyntaxError) || await packageTypeIsModule(componentsPath)) throw esmError;
-      const { require: tsxRequire } = await import("tsx/cjs/api");
-      const realPath = await fs.realpath(componentsPath);
-      for (const key of Object.keys(require.cache)) if ([componentsPath, realPath].includes(key.split("?")[0])) delete require.cache[key];
-      loadedModule = tsxRequire(componentsPath, import.meta.url);
+      // CommonJS loader. Stage an ESM entry so shared TSX and Remotion's
+      // ESM-only media export keep their import semantics. Inside an ESM
+      // package, preserve real module errors.
+      if (esmError?.code !== "ERR_UNKNOWN_FILE_EXTENSION" && (!(esmError instanceof SyntaxError) || await packageTypeIsModule(componentsPath))) throw esmError;
+      loadedModule = await loadVideoComponentModule(componentsPath, loaded.video.localRoot);
     }
     components = loadedModule.default ?? {};
   } catch (caught) {
@@ -1202,7 +1204,7 @@ async function copyTemplate(source, destination) {
   await fs.copyFile(source, destination);
 }
 
-async function defaultVideoComponentsTemplate() {
+export async function defaultVideoComponentsTemplate() {
   const remotionSource = await fs.readFile(path.join(packageRoot, "video", "remotion.tsx"), "utf8");
   const start = remotionSource.indexOf(DEFAULT_COMPONENTS_START);
   const end = remotionSource.indexOf(DEFAULT_COMPONENTS_END);
@@ -1212,7 +1214,7 @@ async function defaultVideoComponentsTemplate() {
   // the TimDS default at runtime, so a new slot in a later release must not
   // break the client's typecheck.
   const componentSource = remotionSource.slice(start, end + DEFAULT_COMPONENTS_END.length).replace("} satisfies Required<VideoProjectComponentOverrides>;", "} satisfies VideoProjectComponentOverrides;");
-  return `// Generated once from the installed TimDS defaults. This file is now owned by this Design System.\n// TimDS upgrades do not overwrite it; use \`timds video components init --force\` only to reset it.\n// Footage-chain rules are imported from the toolkit on purpose: they are production rules, not styling,\n// and \`timds video check\` enforces the same module, so a toolkit fix reaches these frames without a reset.\nimport React, {useMemo} from "react";\nimport {Audio} from "@remotion/media";\nimport {AbsoluteFill, Easing, Img, OffthreadVideo, Sequence, interpolate, staticFile, useCurrentFrame, useVideoConfig} from "remotion";\nimport {MINIMUM_CHAIN_CLIP_SECONDS, adjacentFootageRepeats, chainClipFrames, sceneAssetKeys, verticalTextZone} from "@dtconcepts/timds/video/footage";\nimport {DEFAULT_BOARD_KINDS, revealFrame} from "@dtconcepts/timds/video/boards";\nimport type {\n  VideoProject,\n  VideoProjectAsset,\n  VideoProjectBoardProps,\n  VideoProjectBrandBanners,\n  VideoProjectCaptionLine,\n  VideoProjectComponentOverrides,\n  VideoProjectCover,\n  VideoProjectCoverProps,\n  VideoProjectGraphicProps,\n  VideoProjectIntroProps,\n  VideoProjectOutroProps,\n  VideoProjectScene,\n  VideoProjectSceneProps,\n  VideoProjectVideoProps,\n} from "@dtconcepts/timds/video/remotion";\n\n${DEFAULT_VIDEO_TEXT_SOURCE}\n\n${componentSource}\n\nexport {BrandWatermark, CaptionPages, CardsBoard, ChapterTitleBoard, CompareBoard, Cover, CoverVisual, DocumentBoard, FlowBoard, GoldHeadline, HorizontalCover, Intro, Media, Outro, resolveVideoBoardComponent, SceneView, StatementBoard, StepsBoard, SubscribeBoard, VerticalCover, Video};\nexport default defaultVideoProjectComponents;\n`;
+  return `// Generated once from the installed TimDS defaults. This file is now owned by this Design System.\n// TimDS upgrades do not overwrite it; use \`timds video components init --force\` only to reset it.\n// Footage-chain rules are imported from the toolkit on purpose: they are production rules, not styling,\n// and \`timds video check\` enforces the same module, so a toolkit fix reaches these frames without a reset.\nimport React, {useMemo} from "react";\nimport {Audio} from "@remotion/media";\nimport {AbsoluteFill, Easing, Img, OffthreadVideo, Sequence, interpolate, staticFile, useCurrentFrame, useVideoConfig} from "remotion";\nimport {MINIMUM_CHAIN_CLIP_SECONDS, adjacentFootageRepeats, chainClipFrames, sceneAssetKeys, verticalTextZone} from "@dtconcepts/timds/video/footage";\nimport {DEFAULT_BOARD_KINDS, revealFrame} from "@dtconcepts/timds/video/boards";\nimport {assertSharedBoardLayout, resolveBoardLayout} from "@dtconcepts/timds/video/board-layouts";\nimport type {\n  VideoProject,\n  VideoProjectAsset,\n  VideoProjectBoardProps,\n  VideoProjectBrandBanners,\n  VideoProjectCaptionLine,\n  VideoProjectComponentOverrides,\n  VideoProjectCover,\n  VideoProjectCoverProps,\n  VideoProjectGraphicProps,\n  VideoProjectIntroProps,\n  VideoProjectOutroProps,\n  VideoProjectScene,\n  VideoProjectSceneProps,\n  VideoProjectVideoProps,\n} from "@dtconcepts/timds/video/remotion";\n\n${DEFAULT_VIDEO_TEXT_SOURCE}\n\n${componentSource}\n\nexport {BrandWatermark, CaptionPages, CardsBoard, ChapterTitleBoard, CompareBoard, Cover, CoverVisual, DocumentBoard, FlowBoard, GoldHeadline, HorizontalCover, Intro, Media, Outro, resolveVideoBoardComponent, SceneView, StatementBoard, StepsBoard, SubscribeBoard, VerticalCover, Video};\nexport default defaultVideoProjectComponents;\n`;
 }
 
 export async function initializeVideoComponents(workspace, { force = false } = {}) {
@@ -1224,11 +1226,17 @@ export async function initializeVideoComponents(workspace, { force = false } = {
   if (existsSync(destination) && !force) {
     throw new Error(`Design System video components already exist at ${destination}; rerun with --force only to reset them to the installed TimDS defaults`);
   }
+  const contractPath = path.join(workspace.designSystemRoot, workspace.manifest.video.contract);
+  const contract = await readJson(contractPath, "video contract");
+  assertRuntimeCompatibility(force && contract.runtime ? {...contract.runtime, testedVersions: undefined} : contract.runtime);
   await fs.mkdir(path.dirname(destination), { recursive: true });
   await fs.writeFile(destination, await defaultVideoComponentsTemplate(), "utf8");
   rawVideo.components = relativePath;
   rawManifest.video = rawVideo;
   await fs.writeFile(workspace.manifestPath, `${JSON.stringify(rawManifest, null, 2)}\n`, "utf8");
+  contract.runtime = {...sharedRuntimeRequirements(), ...contract.runtime, testedVersions: [sharedRuntimeRequirements().minimumVersion]};
+  contract.schemaVersion = 2;
+  await fs.writeFile(contractPath, `${JSON.stringify(contract, null, 2)}\n`);
   return { components: destination, relativePath };
 }
 
@@ -1258,6 +1266,15 @@ export async function initializeVideoWorkspace(workspace, { force = false } = {}
   // own. Write a neutral starter logo at the contract's path only when nothing
   // is there yet; a client's real logo at that path is never replaced.
   const contract = JSON.parse(await fs.readFile(path.join(destination, "contract.json"), "utf8"));
+  if (scaffold) {
+    contract.runtime = sharedRuntimeRequirements();
+    contract.schemaVersion = 2;
+    const boardsPath = path.join(destination, "boards.json");
+    const scaffoldBoards = JSON.parse(await fs.readFile(boardsPath, "utf8"));
+    scaffoldBoards.layoutPreset = "standard";
+    await fs.writeFile(boardsPath, `${JSON.stringify(scaffoldBoards, null, 2)}\n`);
+    await fs.writeFile(path.join(destination, "contract.json"), `${JSON.stringify(contract, null, 2)}\n`);
+  }
   const logo = typeof contract?.brand?.logo === "string"
     ? path.join(workspace.designSystemRoot, safeRelativePath(contract.brand.logo, "video contract brand.logo"))
     : null;
@@ -1741,6 +1758,6 @@ export async function voiceoverVideoWorkspace(workspace, selectedSlug, options =
   return { outputRoot, production: production.production.slug };
 }
 
-export const VIDEO_HELP = `TimDS video workflow\n\nUsage:\n  timds video init [--root PATH] [--force]\n  timds video components init [--root PATH] [--force]\n  timds video doctor [--root PATH]\n  timds video check [SLUG] [--root PATH]\n  timds video lab [NAME] [--root PATH] [--plan] [--prepare] [--render] [--silent] [--voice NAME] [--python PATH] [--list]\n  timds video lab --serve [--port 4410] [--root PATH]\n  timds video publishing SLUG [--root PATH] [--date YYYY-MM-DD]\n  timds video prepare SLUG [--root PATH]\n  timds video voiceover SLUG [--root PATH] [--force]\n  timds video studio SLUG [--root PATH]\n  timds video render SLUG [--root PATH] [--date YYYY-MM-DD]\n\nThe client Design System owns video/contract.json, video/assets.json, video/boards.json (its board catalog), video/lab/ compile requests, brand files, production records, and any generated component snapshot. TimDS owns validation, the producer, media staging, voiceover orchestration, default components, the lab, rendering, and review packaging. Generating components copies the installed defaults once; upgrades never overwrite that client-owned file.\n\nThe lab runs a video/lab/NAME.json compile request the way an automated Video Lab does — producer compile, spoken narration with measured word timings, deterministic footage and cover, staged media — and opens Remotion Studio on the result with the client's components; --plan estimates timing without audio generation, --silent explicitly requests a silent preview, --prepare stages narration and media without launching, --render writes the video and cover under video-local/lab/NAME/out/. check compiles every lab input and warns when the catalog cannot finalize one yet. With a board catalog, check also holds every committed board to its declared kind, the catalog's cadence, and its spoken cues, and fails when the components' Boards and the catalog's kinds disagree; graphic boards also need structure.<format>.graphicScenes in the contract.`;
+export const VIDEO_HELP = `TimDS video workflow\n\nUsage:\n  timds video init [--root PATH] [--force]\n  timds video components init [--root PATH] [--force]\n  timds video components migrate [--root PATH] [--apply]\n  timds video doctor [--root PATH]\n  timds video check [SLUG] [--root PATH]\n  timds video lab [NAME] [--root PATH] [--plan] [--prepare] [--render] [--silent] [--voice NAME] [--python PATH] [--list]\n  timds video lab --serve [--port 4410] [--root PATH]\n  timds video publishing SLUG [--root PATH] [--date YYYY-MM-DD]\n  timds video prepare SLUG [--root PATH]\n  timds video voiceover SLUG [--root PATH] [--force]\n  timds video studio SLUG [--root PATH]\n  timds video render SLUG [--root PATH] [--date YYYY-MM-DD]\n\nThe client Design System owns video/contract.json, video/assets.json, video/boards.json (its board catalog), video/lab/ compile requests, brand files, production records, and any generated component snapshot. TimDS owns validation, the producer, media staging, voiceover orchestration, default components, the lab, rendering, and review packaging. Generating components copies the installed defaults once; upgrades never overwrite that client-owned file.\n\nThe lab runs a video/lab/NAME.json compile request the way an automated Video Lab does — producer compile, spoken narration with measured word timings, deterministic footage and cover, staged media — and opens Remotion Studio on the result with the client's components; --plan estimates timing without audio generation, --silent explicitly requests a silent preview, --prepare stages narration and media without launching, --render writes the video and cover under video-local/lab/NAME/out/. check compiles every lab input and warns when the catalog cannot finalize one yet. With a board catalog, check also holds every committed board to its declared kind, the catalog's cadence, and its spoken cues, and fails when the components' Boards and the catalog's kinds disagree; graphic boards also need structure.<format>.graphicScenes in the contract.`;
 
 export { VIDEO_SCHEMA_VERSION };

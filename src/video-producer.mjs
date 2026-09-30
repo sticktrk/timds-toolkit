@@ -1,3 +1,4 @@
+import { assertVideoContractRuntime, runtimeIdentity } from "./runtime.mjs";
 import { footageFamily, verticalTextZone } from "../video/footage.mjs";
 import { deriveVideoChapters } from "../video/boards.mjs";
 import { validateVideoVerticalMetadata } from "./video-crops.mjs";
@@ -275,6 +276,11 @@ const boardCatalogFor = (boards, motifs) => {
   return { catalog: validateBoardCatalog(boards), motifs: motifs ?? null };
 };
 
+const assertBoardRuntime = (contract, catalog) => {
+  if ((catalog?.layoutPreset || Object.values(catalog?.kinds ?? {}).some((kind) => kind.layoutPreset))
+    && !contract.runtime?.features?.includes("shared-board-layouts-v1")) throw new Error("Shared board layouts require video contract runtime.features to declare shared-board-layouts-v1 before drafting or compiling");
+};
+
 /** Boards reach a format only when the catalog offers it and the contract opted the format into graphic scenes. */
 const boardsActiveFor = (catalog, contract, outputFormat) => Boolean(catalog
   && boardFormatEnabled(catalog, outputFormat)
@@ -290,10 +296,12 @@ const yesNoQuestionPattern = "^(?:[Aa][Rr][Ee]|[Cc][Aa][Nn]|[Cc][Oo][Uu][Ll][Dd]
  * choices and the executable video contract into one prompt/schema boundary.
  */
 export function createVideoAuthoringContract({ contract, manifest, designSystemIndex, provenance, outputFormat, assetCatalog, mediaCatalog, verticalMetadata, boards, motifs }) {
+  assertVideoContractRuntime(contract);
   const config = validateVideoProducerConfig(contract.producer, contract);
   if (!config) throw new Error(`${contract.name} has no video producer contract`);
   if (!["horizontal", "short"].includes(outputFormat)) throw new Error("video authoring outputFormat must be horizontal or short");
   const { catalog: boardCatalog, motifs: boardMotifs } = boardCatalogFor(boards, motifs);
+  assertBoardRuntime(contract, boardCatalog);
   const boardsActive = boardsActiveFor(boardCatalog, contract, outputFormat);
   // With the catalogs, the contract lists every clip the model may name per
   // beat. Without them (an older caller), footage stays compiler-owned and the
@@ -451,6 +459,7 @@ export function createVideoAuthoringContract({ contract, manifest, designSystemI
   return {
     schemaVersion: PRODUCER_AUTHORING_SCHEMA_VERSION,
     producerContractVersion: config.schemaVersion,
+    runtime: {...runtimeIdentity},
     designSystem: {
       id: systemId,
       name: systemName,
@@ -519,9 +528,11 @@ const validateQuestion = (fail, label, value, maximumWords, maximumCharacters) =
 };
 
 export function createVideoProducer({ contract, assetCatalog, mediaCatalog, verticalMetadata, boards, motifs }) {
+  assertVideoContractRuntime(contract);
   const config = validateVideoProducerConfig(contract.producer, contract);
   if (!config) throw new Error(`${contract.name} has no video producer contract`);
   const { catalog: boardCatalog, motifs: boardMotifs } = boardCatalogFor(boards, motifs);
+  assertBoardRuntime(contract, boardCatalog);
   const library = createFootageLibrary({ config, contractName: contract.name, assetCatalog, mediaCatalog, verticalMetadata });
   const { assets, mediaFor, fail } = library;
   // Board rules throw plain errors; report them with the producer's prefix.
@@ -655,6 +666,7 @@ export function createVideoProducer({ contract, assetCatalog, mediaCatalog, vert
     return {
       schemaVersion: PRODUCER_SCHEMA_VERSION,
       producerContractVersion: config.schemaVersion,
+      runtime: {...runtimeIdentity},
       slug: productionSlug,
       outputFormat: input.outputFormat,
       exactQuestion,
@@ -743,6 +755,7 @@ export function createVideoProducer({ contract, assetCatalog, mediaCatalog, vert
   };
 
   const finalizeProduction = (input) => {
+    if (input.compiled.runtime && input.compiled.runtime.version !== runtimeIdentity.version) fail(`compiled runtime ${input.compiled.runtime.version} differs from installed ${runtimeIdentity.version}; compile and finalize with the same locked runtime`);
     if (input.schemaVersion !== PRODUCER_SCHEMA_VERSION) fail(`unsupported finalize schema version ${String(input.schemaVersion)}`);
     if (input.compiled.producerContractVersion !== config.schemaVersion) fail(`compiled production uses producer contract ${String(input.compiled.producerContractVersion)}; expected ${config.schemaVersion}`);
     if (!Array.isArray(input.timings) || input.timings.length !== input.compiled.scenes.length) fail("timings must match every compiled scene");
@@ -815,6 +828,7 @@ export function createVideoProducer({ contract, assetCatalog, mediaCatalog, vert
     return {
       schemaVersion: PRODUCER_SCHEMA_VERSION,
       producerContractVersion: config.schemaVersion,
+      runtime: {...runtimeIdentity},
       plan: {
         schemaVersion: PRODUCER_SCHEMA_VERSION,
         slug: input.compiled.slug,

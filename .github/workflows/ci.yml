@@ -22,3 +22,23 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run pack:check
+
+  shared-upgrades:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - run: npm ci
+      - run: npm run test:shared-upgrades
+        env:
+          TIMDS_VISUAL_OUTPUT: ${{ runner.temp }}/timds-visuals
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shared-upgrade-visuals
+          path: ${{ runner.temp }}/timds-visuals
+          if-no-files-found: ignore
