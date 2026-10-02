@@ -1,5 +1,5 @@
 import { assertVideoContractRuntime, runtimeIdentity } from "./runtime.mjs";
-import { footageFamily, verticalTextZone } from "../video/footage.mjs";
+import { footageFamily, matchesFootagePrefix, verticalTextZone } from "../video/footage.mjs";
 import { deriveVideoChapters } from "../video/boards.mjs";
 import { validateVideoVerticalMetadata } from "./video-crops.mjs";
 import {
@@ -65,6 +65,8 @@ const renderTemplate = (template, values) => text(template, "video producer temp
 const tokens = (value) => new Set(String(value ?? "").toLocaleLowerCase().replace(/[^a-z0-9]+/gu, " ").split(/\s+/u).filter((token) => token.length >= 4));
 const overlap = (query, candidateTokens) => [...query].reduce((sum, token) => sum + (candidateTokens.has(token) ? 1 : 0), 0);
 const score = (query, candidate) => overlap(query, tokens(candidate));
+/** The footage prefixes as one readable phrase for messages. */
+const footageLabel = (config) => config.footage.assetPrefixes.join(", ");
 /** The most clips one answer beat may name; the compiler fills any remaining time itself. */
 export const FOOTAGE_PICKS_PER_BEAT = 3;
 
@@ -80,7 +82,7 @@ const stringList = (value) => (Array.isArray(value) ? value.filter((entry) => ty
 function createFootageLibrary({ config, contractName, assetCatalog, mediaCatalog, verticalMetadata }) {
   const assets = object(assetCatalog.assets || assetCatalog, "video producer asset catalog");
   const crops = verticalMetadata == null ? {} : validateVideoVerticalMetadata(verticalMetadata, {
-    assetCatalog, mediaCatalog, footagePrefix: config.footage.assetPrefix,
+    assetCatalog, mediaCatalog, footagePrefixes: config.footage.assetPrefixes,
   }).assets;
   const mediaEntries = Array.isArray(mediaCatalog.assets) ? mediaCatalog.assets : [];
   const mediaByKey = new Map(mediaEntries.map((asset) => [asset.key, asset]));
@@ -94,7 +96,7 @@ function createFootageLibrary({ config, contractName, assetCatalog, mediaCatalog
   };
 
   const masters = () => Object.keys(assets)
-    .filter((key) => key.startsWith(config.footage.assetPrefix) && Number.isFinite(assets[key].durationSeconds) && assets[key].durationSeconds > 0)
+    .filter((key) => matchesFootagePrefix(config.footage.assetPrefixes, key) && Number.isFinite(assets[key].durationSeconds) && assets[key].durationSeconds > 0)
     .filter((key) => !Object.values(assets).some((asset) => asset.vertical === key))
     .map((key) => {
       const master = mediaFor(key);
@@ -175,6 +177,31 @@ export function validateVideoProducerConfig(input, contract) {
     if (!/^[a-z0-9][a-z0-9-]*-$/u.test(result)) throw new Error(`${label} must be a slug-safe prefix ending in a hyphen`);
     return result;
   };
+  // Footage may live under several key prefixes (dashcam clips, character
+  // B-roll, environment inserts) that share one library. Accept one prefix or
+  // a list; every clip under any of them is eligible in every format it can play.
+  const prefixes = (value, label, fallback) => {
+    if (value === undefined || value === null || value === "") return [prefix(fallback, label, fallback)];
+    if (!Array.isArray(value)) return [prefix(value, label, null)];
+    if (!value.length) throw new Error(`${label} must name at least one prefix`);
+    const result = value.map((entry, index) => prefix(entry, `${label}[${index}]`, null));
+    if (new Set(result).size !== result.length) throw new Error(`${label} repeats a prefix`);
+    for (const entry of result) {
+      const parent = result.find((other) => other !== entry && entry.startsWith(other));
+      if (parent) throw new Error(`${label} lists ${entry}, which is already covered by ${parent}`);
+    }
+    return result;
+  };
+  // A normalized config carries the list as assetPrefixes (plus assetPrefix
+  // when there is exactly one), so validation reads the list back first to stay
+  // idempotent. Any other pairing of the two keys is ambiguous and refused.
+  const footagePrefixes = footage.assetPrefixes === undefined
+    ? prefixes(footage.assetPrefix, "video contract producer.footage.assetPrefix", "footage-")
+    : prefixes(footage.assetPrefixes, "video contract producer.footage.assetPrefixes", null);
+  if (footage.assetPrefixes !== undefined && footage.assetPrefix !== undefined
+    && !(footagePrefixes.length === 1 && footage.assetPrefix === footagePrefixes[0])) {
+    throw new Error("video contract producer.footage sets both assetPrefix and assetPrefixes; keep one of them");
+  }
   return {
     ...config,
     schemaVersion: PRODUCER_SCHEMA_VERSION,
@@ -222,7 +249,11 @@ export function validateVideoProducerConfig(input, contract) {
       assetPrefix: prefix(cover.assetPrefix, "video contract producer.cover.assetPrefix", "cover-subject-"),
     },
     footage: {
-      assetPrefix: prefix(footage.assetPrefix, "video contract producer.footage.assetPrefix", "footage-"),
+      // assetPrefixes is canonical. assetPrefix stays only while it is still a
+      // usable prefix (one entry), so a reader that treats it as one never
+      // silently matches nothing against a list.
+      assetPrefixes: footagePrefixes,
+      ...(footagePrefixes.length === 1 ? { assetPrefix: footagePrefixes[0] } : {}),
       allowShortCrop: footage.allowShortCrop === true,
     },
     authoring: {
@@ -311,8 +342,8 @@ export function createVideoAuthoringContract({ contract, manifest, designSystemI
     : null;
   if (footage && !footage.length) {
     throw new Error(outputFormat === "short"
-      ? `${contract.name} has no Shorts footage under ${config.footage.assetPrefix}; publish and link vertical derivatives, or configure video.verticalMetadata with reviewed crops and enable producer.footage.allowShortCrop`
-      : `${contract.name} has no footage under ${config.footage.assetPrefix}; register published clips with positive durationSeconds`);
+      ? `${contract.name} has no Shorts footage under ${footageLabel(config)}; publish and link vertical derivatives, or configure video.verticalMetadata with reviewed crops and enable producer.footage.allowShortCrop`
+      : `${contract.name} has no footage under ${footageLabel(config)}; register published clips with positive durationSeconds`);
   }
   const systemId = text(manifest?.systemId, "timds manifest systemId");
   const systemName = text(manifest?.name, "timds manifest name");
@@ -493,7 +524,7 @@ export function createVideoAuthoringContract({ contract, manifest, designSystemI
       answerBeatRoles: [...beatRoles],
       reservedSceneIds: [...new Set([config.intro.id, config.engagement.id, config.outro.id, ...(subscribeActive ? [config.subscribe.id] : [])])],
     },
-    ...(footage ? { footage: { assetPrefix: config.footage.assetPrefix, maximumPerBeat: FOOTAGE_PICKS_PER_BEAT, clips: footage } } : {}),
+    ...(footage ? { footage: { ...(config.footage.assetPrefix ? { assetPrefix: config.footage.assetPrefix } : {}), assetPrefixes: [...config.footage.assetPrefixes], maximumPerBeat: FOOTAGE_PICKS_PER_BEAT, clips: footage } } : {}),
     compilerOwns: [
       "role eyebrows",
       "intro, engagement, subscribe, and outro scene structure",
@@ -553,7 +584,7 @@ export function createVideoProducer({ contract, assetCatalog, mediaCatalog, vert
     const picks = [...new Set(value.map((key) => key.trim()).filter(Boolean))];
     if (picks.length > FOOTAGE_PICKS_PER_BEAT) fail(`answer beat ${beatId}.footage names ${picks.length} clips; the limit is ${FOOTAGE_PICKS_PER_BEAT}`);
     for (const key of picks) {
-      if (!eligibleKeys().has(key)) fail(`answer beat ${beatId}.footage names ${key}, which is not ${format} footage under ${config.footage.assetPrefix}`);
+      if (!eligibleKeys().has(key)) fail(`answer beat ${beatId}.footage names ${key}, which is not ${format} footage under ${footageLabel(config)}`);
     }
     return picks;
   };
@@ -700,11 +731,11 @@ export function createVideoProducer({ contract, assetCatalog, mediaCatalog, vert
     const eligible = library.eligible(format);
     if (!eligible.length) {
       fail(format === "short"
-        ? `no eligible Shorts footage under ${config.footage.assetPrefix}; publish and link vertical derivatives, or configure video.verticalMetadata with reviewed crops and enable producer.footage.allowShortCrop`
-        : `no eligible footage under ${config.footage.assetPrefix}; register published clips with positive durationSeconds`);
+        ? `no eligible Shorts footage under ${footageLabel(config)}; publish and link vertical derivatives, or configure video.verticalMetadata with reviewed crops and enable producer.footage.allowShortCrop`
+        : `no eligible footage under ${footageLabel(config)}; register published clips with positive durationSeconds`);
     }
     const byKey = new Map(eligible.map((pair) => [pair.master.key, pair]));
-    const preferred = (scene.footage || []).map((key) => byKey.get(key) || fail(`scene ${scene.id} names footage ${key}, which is not ${format} footage under ${config.footage.assetPrefix}`));
+    const preferred = (scene.footage || []).map((key) => byKey.get(key) || fail(`scene ${scene.id} names footage ${key}, which is not ${format} footage under ${footageLabel(config)}`));
     const played = (pair) => usage.get(pair.master.key) || 0;
     const ranked = eligible
       .filter((pair) => !preferred.includes(pair))

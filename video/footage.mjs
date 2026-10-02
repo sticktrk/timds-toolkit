@@ -22,6 +22,13 @@ export const footageFamily = (key) => {
   return family;
 };
 
+/**
+ * Whether an asset key sits under any of the producer's footage prefixes. The
+ * producer, the crop registry, and the Video Lab all filter a catalog by this
+ * one rule, so a list of prefixes reads the same everywhere.
+ */
+export const matchesFootagePrefix = (prefixes, key) => prefixes.some((prefix) => String(key).startsWith(prefix));
+
 /** The shortest cut that still reads as an intentional edit rather than a blip. */
 export const MINIMUM_CHAIN_CLIP_SECONDS = 2;
 

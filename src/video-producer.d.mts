@@ -127,7 +127,14 @@ export type ProducerAuthoringContract = {
   inputSchema: Record<string, unknown>;
 };
 export type ProducerFootageClip = {key: string; title?: string; tags: string[]; durationSeconds: number};
-export type ProducerFootageCatalog = {assetPrefix: string; maximumPerBeat: number; clips: ProducerFootageClip[]};
+export type ProducerFootageCatalog = {
+  /** Every key prefix the producer draws footage from. */
+  assetPrefixes: string[];
+  /** The sole prefix, present only when `assetPrefixes` has one entry. */
+  assetPrefix?: string;
+  maximumPerBeat: number;
+  clips: ProducerFootageClip[];
+};
 export declare const FOOTAGE_PICKS_PER_BEAT: 3;
 export declare function validateVideoProducerConfig(input: unknown, contract: any): any | null;
 export declare function createVideoAuthoringContract(input: {

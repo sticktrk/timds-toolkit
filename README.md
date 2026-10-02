@@ -811,7 +811,7 @@ Horizontal renders retain their original framing and text layout.
 
 New `video init` scaffolds include `video/vertical-meta.json` and enable its
 catalog gate. `video check` (and workspace loading before rendering) requires
-every footage master under `producer.footage.assetPrefix` to have a valid
+every footage master under the producer's footage prefixes to have a valid
 record tied to its published SHA-256, with a crop position, vertical text zone,
 and first/middle/last-frame review. This checks the records, not the visual
 correctness of a crop or automatic object detection. The designer must inspect
@@ -830,8 +830,9 @@ No manual asset pull or cloud login is required for published media.
 
 `video check` compiles every lab input and warns when the registered catalog
 cannot finalize one yet, so a new system can commit the sample before it has
-registered footage under the producer's `footage.assetPrefix` keys and a cover
-library under its `cover.assetPrefix` keys.
+registered footage under the producer's `footage.assetPrefix` keys (one prefix
+or a list of them, when dashcam clips, character B-roll, and inserts share one
+library) and a cover library under its `cover.assetPrefix` keys.
 
 ## Upgrade a client repository
 

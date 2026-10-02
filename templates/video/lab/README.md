@@ -49,7 +49,7 @@ missing files, and fails visibly if narration cannot be generated.
 An input is a preview fixture, not a production. It carries no source,
 authorization, publishing, or caption record, and nothing here renders into a
 review package. Finalizing needs footage registered under the producer's
-`footage.assetPrefix` keys with measured durations and at least one published
+`footage.assetPrefix` keys (one prefix or a list) with measured durations and at least one published
 image under its `cover.assetPrefix` keys. `timds video check` compiles every
 input here (a broken request fails the check) and warns when the registered
 catalog cannot finalize one yet.

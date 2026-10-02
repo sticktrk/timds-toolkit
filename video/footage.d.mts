@@ -1,5 +1,6 @@
 export declare const FOOTAGE_DERIVATIVE_SUFFIXES: readonly string[];
 export declare const footageFamily: (key: string) => string;
+export declare const matchesFootagePrefix: (prefixes: readonly string[], key: string) => boolean;
 export declare const MINIMUM_CHAIN_CLIP_SECONDS: number;
 export declare const verticalTextZone: (text?: string) => "upper" | "lower";
 export declare const chainClipFrames: (availableFrames: number[], duration: number, minimumFrames: number) => number[];
