@@ -7,6 +7,8 @@ import {DEFAULT_BOARD_KINDS, revealFrame} from "./boards.mjs";
 import {
   BrandWatermark,
   CardsBoard,
+  createVideoProjectRoot,
+  createSingleVideoProjectRoot,
   ChapterTitleBoard,
   CompareBoard,
   Cover,
@@ -48,6 +50,11 @@ test("uses TimDS Remotion components as the defaults", () => {
   assert.equal(resolved.Graphic, GraphicBoard);
   assert.equal(defaultVideoProjectComponents.Cover, Cover);
   assert.equal(defaultVideoProjectComponents.Graphic, GraphicBoard);
+});
+
+test("composition registration rejects unsupported runtimes before rendering", () => {
+  const project = {contract: {runtime: {releaseLine: "0.2.x"}}} as any;
+  for (const createRoot of [createVideoProjectRoot, createSingleVideoProjectRoot]) assert.throws(() => createRoot(project), /runtime compatibility.*requires release line/u);
 });
 
 test("lets a Design System own graphic boards without replacing the whole scene", () => {

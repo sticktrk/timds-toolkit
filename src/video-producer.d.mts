@@ -1,3 +1,4 @@
+import type {RuntimeIdentity, RuntimeRequirements} from "./runtime.mjs";
 export type ProducerOutputFormat = "horizontal" | "short";
 export type ProducerBeatRole = "hook" | "rule" | "risk" | "process" | "exception" | "answer";
 export type ProducerCompileInput = {
@@ -17,6 +18,7 @@ export type ProducerCompiledScene = {id: string; role: string; narration: string
 export type ProducerCompiledProduction = {
   schemaVersion: 1;
   producerContractVersion: number;
+  runtime: RuntimeIdentity;
   slug: string;
   outputFormat: ProducerOutputFormat;
   exactQuestion: string;
@@ -28,6 +30,7 @@ export type ProducerMedia = {key: string; filename: string; publicUrl: string; d
 export type ProducerFinalized = {
   schemaVersion: 1;
   producerContractVersion: number;
+  runtime: RuntimeIdentity;
   plan: {
     schemaVersion: 1;
     slug: string;
@@ -71,13 +74,15 @@ export type BoardConstraint = {
 /** A Design System's video/boards.json (raw or normalized). */
 export type VideoBoardCatalog = {
   schemaVersion: 1;
+  layoutPreset?: "standard" | "compact";
   formats?: {longform?: boolean; short?: boolean};
   cadence?: {maxConsecutiveFootageFree?: number | null; chapterReturnsToFootage?: boolean; minimumChapters?: number | null; maxBoardWords?: number | null};
   motifs?: {mount: string};
-  kinds: Record<string, {label: string; use: string; avoid: string; overFootage?: "never" | "optional" | "always"; once?: boolean; schema: BoardSchemaNode; formats?: Array<"longform" | "short">; maxWords?: number; constraints?: BoardConstraint[]}>;
+  kinds: Record<string, {label: string; use: string; avoid: string; overFootage?: "never" | "optional" | "always"; once?: boolean; schema: BoardSchemaNode; formats?: Array<"longform" | "short">; maxWords?: number; constraints?: BoardConstraint[]; layoutPreset?: "standard" | "compact"}>;
 };
 export type VideoBoardCatalogSummary = {
   schemaVersion: 1;
+  layoutPreset?: "standard" | "compact";
   formats: {longform: boolean; short: boolean};
   cadence: {maxConsecutiveFootageFree: number | null; chapterReturnsToFootage: boolean; minimumChapters: number | null; maxBoardWords: number | null};
   motifs?: {mount: string};
@@ -88,6 +93,7 @@ export type VideoBoardCatalogSummary = {
     avoid: string;
     overFootage: "never" | "optional" | "always";
     once: boolean;
+    layoutPreset?: "standard" | "compact";
     formats?: Array<"longform" | "short">;
     constraints?: BoardConstraint[];
     compilerOwned: boolean;
@@ -101,6 +107,7 @@ export declare function resolveBoardKind(catalog: VideoBoardCatalog, kind: strin
 export type ProducerAuthoringContract = {
   schemaVersion: 2;
   producerContractVersion: number;
+  runtime: RuntimeIdentity;
   designSystem: {id: string; name: string; version: string; commit: string; indexUrl?: string};
   outputFormat: ProducerOutputFormat;
   prompt: {instructions: string[]; blockIds: string[]; brief: string};

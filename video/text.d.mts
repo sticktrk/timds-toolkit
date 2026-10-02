@@ -6,11 +6,12 @@ export declare function splitGoldHeadline(value: string, requestedPhrase?: strin
   after: string;
 };
 
-export declare function fitCoverHeadline(value: string, options?: {
+export type CoverHeadlineFitOptions = {
   width?: number;
   height?: number;
   maximum?: number;
   step?: number;
   lineHeight?: number;
   emPerCharacter?: number;
-}): number;
+};
+export declare function fitCoverHeadline(value: string, options?: CoverHeadlineFitOptions): number;

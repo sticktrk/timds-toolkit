@@ -99,9 +99,19 @@ requirement at `0.1.x`, update the resolved lockfile, and then synchronize the
 managed skill and installation record:
 
 ```bash
-npm update @dtconcepts/timds
-npm run timds -- upgrade --root .
+npm run timds -- upgrade --version 0.1.x
 ```
+
+Bootstrap an older CLI once with `npm update @dtconcepts/timds` and ordinary
+`upgrade`. Dependency selection resolves one exact lockfile, installs it with
+`npm ci`, validates the runtime graph, and runs the workspace plus configured
+`check:timds-upgrade` checks. Explicit `--own-runtime` adoption aligns existing
+React/Remotion declarations; explicit `upgrade --dependency-prs` adopts draft
+dependency PR automation. Credentials and repository registrations stay in
+repository settings or a private controller. Ordinary checks and publication
+use the committed lockfile. Shared components are the normal path; consolidation
+of snapshots uses the separate reviewed `video components migrate --apply`
+migration, with rollback copies and before/after visuals in both formats.
 
 Do not choose an unbounded `latest` or use `--force` without explicit
 authorization. The upgrade removes a legacy `.timds/cli` copy when present;

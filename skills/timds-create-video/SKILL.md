@@ -36,6 +36,28 @@ generated module as authored client source from that point forward. Never
 regenerate it during a normal toolkit upgrade, and use `--force` only when the
 user explicitly requests a reset that discards client component changes.
 
+Shared components are the normal path. Prefer `video/boards.json` `layoutPreset`
+(`standard` or `compact`) and typed partial visual overrides. The shared presets
+enforce the same geometry and item limits in compilation and rendering; cards,
+steps, and flow allow at most three items vertically or over footage. Read the
+effective budgets with `resolveBoardKind`; never bypass them by editing snapshots.
+Keep brand tokens, copy, assets, and client policy in the Design System.
+
+For explicitly requested consolidation, preview `video components migrate`,
+review its inventory, then use `--apply`. Recognized defaults become shared
+imports; supported visual changes remain typed overrides. Custom registration,
+imports/exports, and scene/video logic require manual review. Check horizontal and
+vertical frames both full frame and over footage, then commit the migration
+separately. `.timds/component-migration/` contains rollback bytes; Git revert is
+the preferred rollback. Ordinary upgrades never apply this migration.
+
+Read `video/contract.json` `runtime` before drafting: schema, component API,
+features, and minimum version must match the installed host. Snapshots and custom
+overrides require reviewed exact `testedVersions`. Deploy the same tested locked
+release to producer and renderer hosts; compile/finalize provenance records that
+installed version. Do not broaden compatibility or edit production records to
+make a failed upgrade pass.
+
 ## Test-generate in the lab first
 
 `npm run timds -- video lab --serve` opens the local Video Lab (no Remotion

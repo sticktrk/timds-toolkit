@@ -9,6 +9,7 @@
 
 import { sceneAssetKeys } from "../video/footage.mjs";
 import { normalizeCueWord } from "../video/boards.mjs";
+import { BOARD_LAYOUT_PRESETS, resolveBoardLayout } from "../video/board-layouts.mjs";
 
 export const BOARDS_SCHEMA_VERSION = 1;
 
@@ -165,6 +166,14 @@ function boardLimits(kind, {format, overFootage} = {}) {
   const schema = structuredClone(kind.schema);
   let maxWords = kind.maxWords ?? null;
   const footage = overFootage ?? (kind.overFootage === "never" ? false : kind.overFootage === "always" ? true : undefined);
+  if (kind.layoutPreset) {
+    const vertical = format === undefined ? (!kind.formats || kind.formats.includes("short")) : format === "short";
+    const layout = resolveBoardLayout(kind.layoutPreset, {vertical, overFootage: footage !== false});
+    for (const [field, limits] of Object.entries(layout.fields[kind.id] ?? {})) {
+      const node = schema.properties[field];
+      if (node?.type === "array") node.maxItems = Math.min(node.maxItems ?? Infinity, limits.maxItems);
+    }
+  }
   for (const rule of kind.constraints ?? []) {
     if (format !== undefined && rule.when.format !== undefined && rule.when.format !== catalogFormat(format)) continue;
     if (footage !== undefined && rule.when.overFootage !== undefined && rule.when.overFootage !== footage) continue;
@@ -180,7 +189,7 @@ function boardLimits(kind, {format, overFootage} = {}) {
 function normalizeKind(id, input, label) {
   if (!SLUG.test(id)) throw new Error(`${label} kind id ${JSON.stringify(id)} must use lowercase letters, numbers, and hyphens`);
   const kind = requireObject(input, `${label}.kinds.${id}`);
-  const known = new Set(["label", "use", "avoid", "overFootage", "once", "schema", "formats", "maxWords", "constraints"]);
+  const known = new Set(["label", "use", "avoid", "overFootage", "once", "schema", "formats", "maxWords", "constraints", "layoutPreset"]);
   for (const key of Object.keys(kind)) {
     // A normalized kind carries its own id; accept it back so validation stays idempotent.
     if (key === "id" && kind.id === id) continue;
@@ -194,6 +203,7 @@ function normalizeKind(id, input, label) {
   if (kind.formats !== undefined && (!Array.isArray(kind.formats) || !kind.formats.length || kind.formats.some((format) => !["longform", "short"].includes(format)))) throw new Error(`${label}.kinds.${id}.formats must contain longform or short`);
   if (kind.constraints !== undefined && !Array.isArray(kind.constraints)) throw new Error(`${label}.kinds.${id}.constraints must be an array`);
   const maxWords = optionalPositiveInteger(kind.maxWords, `${label}.kinds.${id}.maxWords`);
+  if (kind.layoutPreset !== undefined && !BOARD_LAYOUT_PRESETS.includes(kind.layoutPreset)) throw new Error(`${label}.kinds.${id}.layoutPreset must be ${BOARD_LAYOUT_PRESETS.join(" or ")}`);
   const result = {
     id,
     label: requireText(kind.label, `${label}.kinds.${id}.label`),
@@ -202,12 +212,14 @@ function normalizeKind(id, input, label) {
     overFootage,
     once: optionalBoolean(kind.once, `${label}.kinds.${id}.once`, false),
     schema,
+    ...(kind.layoutPreset ? {layoutPreset: kind.layoutPreset} : {}),
     ...(kind.formats ? {formats: [...new Set(kind.formats)]} : {}),
     ...(maxWords ? {maxWords} : {}),
     ...(kind.constraints ? {constraints: kind.constraints.map((rule, index) => normalizeConstraint(rule, schema, `${label}.kinds.${id}.constraints[${index}]`))} : {}),
   };
   for (const format of result.formats ?? ["longform", "short"]) {
-    for (const overFootage of [false, true, undefined]) boardLimits(result, {format, overFootage});
+    const contexts = result.overFootage === "never" ? [false] : result.overFootage === "always" ? [true] : [false, true, undefined];
+    for (const overFootage of contexts) boardLimits(result, {format, overFootage});
   }
   return result;
 }
@@ -219,9 +231,10 @@ function normalizeKind(id, input, label) {
  */
 export function validateBoardCatalog(input, { label = "video boards" } = {}) {
   const catalog = requireObject(input, label);
-  const known = new Set(["schemaVersion", "formats", "cadence", "motifs", "kinds"]);
+  const known = new Set(["schemaVersion", "formats", "cadence", "motifs", "kinds", "layoutPreset"]);
   for (const key of Object.keys(catalog)) if (!known.has(key)) throw new Error(`${label} has unknown field ${key}`);
   if (catalog.schemaVersion !== BOARDS_SCHEMA_VERSION) throw new Error(`${label} schemaVersion must be ${BOARDS_SCHEMA_VERSION}`);
+  if (catalog.layoutPreset !== undefined && !BOARD_LAYOUT_PRESETS.includes(catalog.layoutPreset)) throw new Error(`${label}.layoutPreset must be ${BOARD_LAYOUT_PRESETS.join(" or ")}`);
   const formats = requireObject(catalog.formats ?? {}, `${label}.formats`);
   for (const key of Object.keys(formats)) if (!["longform", "short"].includes(key)) throw new Error(`${label}.formats has unknown format ${key}`);
   const cadence = requireObject(catalog.cadence ?? {}, `${label}.cadence`);
@@ -236,12 +249,13 @@ export function validateBoardCatalog(input, { label = "video boards" } = {}) {
   }
   const kinds = requireObject(catalog.kinds, `${label}.kinds`);
   if (!Object.keys(kinds).length) throw new Error(`${label}.kinds must declare at least one board kind`);
-  const normalizedKinds = Object.fromEntries(Object.entries(kinds).map(([id, kind]) => [id, normalizeKind(id, kind, label)]));
+  const normalizedKinds = Object.fromEntries(Object.entries(kinds).map(([id, kind]) => [id, normalizeKind(id, {...kind, ...(catalog.layoutPreset ? {layoutPreset: kind.layoutPreset ?? catalog.layoutPreset} : {})}, label)]));
   // A motif field without a mount is allowed: a fresh system can declare the
   // field before it has an illustration library, and the walker then accepts
   // any motif name until the mount lands.
   return {
     schemaVersion: BOARDS_SCHEMA_VERSION,
+    ...(catalog.layoutPreset ? {layoutPreset: catalog.layoutPreset} : {}),
     formats: {
       longform: optionalBoolean(formats.longform, `${label}.formats.longform`, true),
       short: optionalBoolean(formats.short, `${label}.formats.short`, false),
@@ -531,6 +545,7 @@ function fieldBudgets(node, pathLabel, budgets) {
 export function boardCatalogSummary(catalog) {
   return {
     schemaVersion: catalog.schemaVersion,
+    ...(catalog.layoutPreset ? {layoutPreset: catalog.layoutPreset} : {}),
     formats: { ...catalog.formats },
     cadence: { ...catalog.cadence },
     ...(catalog.motifs ? { motifs: { ...catalog.motifs } } : {}),
@@ -543,6 +558,7 @@ export function boardCatalogSummary(catalog) {
         avoid: kind.avoid,
         overFootage: kind.overFootage,
         once: kind.once,
+        ...(kind.layoutPreset ? {layoutPreset: kind.layoutPreset} : {}),
         ...(kind.formats ? {formats: [...kind.formats]} : {}),
         ...(kind.constraints ? {constraints: structuredClone(kind.constraints)} : {}),
         compilerOwned: COMPILER_OWNED_BOARD_KINDS.includes(kind.id),

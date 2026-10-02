@@ -16,11 +16,33 @@ import {
   validateBoardVisual,
 } from "./video-boards.mjs";
 import { DEFAULT_BOARD_KINDS } from "../video/boards.mjs";
+import {assertSharedBoardLayout} from "../video/board-layouts.mjs";
 
 const templatePath = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "templates", "video", "boards.json");
 const template = async () => JSON.parse(await fs.readFile(templatePath, "utf8"));
 const catalogWith = async (patch = {}) => validateBoardCatalog({ ...(await template()), ...patch });
 const clone = (value) => JSON.parse(JSON.stringify(value));
+
+test("shared presets use the same executable fit limits as the components", async () => {
+  const raw = await template();
+  raw.layoutPreset = "standard";
+  raw.formats.short = true;
+  raw.kinds.flow.overFootage = "optional";
+  const catalog = validateBoardCatalog(raw);
+  assert.deepEqual(validateBoardCatalog(catalog), catalog);
+  const visual = {kind: "flow", nodes: Array.from({length: 4}, () => ({label: "Next"}))};
+  assert.doesNotThrow(() => validateBoardVisual({catalog, visual, format: "horizontal", overFootage: false}));
+  assert.doesNotThrow(() => assertSharedBoardLayout(visual, "standard", {vertical: false, overFootage: false}));
+  for (const [vertical, overFootage] of [[true, false], [false, true], [true, true]]) {
+    assert.throws(() => validateBoardVisual({catalog, visual, format: vertical ? "short" : "horizontal", overFootage}), /allows at most 3 items/u);
+    assert.throws(() => assertSharedBoardLayout(visual, "standard", {vertical, overFootage}), /allows at most 3 items/u);
+  }
+  assert.equal(boardKindSchemas(catalog, {format: "horizontal"}).find((entry) => entry.properties.kind.const === "flow").properties.nodes.maxItems, 3);
+  raw.kinds.flow.overFootage = "never";
+  raw.kinds.flow.formats = ["longform"];
+  raw.kinds.flow.schema.properties.nodes.minItems = 4;
+  assert.doesNotThrow(() => validateBoardCatalog(raw), "full-frame horizontal kinds need only satisfy reachable shared layouts");
+});
 
 const constrainedCatalog = async () => {
   const raw = await template();

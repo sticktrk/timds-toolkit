@@ -32,10 +32,18 @@ surface. Work only in the client repository supplied by the user.
    from repository root:
 
 ```bash
-npm update @dtconcepts/timds
-npm run timds -- upgrade --root .
+npm run timds -- upgrade --version 0.1.x
 npm run timds -- defaults
 ```
+
+   Bootstrap an older CLI with `npm update @dtconcepts/timds` and ordinary
+   `upgrade` once. Dependency selection installs one exact lockfile, validates
+   the React/Remotion graph, synchronizes adopted managed files, and runs the
+   workspace and configured `check:timds-upgrade` checks. Adopt `--own-runtime`
+   only when authorized to align existing direct React/Remotion declarations.
+   PR validation and publication use `npm ci`; never probe releases in ordinary
+   checks. Enable `upgrade --dependency-prs` only when the user opts into draft
+   dependency PRs; keep credentials and fleet registrations outside the package.
 
 3. Never use `--force` without explicit authorization to replace locally
    modified managed tooling.
@@ -47,6 +55,13 @@ npm run timds -- defaults
    of any legacy `.timds/cli` tree.
 6. Run `npm run timds -- doctor` and `npm run timds -- check`. Submit the
    tooling update separately from ordinary design work.
+
+Component consolidation is a separate explicit `video components migrate`
+preview and `--apply` migration. Review supported overrides and before/after
+horizontal and vertical renders, including boards over footage. Preserve tokens,
+publishing defaults and sticky overrides, media, and production records. Runtime
+requirements and exact custom-component `testedVersions` need reviewed checks
+before adoption; deploy the selected lockfile on producer and renderer hosts.
 
 When the task includes adopting shared publishing improvements, run
 `npm run timds -- defaults --apply` on the feature branch. Review the contract

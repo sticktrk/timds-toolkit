@@ -90,7 +90,7 @@ test("copies the installed default components into client-owned source exactly o
 
 test("keeps structure policy in the client video contract", () => {
   const contract = validateVideoContract({
-    schemaVersion: 1,
+    schemaVersion: "1",
     id: "client-video",
     name: "Client",
     package: { shortCount: 0 },
@@ -107,6 +107,8 @@ test("keeps structure policy in the client video contract", () => {
   assert.equal(contract.structure.longform.requireIntro, true);
   assert.equal(contract.structure.longform.requireOutro, false);
   assert.equal(contract.structure.short.requireIntro, false);
+  assert.equal(contract.schemaVersion, 1, "a version spelled as a string normalizes as it always did");
+  assert.throws(() => validateVideoContract({ ...contract, schemaVersion: 3, runtime: { videoSchema: 3 } }), /schemaVersion must be 1 or 2/u, "the range error precedes the runtime cross-check");
 });
 
 test("compiles programmatic productions with client-owned producer copy and assets", () => {
@@ -1899,10 +1901,13 @@ test("video init scaffolds the default board catalog and registers it", async (t
   await writeJson(manifestPath, { schemaVersion: 2, systemId: "example/core", name: "Example", version: "1.0.0" });
   const result = await initializeVideoWorkspace({ designSystemRoot: root, repoRoot: root, manifestPath, manifest: {} });
   assert.equal(result.boards, path.join(root, "video", "boards.json"));
-  assert.deepEqual(JSON.parse(await fs.readFile(result.boards, "utf8")), await boardTemplate());
+  assert.deepEqual(JSON.parse(await fs.readFile(result.boards, "utf8")), {...await boardTemplate(), layoutPreset: "standard"});
   const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
   assert.equal(manifest.video.boards, "video/boards.json");
   assert.equal(normalizeVideoManifest(manifest.video).boards, "video/boards.json");
+  assert.equal(manifest.video.components, undefined);
+  await assert.rejects(fs.access(path.join(root, "video", "remotion.tsx")), /ENOENT/u);
+  assert.ok(JSON.parse(await fs.readFile(result.contract, "utf8")).runtime.features.includes("shared-board-layouts-v1"));
   // The scaffolded contract keeps graphic scenes closed: the catalog's formats and the structure flag both open a format.
   assert.equal(JSON.parse(await fs.readFile(result.contract, "utf8")).structure.longform.graphicScenes, false);
 });
@@ -1918,8 +1923,13 @@ test("extract publishes the board catalog summary in the machine index", async (
   const machine = await extractWorkspace(workspace, { write: false });
   assert.deepEqual(machine.index.video.boards.kinds.map((kind) => kind.id), ["chapter-title", "statement", "cards", "compare", "flow", "steps", "document", "subscribe"]);
   assert.equal(machine.index.video.boards.cadence.maxBoardWords, 28);
+  assert.equal(machine.index.video.engine.name, "@dtconcepts/timds");
+  assert.ok(machine.index.video.engine.version);
   await fs.rm(path.join(workspace.designSystemRoot, "video", "boards.json"));
-  assert.equal("video" in (await extractWorkspace(workspace, { write: false })).index, false);
+  assert.equal((await extractWorkspace(workspace, { write: false })).index.video.boards, undefined);
+  // Video may be enabled before `video init` writes the contract; extract still produces the index.
+  await fs.rm(path.join(workspace.designSystemRoot, workspace.manifest.video.contract));
+  assert.equal((await extractWorkspace(workspace, { write: false })).index.video, undefined);
 });
 
 test("subscribe compiles in every producer format whatever the catalog's formats say", async () => {

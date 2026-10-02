@@ -17,6 +17,11 @@ import {
   useVideoConfig,
 } from "remotion";
 import {fitCoverHeadline, splitGoldHeadline, tieOrphan} from "./text.mjs";
+import {assertSharedBoardLayout, resolveBoardLayout} from "./board-layouts.mjs";
+import {assertRuntimeCompatibility, runtimeIdentityFor} from "./runtime-compat.mjs";
+import toolkitPackage from "../package.json" with {type: "json"};
+
+const componentRuntime = runtimeIdentityFor(toolkitPackage);
 import {MINIMUM_CHAIN_CLIP_SECONDS, adjacentFootageRepeats, chainClipFrames, sceneAssetKeys, verticalTextZone} from "./footage.mjs";
 import {DEFAULT_BOARD_KINDS, deriveVideoChapters, revealFrame} from "./boards.mjs";
 
@@ -430,7 +435,9 @@ const boardMotifSrc = (project: VideoProject, motif: unknown) => {
   return mount && file ? staticFile(`${mount}/${file}`) : null;
 };
 
-const useBoardTiming = ({project, line, duration, lead}: VideoProjectBoardProps) => {
+const useBoardTiming = ({project, line, duration, lead, visual, vertical, overFootage}: VideoProjectBoardProps) => {
+  const preset = project.contract.boards?.kinds?.[visual.kind]?.layoutPreset ?? project.contract.boards?.layoutPreset;
+  if (preset) assertSharedBoardLayout(visual, preset, {vertical, overFootage});
   const frame = useCurrentFrame();
   const fps = project.contract.fps;
   const at = (cue: string | undefined, index: number, count: number) =>
@@ -441,15 +448,16 @@ const useBoardTiming = ({project, line, duration, lead}: VideoProjectBoardProps)
 // Full-frame brand background, or a scrim when footage plays beneath. The
 // padding is the safe area: logo and banner above, captions and watermark
 // labels below, and the Shorts UI along the right edge of vertical renders.
-const BoardStage: React.FC<{project: VideoProject; overFootage: boolean; vertical?: boolean; center?: boolean; children: React.ReactNode}> = ({project, overFootage, vertical, center, children}) => {
+const BoardStage: React.FC<{project: VideoProject; kind?: string; overFootage: boolean; vertical?: boolean; center?: boolean; children: React.ReactNode}> = ({project, kind, overFootage, vertical, center, children}) => {
   const background = project.contract.brand.colors.background;
+  const layout = resolveBoardLayout(project.contract.boards?.kinds?.[kind ?? ""]?.layoutPreset ?? project.contract.boards?.layoutPreset, {vertical, overFootage});
   return <AbsoluteFill style={{
-    backgroundColor: overFootage ? `color-mix(in srgb, ${background} 74%, transparent)` : background,
+    backgroundColor: overFootage ? `color-mix(in srgb, ${background} ${layout.scrim}%, transparent)` : background,
     justifyContent: "center",
     alignItems: center ? "center" : "stretch",
     textAlign: center ? "center" : "left",
-    padding: vertical ? "330px 130px 440px 90px" : "150px 150px 210px",
-  }}>{children}</AbsoluteFill>;
+    padding: layout.padding,
+  }}>{layout.scale === 1 ? children : <div style={{transform: `scale(${layout.scale})`, transformOrigin: "center"}}>{children}</div>}</AbsoluteFill>;
 };
 
 const BoardKicker: React.FC<{project: VideoProject; text?: string; vertical?: boolean; style?: React.CSSProperties}> = ({project, text, vertical, style}) => {
@@ -476,7 +484,7 @@ const ChapterTitleBoard: React.FC<VideoProjectBoardProps> = (props) => {
   const {frame} = useBoardTiming(props);
   const number = Number(visual.number);
   const motif = boardMotifSrc(project, visual.motif);
-  return <BoardStage project={project} overFootage={overFootage} vertical={vertical}>
+  return <BoardStage project={project} kind={visual.kind} overFootage={overFootage} vertical={vertical}>
     <div style={{display: "flex", flexDirection: vertical ? "column-reverse" : "row", alignItems: vertical ? "flex-start" : "center", gap: vertical ? 60 : 96}}>
       <div style={{flex: 1}}>
         {Number.isInteger(number) && number > 0
@@ -496,7 +504,7 @@ const StatementBoard: React.FC<VideoProjectBoardProps> = (props) => {
   const {frame} = useBoardTiming(props);
   const motif = boardMotifSrc(project, visual.motif);
   const goldPhrase = boardString(visual.goldPhrase) || undefined;
-  return <BoardStage project={project} overFootage={overFootage} vertical={vertical}>
+  return <BoardStage project={project} kind={visual.kind} overFootage={overFootage} vertical={vertical}>
     <div style={{display: "flex", flexDirection: vertical ? "column-reverse" : "row", alignItems: vertical ? "flex-start" : "center", gap: vertical ? 56 : 90}}>
       <div style={{flex: 1, borderLeft: `8px solid ${brand.colors.accent}`, paddingLeft: vertical ? 40 : 54}}>
         <BoardKicker project={project} text={scene.eyebrow} vertical={vertical} style={boardEnter(frame, lead, 12)} />
@@ -517,7 +525,7 @@ const CardsBoard: React.FC<VideoProjectBoardProps> = (props) => {
   const items = boardItems(visual.items);
   const motif = boardMotifSrc(project, visual.motif);
   const dense = items.length >= 4;
-  return <BoardStage project={project} overFootage={overFootage} vertical={vertical}>
+  return <BoardStage project={project} kind={visual.kind} overFootage={overFootage} vertical={vertical}>
     <BoardKicker project={project} text={scene.eyebrow} vertical={vertical} style={boardEnter(frame, lead, 12)} />
     <div style={{display: "flex", alignItems: "center", gap: 40, marginBottom: vertical ? 48 : 44}}>
       <BoardTitle project={project} text={boardString(visual.title)} size={vertical ? 76 : 68} style={{flex: 1, ...boardEnter(frame, lead + 4, 18)}} />
@@ -555,7 +563,7 @@ const CompareBoard: React.FC<VideoProjectBoardProps> = (props) => {
     </div>;
   });
   const divider = interpolate(frame, [lead + 4, lead + 28], [0, 1], boardClamp);
-  return <BoardStage project={project} overFootage={overFootage} vertical={vertical}>
+  return <BoardStage project={project} kind={visual.kind} overFootage={overFootage} vertical={vertical}>
     <BoardKicker project={project} text={scene.eyebrow} vertical={vertical} style={{marginBottom: vertical ? 40 : 36, ...boardEnter(frame, lead, 12)}} />
     <div style={{display: "flex", flexDirection: vertical ? "column" : "row", gap: vertical ? 40 : 80, alignItems: "stretch"}}>
       {columns[0]}
@@ -573,7 +581,7 @@ const FlowBoard: React.FC<VideoProjectBoardProps> = (props) => {
   const reveals = nodes.map((node, index) => at(node.cue, index, nodes.length));
   const outcome = boardString(visual.outcome);
   const outcomeAt = (reveals.at(-1) ?? lead) + 16;
-  return <BoardStage project={project} overFootage={overFootage} vertical={vertical}>
+  return <BoardStage project={project} kind={visual.kind} overFootage={overFootage} vertical={vertical}>
     <BoardKicker project={project} text={scene.eyebrow} vertical={vertical} style={{marginBottom: vertical ? 40 : 40, ...boardEnter(frame, lead, 12)}} />
     <div style={{display: "flex", flexDirection: vertical ? "column" : "row", alignItems: vertical ? "stretch" : "center"}}>
       {nodes.map((node, index) => <React.Fragment key={`${node.label}-${index}`}>
@@ -600,7 +608,7 @@ const StepsBoard: React.FC<VideoProjectBoardProps> = (props) => {
   const steps = boardItems(visual.steps);
   const reveals = steps.map((step, index) => at(step.cue, index, steps.length));
   const badge = vertical ? 76 : 72;
-  return <BoardStage project={project} overFootage={overFootage} vertical={vertical}>
+  return <BoardStage project={project} kind={visual.kind} overFootage={overFootage} vertical={vertical}>
     <BoardKicker project={project} text={scene.eyebrow} vertical={vertical} style={boardEnter(frame, lead, 12)} />
     <BoardTitle project={project} text={boardString(visual.title)} size={vertical ? 76 : 68} style={{marginBottom: vertical ? 48 : 56, ...boardEnter(frame, lead + 4, 18)}} />
     <div style={{display: "flex", flexDirection: vertical ? "column" : "row", gap: vertical ? 30 : 28}}>
@@ -621,7 +629,7 @@ const DocumentBoard: React.FC<VideoProjectBoardProps> = (props) => {
   const brand = project.contract.brand;
   const {frame, at} = useBoardTiming(props);
   const rows = boardRows(visual.lines);
-  return <BoardStage project={project} overFootage={overFootage} vertical={vertical} center>
+  return <BoardStage project={project} kind={visual.kind} overFootage={overFootage} vertical={vertical} center>
     <div style={{width: vertical ? "100%" : 1140, textAlign: "left", padding: vertical ? "48px 46px 52px" : "54px 64px 60px", backgroundColor: brand.colors.panel, borderTop: `8px solid ${brand.colors.accent}`, boxShadow: `0 30px 80px color-mix(in srgb, ${brand.colors.background} 60%, transparent)`, ...boardEnter(frame, lead, 30)}}>
       <BoardKicker project={project} text={scene.eyebrow} vertical={vertical} style={{marginBottom: 14}} />
       <BoardTitle project={project} text={boardString(visual.title)} size={vertical ? 70 : 62} />
@@ -652,7 +660,7 @@ const SubscribeBoard: React.FC<VideoProjectBoardProps> = (props) => {
   const question = boardString(visual.question) || `Do you want to know more about ${boardString(visual.topic)}?`;
   const cta = boardString(visual.line) || `Subscribe to learn how to ${boardString(visual.solution)}.`;
   const ctaAt = Math.max(lead + 16, at("subscribe", 1, 2));
-  return <BoardStage project={project} overFootage={overFootage} vertical={vertical} center>
+  return <BoardStage project={project} kind={visual.kind} overFootage={overFootage} vertical={vertical} center>
     <BoardTitle project={project} text={question} size={vertical ? 88 : 80} style={{maxWidth: vertical ? undefined : 1400, ...boardEnter(frame, lead + 4, 24)}} />
     <div style={{width: vertical ? 160 : 130, height: 4, backgroundColor: brand.colors.accent, margin: vertical ? "54px 0" : "42px 0", transform: `scaleX(${interpolate(frame, [ctaAt - 8, ctaAt + 10], [0, 1], boardClamp)})`}} />
     <div style={{color: brand.colors.accent, fontFamily: brand.fonts.body, fontSize: vertical ? 54 : 48, fontWeight: 700, lineHeight: 1.12, maxWidth: vertical ? undefined : 1300, textWrap: "pretty", ...boardEnter(frame, ctaAt, 18)}}>{tieOrphan(cta)}</div>
@@ -829,6 +837,7 @@ export function resolveVideoProjectComponents(components: VideoProjectComponentO
 }
 
 export function createVideoProjectRoot(project: VideoProject, components: VideoProjectComponentOverrides = {}) {
+  assertRuntimeCompatibility(project.contract.runtime, componentRuntime);
   loadVideoProjectFonts(project);
   const resolved = resolveVideoProjectComponents(components);
   const prefix = project.records.production.slug.split("-").map((part: string) => `${part[0].toUpperCase()}${part.slice(1)}`).join("");
@@ -857,6 +866,7 @@ export function createVideoProjectRoot(project: VideoProject, components: VideoP
 }
 
 export function createSingleVideoProjectRoot(project: VideoProject, components: VideoProjectComponentOverrides = {}) {
+  assertRuntimeCompatibility(project.contract.runtime, componentRuntime);
   loadVideoProjectFonts(project);
   const resolved = resolveVideoProjectComponents(components);
   const production = project.records.production;
@@ -905,16 +915,19 @@ export { deriveVideoChapters };
 export { boardMotifSrc as videoBoardMotifSrc };
 export {
   BrandWatermark,
+  CaptionPages,
   CardsBoard,
   ChapterTitleBoard,
   CompareBoard,
   Cover,
+  CoverVisual,
   DocumentBoard,
   FlowBoard,
   GoldHeadline,
   GraphicBoard,
   HorizontalCover,
   Intro,
+  Media,
   Outro,
   resolveVideoBoardComponent,
   SceneView,
@@ -924,3 +937,5 @@ export {
   VerticalCover,
   Video,
 };
+export {fitCoverHeadline, splitGoldHeadline, tieOrphan};
+export type {CoverHeadlineFitOptions} from "./text.mjs";
