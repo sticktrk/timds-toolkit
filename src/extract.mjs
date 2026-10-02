@@ -539,7 +539,7 @@ export async function extractArtifact({ artifactRoot, manifest, mediaCatalog = {
     tokens: { url: tokensUrl, count: tokens.count, stylesheets: tokens.stylesheets.length, roles: Object.keys(tokens.roles).length },
     brand: { url: brandUrl, logos: brand.logos.length, imagery: brand.imagery.length, guidance: Object.keys(brand.guidance).length },
     // The video board catalog summary (kinds, guidance, budgets, cadence) when the system has one.
-    ...(video?.boards ? { video: { boards: video.boards } } : {}),
+    ...(video ? {video} : {}),
     pages,
   };
 

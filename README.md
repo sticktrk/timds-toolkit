@@ -408,6 +408,16 @@ a scene headline must be a complete thought — a dangling article, conjunction,
 or possessive fails the check. A client snapshot imports that module rather
 than copying it, so a toolkit fix reaches the client's frames without a reset.
 
+Fresh systems use shared TimDS components directly. Select `standard` or
+`compact` with `video/boards.json` `layoutPreset`; a kind may select its own
+`layoutPreset`. Compiler validation and rendering consume the same executable
+geometry and fit limits. Cards, steps, and flow in vertical layouts and over
+footage allow at most three items; larger horizontal full-frame boards retain
+their catalog budgets. Drafting schemas use the safe intersection before footage
+is selected. Brand tokens, fonts, logos, copy, assets, compliance, and publishing
+policy stay in the Design System. Prefer configuration and typed partial visual
+overrides for deliberate exceptions.
+
 The Remotion export includes a complete default component set. A client Design
 System can fork those exact installed defaults into one complete, editable
 source module:
@@ -844,6 +854,109 @@ both managed skills. It refuses locally modified managed files unless `--force`
 is explicitly supplied and never
 rewrites `timds.json`, tokens, media records, authored source, framework config,
 documentation, or artifacts.
+
+### One dependency selection
+
+After bootstrapping a release that supports dependency selection, prepare a
+compatible upgrade on a clean feature branch:
+
+```bash
+npm run timds -- upgrade --version 0.1.x
+# Or select an exact reviewed patch with --version 0.1.<patch>.
+```
+
+This resolves the patch once, restores the bounded package requirement, installs
+with `npm ci` from the exact lockfile, synchronizes adopted managed files with
+the selected CLI, and runs dependency and Design System checks. A configured
+`package.json` `check:timds-upgrade` also runs client producer, render, and visual
+checks. Commit the package, lockfile, skills, and installation record together.
+A failed check leaves the attempted change available for diagnosis; restore the
+tracked dependency and managed files and run `npm ci` to return to the previous
+resolution. The command does not merge or deploy.
+
+TimDS owns exact React/Remotion runtime versions. Clients can consume hoisted
+modules without redeclaring them. Existing direct declarations require one
+explicit ownership adoption when their versions differ:
+
+```bash
+npm run timds -- upgrade --version 0.1.x --own-runtime
+npm run timds -- dependencies check
+```
+
+This records `timds-v1` ownership and aligns existing React/Remotion dependency
+declarations on subsequent selections. The graph check rejects duplicate or
+missing runtime versions, dependency/lockfile disagreement, and an invalid
+installed graph. PR validation and publication both use `npm ci`; ordinary
+validation does not probe new releases or re-resolve after review.
+
+### Explicit component consolidation
+
+Preview copied visual declarations on a feature branch before applying:
+
+```bash
+npm run timds -- video components migrate
+npm run timds -- video components migrate --apply
+npm run timds -- check
+```
+
+The inventory recognizes installed defaults and the stock board-catalog snapshot
+from 0.1.438 (also shared by 0.1.437). Unchanged snapshots become shared re-exports
+at the same path. Supported visual variations become typed partial overrides,
+retaining their helper declarations. Custom imports, exports, registration,
+unclassified code, or scene/video logic require review and block application.
+For unsupported older copies, implement reviewed partial overrides manually.
+
+Apply changes only the configured component module and the contract's schema
+version and `runtime` requirements. Brand, catalog, media, production records, publishing policy, and
+`.timds/defaults.json` stay intact. Original component, contract, and manifest
+bytes are saved in `.timds/component-migration/`; the migration is safe to rerun.
+Before adoption, compare horizontal and vertical images both full frame and over
+footage, including every retained override. Commit consolidation separately.
+Roll back with `git revert <migration-commit>`, or restore the backed-up component
+to its original `video.components` path and restore the contract and manifest.
+Normal `upgrade` never consolidates snapshots or updates compatibility policy.
+
+### Consumer and runtime compatibility
+
+New scaffolds use video contract schema 2, which requires `runtime` in
+`video/contract.json`: bounded `releaseLine`,
+exact `minimumVersion`, `videoSchema`, `componentApi`, and required `features`.
+The machine index exposes these requirements and the extracting runtime's exact
+identity. Authoring, compile/finalize, and staged projects retain the installed
+package version. Compilation and finalization use the same locked release.
+Unsupported requirements fail before drafting or rendering.
+
+Shared components use the declared release line only when schema, component API,
+minimum version, and features match. Snapshots and migrated custom overrides list
+reviewed exact `testedVersions`; a new patch requires their producer/render/visual
+checks and an explicit contract review. Unchanged snapshots remove this
+restriction when explicitly consolidated. Untested custom components have no
+automatic compatibility promise. Schema 1 contracts retain their legacy behavior until explicit adoption. Schema
+2 makes older hosts reject the contract instead of ignoring runtime requirements.
+
+Consumers read the published derived layer or the selected repository contract,
+and import `assertRuntimeCompatibility` from `@dtconcepts/timds/runtime` to verify
+`index.video.runtime` or `contract.runtime` before invoking a producer or renderer.
+Deploy a compatible locked TimDS release to remote hosts before adopting new
+features; use the same tested resolution on producer and renderer hosts. TimDS
+owns component discovery, staging, and composition registration.
+
+### Opt-in dependency PR automation
+
+```bash
+npm run timds -- upgrade --dependency-prs
+```
+
+This adopts a weekly and manually dispatched workflow in the current repository.
+Configure `TIMDS_UPGRADE_TOKEN` in repository settings with contents and pull
+request permissions (a GitHub App credential is preferred), and configure
+`check:timds-upgrade` for project-specific render checks. The workflow selects and
+tests one locked release, opens or refreshes a draft dependency PR, and reports
+the failing check when adoption fails. It refuses to include authored changes.
+A fleet controller can register repositories privately and dispatch their
+adopted workflows with exact versions; registrations and credentials stay outside
+the public package. Review, merging, runtime deployment, and consumer deployment
+are separate operations.
 
 ### Shared defaults across existing Design Systems
 

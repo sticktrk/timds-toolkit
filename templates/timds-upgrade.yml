@@ -1,0 +1,95 @@
+name: TimDS dependency upgrade
+
+# Opt in per repository. Credentials and repository registrations live in
+# repository settings or an external fleet controller, never in this package.
+on:
+  schedule:
+    - cron: "17 9 * * 1"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Exact TimDS release in the repository's bounded MAJOR.MINOR.x line (empty selects the newest compatible release once)"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: timds-dependency-upgrade
+  cancel-in-progress: false
+
+jobs:
+  upgrade:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ secrets.TIMDS_UPGRADE_TOKEN }}
+      TIMDS_VERSION: ${{ inputs.version }}
+    steps:
+      - name: Require the opted-in repository credential
+        run: |
+          test -n "$GH_TOKEN" || { echo "::error::Configure TIMDS_UPGRADE_TOKEN with repository contents and pull request permissions (GitHub App token recommended)."; exit 1; }
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          token: ${{ secrets.TIMDS_UPGRADE_TOKEN }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Select, synchronize, and validate the exact resolution
+        run: |
+          # Without an explicit release, follow the bounded line package.json declares.
+          if [[ -z "$TIMDS_VERSION" ]]; then
+            TIMDS_VERSION="$(node -p 'const p = require("./package.json"); const r = (p.devDependencies || {})["@dtconcepts/timds"] || (p.dependencies || {})["@dtconcepts/timds"] || ""; r.replace(/^\^(\d+\.\d+)\.\d+$/u, "$1.x")')"
+            echo "TIMDS_VERSION=$TIMDS_VERSION" >> "$GITHUB_ENV"
+          fi
+          npm run timds -- upgrade --version "$TIMDS_VERSION"
+      - name: Open or refresh the review PR
+        env:
+          BASE_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          git diff --check
+          if [[ -z "$(git status --porcelain)" ]]; then exit 0; fi
+          git switch -c timds/dependency-upgrade
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Fail if checks wrote authored source. Only dependency selection, the
+          # already adopted managed boundary, and the rebuilt artifact (whose
+          # extracted index records the engine version) may appear in an upgrade PR.
+          node --input-type=module <<'JS'
+          import {execFileSync} from 'node:child_process';
+          import {existsSync} from 'node:fs';
+          const prefix = existsSync('timds.json') ? '' : 'design-system/';
+          const changed = execFileSync('git', ['status', '--porcelain', '--untracked-files=all'], {encoding: 'utf8'}).trimEnd().split('\n').filter(Boolean).map(line => line.slice(3));
+          const allowed = file => ['package.json', 'package-lock.json', '.github/workflows/timds-upgrade.yml', '.github/workflows/timds-design-system.yml', '.github/workflows/update-consumer-submodule.yml', 'scripts/release.mjs', 'scripts/prepare-merge-release.mjs', 'scripts/prepare-merge-release.test.mjs'].includes(file) || file === `${prefix}.timds/installation.json` || ['.agents/skills/timds-edit-design-system/', '.agents/skills/timds-create-video/', `${prefix}dist/`].some(root => file.startsWith(root));
+          const unexpected = changed.filter(file => !allowed(file));
+          if (unexpected.length) throw new Error(`Checks changed authored files: ${unexpected.join(', ')}. Review this migration manually.`);
+          JS
+          git add --all
+          version="$(node -p "require('./node_modules/@dtconcepts/timds/package.json').version")"
+          git commit -m "Upgrade TimDS to ${version}"
+          remote_revision="$(git ls-remote --heads origin refs/heads/timds/dependency-upgrade | cut -f1)"
+          git push "--force-with-lease=refs/heads/timds/dependency-upgrade:${remote_revision}" origin HEAD:timds/dependency-upgrade
+          body="$RUNNER_TEMP/timds-upgrade-pr.md"
+          cat > "$body" <<EOF
+          Selects @dtconcepts/timds ${version} with its exact committed lockfile and synchronizes the adopted managed files.
+
+          Validation: dependency graph, Design System build/check, producer checks, and configured check:timds-upgrade checks passed. Publication uses npm ci from this same lockfile. Review custom component compatibility and deploy the selected runtime to producer and renderer hosts before adopting new contract features.
+
+          Automated merging and deployment are not enabled.
+          EOF
+          number="$(gh pr list --head timds/dependency-upgrade --state open --json number --jq '.[0].number // empty')"
+          if [[ -n "$number" ]]; then
+            gh pr edit "$number" --title "Upgrade TimDS to ${version}" --body-file "$body"
+          else
+            gh pr create --draft --base "$BASE_BRANCH" --head timds/dependency-upgrade --title "Upgrade TimDS to ${version}" --body-file "$body"
+          fi
+      - name: Report failed adoption
+        if: failure()
+        run: |
+          echo "TimDS upgrade to $TIMDS_VERSION failed; see the failing check above. The dependency branch was not merged or deployed." >> "$GITHUB_STEP_SUMMARY"

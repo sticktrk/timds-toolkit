@@ -6,6 +6,7 @@
     "lib": ["ES2023", "DOM"],
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
+    "resolveJsonModule": true,
     "noEmit": true,
     "skipLibCheck": true,
     "strict": true,

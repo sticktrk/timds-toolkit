@@ -24,13 +24,16 @@
     "./video/boards": "./video/boards.mjs",
     "./video/footage": "./video/footage.mjs",
     "./video/producer": "./src/video-producer.mjs",
-    "./video/remotion": "./video/remotion.tsx"
+    "./video/remotion": "./video/remotion.tsx",
+    "./runtime": "./src/runtime.mjs",
+    "./video/board-layouts": "./video/board-layouts.mjs"
   },
   "scripts": {
     "test": "npm run typecheck && node --test .github/scripts/*.test.mjs src/*.test.mjs video/*.test.mjs && tsx --test video/*.test.tsx",
     "typecheck": "tsc --noEmit",
     "pack:check": "npm pack --dry-run",
-    "release": "./scripts/release.sh"
+    "release": "./scripts/release.sh",
+    "test:shared-upgrades": "node scripts/check-shared-upgrades.mjs"
   },
   "files": [
     "bin",
@@ -58,7 +61,12 @@
     "src/video.mjs",
     "src/video-lab-server.mjs",
     "video",
-    "templates"
+    "templates",
+    "src/runtime.mjs",
+    "src/runtime.d.mts",
+    "src/upgrade.mjs",
+    "src/video-migration.mjs",
+    "src/video-component-loader.mjs"
   ],
   "dependencies": {
     "@anthropic-ai/sdk": "0.125.0",
@@ -70,11 +78,11 @@
     "react-dom": "19.2.3",
     "remotion": "4.0.484",
     "tsx": "4.21.0",
-    "zod": "4.3.6"
+    "zod": "4.3.6",
+    "typescript": "5.9.3"
   },
   "devDependencies": {
-    "@types/react": "19.2.18",
-    "typescript": "5.9.3"
+    "@types/react": "19.2.18"
   },
   "engines": {
     "node": ">=20"
