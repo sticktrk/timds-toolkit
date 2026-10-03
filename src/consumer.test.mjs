@@ -267,6 +267,84 @@ test("checkConsumer fails on out-of-scope and protected changes and lists the pa
   assert.match(lines.join("\n"), /Error: Changes outside the design surface[\s\S]*TimDS consumer check failed\./);
 });
 
+test("checkConsumer lists a file moved out of a protected area at its old path, and odd file names unquoted", async (t) => {
+  const { product } = await consumerFixture(t);
+  git(product, "switch", "-q", "-c", "design/move");
+  git(product, "mv", "web/src/lib/api.ts", "web/src/styles/api.ts");
+  await write(product, "web/src/styles/café.css", "a{}\n");
+  git(product, "add", ".");
+  git(product, "commit", "-q", "-m", "Move");
+  const result = await checkConsumer(product, { base: "main" });
+  assert.equal(result.status, "failed");
+  assert.match(result.errors.join("\n"), /- web\/src\/lib\/api\.ts/);
+  assert.deepEqual(result.changes.find((change) => change.path === "web/src/styles/café.css"), { path: "web/src/styles/café.css", status: "allowed", app: "web" });
+});
+
+test("checkConsumer judges the scope against the base manifest, so a branch cannot widen its own surface", async (t) => {
+  const { product } = await consumerFixture(t);
+  git(product, "switch", "-q", "-c", "design/widen");
+  await write(product, CONSUMER_MANIFEST_FILE, baseManifest({ web: staticApp({ designSurface: ["**"], protected: [] }) }));
+  await write(product, "web/src/lib/api.ts", "export const widened = 1;\n");
+  git(product, "commit", "-q", "-am", "Widen");
+  const result = await checkConsumer(product, { base: "main" });
+  assert.equal(result.status, "failed");
+  assert.match(result.errors.join("\n"), /outside the design surface[\s\S]*- web\/src\/lib\/api\.ts/);
+  assert.match(result.warnings.join("\n"), /timds\.consumer\.json changed on this branch/);
+  assert.match(result.warnings.join("\n"), /Developer-owned files changed[\s\S]*- timds\.consumer\.json/);
+});
+
+test("checkConsumer passes a branch that adds the submodule, then refuses a moved pin", async (t) => {
+  const root = await temporaryDirectory(t);
+  const dsRepo = path.join(root, "ds-origin");
+  const product = path.join(root, "product");
+  await fs.mkdir(dsRepo);
+  await fs.mkdir(product);
+  initRepo(dsRepo);
+  await write(dsRepo, "timds.json", { schemaVersion: 2, systemId: "acme/core", name: "Acme" });
+  await write(dsRepo, ".gitignore", "dist/\n");
+  git(dsRepo, "add", ".");
+  git(dsRepo, "commit", "-q", "-m", "Design system");
+  initRepo(product);
+  await write(product, "web/src/styles/site.css", "body{}\n");
+  git(product, "add", ".");
+  git(product, "commit", "-q", "-m", "Product");
+
+  git(product, "switch", "-q", "-c", "chore/adopt-timds");
+  git(product, "submodule", "add", "-q", dsRepo, "design-system");
+  await write(product, CONSUMER_MANIFEST_FILE, baseManifest());
+  git(product, "add", ".");
+  git(product, "commit", "-q", "-m", "Adopt TimDS");
+  const adopted = await checkConsumer(product, { base: "main" });
+  assert.equal(adopted.status, "passed", adopted.errors.join("\n"));
+  assert.deepEqual(adopted.changes.map((change) => change.path), [".gitmodules", "design-system", CONSUMER_MANIFEST_FILE]);
+
+  // Build output and a drifted checkout inside the submodule are not changes to the product.
+  await write(product, "design-system/dist/index.json", {});
+  await write(product, "design-system/notes.txt", "scratch\n");
+  git(product, "switch", "-q", "-c", "design/pin");
+  const untouched = await checkConsumer(product, { base: "chore/adopt-timds" });
+  assert.equal(untouched.status, "passed", untouched.errors.join("\n"));
+  await fs.rm(path.join(product, "design-system/notes.txt"));
+
+  await write(dsRepo, "timds.json", { schemaVersion: 2, systemId: "acme/core", name: "Acme 2" });
+  git(dsRepo, "commit", "-q", "-am", "Bump");
+  git(path.join(product, "design-system"), "pull", "-q", "origin", "HEAD");
+  const drifted = await checkConsumer(product, { base: "chore/adopt-timds" });
+  assert.equal(drifted.status, "passed", drifted.errors.join("\n"));
+  assert.match(drifted.warnings.join("\n"), /design-system is checked out at/);
+  git(product, "commit", "-q", "-am", "Move the pin");
+  const moved = await checkConsumer(product, { base: "chore/adopt-timds" });
+  assert.equal(moved.status, "failed");
+  assert.match(moved.errors.join("\n"), /The Design System pin at design-system changed/);
+});
+
+test("timds consumer check refuses an unknown option or an empty --base instead of skipping the scope check", async (t) => {
+  const { product } = await consumerFixture(t);
+  await assert.rejects(runConsumerCli(["check", "--root", product, "--bse", "main"], { output: () => {} }), /Unknown option --bse/);
+  await assert.rejects(runConsumerCli(["check", "--root", product, "--base="], { output: () => {} }), /--base requires a value/);
+  await assert.rejects(runConsumerCli(["check", "--root", product, "--base", ""], { output: () => {} }), /--base requires a value/);
+});
+
 test("checkConsumer reports a bad base ref, a missing cwd, an unpinned or drifted submodule", async (t) => {
   const { product, dsRepo } = await consumerFixture(t, baseManifest({ web: staticApp(), admin: staticApp({ cwd: "admin" }) }));
   await assert.rejects(checkConsumer(product, { base: "no-such-ref" }), /Could not diff against no-such-ref/);

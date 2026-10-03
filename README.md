@@ -205,7 +205,13 @@ app's `cwd`; `protected` always wins.
   that the submodule is pinned and checked out (warning when the checkout
   drifts from the pin), and that every app's `cwd` exists. With `--base`, it
   fails when the branch or working tree changes anything outside a declared
-  design surface or inside a protected path, listing those paths.
+  design surface or inside a protected path, or moves the Design System pin,
+  listing those paths. The surface is read from the manifest at the merge
+  base, so a branch cannot widen its own scope; a branch whose base has no
+  manifest is an adoption and may add the submodule. The stock workflow runs
+  this on every pull request and reports a scope failure in the preview
+  comment without failing the job, since developer pull requests leave the
+  surface by design.
 - `timds consumer preview --app NAME [--publish]` builds or serves the app and
   writes a review gallery to `.timds/preview/<app>/`.
 - `timds consumer init [--skip-install]` writes a manifest skeleton and installs the managed

@@ -6,7 +6,8 @@
 // one, and which paths a designer pull request may touch. This module reads
 // and validates that manifest, resolves the pinned Design System (gitlink
 // commit, presence of the checkout), and guards the design-surface scope of a
-// branch diff for `timds consumer check`.
+// branch diff for `timds consumer check`. The scope is judged against the
+// manifest at the merge base, so a branch cannot widen its own surface.
 //
 // Boundary: nothing here knows the product's stack. TimDS never builds,
 // installs, or edits the product; the commands the manifest declares are run
@@ -46,7 +47,7 @@ export const CONSUMER_ALWAYS_ALLOWED = Object.freeze([
 ]);
 
 const CONSUMER_HELP = `Usage:
-  timds consumer check [--root PATH] [--app NAME] [--base REF]
+  timds consumer check [--root PATH] [--app NAME] [--base REF] [--json]
   timds consumer preview --app NAME [--root PATH] [--output DIR] [--publish] [--pull-request N]
   timds consumer init [--root PATH] [--force] [--skip-install]`;
 
@@ -358,20 +359,42 @@ export function classifyConsumerPath(filePath, manifest, apps = Object.keys(mani
 // ---------------------------------------------------------------------------
 // Check
 
-function statusPath(line) {
-  const value = line.slice(3).trim().replace(/^"(.*)"$/, "$1");
-  return value.includes(" -> ") ? value.split(" -> ").at(-1) : value;
-}
-
-async function changedPaths(repoRoot, base) {
-  const committed = await git(["diff", "--name-only", `${base}...HEAD`], repoRoot);
+// Both listings use NUL-separated output so odd file names are never quoted,
+// and `--no-renames` so a file moved out of a protected area is still listed
+// at its old path (a rename would otherwise show only the destination).
+async function changedPaths(repoRoot, base, designSystemPath) {
+  const committed = await git(["diff", "--name-only", "--no-renames", "-z", `${base}...HEAD`], repoRoot);
   if (committed.code !== 0) {
     throw new Error(`Could not diff against ${base}: ${committed.stderr.trim() || "unknown ref"}. Fetch the base branch first (e.g. git fetch origin main) or pass a different --base.`);
   }
-  const status = await git(["status", "--porcelain", "--untracked-files=all"], repoRoot);
-  const paths = new Set(committed.stdout.split("\n").filter(Boolean));
-  for (const line of status.stdout.split("\n").filter(Boolean)) paths.add(statusPath(line));
+  const status = await git(["status", "--porcelain", "-z", "--no-renames", "--untracked-files=all", "--ignore-submodules=dirty"], repoRoot);
+  if (status.code !== 0) throw new Error(`Could not read the working tree status: ${status.stderr.trim() || "git status failed"}`);
+  const paths = new Set(committed.stdout.split("\0").filter(Boolean));
+  for (const entry of status.stdout.split("\0").filter(Boolean)) {
+    const filePath = entry.slice(3);
+    // An unstaged change at the Design System path is a checkout that drifted
+    // from the pin (reported as a warning), not a change to the pin.
+    if (filePath === designSystemPath && entry[0] === " ") continue;
+    paths.add(filePath);
+  }
   return [...paths].sort();
+}
+
+/**
+ * The manifest the scope is judged against: the one at the merge base, so a
+ * branch cannot widen its own design surface. `null` when the base has no
+ * manifest (the branch adopts TimDS) or an unreadable one.
+ */
+async function manifestAtBase(repoRoot, base) {
+  const mergeBase = await git(["merge-base", base, "HEAD"], repoRoot);
+  if (mergeBase.code !== 0 || !mergeBase.stdout.trim()) return { manifest: null, missing: false };
+  const shown = await git(["show", `${mergeBase.stdout.trim()}:${CONSUMER_MANIFEST_FILE}`], repoRoot);
+  if (shown.code !== 0) return { manifest: null, missing: true };
+  try {
+    return { manifest: validateConsumerManifest(JSON.parse(shown.stdout)), missing: false };
+  } catch {
+    return { manifest: null, missing: false };
+  }
 }
 
 /**
@@ -423,15 +446,33 @@ export async function checkConsumer(repoRootInput = process.cwd(), options = {})
   if (options.base) {
     // Scope is judged against every app, so a designer PR may touch any app's surface;
     // `--app` only narrows which apps' cwd and preview are checked.
-    changes = (await changedPaths(repoRoot, options.base))
-      .map((filePath) => ({ path: filePath, ...classifyConsumerPath(filePath, manifest) }));
+    const paths = await changedPaths(repoRoot, options.base, designSystem.path);
+    const atBase = await manifestAtBase(repoRoot, options.base);
+    const scopeManifest = atBase.manifest || manifest;
+    if (atBase.manifest && JSON.stringify(atBase.manifest) !== JSON.stringify(manifest)) {
+      warnings.push(`${CONSUMER_MANIFEST_FILE} changed on this branch; the design surface is judged against the manifest at ${options.base}. Changing the manifest needs a developer.`);
+    }
+    // A branch that adopts TimDS adds the submodule; afterwards the pin only moves by a developer decision.
+    const adoption = atBase.missing ? new Set([".gitmodules", designSystem.path]) : new Set();
+    changes = paths.map((filePath) => {
+      if (adoption.has(filePath)) return { path: filePath, status: "allowed", app: null };
+      if (filePath === designSystem.path) return { path: filePath, status: "pin", app: null };
+      return { path: filePath, ...classifyConsumerPath(filePath, scopeManifest) };
+    });
     const outside = changes.filter((change) => change.status === "outside");
     const guarded = changes.filter((change) => change.status === "protected");
+    if (changes.some((change) => change.status === "pin")) {
+      errors.push(`The Design System pin at ${designSystem.path} changed. A design change never moves the pin; moving it is a separate developer decision.`);
+    }
     if (outside.length) {
       errors.push(`Changes outside the design surface declared in ${CONSUMER_MANIFEST_FILE}:\n${outside.map((change) => `- ${change.path}`).join("\n")}`);
     }
     if (guarded.length) {
       errors.push(`Changes to protected paths:\n${guarded.map((change) => `- ${change.path} (protected in app "${change.app}")`).join("\n")}`);
+    }
+    const developerOwned = changes.filter((change) => change.status === "allowed" && change.app === null && !adoption.has(change.path));
+    if (developerOwned.length && !atBase.missing) {
+      warnings.push(`Developer-owned files changed (allowed so adoption and upgrade branches pass; a design change should not touch them):\n${developerOwned.map((change) => `- ${change.path}`).join("\n")}`);
     }
   }
 
@@ -449,29 +490,28 @@ export async function checkConsumer(repoRootInput = process.cwd(), options = {})
 // ---------------------------------------------------------------------------
 // CLI
 
-const BOOLEAN_FLAGS = new Set(["force", "help", "json", "publish"]);
+const CHECK_BOOLEAN_FLAGS = new Set(["help", "json"]);
+const CHECK_VALUE_FLAGS = new Set(["app", "base", "root"]);
 
-function parseConsumerArguments(argv) {
+// Strict on purpose: a mistyped or empty --base would otherwise skip the scope check and pass.
+function parseCheckArguments(argv) {
   const options = {};
-  const positional = [];
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index];
-    if (!value.startsWith("-")) {
-      positional.push(value);
-      continue;
-    }
+    if (!value.startsWith("-")) throw new Error(`Unexpected argument ${value}\n${CONSUMER_HELP}`);
     const [rawName, inlineValue] = value.replace(/^--?/, "").split("=", 2);
     const name = rawName.replace(/-([a-z])/g, (_match, letter) => letter.toUpperCase());
-    if (BOOLEAN_FLAGS.has(name)) {
+    if (CHECK_BOOLEAN_FLAGS.has(name)) {
       options[name] = true;
       continue;
     }
+    if (!CHECK_VALUE_FLAGS.has(name)) throw new Error(`Unknown option --${rawName}\n${CONSUMER_HELP}`);
     const next = inlineValue ?? argv[index + 1];
-    if (next === undefined || String(next).startsWith("-")) throw new Error(`--${rawName} requires a value`);
+    if (next === undefined || next === "" || String(next).startsWith("-")) throw new Error(`--${rawName} requires a value`);
     options[name] = next;
     if (inlineValue === undefined) index += 1;
   }
-  return { options, positional };
+  return options;
 }
 
 function defaultOutput(message = "") {
@@ -512,7 +552,7 @@ export async function runConsumerCli(args = [], { output = defaultOutput } = {})
     return runConsumerInit(rest, { output });
   }
   if (subcommand !== "check") throw new Error(`Unknown consumer command ${subcommand}\n${CONSUMER_HELP}`);
-  const { options } = parseConsumerArguments(rest);
+  const options = parseCheckArguments(rest);
   if (options.help) {
     output(CONSUMER_HELP);
     return;

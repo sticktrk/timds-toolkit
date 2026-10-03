@@ -1,10 +1,13 @@
 name: TimDS consumer preview
 
 # Managed by TimDS (`timds consumer init`); `upgrade` refreshes it while it is
-# unmodified. Every pull request is checked against the design surface in
-# timds.consumer.json; each app is then previewed (routes x viewports x
-# schemes), published to the TimDS portal, and linked from ONE comment per app
-# that later pushes update in place.
+# unmodified. Every pull request has its manifest and Design System pin
+# validated; each app is then previewed (routes x viewports x schemes),
+# published to the TimDS portal, and linked from ONE comment per app that later
+# pushes update in place. The design surface in timds.consumer.json is checked
+# too, but a pull request that leaves it is not failed (a developer's pull
+# request legitimately does): the job warns and the comment says so, so a
+# reviewer sees when a design change needs a developer.
 #
 # Repository secrets:
 #   TIMDS_ACCESS_TOKEN               CLI token bound to this client; publishes
@@ -34,6 +37,7 @@ jobs:
     timeout-minutes: 15
     outputs:
       apps: ${{ steps.apps.outputs.apps }}
+      scope: ${{ steps.scope.outputs.scope }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -69,8 +73,19 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Check the manifest and the pin
+        run: npm run timds -- consumer check
       - name: Check the design surface
-        run: npm run timds -- consumer check --base "origin/${{ github.base_ref }}"
+        id: scope
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if npm run timds -- consumer check --base "origin/${BASE_REF}"; then
+            echo "scope=inside" >> "$GITHUB_OUTPUT"
+          else
+            echo "scope=outside" >> "$GITHUB_OUTPUT"
+            echo "::warning title=TimDS design surface::This pull request changes paths outside the design surface in timds.consumer.json (listed above). A design change must stay inside it; anything else needs a developer."
+          fi
       - name: List apps
         id: apps
         run: |
@@ -88,8 +103,11 @@ jobs:
       matrix:
         app: ${{ fromJSON(needs.check.outputs.apps) }}
     steps:
+      # The pull request's own head commit, so the preview, its commit, and the
+      # comment all name the commit a reviewer sees on the branch.
       - uses: actions/checkout@v5
         with:
+          ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
       - name: Check out the pinned Design System
         env:
@@ -144,11 +162,12 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
       - name: Comment the preview link
-        if: always()
+        if: ${{ !cancelled() }}
         env:
           APP: ${{ matrix.app }}
           GH_TOKEN: ${{ github.token }}
           OUTCOME: ${{ steps.preview.outcome }}
+          SCOPE: ${{ needs.check.outputs.scope }}
           PREVIEW_URL: ${{ steps.preview.outputs.preview-url }}
           PULL_REQUEST: ${{ github.event.number }}
           REPOSITORY: ${{ github.repository }}
@@ -163,6 +182,9 @@ jobs:
             status="The preview for \`${SHA:0:7}\` was not published. Download \`timds-preview-${APP}\` from [the workflow run](${RUN_URL}) and open \`index.html\`."
           else
             status="The preview for \`${SHA:0:7}\` failed. See [the workflow run](${RUN_URL})."
+          fi
+          if [[ "${SCOPE:-}" == "outside" ]]; then
+            status="${status}"$'\n\n'"This pull request also changes paths outside the design surface in \`timds.consumer.json\`; those changes need a developer's review. See the check job in [the workflow run](${RUN_URL})."
           fi
           body="$(printf '%s\n### Design preview: `%s`\n\n%s\n' "$marker" "$APP" "$status")"
           comment_id="$(gh api --paginate "repos/${REPOSITORY}/issues/${PULL_REQUEST}/comments" \

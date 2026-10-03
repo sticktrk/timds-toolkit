@@ -229,9 +229,9 @@ async function buildConsumerManifest(repoRoot, designSystemPath) {
   }
   const { systemId, guessed } = await designSystemId(repoRoot, designSystemPath);
   const rendered = (await template("timds-consumer.json"))
-    .replaceAll("__DESIGN_SYSTEM_PATH__", designSystemPath)
-    .replaceAll("__SYSTEM_ID__", systemId)
-    .replace("__APPS__", JSON.stringify(apps));
+    .replaceAll("__DESIGN_SYSTEM_PATH__", () => designSystemPath)
+    .replaceAll("__SYSTEM_ID__", () => systemId)
+    .replace("__APPS__", () => JSON.stringify(apps));
   const manifest = JSON.parse(rendered);
   validateConsumerManifest(manifest);
   const general = guessed
@@ -281,10 +281,10 @@ export async function renderConsumerSkill(manifest, options = {}) {
   const source = await fs.readFile(path.join(packageRoot, "skills", CONSUMER_SKILL_NAME, "SKILL.md"), "utf8");
   const apps = Object.entries(validated.apps).map(([name, app]) => appSection(name, app)).join("\n\n");
   return source
-    .replaceAll("__SYSTEM_ID__", validated.designSystem.systemId)
-    .replaceAll("__DESIGN_SYSTEM_PATH__", validated.designSystem.path)
-    .replaceAll("__DEFAULT_BRANCH__", options.defaultBranch || "main")
-    .replace("__APPS__", apps);
+    .replaceAll("__SYSTEM_ID__", () => validated.designSystem.systemId)
+    .replaceAll("__DESIGN_SYSTEM_PATH__", () => validated.designSystem.path)
+    .replaceAll("__DEFAULT_BRANCH__", () => options.defaultBranch || "main")
+    .replace("__APPS__", () => apps);
 }
 
 /** `.claude/launch.json` configurations for every crawl-mode app with a serve command. */
@@ -497,6 +497,7 @@ export async function initializeConsumer(rootInput = process.cwd(), { force = fa
     ...todos.flatMap(({ app, items }) => items.map((item) => `${app}: ${item}`)),
     "Add the TIMDS_ACCESS_TOKEN repository secret so the preview workflow can publish previews",
     "Add DESIGN_SYSTEM_DEPLOY_KEY (read-only deploy key on the Design System repository) or TIMDS_CONSUMER_SUBMODULE_TOKEN (contents:read on it) so CI can check out the private submodule",
+    `After editing ${CONSUMER_MANIFEST_FILE}, rerun timds consumer init so the skill's product section and the launch entries match it`,
     `Commit ${CONSUMER_MANIFEST_FILE}, package.json, the lockfile, and the managed files; then run npm run timds -- consumer check`,
   ];
   output("");

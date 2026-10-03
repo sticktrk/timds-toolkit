@@ -149,10 +149,12 @@ test("static mode installs, builds, copies the output to site/, and writes previ
     "fs.writeFileSync('dist/index.html', '<!doctype html><h1>Home</h1><a href=\"about/\">About</a>');",
     "fs.writeFileSync('dist/about/index.html', '<!doctype html><h1>About</h1>');",
   ].join(" ")];
-  const { app, appRoot, consumer, repoRoot } = await createConsumerRepo({ build, output: "dist" });
+  // The install command records whether it could see the portal token.
+  const install = ["node", "-e", "require('fs').writeFileSync('installed.txt', process.env.TIMDS_ACCESS_TOKEN ? 'leaked' : 'yes')"];
+  const { app, appRoot, consumer, repoRoot } = await createConsumerRepo({ build, output: "dist" }, { install });
   const lines = [];
   const preview = await buildConsumerPreview(consumer, app, {
-    env: cleanEnv(),
+    env: { ...cleanEnv(), TIMDS_ACCESS_TOKEN: "timds_test_token" },
     now: new Date("2026-10-03T00:00:00.000Z"),
     output: (line) => lines.push(line),
     pullRequest: 7,
@@ -186,6 +188,12 @@ test("static mode installs, builds, copies the output to site/, and writes previ
   await runConsumerPreview(["--root", repoRoot, "--app", "web", "--no-install"], { output: () => {} });
   assert.equal(existsSync(path.join(appRoot, "installed.txt")), false);
   assert.ok(existsSync(path.join(outputDir, "site", "about", "index.html")));
+});
+
+test("static mode needs an index.html at the root of the build output", async () => {
+  const build = ["node", "-e", "const fs = require('fs'); fs.mkdirSync('dist', { recursive: true }); fs.writeFileSync('dist/about.html', 'x');"];
+  const { app, consumer } = await createConsumerRepo({ build, output: "dist" }, { install: null });
+  await assert.rejects(buildConsumerPreview(consumer, app, { env: cleanEnv() }), /dist\/index\.html does not exist after the build/);
 });
 
 test("static mode refuses symbolic links in the build output and an unrelated output directory", async (t) => {

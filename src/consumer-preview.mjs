@@ -57,6 +57,13 @@ const PREVIEW_HELP = `Usage:
 
 const noop = () => {};
 
+// The product's install, build, and serve commands run code from the branch
+// under review and its dependencies; they never receive the portal token.
+function productEnvironment(env) {
+  const { TIMDS_ACCESS_TOKEN: _token, ...rest } = env;
+  return rest;
+}
+
 // ---------------------------------------------------------------------------
 // Naming and provenance
 
@@ -323,6 +330,10 @@ async function crawlRoutes(origin, preview, outputDir, { captureTimeoutMs, launc
             failures.push(`${viewport}/${scheme}: ${error.message}`);
             continue;
           }
+          if (shot.png.length > PREVIEW_LIMITS.maxFileBytes) {
+            failures.push(`${viewport}/${scheme}: the capture is ${shot.png.length} bytes, over the ${PREVIEW_LIMITS.maxFileBytes}-byte file limit`);
+            continue;
+          }
           const file = `captures/${slug}/${viewport}-${scheme}.png`;
           await fs.mkdir(path.join(outputDir, "captures", slug), { recursive: true });
           await fs.writeFile(path.join(outputDir, ...file.split("/")), shot.png);
@@ -474,6 +485,7 @@ ${empty}
 export async function buildConsumerPreview(consumer, app, options = {}) {
   const output = options.output || noop;
   const env = options.env || process.env;
+  const commandEnv = productEnvironment(env);
   const preview = app.preview;
   const mode = consumerPreviewMode(preview);
   const outputDir = path.resolve(options.outputDir || path.join(consumer.repoRoot, ".timds", "preview", app.name));
@@ -483,7 +495,7 @@ export async function buildConsumerPreview(consumer, app, options = {}) {
 
   if (app.install && options.install !== false) {
     output(`Running install: ${app.install.join(" ")}`);
-    await execute(app.install, { cwd: app.cwd, env });
+    await execute(app.install, { cwd: app.cwd, env: commandEnv });
   }
 
   let routes = [];
@@ -495,12 +507,15 @@ export async function buildConsumerPreview(consumer, app, options = {}) {
   };
   if (preview.build) {
     output(`Running build: ${preview.build.join(" ")}`);
-    await execute(preview.build, { cwd: app.cwd, env });
+    await execute(preview.build, { cwd: app.cwd, env: commandEnv });
     const buildOutput = path.resolve(app.cwd, preview.output);
     const siteDir = path.join(outputDir, "site");
     const count = await copyPreviewTree(buildOutput, siteDir, preview.output);
-    site = "site/index.html";
     output(`Copied ${count} file${count === 1 ? "" : "s"} from ${preview.output} to site/`);
+    if (existsSync(path.join(siteDir, "index.html"))) site = "site/index.html";
+    else if (!preview.routes?.length) {
+      throw new Error(`${preview.output}/index.html does not exist after the build; a static preview needs an index.html at the root of preview.output, or preview.routes to crawl`);
+    }
     if (preview.routes?.length) {
       const server = await startStaticServer(siteDir);
       try {
@@ -513,7 +528,7 @@ export async function buildConsumerPreview(consumer, app, options = {}) {
     output(`Starting ${preview.serve.join(" ")} on port ${preview.port}`);
     const server = await startAppServer(preview.serve, {
       cwd: app.cwd,
-      env,
+      env: commandEnv,
       port: preview.port,
       ready: preview.ready || "/",
       timeoutMs: options.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS,

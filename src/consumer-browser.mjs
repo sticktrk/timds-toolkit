@@ -203,19 +203,23 @@ export async function launchBrowser({ allowDownload = true, browserExecutable, l
   };
 }
 
+// Returns `{ promise, cancel }`; `cancel()` settles the wait quietly so an
+// abandoned one neither keeps its timer alive nor rejects unhandled.
 function waitForEvent(connection, sessionId, method, timeoutMs) {
   let off;
   let timer;
+  let settle;
   const promise = new Promise((resolve, reject) => {
+    settle = resolve;
     timer = setTimeout(() => reject(new Error(`Timed out after ${timeoutMs}ms waiting for ${method}`)), timeoutMs);
     off = connection.on((message) => {
       if (message.sessionId === sessionId && message.method === method) resolve(message.params);
     });
-  });
-  return promise.finally(() => {
+  }).finally(() => {
     clearTimeout(timer);
     off();
   });
+  return { cancel: () => settle(null), promise };
 }
 
 function trackNetwork(connection, sessionId) {
@@ -278,12 +282,18 @@ export async function capturePage(connection, {
     const network = trackNetwork(connection, sessionId);
     try {
       const loaded = waitForEvent(connection, sessionId, "Page.loadEventFired", timeoutMs);
-      const navigation = await send("Page.navigate", { url });
+      let navigation;
+      try {
+        navigation = await send("Page.navigate", { url });
+      } catch (error) {
+        loaded.cancel();
+        throw error;
+      }
       if (navigation.errorText) {
-        loaded.catch(() => {});
+        loaded.cancel();
         throw new Error(`Could not load ${url}: ${navigation.errorText}`);
       }
-      await loaded;
+      await loaded.promise;
       await network.idle({ quietMs, timeoutMs: Math.min(timeoutMs, 30_000) });
       await send("Runtime.evaluate", {
         awaitPromise: true,

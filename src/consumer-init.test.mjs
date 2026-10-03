@@ -172,7 +172,12 @@ test("renders the skill from the manifest and records managed-file hashes", asyn
 
   const workflow = await fs.readFile(path.join(product, ".github", "workflows", "timds-consumer-preview.yml"), "utf8");
   assert.match(workflow, /pull_request:\n\s+types: \[opened, synchronize, reopened\]/);
-  assert.match(workflow, /consumer check --base "origin\/\$\{\{ github\.base_ref \}\}"/);
+  // The scope check reports instead of failing the job (developer pull requests leave the surface),
+  // the base ref reaches the shell through env, and the preview builds the pull request's head commit.
+  assert.match(workflow, /BASE_REF: \$\{\{ github\.base_ref \}\}/);
+  assert.match(workflow, /if npm run timds -- consumer check --base "origin\/\$\{BASE_REF\}"; then/);
+  assert.doesNotMatch(workflow, /run:[^\n]*\$\{\{ github\.base_ref/);
+  assert.match(workflow, /ref: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/);
   assert.match(workflow, /consumer preview --app "\$APP" --publish --pull-request/);
   assert.match(workflow, /<!-- timds-consumer-preview:\$\{APP\} -->/);
   assert.match(workflow, /DESIGN_SYSTEM_DEPLOY_KEY/);
