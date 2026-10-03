@@ -18,21 +18,36 @@ name: TimDS consumer preview
 #   TIMDS_CONSUMER_SUBMODULE_TOKEN   a token with contents:read on it.
 #                                    One of the two is required: the job token
 #                                    cannot read another private repository.
+#
+# The designer-change workflow calls this one (workflow_call) with the pull
+# request and branch it pushed, because pushes made with the job token do not
+# start pull_request workflows.
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+  workflow_call:
+    inputs:
+      pull_request:
+        description: Pull request number to preview and comment on
+        required: true
+        type: string
+      ref:
+        description: Branch (or commit) to preview
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: timds-consumer-preview-${{ github.event.number }}
+  group: timds-consumer-preview-${{ inputs.pull_request || github.event.number }}
   cancel-in-progress: true
 
 jobs:
   check:
     # Secrets and comment permissions are unavailable to fork pull requests.
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    # A workflow_call comes from a workflow in this repository.
+    if: inputs.pull_request || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 15
     outputs:
@@ -41,6 +56,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
+          ref: ${{ inputs.ref }}
           fetch-depth: 0
           persist-credentials: false
       - name: Check out the pinned Design System
@@ -78,7 +94,7 @@ jobs:
       - name: Check the design surface
         id: scope
         env:
-          BASE_REF: ${{ github.base_ref }}
+          BASE_REF: ${{ github.base_ref || github.event.repository.default_branch }}
         run: |
           if npm run timds -- consumer check --base "origin/${BASE_REF}"; then
             echo "scope=inside" >> "$GITHUB_OUTPUT"
@@ -107,7 +123,9 @@ jobs:
       # comment all name the commit a reviewer sees on the branch.
       - uses: actions/checkout@v5
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ inputs.ref || github.event.pull_request.head.sha }}
+          # Full history, so the preview can find the merge base to compare with.
+          fetch-depth: 0
           persist-credentials: false
       - name: Check out the pinned Design System
         env:
@@ -143,15 +161,16 @@ jobs:
         id: preview
         env:
           APP: ${{ matrix.app }}
-          PULL_REQUEST: ${{ github.event.number }}
+          PULL_REQUEST: ${{ inputs.pull_request || github.event.number }}
+          BASE_REF: ${{ github.base_ref || github.event.repository.default_branch }}
           TIMDS_ACCESS_TOKEN: ${{ secrets.TIMDS_ACCESS_TOKEN }}
         run: |
           set -euo pipefail
           if [[ -n "${TIMDS_ACCESS_TOKEN:-}" ]]; then
-            npm run timds -- consumer preview --app "$APP" --publish --pull-request "$PULL_REQUEST"
+            npm run timds -- consumer preview --app "$APP" --base "origin/${BASE_REF}" --publish --pull-request "$PULL_REQUEST"
           else
             echo "TIMDS_ACCESS_TOKEN is not configured; the preview is uploaded as a workflow artifact only."
-            npm run timds -- consumer preview --app "$APP" --pull-request "$PULL_REQUEST"
+            npm run timds -- consumer preview --app "$APP" --base "origin/${BASE_REF}" --pull-request "$PULL_REQUEST"
           fi
       - name: Upload the preview
         if: always()
@@ -169,12 +188,13 @@ jobs:
           OUTCOME: ${{ steps.preview.outcome }}
           SCOPE: ${{ needs.check.outputs.scope }}
           PREVIEW_URL: ${{ steps.preview.outputs.preview-url }}
-          PULL_REQUEST: ${{ github.event.number }}
+          PULL_REQUEST: ${{ inputs.pull_request || github.event.number }}
           REPOSITORY: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
+          SHA="${SHA:-$(git rev-parse HEAD)}"
           marker="<!-- timds-consumer-preview:${APP} -->"
           if [[ -n "${PREVIEW_URL:-}" ]]; then
             status="**[Open the preview](${PREVIEW_URL})** for \`${SHA:0:7}\`. Every route at each width and color scheme is on its first page."

@@ -9,6 +9,7 @@ import test from "node:test";
 import {
   consumerLaunchConfigurations,
   consumerManagedFiles,
+  consumerMcpServers,
   initializeConsumer,
   renderConsumerSkill,
   runConsumerInit,
@@ -105,7 +106,7 @@ test("discovers apps and writes the manifest with guessed defaults", async (t) =
   assert.deepEqual(manifest.apps.web, {
     cwd: "web",
     install: ["npm", "ci"],
-    preview: { serve: ["npm", "run", "dev"], port: 4321, ready: "/", routes: ["/"], viewports: ["desktop", "phone"], schemes: ["light", "dark"] },
+    preview: { serve: ["npm", "run", "dev"], port: 4321, ready: "/", routes: ["/"], discover: { from: ["/"], limit: 40 }, viewports: ["desktop", "phone"], schemes: ["light", "dark"] },
     designSurface: ["src/styles/**", "src/pages/**", "public/**"],
     protected: [],
   });
@@ -120,6 +121,9 @@ test("discovers apps and writes the manifest with guessed defaults", async (t) =
   assert.match(output, /spa: install is bun install --frozen-lockfile \(bun is not set up/);
   assert.match(output, /TIMDS_ACCESS_TOKEN/);
   assert.match(output, /DESIGN_SYSTEM_DEPLOY_KEY/);
+  assert.match(output, /web: preview\.routes lists only "\/" and preview\.discover follows links/);
+  assert.match(output, /ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN/);
+  assert.match(output, /timds-design-change label, set the TIMDS_DESIGNER_BOTS repository variable/);
   assert.equal(result.keptManifest, false);
 
   const packageJson = JSON.parse(await fs.readFile(path.join(product, "package.json"), "utf8"));
@@ -174,14 +178,50 @@ test("renders the skill from the manifest and records managed-file hashes", asyn
   assert.match(workflow, /pull_request:\n\s+types: \[opened, synchronize, reopened\]/);
   // The scope check reports instead of failing the job (developer pull requests leave the surface),
   // the base ref reaches the shell through env, and the preview builds the pull request's head commit.
-  assert.match(workflow, /BASE_REF: \$\{\{ github\.base_ref \}\}/);
+  assert.match(workflow, /BASE_REF: \$\{\{ github\.base_ref \|\| github\.event\.repository\.default_branch \}\}/);
   assert.match(workflow, /if npm run timds -- consumer check --base "origin\/\$\{BASE_REF\}"; then/);
   assert.doesNotMatch(workflow, /run:[^\n]*\$\{\{ github\.base_ref/);
-  assert.match(workflow, /ref: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/);
-  assert.match(workflow, /consumer preview --app "\$APP" --publish --pull-request/);
+  assert.match(workflow, /ref: \$\{\{ inputs\.ref \|\| github\.event\.pull_request\.head\.sha \}\}/);
+  assert.match(workflow, /consumer preview --app "\$APP" --base "origin\/\$\{BASE_REF\}" --publish --pull-request/);
   assert.match(workflow, /<!-- timds-consumer-preview:\$\{APP\} -->/);
   assert.match(workflow, /DESIGN_SYSTEM_DEPLOY_KEY/);
   assert.doesNotMatch(workflow, /__[A-Z_]+__/);
+  // Callable from the designer-change workflow with a pull request and a branch.
+  assert.match(workflow, /workflow_call:\n\s+inputs:\n\s+pull_request:[\s\S]*ref:/);
+  assert.match(workflow, /PULL_REQUEST: \$\{\{ inputs\.pull_request \|\| github\.event\.number \}\}/);
+
+  const designer = await fs.readFile(path.join(product, ".github", "workflows", "timds-designer-change.yml"), "utf8");
+  assert.equal(designer, await fs.readFile(new URL("../templates/timds-designer-change.yml", import.meta.url), "utf8"));
+  assert.doesNotMatch(designer, /__[A-Z_]+__/);
+  assert.match(designer, /issues:\n\s+types: \[labeled\]/);
+  assert.match(designer, /github\.event\.label\.name == 'timds-design-change'/);
+  assert.match(designer, /contains\(github\.event\.comment\.body, '<!-- timds-designer-request -->'\)/);
+  assert.match(designer, /case "\$2" in OWNER\|MEMBER\|COLLABORATOR\) return 0/);
+  assert.match(designer, /DESIGNER_BOTS: \$\{\{ vars\.TIMDS_DESIGNER_BOTS \}\}/);
+  assert.match(designer, /uses: anthropics\/claude-code-action@v1/);
+  assert.match(designer, /anthropic_api_key: \$\{\{ secrets\.ANTHROPIC_API_KEY \}\}/);
+  assert.match(designer, /claude_code_oauth_token: \$\{\{ secrets\.CLAUDE_CODE_OAUTH_TOKEN \}\}/);
+  assert.match(designer, /uses: \.\/\.github\/workflows\/timds-consumer-preview\.yml/);
+  assert.match(designer, /cancel-in-progress: false/);
+  // Event text reaches shell steps only through env, never ${{ }} inside run.
+  const runBlocks = designer.split("\n").reduce((blocks, line) => {
+    const indent = line.match(/^ */)[0].length;
+    const open = blocks.at(-1);
+    if (open && !open.done && (line.trim() === "" || indent > open.indent)) open.lines.push(line);
+    else if (open) open.done = true;
+    if (/^\s*run: [|>]/.test(line)) blocks.push({ indent, lines: [], done: false });
+    return blocks;
+  }, []);
+  assert.ok(runBlocks.length >= 5);
+  for (const block of runBlocks) assert.doesNotMatch(block.lines.join("\n"), /\$\{\{/);
+
+  const mcp = JSON.parse(await fs.readFile(path.join(product, ".mcp.json"), "utf8"));
+  assert.deepEqual(mcp, { mcpServers: consumerMcpServers() });
+  assert.deepEqual(mcp.mcpServers["timds-design-system-read"], {
+    type: "http",
+    url: "https://timds.com/api/timds/mcp/read",
+    headers: { Authorization: "Bearer ${TIMDS_ACCESS_TOKEN}" },
+  });
 
   const installation = JSON.parse(await fs.readFile(path.join(product, ".timds", "installation.json"), "utf8"));
   assert.equal(installation.consumer.name, toolkitPackage.name);
@@ -194,6 +234,45 @@ test("renders the skill from the manifest and records managed-file hashes", asyn
   const launch = JSON.parse(await fs.readFile(path.join(product, ".claude", "launch.json"), "utf8"));
   assert.deepEqual(Object.keys(installation.consumer.launchConfigurations), ["web"]);
   assert.equal(installation.consumer.launchConfigurations.web, sha256(JSON.stringify(launch.configurations[0])));
+  assert.deepEqual(installation.consumer.mcpServers, { "timds-design-system-read": sha256(JSON.stringify(mcp.mcpServers["timds-design-system-read"])) });
+});
+
+test("merges the read MCP server into an existing .mcp.json", async (t) => {
+  const product = await createConsumerRepo(t);
+  const userServer = { command: "npx", args: ["some-mcp"] };
+  await writeJson(path.join(product, ".mcp.json"), { mcpServers: { other: userServer }, extra: true });
+  await initializeConsumer(product, { skipInstall: true, output: quiet, portalUrl: "https://portal.example.test/ignored/path" });
+  const mcpPath = path.join(product, ".mcp.json");
+  const merged = JSON.parse(await fs.readFile(mcpPath, "utf8"));
+  assert.deepEqual(merged.mcpServers.other, userServer);
+  assert.equal(merged.extra, true);
+  assert.equal(merged.mcpServers["timds-design-system-read"].url, "https://portal.example.test/api/timds/mcp/read");
+
+  // A rerun is idempotent.
+  await initializeConsumer(product, { skipInstall: true, output: quiet, portalUrl: "https://portal.example.test" });
+  assert.deepEqual(JSON.parse(await fs.readFile(mcpPath, "utf8")), merged);
+
+  // An unmodified managed entry follows a new portal URL.
+  await initializeConsumer(product, { skipInstall: true, output: quiet });
+  assert.equal(JSON.parse(await fs.readFile(mcpPath, "utf8")).mcpServers["timds-design-system-read"].url, "https://timds.com/api/timds/mcp/read");
+
+  // A customized entry is kept without --force (other servers untouched) and replaced with it.
+  const customized = JSON.parse(await fs.readFile(mcpPath, "utf8"));
+  customized.mcpServers["timds-design-system-read"].headers = { Authorization: "Bearer ${MY_TOKEN}" };
+  await writeJson(mcpPath, customized);
+  const lines = [];
+  const kept = await initializeConsumer(product, { skipInstall: true, output: (line) => lines.push(line) });
+  assert.deepEqual(kept.keptMcpServers, ["timds-design-system-read"]);
+  assert.match(lines.join("\n"), /Kept the customized "timds-design-system-read" server in \.mcp\.json/);
+  assert.deepEqual(JSON.parse(await fs.readFile(mcpPath, "utf8")), customized);
+  await runConsumerInit(["--root", product, "--skip-install", "--force", "--portal-url", "https://portal.example.test"], { output: quiet });
+  const forced = JSON.parse(await fs.readFile(mcpPath, "utf8"));
+  assert.deepEqual(forced.mcpServers["timds-design-system-read"], consumerMcpServers({ portalUrl: "https://portal.example.test" })["timds-design-system-read"]);
+  assert.deepEqual(forced.mcpServers.other, userServer);
+
+  await writeJson(mcpPath, { mcpServers: [] });
+  await assert.rejects(initializeConsumer(product, { skipInstall: true, output: quiet }), /\.mcp\.json has an mcpServers value that is not an object/);
+  assert.throws(() => consumerMcpServers({ portalUrl: "ftp://portal.example.test" }), /must use HTTP or HTTPS/);
 });
 
 test("merges launch entries into an existing launch.json", async (t) => {

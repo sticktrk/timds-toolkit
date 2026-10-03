@@ -43,13 +43,17 @@ export const CONSUMER_ALWAYS_ALLOWED = Object.freeze([
   ".timds/installation.json",
   ".agents/skills/timds-consume-design-system/**",
   ".github/workflows/timds-consumer-preview.yml",
+  ".github/workflows/timds-designer-change.yml",
   ".claude/launch.json",
+  ".mcp.json",
 ]);
 
 const CONSUMER_HELP = `Usage:
   timds consumer check [--root PATH] [--app NAME] [--base REF] [--json]
-  timds consumer preview --app NAME [--root PATH] [--output DIR] [--publish] [--pull-request N]
-  timds consumer init [--root PATH] [--force] [--skip-install]`;
+  timds consumer preview --app NAME [--root PATH] [--output DIR] [--base REF] [--publish] [--pull-request N]
+  timds consumer init [--root PATH] [--force] [--skip-install] [--portal-url URL]
+  timds consumer notes [--root PATH] [--app NAME] [--pull-request N] [--all] [--json] [--portal-url URL]
+  timds consumer notes resolve ID [ID...] [--commit SHA] [--dismiss]`;
 
 // ---------------------------------------------------------------------------
 // Manifest validation
@@ -82,6 +86,24 @@ const globList = (label) => z.array(z.string().min(1, `${label} globs must be no
   message: `${label} globs are relative to the app's cwd and must not start with "/" or contain ".."`,
 }), { error: `${label} must be an array of glob strings` });
 
+const urlPathGlob = z.string().min(1, "preview.discover.exclude globs must be non-empty").refine((value) => value.startsWith("/") && !value.includes("\0") && !/\s/.test(value), {
+  message: 'preview.discover.exclude globs are URL path globs such as "/admin/**" or "/blog/*/print"',
+});
+
+/** Route discovery limits: how many routes beyond `routes` a crawl may add. */
+export const CONSUMER_DISCOVER_LIMIT = Object.freeze({ default: 40, max: 200 });
+
+const discoverSchema = z.object({
+  from: z.array(routePath, { error: "preview.discover.from must be an array of URL paths" })
+    .min(1, "preview.discover.from must list at least one URL path")
+    .default(["/"]),
+  limit: z.number({ error: "preview.discover.limit must be a number" }).int("preview.discover.limit must be a whole number")
+    .min(1, `preview.discover.limit must be between 1 and ${CONSUMER_DISCOVER_LIMIT.max}`)
+    .max(CONSUMER_DISCOVER_LIMIT.max, `preview.discover.limit must be between 1 and ${CONSUMER_DISCOVER_LIMIT.max}`)
+    .default(CONSUMER_DISCOVER_LIMIT.default),
+  exclude: z.array(urlPathGlob, { error: "preview.discover.exclude must be an array of URL path globs" }).default([]),
+}, { error: "preview.discover must be an object with from, limit, and exclude" }).strict();
+
 const previewSchema = z.object({
   build: commandSchema("preview.build").optional(),
   output: relativePath("preview.output").optional(),
@@ -95,6 +117,7 @@ const previewSchema = z.object({
   schemes: z.array(z.enum(CONSUMER_SCHEMES, { error: `preview.schemes entries must be one of ${CONSUMER_SCHEMES.join(", ")}` }))
     .min(1, "preview.schemes must not be empty")
     .default(["light", "dark"]),
+  discover: discoverSchema.optional(),
 }, { error: "preview must be an object" }).strict().superRefine((preview, context) => {
   const staticKeys = ["build", "output"].filter((key) => preview[key] !== undefined);
   const crawlKeys = ["serve", "port"].filter((key) => preview[key] !== undefined);
@@ -116,6 +139,9 @@ const previewSchema = z.object({
   for (const key of ["viewports", "schemes", "routes"]) {
     const list = preview[key];
     if (list && new Set(list).size !== list.length) context.addIssue({ code: "custom", path: [key], message: `preview.${key} must not repeat entries` });
+  }
+  if (preview.discover && !preview.serve && !preview.routes) {
+    context.addIssue({ code: "custom", path: ["discover"], message: "preview.discover only works in crawl mode (serve + port + routes, or build + output + routes)" });
   }
 });
 
@@ -536,7 +562,7 @@ function checkReport(result) {
   return lines.join("\n");
 }
 
-/** `timds consumer <check|preview|init> ...` */
+/** `timds consumer <check|preview|init|notes> ...` */
 export async function runConsumerCli(args = [], { output = defaultOutput } = {}) {
   const [subcommand = "help", ...rest] = args;
   if (["help", "--help", "-h"].includes(subcommand)) {
@@ -546,6 +572,10 @@ export async function runConsumerCli(args = [], { output = defaultOutput } = {})
   if (subcommand === "preview") {
     const { runConsumerPreview } = await import("./consumer-preview.mjs");
     return runConsumerPreview(rest, { output });
+  }
+  if (subcommand === "notes") {
+    const { runConsumerNotes } = await import("./consumer-notes.mjs");
+    return runConsumerNotes(rest, { output });
   }
   if (subcommand === "init") {
     const { runConsumerInit } = await import("./consumer-init.mjs");

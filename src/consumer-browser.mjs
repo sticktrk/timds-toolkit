@@ -9,8 +9,12 @@
 //
 // Boundary: this is a capture driver, nothing more. It opens a URL at a given
 // viewport and color scheme, waits for the network to settle, and returns a
-// full-page PNG and the rendered DOM. It knows nothing about routes, apps, or
-// the preview layout; `consumer-preview.mjs` owns those.
+// full-page PNG and the rendered DOM, plus on request the page's link targets
+// (for route discovery) and an element map: every visible element's
+// full-page rectangle, a stable CSS selector, its own text, and the source
+// location a dev-mode stamp or React fiber carries, read raw. It knows nothing
+// about routes, apps, repositories, or the preview layout;
+// `consumer-preview.mjs` owns those and normalises the source paths.
 
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
@@ -23,6 +27,9 @@ const require = createRequire(import.meta.url);
 
 /** Tallest full-page capture, in CSS pixels; longer pages are clipped to keep PNGs reviewable. */
 export const MAX_CAPTURE_HEIGHT = 16_384;
+
+/** Most elements one element map lists; stamped or text-bearing elements win when a page has more. */
+export const MAX_MAP_ELEMENTS = 2_000;
 
 function loadRemotionRenderer() {
   // @remotion/renderer arrives through @remotion/cli; resolve it from there so
@@ -253,7 +260,9 @@ function trackNetwork(connection, sessionId) {
 
 /**
  * Open `url` in a fresh tab at `width`×`height` with `prefers-color-scheme: scheme`,
- * wait for load and network idle, and return `{ png, html, contentHeight, status }`.
+ * wait for load and network idle, and return `{ png, html, contentHeight, status }`,
+ * plus `links` (absolute hrefs of every `<a href>`) when `links` is set and
+ * `map` (`{ width, height, elements }`, see `collectElementMap`) when `elementMap` is set.
  */
 export async function capturePage(connection, {
   url,
@@ -263,6 +272,9 @@ export async function capturePage(connection, {
   timeoutMs = 60_000,
   quietMs = 500,
   maxHeight = MAX_CAPTURE_HEIGHT,
+  links = false,
+  elementMap = false,
+  mapLimit = MAX_MAP_ELEMENTS,
 }) {
   const { targetId } = await connection.send("Target.createTarget", { url: "about:blank" });
   try {
@@ -319,8 +331,140 @@ export async function capturePage(connection, {
       returnByValue: true,
     });
     const html = `${doctype.result?.value ? `${doctype.result.value}\n` : ""}${dom.result?.value ?? ""}`;
-    return { contentHeight, height: captureHeight, html, png: Buffer.from(shot.data, "base64"), status, width };
+    const result = { contentHeight, height: captureHeight, html, png: Buffer.from(shot.data, "base64"), status, width };
+    if (links) {
+      const found = await send("Runtime.evaluate", {
+        expression: "Array.from(document.querySelectorAll('a[href]'), (anchor) => anchor.href).filter(Boolean)",
+        returnByValue: true,
+      }).catch(() => null);
+      result.links = Array.isArray(found?.result?.value) ? found.result.value.map(String) : [];
+    }
+    if (elementMap) {
+      const mapped = await send("Runtime.evaluate", {
+        expression: `(${collectElementMap.toString()})(${JSON.stringify({ maxElements: mapLimit, maxHeight: captureHeight })})`,
+        returnByValue: true,
+        timeout: 30_000,
+      }).catch(() => null);
+      const elements = Array.isArray(mapped?.result?.value?.elements) ? mapped.result.value.elements : [];
+      result.map = { width, height: captureHeight, elements };
+    }
+    return result;
   } finally {
     await connection.send("Target.closeTarget", { targetId }).catch(() => {});
   }
+}
+
+/**
+ * Runs inside the page (serialized with `toString()`), never in Node. Lists
+ * visible elements in document order as `{ id, rect, selector, tag, text,
+ * source }`: `rect` is `[x, y, w, h]` in full-page CSS pixels, `selector` a
+ * CSS path (a unique id when there is one, else `tag:nth-of-type(n)` steps
+ * from `body`), `text` the element's own trimmed text (at most 120
+ * characters), and `source` the raw `{ file, line, column }` from the first
+ * stamp present (Astro dev, data-source-*, lovable-tagger data-lov-id,
+ * data-component-*, react-dev-inspector, React fiber `_debugSource`) or null.
+ * Elements entirely below `maxHeight` are left out; past `maxElements`,
+ * stamped or text-bearing elements are kept first.
+ */
+export function collectElementMap({ maxElements, maxHeight }) {
+  const body = document.body;
+  if (!body) return { elements: [], total: 0 };
+  const scrollX = window.scrollX || 0;
+  const scrollY = window.scrollY || 0;
+  const escapeIdent = (value) => (window.CSS && CSS.escape ? CSS.escape(value) : String(value).replace(/[^A-Za-z0-9_-]/g, (char) => `\\${char}`));
+  const idCounts = new Map();
+  for (const element of document.querySelectorAll("[id]")) idCounts.set(element.id, (idCounts.get(element.id) || 0) + 1);
+  const selectors = new Map();
+  const selectorFor = (element) => {
+    if (selectors.has(element)) return selectors.get(element);
+    let selector;
+    if (element.id && idCounts.get(element.id) === 1) selector = `#${escapeIdent(element.id)}`;
+    else if (element === body) selector = "body";
+    else if (!element.parentElement || element === document.documentElement) selector = element.localName;
+    else {
+      let index = 1;
+      for (let sibling = element.previousElementSibling; sibling; sibling = sibling.previousElementSibling) {
+        if (sibling.localName === element.localName) index += 1;
+      }
+      selector = `${selectorFor(element.parentElement)} > ${element.localName}:nth-of-type(${index})`;
+    }
+    selectors.set(element, selector);
+    return selector;
+  };
+  const ownText = (element) => {
+    let text = "";
+    for (const node of element.childNodes) if (node.nodeType === 3) text += node.nodeValue;
+    text = text.replace(/\s+/g, " ").trim();
+    return text.length > 120 ? text.slice(0, 120) : text;
+  };
+  const number = (value) => {
+    const parsed = Number.parseInt(String(value ?? ""), 10);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+  const fromLocation = (value) => {
+    const match = String(value || "").match(/^(.*?):(\d+)(?::(\d+))?$/);
+    return match ? { file: match[1], line: number(match[2]), column: number(match[3]) } : null;
+  };
+  const sourceFor = (element) => {
+    const attr = (name) => element.getAttribute(name);
+    if (attr("data-astro-source-file")) {
+      const [line, column] = String(attr("data-astro-source-loc") || "").split(":");
+      return { file: attr("data-astro-source-file"), line: number(line), column: number(column) };
+    }
+    if (attr("data-source-file")) {
+      return { file: attr("data-source-file"), line: number(attr("data-source-line")), column: number(attr("data-source-column")) };
+    }
+    if (attr("data-lov-id")) {
+      const parsed = fromLocation(attr("data-lov-id"));
+      if (parsed && parsed.file) return parsed;
+    }
+    if (attr("data-component-path")) {
+      return { file: attr("data-component-path"), line: number(attr("data-component-line")), column: number(attr("data-component-column")) };
+    }
+    if (attr("data-inspector-relative-path")) {
+      return { file: attr("data-inspector-relative-path"), line: number(attr("data-inspector-line")), column: number(attr("data-inspector-column")) };
+    }
+    for (const key of Object.keys(element)) {
+      if (!key.startsWith("__reactFiber$") && !key.startsWith("__reactInternalInstance$")) continue;
+      const debug = element[key] && element[key]._debugSource;
+      if (debug && debug.fileName) return { file: String(debug.fileName), line: number(debug.lineNumber), column: number(debug.columnNumber) };
+    }
+    return null;
+  };
+  const candidates = [];
+  for (const element of [body, ...body.querySelectorAll("*")]) {
+    const rect = element.getBoundingClientRect();
+    if (!(rect.width > 0 && rect.height > 0)) continue;
+    const style = getComputedStyle(element);
+    if (style.display === "none" || style.visibility === "hidden" || style.visibility === "collapse") continue;
+    const top = rect.top + scrollY;
+    if (top >= maxHeight) continue;
+    const source = sourceFor(element);
+    const text = ownText(element);
+    candidates.push({
+      element,
+      order: candidates.length,
+      preferred: Boolean(source || text),
+      rect: [Math.round(rect.left + scrollX), Math.round(top), Math.max(1, Math.round(rect.width)), Math.max(1, Math.round(rect.height))],
+      source,
+      text,
+    });
+  }
+  let kept = candidates;
+  if (candidates.length > maxElements) {
+    const preferred = candidates.filter((candidate) => candidate.preferred);
+    const rest = candidates.filter((candidate) => !candidate.preferred);
+    kept = [...preferred, ...rest].slice(0, maxElements).sort((left, right) => left.order - right.order);
+  }
+  return {
+    total: candidates.length,
+    elements: kept.map((candidate, index) => ({
+      id: `e${index + 1}`,
+      rect: candidate.rect,
+      selector: selectorFor(candidate.element),
+      tag: candidate.element.localName,
+      text: candidate.text,
+      source: candidate.source,
+    })),
+  };
 }
