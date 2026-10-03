@@ -206,6 +206,8 @@ jobs:
           if [[ "${SCOPE:-}" == "outside" ]]; then
             status="${status}"$'\n\n'"This pull request also changes paths outside the design surface in \`timds.consumer.json\`; those changes need a developer's review. See the check job in [the workflow run](${RUN_URL})."
           fi
+          # The backticks are literal Markdown, not a command substitution.
+          # shellcheck disable=SC2016
           body="$(printf '%s\n### Design preview: `%s`\n\n%s\n' "$marker" "$APP" "$status")"
           comment_id="$(gh api --paginate "repos/${REPOSITORY}/issues/${PULL_REQUEST}/comments" \
             --jq ".[] | select(.body | startswith(\"${marker}\")) | .id" | head -n 1)"

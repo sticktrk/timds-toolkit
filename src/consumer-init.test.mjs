@@ -12,9 +12,10 @@ import {
   consumerMcpServers,
   initializeConsumer,
   renderConsumerSkill,
+  rootAppName,
   runConsumerInit,
 } from "./consumer-init.mjs";
-import { validateConsumerManifest } from "./consumer.mjs";
+import { checkConsumer, loadConsumer, resolveConsumerApp, validateConsumerManifest } from "./consumer.mjs";
 
 const toolkitPackage = JSON.parse(await fs.readFile(new URL("../package.json", import.meta.url), "utf8"));
 const releaseLine = toolkitPackage.version.replace(/^(\d+\.\d+)\.\d+.*$/, "$1.x");
@@ -43,7 +44,7 @@ async function initRepo(directory) {
 }
 
 /** A product repo with two apps and a real design-system submodule. */
-async function createConsumerRepo(t, { submodule = true } = {}) {
+async function createConsumerRepo(t, { submodule = true, nested = true, rootPackage = null } = {}) {
   const root = await temporaryDirectory(t);
   const designSystem = path.join(root, "acme-design-system");
   await initRepo(designSystem);
@@ -54,6 +55,15 @@ async function createConsumerRepo(t, { submodule = true } = {}) {
   const product = path.join(root, "product");
   await initRepo(product);
   await fs.writeFile(path.join(product, "README.md"), "# Product\n", "utf8");
+
+  if (rootPackage) {
+    await writeJson(path.join(product, "package.json"), rootPackage);
+    await writeJson(path.join(product, "package-lock.json"), { lockfileVersion: 3 });
+    for (const folder of ["src/styles", "src/server", "public"]) {
+      await fs.mkdir(path.join(product, folder), { recursive: true });
+      await fs.writeFile(path.join(product, folder, ".keep"), "", "utf8");
+    }
+  }
 
   const web = path.join(product, "web");
   await writeJson(path.join(web, "package.json"), { name: "web", scripts: { dev: "astro dev" }, dependencies: { astro: "5.0.0" } });
@@ -75,7 +85,11 @@ async function createConsumerRepo(t, { submodule = true } = {}) {
   await fs.mkdir(path.join(product, "docs"), { recursive: true });
   await fs.writeFile(path.join(product, "docs", "index.md"), "# Docs\n", "utf8");
 
-  git(product, "add", "README.md", "web", "spa", "docs");
+  if (!nested) {
+    await fs.rm(web, { recursive: true });
+    await fs.rm(spa, { recursive: true });
+  }
+  git(product, "add", "README.md", "docs", ...(nested ? ["web", "spa"] : []), ...(rootPackage ? ["package.json", "package-lock.json", "src", "public"] : []));
   if (submodule) git(product, "submodule", "add", "../acme-design-system", "design-system");
   git(product, "commit", "-m", "Initial");
   return product;
@@ -349,4 +363,89 @@ test("refuses a conflicting toolkit declaration without --force", async (t) => {
   const packageJson = JSON.parse(await fs.readFile(path.join(product, "package.json"), "utf8"));
   assert.equal(packageJson.devDependencies["@dtconcepts/timds"], releaseLine);
   assert.equal(packageJson.name, "product");
+});
+
+test("names a root app from its package, without a scope, else from the folder", () => {
+  assert.equal(rootAppName("@acme/marketing-site", "product"), "marketing-site");
+  assert.equal(rootAppName("@acme/My Site!", "product"), "My-Site");
+  assert.equal(rootAppName("", "product"), "product");
+  assert.equal(rootAppName("@acme/---", "..."), "app");
+  assert.equal(rootAppName("x".repeat(140), "product").length, 100);
+});
+
+test("discovers an app at the repository root and checks its design surface from the root", async (t) => {
+  const product = await createConsumerRepo(t, {
+    nested: false,
+    rootPackage: { name: "@acme/site", private: true, scripts: { dev: "vite --port 5174", build: "vite build" }, devDependencies: { vite: "6.0.0" } },
+  });
+  const lines = [];
+  const result = await initializeConsumer(product, { skipInstall: true, output: (line) => lines.push(line) });
+  const manifest = JSON.parse(await fs.readFile(path.join(product, "timds.consumer.json"), "utf8"));
+  assert.deepEqual(Object.keys(manifest.apps), ["site"]);
+  assert.deepEqual(manifest.apps.site, {
+    cwd: ".",
+    install: ["npm", "ci"],
+    preview: { serve: ["npm", "run", "dev"], port: 5174, ready: "/", routes: ["/"], discover: { from: ["/"], limit: 40 }, viewports: ["desktop", "phone"], schemes: ["light", "dark"] },
+    designSurface: ["src/styles/**", "public/**"],
+    protected: [],
+  });
+  assert.match(lines.join("\n"), /site: this app is the repository root, so its design surface globs are relative to the root/);
+
+  // The toolkit selection lands in the app's own (root) package.json beside its scripts.
+  const packageJson = JSON.parse(await fs.readFile(path.join(product, "package.json"), "utf8"));
+  assert.equal(packageJson.scripts.dev, "vite --port 5174");
+  assert.equal(packageJson.scripts.timds, "timds");
+
+  const skill = await fs.readFile(path.join(product, ".agents", "skills", "timds-consume-design-system", "SKILL.md"), "utf8");
+  assert.match(skill, /### `site`\n\n- Folder: repository root\. Paths below are relative to it/);
+  const launch = JSON.parse(await fs.readFile(path.join(product, ".claude", "launch.json"), "utf8"));
+  assert.deepEqual(launch.configurations, [{ name: "site", runtimeExecutable: "npm", runtimeArgs: ["run", "dev"], cwd: ".", port: 5174 }]);
+  assert.deepEqual(launch.configurations, await consumerLaunchConfigurations(result.manifest));
+
+  const consumer = await loadConsumer(product);
+  const app = resolveConsumerApp(consumer);
+  assert.equal(app.cwd, product);
+  assert.equal(app.cwdRelative, ".");
+
+  git(product, "add", "--all");
+  git(product, "commit", "-m", "Adopt TimDS");
+  git(product, "checkout", "-b", "design/colors");
+  await fs.writeFile(path.join(product, "src", "styles", "site.css"), "a { color: red; }\n", "utf8");
+  git(product, "add", "--all");
+  git(product, "commit", "-m", "Recolor links");
+  const passed = await checkConsumer(product, { base: "main" });
+  assert.equal(passed.status, "passed", passed.errors.join("\n"));
+  assert.deepEqual(passed.apps, [{ name: "site", cwd: ".", cwdExists: true, mode: "crawl" }]);
+  assert.deepEqual(passed.changes, [{ path: "src/styles/site.css", status: "allowed", app: "site" }]);
+
+  await fs.writeFile(path.join(product, "src", "server", "api.js"), "export {};\n", "utf8");
+  const failed = await checkConsumer(product, { base: "main" });
+  assert.equal(failed.status, "failed");
+  assert.match(failed.errors.join("\n"), /outside the design surface[\s\S]*- src\/server\/api\.js/);
+});
+
+test("puts a root app first beside the app folders", async (t) => {
+  const product = await createConsumerRepo(t, { rootPackage: { name: "web", private: true, scripts: { start: "next start" }, dependencies: { next: "15.0.0" } } });
+  await initializeConsumer(product, { skipInstall: true, output: quiet });
+  const manifest = JSON.parse(await fs.readFile(path.join(product, "timds.consumer.json"), "utf8"));
+  // The root package is named like the web folder, so the root app takes a distinct name.
+  assert.deepEqual(Object.keys(manifest.apps), ["web-root", "spa", "web"]);
+  assert.equal(manifest.apps["web-root"].cwd, ".");
+  assert.deepEqual(manifest.apps["web-root"].preview.serve, ["npm", "run", "start"]);
+  assert.equal(manifest.apps["web-root"].preview.port, 3000);
+  assert.equal(manifest.apps.web.cwd, "web");
+  const launch = JSON.parse(await fs.readFile(path.join(product, ".claude", "launch.json"), "utf8"));
+  assert.deepEqual(launch.configurations.map((entry) => [entry.name, entry.cwd]), [["web-root", "."], ["spa", "spa"], ["web", "web"]]);
+});
+
+test("never treats the root package.json init writes for the toolkit as an app", async (t) => {
+  const product = await createConsumerRepo(t, {
+    rootPackage: { name: "product", private: true, scripts: { timds: "timds" }, devDependencies: { "@dtconcepts/timds": releaseLine } },
+  });
+  await initializeConsumer(product, { skipInstall: true, output: quiet });
+  const manifest = JSON.parse(await fs.readFile(path.join(product, "timds.consumer.json"), "utf8"));
+  assert.deepEqual(Object.keys(manifest.apps), ["spa", "web"]);
+  // A forced rerun sees init's own package.json and still finds no root app.
+  await initializeConsumer(product, { force: true, skipInstall: true, output: quiet });
+  assert.deepEqual(Object.keys(JSON.parse(await fs.readFile(path.join(product, "timds.consumer.json"), "utf8")).apps), ["spa", "web"]);
 });

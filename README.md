@@ -243,7 +243,10 @@ Declared `routes` always come first and always stay.
   designer-change workflows, `.claude/launch.json` entries, and the
   `timds-design-system-read` HTTP MCP server in `.mcp.json` (authorized with
   `TIMDS_ACCESS_TOKEN` from the environment). Merged entries beside your own
-  are tracked one by one; customized ones are kept unless `--force`.
+  are tracked one by one; customized ones are kept unless `--force`. Apps are
+  discovered from a `package.json` one folder down, and from the root
+  `package.json` when it has a `dev`, `start`, `preview`, or `build` script
+  (that app gets `"cwd": "."`, comes first, and is named after the package).
 - `timds consumer notes [--app NAME] [--pull-request N] [--all] [--json]`
   lists the notes a designer left on the pull request's preview in the portal,
   grouped by page, with the element, its source `file:line` when the dev build
@@ -268,6 +271,17 @@ can trigger it, and fork branches are skipped. It needs the
 `timds-design-change` label, and permission for Actions to create pull
 requests; with `TIMDS_ACCESS_TOKEN` it also reads and resolves notes through
 the portal.
+
+To upgrade a consumer, run `npm run timds -- upgrade` at the product root:
+it refreshes the consumer skill, the two consumer workflows, and the tracked
+launch and MCP entries from the installed toolkit, replacing only what nobody
+edited since TimDS wrote it (customized files are refused, customized entries
+kept, until `--force`), and records the new version in
+`.timds/installation.json`. `upgrade --version 0.1.<patch>` (or `0.1.x`) first
+selects that release under the bounded requirement, runs `npm ci`, and lets
+the new CLI do the refresh. It never touches `timds.consumer.json` or product
+source, and `--own-runtime`, `--auto-release`, and `--dependency-prs` are for
+Design System repositories only.
 
 Hosts and other tools read the manifest with `loadConsumer` from
 `@dtconcepts/timds/consumer`.

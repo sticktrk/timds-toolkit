@@ -222,6 +222,31 @@ function run(command, args, cwd) {
 
 const git = (args, cwd) => run("git", args, cwd);
 
+/**
+ * The root of the consumer repository containing `start`, or null when it is
+ * not one: the git toplevel when it holds `timds.consumer.json`; outside git,
+ * the nearest ancestor that holds it. Inside git the search never climbs past
+ * the toplevel, so a Design System submodule checked out inside a product is
+ * still its own repository. `timds upgrade` uses this to route consumers away
+ * from the design-system workspace loader.
+ */
+export async function findConsumerManifestRoot(start = process.cwd()) {
+  const resolved = path.resolve(start);
+  if (!existsSync(resolved)) return null;
+  const result = await git(["rev-parse", "--show-toplevel"], resolved);
+  if (result.code === 0 && result.stdout.trim()) {
+    const top = await fs.realpath(path.resolve(result.stdout.trim()));
+    return existsSync(path.join(top, CONSUMER_MANIFEST_FILE)) ? top : null;
+  }
+  let current = resolved;
+  while (true) {
+    if (existsSync(path.join(current, CONSUMER_MANIFEST_FILE))) return current;
+    const parent = path.dirname(current);
+    if (parent === current) return null;
+    current = parent;
+  }
+}
+
 async function findConsumerRoot(start) {
   const resolved = path.resolve(start);
   const result = await git(["rev-parse", "--show-toplevel"], resolved);

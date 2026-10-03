@@ -2,9 +2,11 @@
 //
 // A consumer repo is a product that pins a TimDS Design System as its
 // `design-system` git submodule. Init writes the `timds.consumer.json`
-// skeleton (apps discovered one directory down, with guessed install, serve,
-// port, and design surface for a developer to confirm), selects the toolkit
-// in the root package.json, and installs the consumer-managed files:
+// skeleton (apps discovered one directory down, plus the repository root
+// when its package.json has a dev, start, preview, or build script, with
+// guessed install, serve, port, and design surface for a developer to
+// confirm), selects the toolkit in the root package.json, and installs the
+// consumer-managed files:
 //
 //   .agents/skills/timds-consume-design-system/   the designer-facing skill,
 //                                                 product half rendered from
@@ -22,14 +24,17 @@
 //
 // Every managed file's sha256 (and every launch and MCP entry's) is recorded
 // under `consumer` in root `.timds/installation.json`, so a rerun or a later
-// `upgrade` refreshes files nobody edited and refuses customized ones unless
-// forced. `renderConsumerSkill`, `consumerManagedFiles`,
-// `consumerLaunchConfigurations`, and `consumerMcpServers` are exported for
-// that reuse.
+// `timds upgrade` (`upgradeConsumer`, same planning) refreshes files nobody
+// edited and refuses customized ones unless forced. `renderConsumerSkill`,
+// `consumerManagedFiles`, `consumerLaunchConfigurations`, and
+// `consumerMcpServers` are exported for that reuse.
 //
 // Boundary: init never edits product source, the Design System submodule, or
-// an existing manifest (it is kept unless --force regenerates it). The guesses
-// are a starting point; the printed TODO list names what a developer confirms.
+// an existing manifest (it is kept unless --force regenerates it); upgrade
+// never touches the manifest, package.json, or product source at all
+// (`upgrade --version` in upgrade.mjs moves the toolkit pin, then calls the
+// new CLI's upgrade). The guesses are a starting point; the printed TODO list
+// names what a developer confirms.
 
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -63,7 +68,8 @@ const INIT_HELP = `Usage:
   timds consumer init [--root PATH] [--force] [--skip-install] [--portal-url URL]
 
 Writes timds.consumer.json (apps discovered from package.json files one
-directory down), selects @dtconcepts/timds in the root package.json, and
+directory down, and the root package.json when it has a dev, start, preview,
+or build script), selects @dtconcepts/timds in the root package.json, and
 installs the consumer skill, the preview and designer-change workflows,
 .claude/launch.json entries, and the Design System read MCP server in
 .mcp.json (at --portal-url, default ${DEFAULT_PORTAL_URL}). An existing
@@ -184,9 +190,69 @@ function guessPort(packageJson, script) {
   return { port: 3000, guessed: true, framework: null };
 }
 
+// The scripts that make a package an app: a serve script (dev, start,
+// preview) or a build. A root package.json without any of them is the one
+// init itself writes for the toolkit, not an app.
+const SERVE_SCRIPTS = ["dev", "start", "preview"];
+const APP_SCRIPTS = [...SERVE_SCRIPTS, "build"];
+const APP_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
+
+function discoveredApp(appRoot, cwd, packageJson) {
+  const manager = packageManagerFor(appRoot);
+  const scripts = packageJson.scripts || {};
+  const serveScript = SERVE_SCRIPTS.find((script) => scripts[script]);
+  const { port, framework } = guessPort(packageJson, serveScript ? scripts[serveScript] : "");
+  const surface = SURFACE_CANDIDATES.filter((candidate) => existsSync(path.join(appRoot, candidate))).map((candidate) => `${candidate}/**`);
+  const app = {
+    cwd,
+    install: manager.install,
+    preview: {
+      serve: manager.run(serveScript || "dev"),
+      port,
+      ready: "/",
+      routes: ["/"],
+      discover: structuredClone(DEFAULT_DISCOVER),
+      viewports: ["desktop", "phone"],
+      schemes: ["light", "dark"],
+    },
+    designSurface: surface.length ? surface : ["src/styles/**"],
+    protected: [],
+  };
+  const items = [
+    `install is ${manager.install.join(" ")}${manager.todo ? ` (${manager.todo})` : ""}`,
+    serveScript
+      ? `preview.serve is ${manager.run(serveScript).join(" ")} (from the "${serveScript}" script); it must serve the app on a fixed port without opening a browser`
+      : "no dev, start, or preview script found; set preview.serve, or switch to static mode with preview.build and preview.output",
+    `preview.port is ${port}${framework ? ` (the ${framework} default)` : " (a guess)"}; match what the serve command listens on`,
+    "preview.routes lists only \"/\" and preview.discover follows links from it (up to 40 pages); add routes that must always be reviewed, and preview.discover.exclude for pages designers should not see",
+    surface.length
+      ? `designSurface is ${surface.join(", ")}; trim it to what designers may change`
+      : "designSurface is a placeholder (src/styles/**); set the folders designers may change",
+    "protected is empty; add server code, data, scripts, and anything inside the design surface that designers must not touch",
+  ];
+  if (cwd === ".") {
+    items.push("this app is the repository root, so its design surface globs are relative to the root; keep them narrow (never the whole repository) so other apps and developer files stay out of designer changes");
+  }
+  return { app, items };
+}
+
+/** An app name for the root package: its package name without a scope, sanitized, else the folder name. */
+export function rootAppName(packageName, folderName) {
+  const sanitize = (value) => String(value || "")
+    .replace(/^@[^/]*\//, "")
+    .replace(/[^A-Za-z0-9._-]+/g, "-")
+    .replace(/^[^A-Za-z0-9]+/, "")
+    .slice(0, 100)
+    .replace(/[^A-Za-z0-9]+$/, "");
+  for (const candidate of [sanitize(packageName), sanitize(folderName)]) {
+    if (APP_NAME.test(candidate)) return candidate;
+  }
+  return "app";
+}
+
 async function discoverApps(repoRoot, designSystemPath) {
   const entries = await fs.readdir(repoRoot, { withFileTypes: true });
-  const apps = {};
+  const nested = {};
   const todos = [];
   for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
     if (!entry.isDirectory() || entry.name.startsWith(".") || SKIPPED_DIRECTORIES.has(entry.name)) continue;
@@ -194,42 +260,18 @@ async function discoverApps(repoRoot, designSystemPath) {
     const appRoot = path.join(repoRoot, entry.name);
     const packageJson = await readJsonFile(path.join(appRoot, "package.json"), `${entry.name}/package.json`);
     if (!packageJson) continue;
-    const name = entry.name;
-    const manager = packageManagerFor(appRoot);
-    const scripts = packageJson.scripts || {};
-    const serveScript = ["dev", "start", "preview"].find((script) => scripts[script]);
-    const { port, framework } = guessPort(packageJson, serveScript ? scripts[serveScript] : "");
-    const surface = SURFACE_CANDIDATES.filter((candidate) => existsSync(path.join(appRoot, candidate))).map((candidate) => `${candidate}/**`);
-    apps[name] = {
-      cwd: name,
-      install: manager.install,
-      preview: {
-        serve: manager.run(serveScript || "dev"),
-        port,
-        ready: "/",
-        routes: ["/"],
-        discover: structuredClone(DEFAULT_DISCOVER),
-        viewports: ["desktop", "phone"],
-        schemes: ["light", "dark"],
-      },
-      designSurface: surface.length ? surface : ["src/styles/**"],
-      protected: [],
-    };
-    const appTodos = [
-      `install is ${manager.install.join(" ")}${manager.todo ? ` (${manager.todo})` : ""}`,
-      serveScript
-        ? `preview.serve is ${manager.run(serveScript).join(" ")} (from the "${serveScript}" script); it must serve the app on a fixed port without opening a browser`
-        : "no dev, start, or preview script found; set preview.serve, or switch to static mode with preview.build and preview.output",
-      `preview.port is ${port}${framework ? ` (the ${framework} default)` : " (a guess)"}; match what the serve command listens on`,
-      "preview.routes lists only \"/\" and preview.discover follows links from it (up to 40 pages); add routes that must always be reviewed, and preview.discover.exclude for pages designers should not see",
-      surface.length
-        ? `designSurface is ${surface.join(", ")}; trim it to what designers may change`
-        : "designSurface is a placeholder (src/styles/**); set the folders designers may change",
-      "protected is empty; add server code, data, scripts, and anything inside the design surface that designers must not touch",
-    ];
-    todos.push({ app: name, items: appTodos });
+    const { app, items } = discoveredApp(appRoot, entry.name, packageJson);
+    nested[entry.name] = app;
+    todos.push({ app: entry.name, items });
   }
-  return { apps, todos };
+  // The repository root is an app too when its package.json can serve or
+  // build one; it goes first.
+  const rootPackage = await readJsonFile(path.join(repoRoot, "package.json"), "package.json");
+  if (!rootPackage || !APP_SCRIPTS.some((script) => rootPackage.scripts?.[script])) return { apps: nested, todos };
+  let name = rootAppName(rootPackage.name, path.basename(repoRoot));
+  if (Object.hasOwn(nested, name)) name = rootAppName(`${name}-root`, "");
+  const { app, items } = discoveredApp(repoRoot, ".", rootPackage);
+  return { apps: { [name]: app, ...nested }, todos: [{ app: name, items }, ...todos] };
 }
 
 async function designSystemId(repoRoot, designSystemPath) {
@@ -242,7 +284,7 @@ async function designSystemId(repoRoot, designSystemPath) {
 async function buildConsumerManifest(repoRoot, designSystemPath) {
   const { apps, todos } = await discoverApps(repoRoot, designSystemPath);
   if (!Object.keys(apps).length) {
-    throw new Error(`No app folders found: timds consumer init looks for a package.json one directory below ${repoRoot} (skipping ${designSystemPath}, node_modules, and dot-folders). Write ${CONSUMER_MANIFEST_FILE} by hand from the contract in the TimDS README, then rerun timds consumer init.`);
+    throw new Error(`No apps found: timds consumer init looks for a package.json one directory below ${repoRoot} (skipping ${designSystemPath}, node_modules, and dot-folders) and for a root package.json with a dev, start, preview, or build script. Write ${CONSUMER_MANIFEST_FILE} by hand from the contract in the TimDS README, then rerun timds consumer init.`);
   }
   const { systemId, guessed } = await designSystemId(repoRoot, designSystemPath);
   const rendered = (await template("timds-consumer.json"))
@@ -366,22 +408,33 @@ export function consumerMcpServers({ portalUrl = DEFAULT_PORTAL_URL } = {}) {
 // ---------------------------------------------------------------------------
 // Planning (all refusals happen before anything is written)
 
+// Every managed file is "unchanged" (already the desired bytes), "created",
+// "refreshed" (the on-disk sha256 matches the recorded one, or `force`), or
+// "refused" (customized since TimDS wrote it). Callers refuse on any conflict.
 async function planManagedFiles(repoRoot, files, recorded, force) {
   const writes = [];
   const conflicts = [];
+  const statuses = [];
   for (const file of files) {
     const current = await readText(path.join(repoRoot, file.path));
-    if (current === file.content) continue;
+    if (current === file.content) {
+      statuses.push({ path: file.path, status: "unchanged" });
+      continue;
+    }
     if (current !== null && !force && sha256(current) !== recorded[file.path]) {
       conflicts.push(file.path);
+      statuses.push({ path: file.path, status: "refused" });
       continue;
     }
     writes.push(file);
+    statuses.push({ path: file.path, status: current === null ? "created" : "refreshed" });
   }
-  if (conflicts.length) {
-    throw new Error(`Refusing to replace customized TimDS consumer files:\n${conflicts.map((file) => `- ${file}`).join("\n")}\nReview them, or rerun timds consumer init with --force to replace them`);
-  }
-  return writes;
+  return { writes, conflicts, statuses };
+}
+
+function refuseCustomizedFiles(conflicts, rerun) {
+  if (!conflicts.length) return;
+  throw new Error(`Refusing to replace customized TimDS consumer files:\n${conflicts.map((file) => `- ${file}`).join("\n")}\nReview them, or rerun ${rerun} with --force to replace them`);
 }
 
 async function planPackageJson(repoRoot, force) {
@@ -417,26 +470,33 @@ async function planLaunch(repoRoot, desired, recorded, force) {
   }
   const kept = [];
   const managed = {};
+  const statuses = [];
   for (const entry of desired) {
     managed[entry.name] = sha256(JSON.stringify(entry));
     const index = launch.configurations.findIndex((configuration) => configuration?.name === entry.name);
     if (index === -1) {
       launch.configurations.push(entry);
+      statuses.push({ name: entry.name, status: "created" });
       continue;
     }
     const current = launch.configurations[index];
-    if (sameJson(current, entry)) continue;
+    if (sameJson(current, entry)) {
+      statuses.push({ name: entry.name, status: "unchanged" });
+      continue;
+    }
     if (force || sha256(JSON.stringify(current)) === recorded[entry.name]) {
       launch.configurations[index] = entry;
+      statuses.push({ name: entry.name, status: "refreshed" });
       continue;
     }
     kept.push(entry.name);
+    statuses.push({ name: entry.name, status: "refused" });
     managed[entry.name] = recorded[entry.name] ?? null;
     if (managed[entry.name] === null) delete managed[entry.name];
   }
   const content = toJson(launch);
   const changed = !existing || toJson(existing) !== content;
-  return { launchPath, content, changed, kept, managed };
+  return { launchPath, content, changed, kept, managed, statuses };
 }
 
 async function planMcp(repoRoot, desired, recorded, force) {
@@ -449,25 +509,32 @@ async function planMcp(repoRoot, desired, recorded, force) {
   }
   const kept = [];
   const managed = {};
+  const statuses = [];
   for (const [name, entry] of Object.entries(desired)) {
     managed[name] = sha256(JSON.stringify(entry));
     if (!Object.hasOwn(config.mcpServers, name)) {
       config.mcpServers[name] = entry;
+      statuses.push({ name, status: "created" });
       continue;
     }
     const current = config.mcpServers[name];
-    if (sameJson(current, entry)) continue;
+    if (sameJson(current, entry)) {
+      statuses.push({ name, status: "unchanged" });
+      continue;
+    }
     if (force || sha256(JSON.stringify(current)) === recorded[name]) {
       config.mcpServers[name] = entry;
+      statuses.push({ name, status: "refreshed" });
       continue;
     }
     kept.push(name);
+    statuses.push({ name, status: "refused" });
     managed[name] = recorded[name] ?? null;
     if (managed[name] === null) delete managed[name];
   }
   const content = toJson(config);
   const changed = !existing || toJson(existing) !== content;
-  return { mcpPath, content, changed, kept, managed };
+  return { mcpPath, content, changed, kept, managed, statuses };
 }
 
 async function ensureGitignoreLines(repoRoot, lines) {
@@ -479,6 +546,30 @@ async function ensureGitignoreLines(repoRoot, lines) {
   const prefix = existing && !existing.endsWith("\n") ? "\n" : "";
   await fs.writeFile(gitignorePath, `${existing}${prefix}${missing.join("\n")}\n`, "utf8");
   return true;
+}
+
+/**
+ * Plan every consumer-managed file and entry for `manifest` against the
+ * record of the previous installation. Shared by init and upgrade so both
+ * apply the same rules; nothing is written here.
+ */
+async function planConsumerManagedState(repoRoot, manifest, previous, { defaultBranch, force, portalUrl }) {
+  const files = await consumerManagedFiles(manifest, { defaultBranch });
+  const filePlan = await planManagedFiles(repoRoot, files, previous.managedFiles || {}, force);
+  const launchPlan = await planLaunch(repoRoot, await consumerLaunchConfigurations(manifest), previous.launchConfigurations || {}, force);
+  const mcpPlan = await planMcp(repoRoot, consumerMcpServers({ portalUrl }), previous.mcpServers || {}, force);
+  return { files, filePlan, launchPlan, mcpPlan };
+}
+
+function consumerInstallationRecord(files, launchPlan, mcpPlan) {
+  return {
+    name: runtimeIdentity.name,
+    schemaVersion: 1,
+    version: runtimeIdentity.version,
+    managedFiles: Object.fromEntries(files.map((file) => [file.path, sha256(file.content)])),
+    launchConfigurations: launchPlan.managed,
+    mcpServers: mcpPlan.managed,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -513,11 +604,10 @@ export async function initializeConsumer(rootInput = process.cwd(), { force = fa
   const previous = installation.consumer && typeof installation.consumer === "object" ? installation.consumer : {};
   const defaultBranch = await consumerDefaultBranch(repoRoot);
 
-  const files = await consumerManagedFiles(manifest, { defaultBranch });
-  const writes = await planManagedFiles(repoRoot, files, previous.managedFiles || {}, force);
+  const { files, filePlan, launchPlan, mcpPlan } = await planConsumerManagedState(repoRoot, manifest, previous, { defaultBranch, force, portalUrl });
+  refuseCustomizedFiles(filePlan.conflicts, "timds consumer init");
+  const writes = filePlan.writes;
   const packagePlan = await planPackageJson(repoRoot, force);
-  const launchPlan = await planLaunch(repoRoot, await consumerLaunchConfigurations(manifest), previous.launchConfigurations || {}, force);
-  const mcpPlan = await planMcp(repoRoot, consumerMcpServers({ portalUrl }), previous.mcpServers || {}, force);
 
   const written = [];
   if (!keepManifest) {
@@ -542,14 +632,7 @@ export async function initializeConsumer(rootInput = process.cwd(), { force = fa
   }
   if (await ensureGitignoreLines(repoRoot, ["node_modules/", ".timds/preview/"])) written.push(".gitignore");
 
-  installation.consumer = {
-    name: runtimeIdentity.name,
-    schemaVersion: 1,
-    version: runtimeIdentity.version,
-    managedFiles: Object.fromEntries(files.map((file) => [file.path, sha256(file.content)])),
-    launchConfigurations: launchPlan.managed,
-    mcpServers: mcpPlan.managed,
-  };
+  installation.consumer = consumerInstallationRecord(files, launchPlan, mcpPlan);
   await writeFile(installationPath, toJson(installation));
   written.push(CONSUMER_INSTALLATION_PATH);
 
@@ -597,6 +680,95 @@ export async function initializeConsumer(rootInput = process.cwd(), { force = fa
     todos: checklist,
     keptLaunchConfigurations: launchPlan.kept,
     keptMcpServers: mcpPlan.kept,
+    installation: installation.consumer,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Upgrade
+
+/** The portal origin the managed read MCP server points at today (default when absent or unreadable). */
+async function installedPortalUrl(repoRoot) {
+  const config = await readJsonFile(path.join(repoRoot, CONSUMER_MCP_PATH), CONSUMER_MCP_PATH);
+  const url = config?.mcpServers?.[CONSUMER_MCP_SERVER_NAME]?.url;
+  try {
+    const parsed = new URL(String(url));
+    if (["http:", "https:"].includes(parsed.protocol)) return parsed.origin;
+  } catch {
+    // Fall through to the default portal.
+  }
+  return DEFAULT_PORTAL_URL;
+}
+
+/**
+ * `timds upgrade` in a consumer repository: refresh every consumer-managed
+ * file and entry with this toolkit's templates, by the rules init applies
+ * (identical: unchanged; recorded hash matches: refreshed; customized: refused
+ * unless `force`, launch and MCP entries kept), then rewrite
+ * `installation.consumer`. A file a previous release managed and this one no
+ * longer ships is removed when unmodified. Never regenerates
+ * `timds.consumer.json`, never edits package.json or product source, and never
+ * runs an install (`upgrade --version` in upgrade.mjs does that, then calls
+ * the newly installed CLI, which lands here).
+ */
+export async function upgradeConsumer(rootInput = process.cwd(), { force = false, output = () => {} } = {}) {
+  const repoRoot = await findGitRoot(rootInput);
+  const manifest = await readJsonFile(path.join(repoRoot, CONSUMER_MANIFEST_FILE), CONSUMER_MANIFEST_FILE);
+  if (!manifest) throw new Error(`No ${CONSUMER_MANIFEST_FILE} at ${repoRoot}. Run timds consumer init to adopt TimDS in this product repository.`);
+  validateConsumerManifest(manifest);
+  const installationPath = path.join(repoRoot, CONSUMER_INSTALLATION_PATH);
+  const installation = (await readJsonFile(installationPath, CONSUMER_INSTALLATION_PATH)) ?? {};
+  const previous = installation.consumer;
+  if (!previous || typeof previous !== "object" || Array.isArray(previous)) {
+    throw new Error(`${repoRoot} has no TimDS consumer installation record (consumer in ${CONSUMER_INSTALLATION_PATH}). Run timds consumer init first; upgrade only refreshes the files init installed.`);
+  }
+  const defaultBranch = await consumerDefaultBranch(repoRoot);
+  const portalUrl = await installedPortalUrl(repoRoot);
+  const { files, filePlan, launchPlan, mcpPlan } = await planConsumerManagedState(repoRoot, manifest, previous, { defaultBranch, force, portalUrl });
+  refuseCustomizedFiles(filePlan.conflicts, "timds upgrade");
+
+  const shipped = new Set(files.map((file) => file.path));
+  const retired = [];
+  for (const [relative, recordedHash] of Object.entries(previous.managedFiles || {})) {
+    // Only paths inside the consumer-managed boundary are ever removed.
+    const managedPath = relative.startsWith(`${CONSUMER_SKILL_PATH}/`) || relative.startsWith(".github/workflows/timds-");
+    if (shipped.has(relative) || !managedPath || relative.split("/").includes("..")) continue;
+    const current = await readText(path.join(repoRoot, relative));
+    if (current === null) continue;
+    retired.push({ path: relative, status: force || sha256(current) === recordedHash ? "removed" : "kept" });
+  }
+
+  for (const file of filePlan.writes) await writeFile(path.join(repoRoot, file.path), file.content);
+  for (const file of retired.filter((entry) => entry.status === "removed")) await fs.rm(path.join(repoRoot, file.path), { force: true });
+  if (launchPlan.changed) await writeFile(launchPlan.launchPath, launchPlan.content);
+  if (mcpPlan.changed) await writeFile(mcpPlan.mcpPath, mcpPlan.content);
+  installation.consumer = consumerInstallationRecord(files, launchPlan, mcpPlan);
+  await writeFile(installationPath, toJson(installation));
+
+  const previousVersion = typeof previous.version === "string" ? previous.version : "unknown";
+  output(`TimDS consumer files upgraded for ${repoRoot}`);
+  output(`Toolkit: ${previousVersion} -> ${runtimeIdentity.version}`);
+  for (const { path: relative, status } of filePlan.statuses) output(`  ${status.padEnd(9)} ${relative}`);
+  for (const { path: relative, status } of retired) {
+    output(status === "removed"
+      ? `  removed   ${relative} (no longer shipped by TimDS)`
+      : `  kept      ${relative} (no longer shipped by TimDS, customized; delete it when it is no longer needed)`);
+  }
+  for (const { name, status } of launchPlan.statuses) {
+    output(`  ${status.padEnd(9)} ${CONSUMER_LAUNCH_PATH} entry "${name}"${status === "refused" ? " (customized; rerun timds upgrade --force to replace it)" : ""}`);
+  }
+  for (const { name, status } of mcpPlan.statuses) {
+    output(`  ${status.padEnd(9)} ${CONSUMER_MCP_PATH} server "${name}"${status === "refused" ? " (customized; rerun timds upgrade --force to replace it)" : ""}`);
+  }
+  output(`Review the diff, then commit the managed files and ${CONSUMER_INSTALLATION_PATH}.`);
+
+  return {
+    repoRoot,
+    previousVersion,
+    version: runtimeIdentity.version,
+    files: [...filePlan.statuses, ...retired],
+    launchConfigurations: launchPlan.statuses,
+    mcpServers: mcpPlan.statuses,
     installation: installation.consumer,
   };
 }
