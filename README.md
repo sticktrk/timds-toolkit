@@ -170,6 +170,56 @@ pinned }`; with `hooks.remote` every tool takes an optional `systemId` and
 system id percent-encoded. `hooks.fileGap({ system, gap })` receives each
 reported gap.
 
+## Consumer repositories
+
+A product that uses a Design System (a website, an app) pins it as the
+`design-system` git submodule and declares, once, in `timds.consumer.json` at
+its root, how to preview each app and which paths a designer pull request may
+touch. TimDS never builds the product itself; it runs the commands the
+manifest declares.
+
+```json
+{
+  "schemaVersion": 1,
+  "designSystem": { "path": "design-system", "systemId": "acme/core" },
+  "apps": {
+    "web": {
+      "cwd": "web",
+      "install": ["npm", "ci"],
+      "preview": { "serve": ["npm", "run", "dev"], "port": 4321, "routes": ["/", "/contact"] },
+      "designSurface": ["src/styles/**", "src/components/**", "public/**"],
+      "protected": ["src/server/**"]
+    }
+  }
+}
+```
+
+`preview` takes either `build` + `output` (the build output is the preview;
+add `routes` to crawl it) or `serve` + `port` + `routes` (start the app and
+crawl it). `ready` defaults to `/`, `viewports` to `["desktop", "phone"]`
+(`tablet` is also allowed), and `schemes` to `["light", "dark"]`.
+`designSurface` and `protected` are globs (`**`, `*`, `?`) relative to the
+app's `cwd`; `protected` always wins.
+
+- `timds consumer check [--app NAME] [--base REF]` validates the manifest,
+  that the submodule is pinned and checked out (warning when the checkout
+  drifts from the pin), and that every app's `cwd` exists. With `--base`, it
+  fails when the branch or working tree changes anything outside a declared
+  design surface or inside a protected path, or moves the Design System pin,
+  listing those paths. The surface is read from the manifest at the merge
+  base, so a branch cannot widen its own scope; a branch whose base has no
+  manifest is an adoption and may add the submodule. The stock workflow runs
+  this on every pull request and reports a scope failure in the preview
+  comment without failing the job, since developer pull requests leave the
+  surface by design.
+- `timds consumer preview --app NAME [--publish]` builds or serves the app and
+  writes a review gallery to `.timds/preview/<app>/`.
+- `timds consumer init [--skip-install]` writes a manifest skeleton and installs the managed
+  consumer skill and preview workflow.
+
+Hosts and other tools read the manifest with `loadConsumer` from
+`@dtconcepts/timds/consumer`.
+
 ## Machine-readable artifacts
 
 A design system is read by agents and downstream pipelines as well as by people.

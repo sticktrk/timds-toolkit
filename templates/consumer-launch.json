@@ -1,0 +1,7 @@
+{
+  "name": "__LAUNCH_NAME__",
+  "runtimeExecutable": "__RUNTIME_EXECUTABLE__",
+  "runtimeArgs": __RUNTIME_ARGS__,
+  "cwd": "__CWD__",
+  "port": __PORT__
+}
