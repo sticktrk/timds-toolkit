@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "designSystem": {
+    "path": "__DESIGN_SYSTEM_PATH__",
+    "systemId": "__SYSTEM_ID__"
+  },
+  "apps": __APPS__
+}

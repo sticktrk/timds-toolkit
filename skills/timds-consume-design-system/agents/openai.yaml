@@ -1,0 +1,4 @@
+interface:
+  display_name: "Use the TimDS Design System in this product"
+  short_description: "Make on-brand product changes and open a previewed draft PR"
+  default_prompt: "Use $timds-consume-design-system to make this design change in the product and open a draft pull request with a preview link."

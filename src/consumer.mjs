@@ -1,0 +1,529 @@
+// Consumer repositories: products that pin a TimDS Design System.
+//
+// A consumer repo is a product (a website, an app) that carries a TimDS
+// Design System as the `design-system` git submodule and declares, once, in
+// `timds.consumer.json` at its root: which apps it holds, how to preview each
+// one, and which paths a designer pull request may touch. This module reads
+// and validates that manifest, resolves the pinned Design System (gitlink
+// commit, presence of the checkout), and guards the design-surface scope of a
+// branch diff for `timds consumer check`.
+//
+// Boundary: nothing here knows the product's stack. TimDS never builds,
+// installs, or edits the product; the commands the manifest declares are run
+// by `consumer-preview.mjs`, and the managed skill and workflow are installed
+// by `consumer-init.mjs`. This module is the shared read side both import.
+
+import { spawn } from "node:child_process";
+import { existsSync, promises as fs } from "node:fs";
+import path from "node:path";
+import process from "node:process";
+import * as z from "zod/v4";
+
+export const CONSUMER_MANIFEST_FILE = "timds.consumer.json";
+export const CONSUMER_VIEWPORTS = Object.freeze(["desktop", "tablet", "phone"]);
+export const CONSUMER_SCHEMES = Object.freeze(["light", "dark"]);
+
+/**
+ * Paths a consumer PR may always change: the manifest, the TimDS-managed
+ * files, and the root files `consumer init` and upgrades write (the root
+ * package manifest, lockfiles, .gitignore, installation record). Root only:
+ * an app's own package.json stays subject to its design surface.
+ */
+export const CONSUMER_ALWAYS_ALLOWED = Object.freeze([
+  CONSUMER_MANIFEST_FILE,
+  "package.json",
+  "package-lock.json",
+  "npm-shrinkwrap.json",
+  "bun.lock",
+  "bun.lockb",
+  "pnpm-lock.yaml",
+  "yarn.lock",
+  ".gitignore",
+  ".timds/installation.json",
+  ".agents/skills/timds-consume-design-system/**",
+  ".github/workflows/timds-consumer-preview.yml",
+  ".claude/launch.json",
+]);
+
+const CONSUMER_HELP = `Usage:
+  timds consumer check [--root PATH] [--app NAME] [--base REF]
+  timds consumer preview --app NAME [--root PATH] [--output DIR] [--publish] [--pull-request N]
+  timds consumer init [--root PATH] [--force] [--skip-install]`;
+
+// ---------------------------------------------------------------------------
+// Manifest validation
+
+function isSafeRelativePath(value) {
+  if (typeof value !== "string" || !value.trim() || value.includes("\0")) return false;
+  const normalized = value.replace(/\\/g, "/");
+  if (normalized.startsWith("/") || /^[a-zA-Z]:/.test(normalized)) return false;
+  return normalized.split("/").every((segment) => segment !== "..");
+}
+
+function normalizeRelativePath(value) {
+  const normalized = path.posix.normalize(String(value).replace(/\\/g, "/")).replace(/\/+$/, "");
+  return normalized === "" ? "." : normalized;
+}
+
+const relativePath = (label) => z.string().refine(isSafeRelativePath, {
+  message: `${label} must be a relative path inside the repository (no leading "/" and no "..")`,
+}).transform(normalizeRelativePath);
+
+const commandSchema = (label) => z.array(z.string().min(1, `${label} entries must be non-empty strings`), {
+  error: `${label} must be a command as an array of strings, e.g. ["npm", "run", "build"]`,
+}).min(1, `${label} must not be empty`);
+
+const routePath = z.string().refine((value) => value.startsWith("/") && !value.includes("\0") && !/\s/.test(value), {
+  message: 'routes must be absolute URL paths such as "/" or "/contact"',
+});
+
+const globList = (label) => z.array(z.string().min(1, `${label} globs must be non-empty`).refine(isSafeRelativePath, {
+  message: `${label} globs are relative to the app's cwd and must not start with "/" or contain ".."`,
+}), { error: `${label} must be an array of glob strings` });
+
+const previewSchema = z.object({
+  build: commandSchema("preview.build").optional(),
+  output: relativePath("preview.output").optional(),
+  serve: commandSchema("preview.serve").optional(),
+  port: z.number({ error: "preview.port must be a number" }).int().min(1).max(65_535, "preview.port must be between 1 and 65535").optional(),
+  ready: routePath.default("/"),
+  routes: z.array(routePath, { error: "preview.routes must be an array of URL paths" }).min(1, "preview.routes must list at least one route").optional(),
+  viewports: z.array(z.enum(CONSUMER_VIEWPORTS, { error: `preview.viewports entries must be one of ${CONSUMER_VIEWPORTS.join(", ")}` }))
+    .min(1, "preview.viewports must not be empty")
+    .default(["desktop", "phone"]),
+  schemes: z.array(z.enum(CONSUMER_SCHEMES, { error: `preview.schemes entries must be one of ${CONSUMER_SCHEMES.join(", ")}` }))
+    .min(1, "preview.schemes must not be empty")
+    .default(["light", "dark"]),
+}, { error: "preview must be an object" }).strict().superRefine((preview, context) => {
+  const staticKeys = ["build", "output"].filter((key) => preview[key] !== undefined);
+  const crawlKeys = ["serve", "port"].filter((key) => preview[key] !== undefined);
+  if (staticKeys.length && crawlKeys.length) {
+    context.addIssue({ code: "custom", message: "preview must use exactly one mode: build + output (static) or serve + port + routes (crawl), not both" });
+    return;
+  }
+  if (!staticKeys.length && !crawlKeys.length) {
+    context.addIssue({ code: "custom", message: "preview must declare build + output (static mode) or serve + port + routes (crawl mode)" });
+    return;
+  }
+  if (staticKeys.length && staticKeys.length !== 2) {
+    context.addIssue({ code: "custom", message: "static preview needs both build (the build command) and output (the build output directory)" });
+  }
+  if (crawlKeys.length) {
+    const missing = ["serve", "port", "routes"].filter((key) => preview[key] === undefined);
+    if (missing.length) context.addIssue({ code: "custom", message: `crawl preview needs serve, port, and routes; missing ${missing.join(", ")}` });
+  }
+  for (const key of ["viewports", "schemes", "routes"]) {
+    const list = preview[key];
+    if (list && new Set(list).size !== list.length) context.addIssue({ code: "custom", path: [key], message: `preview.${key} must not repeat entries` });
+  }
+});
+
+const appSchema = z.object({
+  cwd: relativePath("cwd"),
+  install: commandSchema("install").optional(),
+  preview: previewSchema,
+  designSurface: globList("designSurface").min(1, "designSurface must list at least one glob a designer PR may change"),
+  protected: globList("protected").default([]),
+}, { error: "each app must be an object" }).strict();
+
+const APP_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
+
+const manifestSchema = z.object({
+  $schema: z.string().optional(),
+  schemaVersion: z.literal(1, { error: `${CONSUMER_MANIFEST_FILE} schemaVersion must be 1` }),
+  designSystem: z.object({
+    path: relativePath("designSystem.path").default("design-system"),
+    systemId: z.string({ error: "designSystem.systemId is required (the Design System's systemId from its timds.json)" })
+      .regex(/^[a-zA-Z0-9][a-zA-Z0-9._/-]{1,159}$/, "designSystem.systemId must use letters, numbers, dots, slashes, underscores, or hyphens"),
+  }, { error: "designSystem must be an object with path and systemId" }).strict(),
+  apps: z.record(z.string(), appSchema, { error: "apps must be an object keyed by app name" }).superRefine((apps, context) => {
+    const names = Object.keys(apps);
+    if (!names.length) context.addIssue({ code: "custom", message: "apps must declare at least one app" });
+    for (const name of names) {
+      if (!APP_NAME.test(name)) {
+        context.addIssue({ code: "custom", path: [name], message: `app name "${name}" must start with a letter or digit and use only letters, digits, dots, underscores, or hyphens` });
+      }
+    }
+  }),
+}, { error: `${CONSUMER_MANIFEST_FILE} must be a JSON object` }).strict();
+
+function issuePath(issue) {
+  return (issue.path || []).map((segment) => (typeof segment === "number" ? `[${segment}]` : segment)).join(".").replace(/\.\[/g, "[");
+}
+
+function formatIssues(issues) {
+  return issues.map((issue) => {
+    const where = issuePath(issue);
+    const message = issue.code === "unrecognized_keys"
+      ? `unknown field${issue.keys.length === 1 ? "" : "s"} ${issue.keys.map((key) => `"${key}"`).join(", ")}`
+      : issue.message;
+    return `- ${where ? `${where}: ` : ""}${message}`;
+  }).join("\n");
+}
+
+/** Validate a parsed `timds.consumer.json` and return it with defaults applied. Throws an actionable Error. */
+export function validateConsumerManifest(value) {
+  const result = manifestSchema.safeParse(value);
+  if (!result.success) {
+    throw new Error(`${CONSUMER_MANIFEST_FILE} is invalid:\n${formatIssues(result.error.issues)}`);
+  }
+  const { $schema: _schema, ...manifest } = result.data;
+  return manifest;
+}
+
+/** "static" when the build output is the preview, "crawl" when routes are visited (serve, or build + routes). */
+export function consumerPreviewMode(preview) {
+  return preview.serve || preview.routes ? "crawl" : "static";
+}
+
+// ---------------------------------------------------------------------------
+// Repository and Design System resolution
+
+function run(command, args, cwd) {
+  return new Promise((resolve) => {
+    const child = spawn(command, args, { cwd, shell: false, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.on("error", (error) => resolve({ code: -1, stdout, stderr: error.message }));
+    child.on("close", (code) => resolve({ code: Number(code ?? -1), stdout, stderr }));
+  });
+}
+
+const git = (args, cwd) => run("git", args, cwd);
+
+async function findConsumerRoot(start) {
+  const resolved = path.resolve(start);
+  const result = await git(["rev-parse", "--show-toplevel"], resolved);
+  if (result.code === 0 && result.stdout.trim()) {
+    const top = path.resolve(result.stdout.trim());
+    if (existsSync(path.join(top, CONSUMER_MANIFEST_FILE))) return top;
+  }
+  let current = resolved;
+  while (true) {
+    if (existsSync(path.join(current, CONSUMER_MANIFEST_FILE))) return current;
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  return result.code === 0 && result.stdout.trim() ? path.resolve(result.stdout.trim()) : resolved;
+}
+
+async function gitlinkCommit(repoRoot, designSystemPath) {
+  const tree = await git(["ls-tree", "HEAD", "--", designSystemPath], repoRoot);
+  if (tree.code === 0) {
+    const match = tree.stdout.trim().match(/^160000\s+commit\s+([0-9a-f]{7,64})\t/m);
+    if (match) return match[1];
+  }
+  // No commit yet (or not a gitlink in HEAD): fall back to the index.
+  const staged = await git(["ls-files", "--stage", "--", designSystemPath], repoRoot);
+  if (staged.code === 0) {
+    const match = staged.stdout.trim().match(/^160000\s+([0-9a-f]{7,64})\s+\d\t/m);
+    if (match) return match[1];
+  }
+  return null;
+}
+
+async function checkoutCommit(root) {
+  if (!existsSync(path.join(root, ".git"))) return null;
+  const head = await git(["rev-parse", "HEAD"], root);
+  return head.code === 0 ? head.stdout.trim() || null : null;
+}
+
+/**
+ * Load the consumer repo at or above `repoRootInput`: the validated manifest
+ * and the pinned Design System (`root`, gitlink `commit` or null, `present`).
+ */
+export async function loadConsumer(repoRootInput = process.cwd()) {
+  const repoRoot = await findConsumerRoot(repoRootInput);
+  const manifestPath = path.join(repoRoot, CONSUMER_MANIFEST_FILE);
+  let text;
+  try {
+    text = await fs.readFile(manifestPath, "utf8");
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      throw new Error(`No ${CONSUMER_MANIFEST_FILE} found at ${repoRoot}. Run \`timds consumer init\` in the product repository to create one.`);
+    }
+    throw error;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch (error) {
+    throw new Error(`${CONSUMER_MANIFEST_FILE} is not valid JSON: ${error.message}`);
+  }
+  const manifest = validateConsumerManifest(parsed);
+  const designSystemRoot = path.resolve(repoRoot, manifest.designSystem.path);
+  const designSystem = {
+    path: manifest.designSystem.path,
+    systemId: manifest.designSystem.systemId,
+    root: designSystemRoot,
+    commit: await gitlinkCommit(repoRoot, manifest.designSystem.path),
+    present: existsSync(path.join(designSystemRoot, "timds.json")),
+  };
+  return { repoRoot, manifestPath, manifest, apps: manifest.apps, designSystem };
+}
+
+/** The app entry named `name` (or the only app when `name` is omitted), with its absolute `cwd`. */
+export function resolveConsumerApp(consumer, name) {
+  const names = Object.keys(consumer.apps);
+  let selected = name;
+  if (!selected) {
+    if (names.length === 1) selected = names[0];
+    else throw new Error(`This repository declares ${names.length} apps in ${CONSUMER_MANIFEST_FILE}; choose one with --app (${names.join(", ")})`);
+  }
+  const app = consumer.apps[selected];
+  if (!app || !Object.hasOwn(consumer.apps, selected)) {
+    throw new Error(`Unknown app "${selected}" in ${CONSUMER_MANIFEST_FILE}; available apps: ${names.join(", ")}`);
+  }
+  return { ...app, name: selected, cwdRelative: app.cwd, cwd: path.resolve(consumer.repoRoot, app.cwd) };
+}
+
+// ---------------------------------------------------------------------------
+// Glob matching (`**`, `*`, `?`), no dependency
+
+const globCache = new Map();
+
+export function globToRegExp(glob) {
+  if (globCache.has(glob)) return globCache.get(glob);
+  const source = normalizeRelativePath(glob);
+  let pattern = "";
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === "*") {
+      if (source[index + 1] === "*") {
+        const atStart = index === 0 || source[index - 1] === "/";
+        const atEnd = index + 2 === source.length || source[index + 2] === "/";
+        if (atStart && atEnd) {
+          if (index + 2 === source.length) {
+            pattern += ".*"; // trailing "**": everything below
+          } else {
+            pattern += "(?:[^/]+/)*"; // "**/": zero or more directories
+            index += 1; // skip the slash after "**"
+          }
+          index += 1;
+          continue;
+        }
+        pattern += "[^/]*";
+        index += 1;
+        continue;
+      }
+      pattern += "[^/]*";
+    } else if (char === "?") {
+      pattern += "[^/]";
+    } else {
+      pattern += char.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+    }
+  }
+  // "dir/**" also matches "dir" itself; a literal path (no wildcard) matches
+  // that file or everything under that directory.
+  const literal = !/[*?]/.test(source);
+  const expression = new RegExp(source.endsWith("/**")
+    ? `^(?:${pattern.slice(0, -3)}|${pattern})$`
+    : literal ? `^${pattern}(?:/.*)?$` : `^${pattern}$`);
+  globCache.set(glob, expression);
+  return expression;
+}
+
+export function matchesGlob(filePath, glob) {
+  return globToRegExp(glob).test(filePath);
+}
+
+function relativeToApp(filePath, cwd) {
+  if (cwd === ".") return filePath;
+  if (filePath === cwd) return "";
+  return filePath.startsWith(`${cwd}/`) ? filePath.slice(cwd.length + 1) : null;
+}
+
+/** Classify one repo-relative path against the manifest: "allowed", "protected" (with app), or "outside". */
+export function classifyConsumerPath(filePath, manifest, apps = Object.keys(manifest.apps)) {
+  if (CONSUMER_ALWAYS_ALLOWED.some((glob) => matchesGlob(filePath, glob))) return { status: "allowed", app: null };
+  let protectedBy = null;
+  for (const name of apps) {
+    const app = manifest.apps[name];
+    const inner = relativeToApp(filePath, app.cwd);
+    if (inner === null || inner === "") continue;
+    if (app.protected.some((glob) => matchesGlob(inner, glob))) {
+      protectedBy ||= name;
+      continue;
+    }
+    if (app.designSurface.some((glob) => matchesGlob(inner, glob))) return { status: "allowed", app: name };
+  }
+  return protectedBy ? { status: "protected", app: protectedBy } : { status: "outside", app: null };
+}
+
+// ---------------------------------------------------------------------------
+// Check
+
+function statusPath(line) {
+  const value = line.slice(3).trim().replace(/^"(.*)"$/, "$1");
+  return value.includes(" -> ") ? value.split(" -> ").at(-1) : value;
+}
+
+async function changedPaths(repoRoot, base) {
+  const committed = await git(["diff", "--name-only", `${base}...HEAD`], repoRoot);
+  if (committed.code !== 0) {
+    throw new Error(`Could not diff against ${base}: ${committed.stderr.trim() || "unknown ref"}. Fetch the base branch first (e.g. git fetch origin main) or pass a different --base.`);
+  }
+  const status = await git(["status", "--porcelain", "--untracked-files=all"], repoRoot);
+  const paths = new Set(committed.stdout.split("\n").filter(Boolean));
+  for (const line of status.stdout.split("\n").filter(Boolean)) paths.add(statusPath(line));
+  return [...paths].sort();
+}
+
+/**
+ * Validate a consumer repo: manifest, pinned and present Design System, each
+ * app's cwd, and (with `base`) that the branch only touches design surface.
+ */
+export async function checkConsumer(repoRootInput = process.cwd(), options = {}) {
+  const errors = [];
+  const warnings = [];
+  let consumer;
+  try {
+    consumer = await loadConsumer(repoRootInput);
+  } catch (error) {
+    return { status: "failed", errors: [error.message], warnings, apps: [], repoRoot: null, designSystem: null, changes: [] };
+  }
+  const { designSystem, manifest, repoRoot } = consumer;
+  const selected = options.app ? [resolveConsumerApp(consumer, options.app).name] : Object.keys(manifest.apps);
+
+  if (!designSystem.commit) {
+    errors.push(`${designSystem.path} is not pinned as a git submodule. Add it with: git submodule add <design-system-repo-url> ${designSystem.path}`);
+  }
+  if (!designSystem.present) {
+    errors.push(`${designSystem.path}/timds.json is missing. Check out the submodule with: git submodule update --init ${designSystem.path}`);
+  } else if (designSystem.commit) {
+    const checkedOut = await checkoutCommit(designSystem.root);
+    if (checkedOut && checkedOut !== designSystem.commit) {
+      warnings.push(`${designSystem.path} is checked out at ${checkedOut.slice(0, 12)} but the repository pins ${designSystem.commit.slice(0, 12)}. Run git submodule update ${designSystem.path}, or commit the new pin deliberately.`);
+    }
+    try {
+      const dsManifest = JSON.parse(await fs.readFile(path.join(designSystem.root, "timds.json"), "utf8"));
+      const dsId = String(dsManifest.systemId || dsManifest.system_id || dsManifest.client || "").trim();
+      if (dsId && dsId !== designSystem.systemId) {
+        warnings.push(`${CONSUMER_MANIFEST_FILE} designSystem.systemId is ${designSystem.systemId} but ${designSystem.path}/timds.json declares ${dsId}`);
+      }
+    } catch {
+      warnings.push(`${designSystem.path}/timds.json could not be read as JSON`);
+    }
+  }
+
+  const apps = [];
+  for (const name of selected) {
+    const app = resolveConsumerApp(consumer, name);
+    const cwdExists = existsSync(app.cwd);
+    if (!cwdExists) errors.push(`App "${name}": cwd ${app.cwdRelative} does not exist`);
+    apps.push({ name, cwd: app.cwdRelative, cwdExists, mode: consumerPreviewMode(app.preview) });
+  }
+
+  let changes = [];
+  if (options.base) {
+    // Scope is judged against every app, so a designer PR may touch any app's surface;
+    // `--app` only narrows which apps' cwd and preview are checked.
+    changes = (await changedPaths(repoRoot, options.base))
+      .map((filePath) => ({ path: filePath, ...classifyConsumerPath(filePath, manifest) }));
+    const outside = changes.filter((change) => change.status === "outside");
+    const guarded = changes.filter((change) => change.status === "protected");
+    if (outside.length) {
+      errors.push(`Changes outside the design surface declared in ${CONSUMER_MANIFEST_FILE}:\n${outside.map((change) => `- ${change.path}`).join("\n")}`);
+    }
+    if (guarded.length) {
+      errors.push(`Changes to protected paths:\n${guarded.map((change) => `- ${change.path} (protected in app "${change.app}")`).join("\n")}`);
+    }
+  }
+
+  return {
+    status: errors.length ? "failed" : "passed",
+    errors,
+    warnings,
+    apps,
+    repoRoot,
+    designSystem,
+    changes,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// CLI
+
+const BOOLEAN_FLAGS = new Set(["force", "help", "json", "publish"]);
+
+function parseConsumerArguments(argv) {
+  const options = {};
+  const positional = [];
+  for (let index = 0; index < argv.length; index += 1) {
+    const value = argv[index];
+    if (!value.startsWith("-")) {
+      positional.push(value);
+      continue;
+    }
+    const [rawName, inlineValue] = value.replace(/^--?/, "").split("=", 2);
+    const name = rawName.replace(/-([a-z])/g, (_match, letter) => letter.toUpperCase());
+    if (BOOLEAN_FLAGS.has(name)) {
+      options[name] = true;
+      continue;
+    }
+    const next = inlineValue ?? argv[index + 1];
+    if (next === undefined || String(next).startsWith("-")) throw new Error(`--${rawName} requires a value`);
+    options[name] = next;
+    if (inlineValue === undefined) index += 1;
+  }
+  return { options, positional };
+}
+
+function defaultOutput(message = "") {
+  process.stdout.write(`${message}\n`);
+}
+
+function checkReport(result) {
+  const lines = [];
+  if (result.repoRoot) lines.push(`Consumer: ${result.repoRoot}`);
+  if (result.designSystem) {
+    const ds = result.designSystem;
+    lines.push(`Design System: ${ds.systemId} at ${ds.path} (${ds.commit ? `pinned ${ds.commit.slice(0, 12)}` : "not pinned"}${ds.present ? "" : ", not checked out"})`);
+  }
+  for (const app of result.apps) lines.push(`App ${app.name}: ${app.cwd} (${app.mode} preview)${app.cwdExists ? "" : " — missing"}`);
+  if (result.changes.length) {
+    const allowed = result.changes.filter((change) => change.status === "allowed").length;
+    lines.push(`Changes: ${result.changes.length} (${allowed} inside the design surface)`);
+  }
+  for (const warning of result.warnings) lines.push(`Warning: ${warning}`);
+  for (const error of result.errors) lines.push(`Error: ${error}`);
+  lines.push(result.status === "passed" ? "TimDS consumer check passed." : "TimDS consumer check failed.");
+  return lines.join("\n");
+}
+
+/** `timds consumer <check|preview|init> ...` */
+export async function runConsumerCli(args = [], { output = defaultOutput } = {}) {
+  const [subcommand = "help", ...rest] = args;
+  if (["help", "--help", "-h"].includes(subcommand)) {
+    output(CONSUMER_HELP);
+    return;
+  }
+  if (subcommand === "preview") {
+    const { runConsumerPreview } = await import("./consumer-preview.mjs");
+    return runConsumerPreview(rest, { output });
+  }
+  if (subcommand === "init") {
+    const { runConsumerInit } = await import("./consumer-init.mjs");
+    return runConsumerInit(rest, { output });
+  }
+  if (subcommand !== "check") throw new Error(`Unknown consumer command ${subcommand}\n${CONSUMER_HELP}`);
+  const { options } = parseConsumerArguments(rest);
+  if (options.help) {
+    output(CONSUMER_HELP);
+    return;
+  }
+  const result = await checkConsumer(options.root || process.cwd(), { app: options.app, base: options.base });
+  if (options.json) output(JSON.stringify(result, null, 2));
+  else output(checkReport(result));
+  if (result.status !== "passed") {
+    const error = new Error(`consumer check failed with ${result.errors.length} error${result.errors.length === 1 ? "" : "s"}`);
+    error.result = result;
+    throw error;
+  }
+  return result;
+}
