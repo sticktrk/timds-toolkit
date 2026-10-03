@@ -21,7 +21,7 @@ import {
   saveAccessToken,
 } from "./auth.mjs";
 import { syncDefaults } from "./defaults.mjs";
-import { checkRuntimeDependencies, upgradeToRelease } from "./upgrade.mjs";
+import { checkRuntimeDependencies, upgradeConsumerToRelease, upgradeToRelease } from "./upgrade.mjs";
 import { migrateVideoComponents } from "./video-migration.mjs";
 import { acceptsToolkitReleaseRange, assertVideoContractRuntime, runtimeIdentity, toolkitReleaseRange } from "./runtime.mjs";
 import { publishExtractedIndex } from "./artifact.mjs";
@@ -936,6 +936,33 @@ export async function upgradeRepository(repoRootInput, { autoRelease = false, de
   return { ...workspace, ...installed, previousVersion, releaseAutomationChanges };
 }
 
+/**
+ * `timds upgrade` in a consumer (product) repository, or null when `root` is
+ * not one. A product pins the Design System as its `design-system`
+ * submodule, which `loadWorkspace` would misread as an embedded system, so
+ * consumers are detected first and never reach the design-system upgrade.
+ */
+async function upgradeConsumerRepository(root, options) {
+  const { CONSUMER_MANIFEST_FILE, findConsumerManifestRoot } = await import("./consumer.mjs");
+  const consumerRoot = await findConsumerManifestRoot(root);
+  if (!consumerRoot) return null;
+  if (existsSync(path.join(consumerRoot, "timds.json"))) {
+    throw new Error(`${consumerRoot} has both timds.json (a Design System) and ${CONSUMER_MANIFEST_FILE} (a product that consumes one); keep the one this repository is and remove the other before upgrading`);
+  }
+  const unsupported = [["ownRuntime", "--own-runtime"], ["autoRelease", "--auto-release"], ["dependencyPrs", "--dependency-prs"]]
+    .filter(([name]) => options[name]).map(([, flag]) => flag);
+  if (unsupported.length) {
+    throw new Error(`${unsupported.join(", ")} ${unsupported.length === 1 ? "applies" : "apply"} only to Design System repositories; ${consumerRoot} is a consumer (${CONSUMER_MANIFEST_FILE}). Run timds upgrade${options.version ? ` --version ${options.version}` : ""} without ${unsupported.length === 1 ? "it" : "them"}.`);
+  }
+  if (options.version) {
+    const result = await upgradeConsumerToRelease(consumerRoot, { version: options.version, force: options.force });
+    output(`Prepared TimDS ${result.version} for consumer ${consumerRoot}; review the package, lockfile, and managed-file changes, then run npm run timds -- consumer check`);
+    return result;
+  }
+  const { upgradeConsumer } = await import("./consumer-init.mjs");
+  return upgradeConsumer(consumerRoot, { force: Boolean(options.force), output });
+}
+
 function parseArguments(argv) {
   const options = {};
   const positional = [];
@@ -1280,6 +1307,8 @@ export async function runCli(argv) {
     return result;
   }
   if (command === "upgrade") {
+    const consumerResult = await upgradeConsumerRepository(root, options);
+    if (consumerResult) return consumerResult;
     if (options.version) {
       const result = await upgradeToRelease(await loadWorkspace(root), {version: options.version, ownRuntime: options.ownRuntime, force: options.force});
       output(`Prepared TimDS ${result.version}; review dependency, lockfile, and managed-file changes before merging`);

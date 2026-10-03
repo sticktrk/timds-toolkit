@@ -30,6 +30,14 @@ explicit `upgrade --auto-release` migration; refuse customized files unless
 replacement is forced. Package and lockfile changes select the resolved package
 release.
 
+In a consumer (product) repository, the consumer-managed boundary is
+`.agents/skills/timds-consume-design-system/`, the
+`timds-consumer-preview.yml` and `timds-designer-change.yml` workflows, the
+tracked `.claude/launch.json` and `.mcp.json` entries, and `consumer` in
+`.timds/installation.json`; `upgrade` there refreshes only that boundary (and,
+with `--version`, the root package and lockfile) and never touches
+`timds.consumer.json`, other launch entries or MCP servers, or product source.
+
 `upgrade --version VERSION` selects one exact tested resolution, restores the
 bounded requirement, runs `npm ci`, synchronizes adopted managed files with the
 selected CLI, and validates the graph and workspace. Explicit `--own-runtime`

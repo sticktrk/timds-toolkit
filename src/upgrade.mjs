@@ -1,5 +1,6 @@
-// Dependency selection is explicit. Normal synchronization stays in core.mjs;
-// this command prepares dependency and managed-file changes for review.
+// Dependency selection is explicit. Normal synchronization stays in core.mjs
+// (and consumer-init.mjs for product repositories); this command prepares
+// dependency and managed-file changes for review in either kind of repository.
 import { execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
 import { createRequire } from "node:module";
@@ -66,8 +67,10 @@ export async function checkRuntimeDependencies({repoRoot, designSystemRoot}) {
   return result;
 }
 
-export async function upgradeToRelease(workspace, {version, ownRuntime = false, force = false, run = execute} = {}) {
-  const root = workspace.repoRoot;
+// Shared by design-system and consumer repositories: validate the bounded
+// line and the requested version, require a clean tree and a committed
+// matching lockfile, and resolve the exact release from the registry.
+async function selectRelease(root, version, invoke) {
   const packagePath = path.join(root, "package.json"), lockPath = path.join(root, "package-lock.json");
   const pkg = await readJson(packagePath);
   // The bounded line comes from the repository's own requirement, so moving to
@@ -75,7 +78,6 @@ export async function upgradeToRelease(workspace, {version, ownRuntime = false, 
   const line = declaredReleaseLine(pkg.devDependencies?.[packageName] ?? pkg.dependencies?.[packageName]);
   if (pkg.scripts?.timds !== "timds" || !line) throw new Error("Keep scripts.timds at timds and select a bounded MAJOR.MINOR.x dependency line before upgrading");
   if (version !== line && !(exactRelease(version) && releaseLineOf(version) === line)) throw new Error(`upgrade --version requires an exact stable ${line} release or ${line} to resolve the newest compatible release once`);
-  const invoke = (command, args) => run(command, args, {cwd: root, maxBuffer: 20_000_000});
   const status = await invoke("git", ["status", "--porcelain", "--untracked-files=all"]);
   if (status.stdout.trim()) throw new Error("Dependency upgrades require a clean working tree; commit or restore existing changes before selecting a release");
   const previousLock = await readJson(lockPath); // A committed baseline is required for rollback and review.
@@ -85,6 +87,35 @@ export async function upgradeToRelease(workspace, {version, ownRuntime = false, 
   const resolved = JSON.parse(metadataResult.stdout);
   const selected = Array.isArray(resolved) ? [...resolved].sort((a, b) => Number(b.version?.split(".")[2]) - Number(a.version?.split(".")[2]))[0] : resolved;
   if (!exactRelease(selected?.version) || releaseLineOf(selected.version) !== line || (version !== line && selected.version !== version)) throw new Error("Registry returned an unexpected TimDS release");
+  return {dependencyKey, lockPath, packagePath, pkg, previousLock, selected};
+}
+
+// Resolve the selected release exactly, then restore the bounded manifest
+// requirement without re-resolving the tested package graph.
+async function lockExactRelease({dedupe = true, dependencyKey, invoke, lockPath, packagePath, pkg, previousLock, selected}) {
+  const bounded = pkg[dependencyKey][packageName];
+  pkg[dependencyKey][packageName] = selected.version;
+  await writeJson(packagePath, pkg);
+  let lock;
+  try {
+    await invoke("npm", ["install", "--ignore-scripts"]);
+    if (dedupe) await invoke("npm", ["dedupe", "--ignore-scripts"]);
+    lock = await readJson(lockPath);
+  } finally {
+    pkg[dependencyKey][packageName] = bounded;
+    await writeJson(packagePath, pkg);
+    lock ??= await readJson(lockPath).catch(() => previousLock);
+    lock.packages[""][dependencyKey][packageName] = bounded;
+    await writeJson(lockPath, lock);
+  }
+  return lock;
+}
+
+export async function upgradeToRelease(workspace, {version, ownRuntime = false, force = false, run = execute} = {}) {
+  const root = workspace.repoRoot;
+  const invoke = (command, args) => run(command, args, {cwd: root, maxBuffer: 20_000_000});
+  const release = await selectRelease(root, version, invoke);
+  const {pkg, selected} = release;
   const installationPath = path.join(workspace.designSystemRoot, ".timds", "installation.json");
   const installation = await readJson(installationPath);
   const ownership = ownRuntime || installation.runtimeDependencyOwnership === "timds-v1";
@@ -98,23 +129,7 @@ export async function upgradeToRelease(workspace, {version, ownRuntime = false, 
       if (ownership) pkg[key][name] = expected;
     }
   }
-  const bounded = pkg[dependencyKey][packageName];
-  // Resolve the selected release exactly, then restore the bounded manifest
-  // requirement without re-resolving the tested package graph.
-  pkg[dependencyKey][packageName] = selected.version;
-  await writeJson(packagePath, pkg);
-  let lock;
-  try {
-    await invoke("npm", ["install", "--ignore-scripts"]);
-    await invoke("npm", ["dedupe", "--ignore-scripts"]);
-    lock = await readJson(lockPath);
-  } finally {
-    pkg[dependencyKey][packageName] = bounded;
-    await writeJson(packagePath, pkg);
-    lock ??= await readJson(lockPath).catch(() => previousLock);
-    lock.packages[""][dependencyKey][packageName] = bounded;
-    await writeJson(lockPath, lock);
-  }
+  const lock = await lockExactRelease({...release, invoke});
   validateLockedRuntime(lock, selected);
   await invoke("npm", ["ci"]);
   // The selected package performs synchronization and checks, so new CLI,
@@ -129,4 +144,26 @@ export async function upgradeToRelease(workspace, {version, ownRuntime = false, 
   await invoke("npm", ["run", "timds", "--", "check"]);
   if (pkg.scripts?.["check:timds-upgrade"]) await invoke("npm", ["run", "check:timds-upgrade"]);
   return {version: selected.version, runtimeDependencyOwnership: ownership ? "timds-v1" : null};
+}
+
+/**
+ * `timds upgrade --version VERSION` in a consumer (product) repository: the
+ * same exact selection under the bounded requirement as a Design System, then
+ * `npm ci` and the newly installed CLI's `upgrade`, which refreshes the
+ * consumer-managed files from that release's templates. A product owns its
+ * own React and other dependencies, so there is no runtime alignment, no
+ * dedupe of its graph, and no single-version runtime check; only the toolkit
+ * entry in the lockfile must resolve the selected release.
+ */
+export async function upgradeConsumerToRelease(repoRoot, {version, force = false, run = execute} = {}) {
+  const invoke = (command, args) => run(command, args, {cwd: repoRoot, maxBuffer: 20_000_000});
+  const release = await selectRelease(repoRoot, version, invoke);
+  const lock = await lockExactRelease({...release, dedupe: false, invoke});
+  const locked = lock.packages?.[`node_modules/${packageName}`]?.version;
+  if (locked !== release.selected.version) throw new Error(`package-lock.json resolves ${packageName} to ${locked ?? "nothing"}, expected ${release.selected.version}; review the lockfile before retrying`);
+  await invoke("npm", ["ci"]);
+  // The selected package refreshes the managed files, so the CLI, workflows,
+  // and skill always come from one release.
+  await invoke("npm", ["run", "timds", "--", "upgrade", ...(force ? ["--force"] : [])]);
+  return {version: release.selected.version};
 }
