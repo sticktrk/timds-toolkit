@@ -22,6 +22,19 @@ may touch. Work only in the repository the user supplied.
 3. Run `git submodule update --init __DESIGN_SYSTEM_PATH__` so the checkout
    matches the pin, then `npm ci` at repository root.
 4. Read the app's section under **This product** below before editing.
+5. When the branch has a pull request, read the designer's notes (below).
+
+## Designer notes
+
+The designer reviews the preview in the TimDS portal and leaves notes on it.
+Run `npm run timds -- consumer notes` at the start and again after each push
+(it needs `TIMDS_ACCESS_TOKEN` or `timds auth login`). Each note names the
+page, the element, and usually the source file and line. Treat the
+designer's words as the request and the element as where it applies. After
+pushing the fix, run `npm run timds -- consumer notes resolve <id>` for each
+note you addressed. Never mark a note addressed that you did not address; say
+why instead (in the pull request or your report), or
+`consumer notes resolve <id> --dismiss` when the designer agreed to drop it.
 
 ## The Design System is pinned, not edited here
 
@@ -107,8 +120,20 @@ npm run timds -- consumer check --base origin/__DEFAULT_BRANCH__
    preview instead.
 5. Never merge, mark ready for review, deploy, move the Design System pin, or
    change managed TimDS files (`.agents/skills/timds-consume-design-system/`,
-   `.github/workflows/timds-consumer-preview.yml`, `.timds/installation.json`)
+   `.github/workflows/timds-consumer-preview.yml`,
+   `.github/workflows/timds-designer-change.yml`, `.timds/installation.json`,
+   the TimDS entries in `.mcp.json` and `.claude/launch.json`)
    without separate authorization.
+
+## In the designer-change workflow
+
+When this skill runs inside `.github/workflows/timds-designer-change.yml`, the
+run is non-interactive: do not ask questions; make reasonable assumptions and
+state them in the pull request description. There is no local browser pane;
+skip **Look at it**, because the preview workflow publishes the review page
+after the run. The workflow authorizes committing, pushing, and opening the
+draft pull request; the rest of **Open the pull request only when asked**
+(never merge, never move the pin, never edit managed files) still holds.
 
 ## Report the result
 

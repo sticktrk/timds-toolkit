@@ -6,11 +6,19 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { gunzipSync } from "node:zlib";
+import http from "node:http";
 
-import { launchBrowser } from "./consumer-browser.mjs";
+import { MAX_MAP_ELEMENTS, launchBrowser } from "./consumer-browser.mjs";
+import { decodePng, encodePng } from "./consumer-png.mjs";
 import {
+  PREVIEW_LIMITS,
   buildConsumerPreview,
+  discoverablePath,
   normalizeRepository,
+  normalizeSourceFile,
+  parseSitemap,
+  routeKey,
+  scanPreviewTree,
   previewMetadataHeader,
   publishConsumerPreview,
   renderPreviewGallery,
@@ -174,7 +182,10 @@ test("static mode installs, builds, copies the output to site/, and writes previ
     designSystem: { systemId: "acme/core", commit: DESIGN_SYSTEM_COMMIT },
     mode: "static",
     site: "site/index.html",
+    compare: null,
+    changedRouteCount: 0,
     routes: [],
+    dropped: [],
     generatedAt: "2026-10-03T00:00:00Z",
   });
   const gallery = await fs.readFile(path.join(outputDir, "index.html"), "utf8");
@@ -224,10 +235,14 @@ test("build + output + routes serves the build with the static server and crawls
   assert.deepEqual(preview.routes[1], {
     path: "/contact",
     slug: "contact",
+    declared: true,
+    discovered: false,
     html: "pages/contact/dark.html",
     pages: [{ scheme: "dark", file: "pages/contact/dark.html" }],
     status: 200,
-    captures: [{ viewport: "phone", scheme: "dark", width: 390, height: 844, file: "captures/contact/phone-dark.png" }],
+    change: "unknown",
+    affectedBy: [],
+    captures: [{ viewport: "phone", scheme: "dark", width: 390, height: 844, file: "captures/contact/phone-dark.png", base: null, diff: null, map: null }],
   });
 });
 
@@ -386,7 +401,17 @@ test("publish tars and gzips the preview and posts it with metadata and bearer a
   assert.equal(init.headers["Content-Type"], "application/gzip");
   const metadata = JSON.parse(Buffer.from(init.headers["x-timds-build-metadata"], "base64").toString("utf8"));
   const { routes: _routes, ...summary } = preview;
-  assert.deepEqual(metadata, { ...summary, routeCount: 1, captureCount: 1 });
+  assert.deepEqual(metadata, { ...summary, compare: null, changedRouteCount: 0, routeCount: 1, captureCount: 1 });
+  const compared = {
+    ...preview,
+    compare: { base: "main", baseCommit: "f00d", status: "ready", reason: null, changedFiles: ["web/src/a.css"] },
+    changedRouteCount: 1,
+    dropped: [{ route: "/", what: "x", files: ["base/captures/root/desktop-light.png"] }],
+  };
+  const comparedMetadata = JSON.parse(Buffer.from(previewMetadataHeader(compared), "base64").toString("utf8"));
+  assert.deepEqual(comparedMetadata.compare, { base: "main", baseCommit: "f00d", status: "ready" });
+  assert.equal(comparedMetadata.changedRouteCount, 1);
+  assert.equal(comparedMetadata.dropped, undefined);
   assert.equal(init.headers["x-timds-build-metadata"], previewMetadataHeader(preview));
   const body = Buffer.from(init.body);
   assert.deepEqual([...body.subarray(0, 2)], [0x1f, 0x8b], "body is gzip");
@@ -407,4 +432,533 @@ test("publish tars and gzips the preview and posts it with metadata and bearer a
     if (saved !== undefined) process.env.TIMDS_ACCESS_TOKEN = saved;
   }
   await assert.rejects(publishConsumerPreview(path.join(outputDir, "nope"), { fetchImpl, token: "t" }), /preview\.json is missing/);
+});
+
+// ---------------------------------------------------------------------------
+// Discovery, comparison, element maps
+
+// A product whose pages are files under src/pages, stamped like Astro dev
+// output. argv[3] "absolute" stamps absolute paths (as Astro does); otherwise
+// the app-relative path.
+const PAGES_SERVER = `
+import fs from "node:fs";
+import http from "node:http";
+import path from "node:path";
+const port = Number(process.argv[2]);
+const absolute = process.argv[3] === "absolute";
+http.createServer((request, response) => {
+  const url = new URL(request.url, "http://local");
+  if (url.pathname === "/sitemap.xml") {
+    if (!fs.existsSync("sitemap.xml")) { response.writeHead(404); response.end("no"); return; }
+    response.writeHead(200, { "content-type": "application/xml" });
+    response.end(fs.readFileSync("sitemap.xml"));
+    return;
+  }
+  const name = url.pathname === "/" ? "index" : url.pathname.replace(/^\\/+|\\/+$/g, "");
+  const file = path.join("src", "pages", name + ".html");
+  if (!/^[a-z0-9/-]+$/.test(name) || !fs.existsSync(file)) {
+    response.writeHead(404, { "content-type": "text/html" });
+    response.end("<!doctype html><html><body><h1>Not found</h1></body></html>");
+    return;
+  }
+  const html = fs.readFileSync(file, "utf8").replaceAll("__FILE__", absolute ? path.resolve(file) : file.split(path.sep).join("/"));
+  response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+  response.end(html);
+}).listen(port, "127.0.0.1");
+`;
+
+const page = (title, body, color = "#222222") => `<!doctype html>
+<html><head><title>${title}</title><style>body { margin: 0; font: 20px sans-serif; } h1 { color: ${color}; padding: 40px; }</style></head>
+<body>
+<h1 data-astro-source-file="__FILE__" data-astro-source-loc="3:1">${title}</h1>
+${body}
+</body></html>
+`;
+
+async function writeFile(root, relative, content) {
+  const target = path.join(root, ...relative.split("/"));
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  await fs.writeFile(target, content, "utf8");
+}
+
+/**
+ * A git repo whose `main` branch holds `basePages` and whose checked-out
+ * branch `design/x` holds `headPages` (null deletes a page). `withManifest:
+ * false` leaves the manifest out of the base commit.
+ */
+async function createCompareRepo({ basePages, headPages, preview, withManifest = true, stamp = "relative", extraBase = {} }) {
+  const repoRoot = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "timds-consumer-compare-")));
+  const manifest = {
+    schemaVersion: 1,
+    designSystem: { path: "design-system", systemId: "acme/core" },
+    apps: { web: { cwd: "web", install: ["node", "-e", "require('fs').writeFileSync('installed.txt', 'yes')"], preview: { ...preview, serve: ["node", "server.mjs", String(preview.port), stamp] }, designSurface: ["src/**"] } },
+  };
+  git(repoRoot, "init", "-q", "-b", "main");
+  git(repoRoot, "config", "user.email", "test@example.com");
+  git(repoRoot, "config", "user.name", "Test");
+  git(repoRoot, "config", "commit.gpgsign", "false");
+  await writeFile(repoRoot, "web/server.mjs", PAGES_SERVER);
+  await writeFile(repoRoot, ".gitignore", "web/installed.txt\n");
+  for (const [name, html] of Object.entries(basePages)) await writeFile(repoRoot, `web/src/pages/${name}.html`, html);
+  for (const [file, content] of Object.entries(extraBase)) await writeFile(repoRoot, file, content);
+  if (withManifest) await writeFile(repoRoot, "timds.consumer.json", `${JSON.stringify(manifest, null, 2)}\n`);
+  git(repoRoot, "add", ".");
+  git(repoRoot, "commit", "-q", "-m", "base");
+  git(repoRoot, "checkout", "-q", "-b", "design/x");
+  if (!withManifest) await writeFile(repoRoot, "timds.consumer.json", `${JSON.stringify(manifest, null, 2)}\n`);
+  for (const [name, html] of Object.entries(headPages)) {
+    const target = path.join(repoRoot, "web", "src", "pages", `${name}.html`);
+    if (html === null) await fs.rm(target, { force: true });
+    else await writeFile(repoRoot, `web/src/pages/${name}.html`, html);
+  }
+  git(repoRoot, "add", "-A");
+  git(repoRoot, "commit", "-q", "-m", "head", "--allow-empty");
+  const consumer = await loadConsumer(repoRoot);
+  return { app: resolveConsumerApp(consumer, "web"), consumer, repoRoot };
+}
+
+const fnv = (text) => {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index += 1) hash = Math.imul(hash ^ text.charCodeAt(index), 0x01000193) >>> 0;
+  return hash;
+};
+
+// One 4-pixel band per line of HTML, coloured by that line, so one changed
+// line changes one band. Real PNG bytes, decodable by the diff.
+function bandsPng(lines, width = 20) {
+  const height = Math.max(1, lines.length) * 4;
+  const data = Buffer.alloc(width * height * 4);
+  lines.forEach((line, index) => {
+    const hash = fnv(line);
+    for (let y = index * 4; y < index * 4 + 4; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const at = (y * width + x) * 4;
+        data[at] = hash & 0xff;
+        data[at + 1] = (hash >>> 8) & 0xff;
+        data[at + 2] = (hash >>> 16) & 0xff;
+        data[at + 3] = 255;
+      }
+    }
+  });
+  return encodePng({ data, height, width });
+}
+
+// Stands in for Chrome with real PNGs, link harvesting, and element maps
+// built from the Astro stamps, so discovery and comparison run without a browser.
+function renderingBrowser(log = []) {
+  return async () => ({
+    async capture({ url, width, scheme, links, elementMap }) {
+      log.push({ elementMap: Boolean(elementMap), links: Boolean(links), path: new URL(url).pathname, scheme, width });
+      const response = await fetch(url);
+      const html = await response.text();
+      const lines = html.split("\n");
+      const result = { html, png: bandsPng(lines.map((line) => `${line}|${scheme}|${width}`)), status: response.status };
+      if (links) result.links = [...html.matchAll(/href="([^"]*)"/g)].map((match) => new URL(match[1], url).href);
+      if (elementMap) {
+        result.map = {
+          width: 20,
+          height: lines.length * 4,
+          elements: [...html.matchAll(/<(\w+)[^>]*data-astro-source-file="([^"]+)" data-astro-source-loc="(\d+):(\d+)"[^>]*>([^<]*)/g)].map((match, index) => ({
+            id: `e${index + 1}`,
+            rect: [0, index * 4, 20, 4],
+            selector: `body > ${match[1]}:nth-of-type(1)`,
+            tag: match[1],
+            text: match[5].trim(),
+            source: { file: match[2], line: Number(match[3]), column: Number(match[4]) },
+          })),
+        };
+      }
+      return result;
+    },
+    async close() {},
+  });
+}
+
+const worktreeCount = (repoRoot) => git(repoRoot, "worktree", "list", "--porcelain").split("\n").filter((line) => line.startsWith("worktree ")).length;
+
+test("routeKey, discoverablePath, and parseSitemap normalise discovered links", () => {
+  assert.equal(routeKey("/about/"), "/about");
+  assert.equal(routeKey("/"), "/");
+  const origin = "http://127.0.0.1:4321";
+  assert.equal(discoverablePath("/about?x=1#top", origin), "/about");
+  assert.equal(discoverablePath("http://localhost:4321/team/", origin), "/team/");
+  assert.equal(discoverablePath("http://localhost:9999/team", origin), null);
+  assert.equal(discoverablePath("https://elsewhere.test/page", origin), null);
+  assert.equal(discoverablePath("mailto:hi@example.com", origin), null);
+  assert.equal(discoverablePath("/files/report.pdf", origin), null);
+  assert.equal(discoverablePath("/legacy/page.html", origin), "/legacy/page.html");
+  assert.equal(discoverablePath("/admin/users", origin, ["/admin/**"]), null);
+  assert.equal(discoverablePath("/admin", origin, ["/admin/**"]), null);
+  assert.equal(discoverablePath("/administrator", origin, ["/admin/**"]), "/administrator");
+  assert.equal(discoverablePath("/blog/2026/print", origin, ["/blog/*/print"]), null);
+  assert.deepEqual(parseSitemap(`<?xml version="1.0"?><urlset><url><loc> https://x.test/a?b=1&amp;c=2 </loc></url><url><loc><![CDATA[https://x.test/b]]></loc></url></urlset>`), {
+    index: false,
+    locs: ["https://x.test/a?b=1&c=2", "https://x.test/b"],
+  });
+  assert.equal(parseSitemap("<sitemapindex><sitemap><loc>https://x.test/s1.xml</loc></sitemap></sitemapindex>").index, true);
+});
+
+test("discovery follows same-origin links breadth-first, reads the sitemap, skips excluded paths, and stops at the limit", async () => {
+  const port = await freePort();
+  const index = page("Home", [
+    '<a href="/about">About</a>',
+    '<a href="/contact?ref=nav#top">Contact</a>',
+    '<a href="/about/">About again</a>',
+    '<a href="/files/report.pdf">Report</a>',
+    '<a href="https://elsewhere.test/page">Elsewhere</a>',
+    '<a href="/admin/secret">Admin</a>',
+    '<a href="mailto:hi@example.com">Mail</a>',
+  ].join("\n"));
+  const pages = {
+    index,
+    about: page("About", '<a href="/team">Team</a>'),
+    contact: page("Contact", ""),
+    team: page("Team", ""),
+    blog: page("Blog", ""),
+    "admin/secret": page("Secret", ""),
+    "admin/hidden": page("Hidden", ""),
+  };
+  const sitemap = `<?xml version="1.0"?><urlset><url><loc>https://shop.example.com/blog</loc></url><url><loc>https://shop.example.com/admin/hidden</loc></url><url><loc>https://shop.example.com/about</loc></url></urlset>`;
+  const { app, consumer, repoRoot } = await createCompareRepo({
+    basePages: pages,
+    headPages: {},
+    extraBase: { "web/sitemap.xml": sitemap },
+    preview: { port, routes: ["/"], viewports: ["phone"], schemes: ["light"], discover: { exclude: ["/admin/**"], limit: 3 } },
+  });
+  const log = [];
+  const preview = await buildConsumerPreview(consumer, app, { env: cleanEnv(), install: false, launchBrowser: renderingBrowser(log) });
+  assert.deepEqual(preview.routes.map((route) => [route.path, route.declared, route.discovered, route.change]), [
+    ["/", true, false, "unknown"],
+    ["/about", false, true, "unknown"],
+    ["/contact", false, true, "unknown"],
+    ["/blog", false, true, "unknown"],
+  ]);
+  assert.ok(log.every((entry) => entry.elementMap), "head captures ask for element maps");
+  assert.equal(await portAnswers(port), false);
+
+  const wide = { ...consumer, apps: { web: { ...consumer.apps.web, preview: { ...consumer.apps.web.preview, discover: { from: ["/"], exclude: ["/admin/**"], limit: 10 } } } } };
+  const widePreview = await buildConsumerPreview(wide, resolveConsumerApp(wide, "web"), { env: cleanEnv(), install: false, launchBrowser: renderingBrowser() });
+  assert.deepEqual(widePreview.routes.map((route) => route.path), ["/", "/about", "/contact", "/blog", "/team"]);
+  const outputDir = path.join(repoRoot, ".timds", "preview", "web");
+  const map = await readJson(path.join(outputDir, "maps", "about", "phone-light.json"));
+  assert.deepEqual(map.elements[0].source, { file: "web/src/pages/about.html", line: 3, column: 1 });
+  assert.equal(widePreview.routes[1].captures[0].map, "maps/about/phone-light.json");
+});
+
+test("--base compares the merge base built in a temporary worktree with HEAD", async () => {
+  const port = await freePort();
+  const nav = '<a href="/about">About</a>\n<a href="/contact">Contact</a>';
+  const { repoRoot } = await createCompareRepo({
+    basePages: { index: page("Home", nav), about: page("About", "<p>Old copy</p>"), contact: page("Contact", "") },
+    headPages: { about: page("About", "<p>New copy</p>", "#c0007a"), pricing: page("Pricing", "") },
+    preview: { port, routes: ["/", "/pricing"], discover: {} },
+  });
+  const baseSha = git(repoRoot, "rev-parse", "main");
+  const lines = [];
+  const result = await runConsumerPreview(["--root", repoRoot, "--app", "web", "--base", "main", "--no-install"], {
+    launchBrowser: renderingBrowser(),
+    output: (line) => lines.push(line),
+  });
+  const { preview, outputDir } = result;
+  assert.equal(await portAnswers(port), false, "the port is free afterwards");
+  assert.equal(worktreeCount(repoRoot), 1, "the base worktree is removed");
+  assert.equal(git(repoRoot, "worktree", "list").includes("base-checkout"), false);
+  assert.deepEqual(preview.compare, { base: "main", baseCommit: baseSha, status: "ready", reason: null, changedFiles: ["web/src/pages/about.html", "web/src/pages/pricing.html"] });
+  assert.equal(preview.changedRouteCount, 2);
+  const byPath = Object.fromEntries(preview.routes.map((route) => [route.path, route]));
+  assert.deepEqual(preview.routes.map((route) => [route.path, route.declared, route.discovered, route.change]), [
+    ["/", true, false, "unchanged"],
+    ["/pricing", true, false, "added"],
+    ["/about", false, true, "changed"],
+    ["/contact", false, true, "unchanged"],
+  ]);
+  assert.deepEqual(byPath["/about"].affectedBy, ["web/src/pages/about.html"]);
+  assert.deepEqual(byPath["/pricing"].affectedBy, ["web/src/pages/pricing.html"]);
+  assert.deepEqual(byPath["/"].affectedBy, []);
+  assert.deepEqual(byPath["/contact"].captures, [], "unchanged discovered routes are listed without captures");
+  assert.equal(byPath["/contact"].html, null);
+  assert.equal(byPath["/"].captures.length, 4, "declared routes get the full matrix even when unchanged");
+  for (const capture of byPath["/"].captures) {
+    assert.equal(capture.diff.changedPixels, 0);
+    assert.ok(existsSync(path.join(outputDir, capture.base.file)));
+  }
+  const about = byPath["/about"].captures[0];
+  assert.deepEqual(Object.keys(about), ["viewport", "scheme", "width", "height", "file", "base", "diff", "map"]);
+  assert.equal(about.base.file, "base/captures/about/desktop-light.png");
+  assert.equal(about.diff.file, "diffs/about/desktop-light.png");
+  assert.equal(about.map, "maps/about/desktop-light.json");
+  assert.ok(about.diff.changedRatio > 0.0005 && about.diff.changedPixels > 0);
+  const overlay = decodePng(await fs.readFile(path.join(outputDir, about.diff.file)));
+  const head = decodePng(await fs.readFile(path.join(outputDir, about.file)));
+  assert.equal(overlay.width, head.width);
+  assert.equal(byPath["/about"].captures.length, 4);
+  assert.ok(lines.some((line) => line.includes("2 of 4 pages changed compared with main")));
+  const written = await readJson(path.join(outputDir, "preview.json"));
+  assert.deepEqual(written, preview);
+
+  const gallery = await fs.readFile(path.join(outputDir, "index.html"), "utf8");
+  assert.match(gallery, /2 of 4 pages changed compared with main/);
+  assert.doesNotMatch(gallery, /<script/i);
+  assert.ok(gallery.indexOf('id="route-about"') < gallery.indexOf('id="route-root"'), "changed routes come first");
+  assert.match(gallery, /<details class="unchanged"><summary>2 pages without visible changes<\/summary>/);
+  assert.match(gallery, /Likely from the edits to <span title="web\/src\/pages\/about.html">about\.html<\/span>/);
+  assert.match(gallery, /<input type="radio" class="pick pick-before"/);
+  for (const match of gallery.matchAll(/(?:href|src)="([^"]+)"/g)) {
+    assert.doesNotMatch(match[1], /^(?:\/|[a-z]+:)/i, `gallery link ${match[1]} must be relative`);
+    if (!match[1].startsWith("#")) assert.ok(existsSync(path.join(outputDir, decodeURIComponent(match[1]))), match[1]);
+  }
+
+  // Over the archive limits: base and diff images of the unchanged declared route go first.
+  const { files } = await scanPreviewTree(outputDir, "preview");
+  const consumer = await loadConsumer(repoRoot);
+  const limited = await buildConsumerPreview(consumer, resolveConsumerApp(consumer, "web"), {
+    base: "main",
+    env: cleanEnv(),
+    install: false,
+    launchBrowser: renderingBrowser(),
+    limits: { ...PREVIEW_LIMITS, maxFiles: files.length - 1 },
+    output: () => {},
+  });
+  assert.deepEqual(limited.dropped.map((entry) => [entry.route, entry.files.length]), [["/", 8]]);
+  assert.match(limited.dropped[0].what, /unchanged/);
+  const root = limited.routes.find((route) => route.path === "/");
+  assert.ok(root.captures.every((capture) => capture.base === null && capture.diff === null));
+  assert.ok(!existsSync(path.join(outputDir, "base", "captures", "root")));
+  assert.ok(limited.routes.find((route) => route.path === "/about").captures.every((capture) => capture.base && capture.diff));
+  assert.match(await fs.readFile(path.join(outputDir, "index.html"), "utf8"), /some images were left out/);
+});
+
+test("--base records an unavailable comparison and still previews the head when the base cannot be shown", async () => {
+  const port = await freePort();
+  const { app, consumer, repoRoot } = await createCompareRepo({
+    basePages: { index: page("Home", "") },
+    headPages: { index: page("Home", "<p>New</p>") },
+    preview: { port, routes: ["/"], viewports: ["phone"], schemes: ["light"] },
+    withManifest: false,
+  });
+  const lines = [];
+  const preview = await buildConsumerPreview(consumer, app, { base: "main", env: cleanEnv(), install: false, launchBrowser: renderingBrowser(), output: (line) => lines.push(line) });
+  assert.equal(preview.compare.status, "unavailable");
+  assert.match(preview.compare.reason, /timds\.consumer\.json does not exist at main/);
+  assert.equal(preview.compare.baseCommit, git(repoRoot, "rev-parse", "main"));
+  assert.equal(preview.changedRouteCount, 0);
+  assert.deepEqual(preview.routes.map((route) => [route.path, route.change, route.captures.length, route.captures[0].base]), [["/", "unknown", 1, null]]);
+  assert.ok(lines.some((line) => line.startsWith("Comparison unavailable:")));
+  const gallery = await fs.readFile(path.join(repoRoot, ".timds", "preview", "web", "index.html"), "utf8");
+  assert.match(gallery, /Comparison with main was not available: timds\.consumer\.json does not exist/);
+
+  // The base exists but its serve command fails: unavailable, worktree removed, head still captured.
+  const broken = await createCompareRepo({
+    basePages: { index: page("Home", "") },
+    headPages: { index: page("Home", "<p>New</p>") },
+    preview: { port, routes: ["/"], viewports: ["phone"], schemes: ["light"] },
+  });
+  await fs.writeFile(path.join(broken.repoRoot, "web", "server.mjs"), PAGES_SERVER);
+  git(broken.repoRoot, "checkout", "-q", "main");
+  await fs.writeFile(path.join(broken.repoRoot, "web", "server.mjs"), "process.exit(4)\n");
+  git(broken.repoRoot, "commit", "-q", "-am", "broken base server");
+  git(broken.repoRoot, "checkout", "-q", "design/x");
+  git(broken.repoRoot, "merge", "-q", "-s", "ours", "main", "-m", "keep head server");
+  const brokenPreview = await buildConsumerPreview(broken.consumer, broken.app, { base: "main", env: cleanEnv(), install: false, launchBrowser: renderingBrowser() });
+  assert.equal(brokenPreview.compare.status, "unavailable");
+  assert.match(brokenPreview.compare.reason, /did not build or start at main/);
+  assert.equal(brokenPreview.routes[0].captures.length, 1);
+  assert.equal(worktreeCount(broken.repoRoot), 1);
+  assert.equal(await portAnswers(port), false);
+
+  await assert.rejects(buildConsumerPreview(consumer, app, { base: "no-such-branch", env: cleanEnv(), install: false, launchBrowser: renderingBrowser() }), /Could not find where no-such-branch and HEAD diverge.*git fetch/);
+  await assert.rejects(runConsumerPreview(["--root", repoRoot, "--app", "web", "--base="]), /--base requires a value/);
+});
+
+test("normalizeSourceFile makes source stamps repository-relative", () => {
+  const exists = (target) => ["/repo/web/src/App.tsx", "/repo/web/src/pages/a.astro", "/repo/lib/x.ts"].includes(target.split(path.sep).join("/"));
+  const options = { appCwd: "web", exists, repoRoot: "/repo", roots: ["/private/repo", "/tmp/work/base-checkout"] };
+  assert.equal(normalizeSourceFile("/repo/web/src/pages/a.astro", options), "web/src/pages/a.astro");
+  assert.equal(normalizeSourceFile("/private/repo/web/src/pages/a.astro", options), "web/src/pages/a.astro");
+  assert.equal(normalizeSourceFile("/tmp/work/base-checkout/web/src/x.css", options), "web/src/x.css");
+  assert.equal(normalizeSourceFile("file:///repo/web/src/App.tsx", options), "web/src/App.tsx");
+  assert.equal(normalizeSourceFile("src/App.tsx", options), "web/src/App.tsx");
+  assert.equal(normalizeSourceFile("./src/App.tsx", options), "web/src/App.tsx");
+  assert.equal(normalizeSourceFile("/src/App.tsx", options), "web/src/App.tsx");
+  assert.equal(normalizeSourceFile("lib/x.ts", options), "lib/x.ts");
+  assert.equal(normalizeSourceFile("src/Missing.tsx", options), "src/Missing.tsx");
+  assert.equal(normalizeSourceFile("/elsewhere/x.ts", options), "/elsewhere/x.ts");
+  assert.equal(normalizeSourceFile("", options), null);
+});
+
+test("the gallery puts changed routes first with a CSS-only before/after switch and no scripts", () => {
+  const capture = (slug, extra = {}) => ({
+    viewport: "desktop", scheme: "light", width: 1440, height: 900, file: `captures/${slug}/desktop-light.png`,
+    base: { file: `base/captures/${slug}/desktop-light.png`, width: 1440, height: 1600 },
+    diff: { file: `diffs/${slug}/desktop-light.png`, changedPixels: 5000, changedRatio: 0.0021 },
+    map: `maps/${slug}/desktop-light.json`,
+    ...extra,
+  });
+  const route = (pathName, slug, change, extra = {}) => ({ path: pathName, slug, declared: true, discovered: false, html: null, pages: [], status: 200, change, affectedBy: [], captures: [capture(slug)], ...extra });
+  const html = renderPreviewGallery({
+    schemaVersion: 1, app: "web", repository: "acme/shop", branch: "design/x", commit: "abc", pullRequest: 4,
+    designSystem: { systemId: "acme/core", commit: null }, mode: "crawl",
+    compare: { base: "master", baseCommit: "0123456789", status: "ready", reason: null, changedFiles: [] },
+    changedRouteCount: 1,
+    routes: [
+      route("/", "root", "unchanged", { captures: [capture("root", { diff: { file: "diffs/root/desktop-light.png", changedPixels: 0, changedRatio: 0 } })] }),
+      route("/blog", "blog", "unchanged", { declared: false, discovered: true, captures: [] }),
+      route("/about", "about", "changed", { affectedBy: ["web/src/components/Hero.astro", "web/src/styles/site.css"] }),
+    ],
+    dropped: [],
+    generatedAt: "2026-10-03T00:00:00Z",
+  });
+  assert.match(html, /1 of 3 pages changed compared with master\./);
+  assert.ok(html.indexOf('id="route-about"') < html.indexOf("<details"), "the changed route precedes the collapsed unchanged ones");
+  assert.ok(html.indexOf('id="route-root"') > html.indexOf("<details"));
+  assert.match(html, /<span class="badge badge-changed">Changed<\/span>/);
+  assert.match(html, /Likely from the edits to <span title="web\/src\/components\/Hero.astro">Hero\.astro<\/span> and <span title="web\/src\/styles\/site.css">site\.css<\/span>\./);
+  assert.match(html, /<label class="tab tab-before" for="c\d+-before">Before<\/label><label class="tab tab-after" for="c\d+-after">After<\/label><label class="tab tab-changes" for="c\d+-changes">Changes<\/label>/);
+  assert.match(html, /\.pick-changes:checked ~ \.view-changes/);
+  assert.match(html, /0\.2% of pixels differ/);
+  assert.match(html, /found by crawling/);
+  assert.doesNotMatch(html, /<script/i);
+  assert.doesNotMatch(html, /(?:href|src)="\//);
+  const ids = [...html.matchAll(/ id="(c\d+-[a-z]+)"/g)].map((match) => match[1]);
+  assert.equal(new Set(ids).size, ids.length, "radio ids are unique");
+});
+
+// ---------------------------------------------------------------------------
+// Real Chrome
+
+async function serveHtml(html) {
+  const server = http.createServer((request, response) => {
+    response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+    response.end(html);
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  return { origin: `http://127.0.0.1:${server.address().port}`, close: () => new Promise((resolve) => server.close(resolve)) };
+}
+
+test("element maps list visible elements with full-page rects, stable selectors, own text, and source stamps (real Chrome)", async (t) => {
+  const unavailable = await realBrowserAvailable();
+  if (unavailable) {
+    t.skip(unavailable);
+    return;
+  }
+  const filler = Array.from({ length: MAX_MAP_ELEMENTS + 300 }, () => '<i style="display:block;height:2px"></i>').join("");
+  const html = `<!doctype html><html><head><style>body{margin:0} .h{visibility:hidden} .n{display:none}</style></head><body>
+<header id="top"><h1 data-astro-source-file="/abs/repo/web/src/pages/index.astro" data-astro-source-loc="12:4">  Welcome
+   home  </h1></header>
+<p data-source-file="src/a.tsx" data-source-line="7">Source stamp</p>
+<p data-lov-id="src/components/Hero.tsx:21:9">Lovable</p>
+<p data-component-path="src/B.tsx" data-component-line="3">Component</p>
+<p data-inspector-relative-path="src/C.tsx" data-inspector-line="4" data-inspector-column="2">Inspector</p>
+<div id="dup">a</div><div id="dup">b</div>
+<p class="h">hidden</p><p class="n">gone</p><span></span>
+<a href="/next?x=1">Next</a>
+${filler}
+<p id="last">Last words</p>
+</body></html>`;
+  const server = await serveHtml(html);
+  const browser = await launchBrowser({ allowDownload: false });
+  try {
+    const shot = await browser.capture({ elementMap: true, height: 900, links: true, scheme: "light", url: `${server.origin}/`, width: 1440 });
+    assert.deepEqual(shot.links, [`${server.origin}/next?x=1`]);
+    const { elements } = shot.map;
+    assert.equal(shot.map.width, 1440);
+    assert.equal(elements.length, MAX_MAP_ELEMENTS, "capped");
+    assert.deepEqual(elements.map((element) => element.id).slice(0, 3), ["e1", "e2", "e3"]);
+    assert.equal(elements.at(-1).id, `e${MAX_MAP_ELEMENTS}`);
+    const byText = (text) => elements.find((element) => element.text === text);
+    const heading = byText("Welcome home");
+    assert.deepEqual(heading.source, { file: "/abs/repo/web/src/pages/index.astro", line: 12, column: 4 });
+    assert.equal(heading.selector, "#top > h1:nth-of-type(1)");
+    assert.equal(heading.tag, "h1");
+    assert.equal(heading.rect.length, 4);
+    assert.deepEqual(byText("Source stamp").source, { file: "src/a.tsx", line: 7, column: null });
+    assert.deepEqual(byText("Lovable").source, { file: "src/components/Hero.tsx", line: 21, column: 9 });
+    assert.deepEqual(byText("Component").source, { file: "src/B.tsx", line: 3, column: null });
+    assert.deepEqual(byText("Inspector").source, { file: "src/C.tsx", line: 4, column: 2 });
+    assert.equal(byText("a").selector, "body > div:nth-of-type(1)", "duplicate ids fall back to nth-of-type");
+    assert.equal(byText("hidden"), undefined);
+    assert.equal(byText("gone"), undefined);
+    const last = byText("Last words");
+    assert.ok(last, "text-bearing elements survive the cap");
+    assert.equal(last.selector, "#last");
+    assert.ok(last.rect[1] > 900, "rects are in full-page coordinates");
+    const order = elements.map((element) => Number(element.id.slice(1)));
+    assert.deepEqual(order, [...order].sort((left, right) => left - right));
+    assert.equal(elements.filter((element) => element.tag === "i").length, MAX_MAP_ELEMENTS - elements.filter((element) => element.tag !== "i").length);
+  } finally {
+    await browser.close();
+    await server.close();
+  }
+});
+
+test("--base compares real Chrome captures and maps Astro stamps to changed files (real Chrome)", async (t) => {
+  const unavailable = await realBrowserAvailable();
+  if (unavailable) {
+    t.skip(unavailable);
+    return;
+  }
+  const port = await freePort();
+  const { app, consumer, repoRoot } = await createCompareRepo({
+    basePages: { index: page("Home", '<a href="/about">About</a>'), about: page("About", "<p>Old copy</p>") },
+    headPages: { about: page("About", "<p>New copy, longer than before</p>", "#c0007a") },
+    preview: { port, routes: ["/"], viewports: ["desktop"], schemes: ["light"], discover: {} },
+    stamp: "absolute",
+  });
+  const preview = await buildConsumerPreview(consumer, app, { allowBrowserDownload: false, base: "main", env: cleanEnv(), install: false, output: () => {} });
+  const outputDir = path.join(repoRoot, ".timds", "preview", "web");
+  assert.equal(preview.compare.status, "ready");
+  assert.equal(await portAnswers(port), false);
+  assert.equal(worktreeCount(repoRoot), 1);
+  const [root, about] = preview.routes;
+  assert.equal(root.change, "unchanged");
+  assert.equal(root.captures[0].diff.changedPixels, 0);
+  assert.equal(about.change, "changed");
+  assert.deepEqual(about.affectedBy, ["web/src/pages/about.html"]);
+  const map = await readJson(path.join(outputDir, about.captures[0].map));
+  assert.equal(map.schemaVersion, 1);
+  assert.equal(map.width, 1440);
+  const heading = map.elements.find((element) => element.tag === "h1");
+  assert.deepEqual(heading.source, { file: "web/src/pages/about.html", line: 3, column: 1 });
+  assert.equal(heading.text, "About");
+  const overlay = decodePng(await fs.readFile(path.join(outputDir, about.captures[0].diff.file)));
+  assert.equal(overlay.width, 1440);
+  assert.ok(about.captures[0].diff.changedRatio > 0.0005);
+});
+
+test("--base reuses the checked-out Design System for the base worktree without fetching it", async () => {
+  const port = await freePort();
+  const { repoRoot } = await createCompareRepo({
+    basePages: { index: page("Home", "<p>Old</p>") },
+    headPages: { index: page("Home", "<p>New</p>") },
+    preview: { port, routes: ["/"] },
+  });
+  // A real pinned submodule on the base branch, merged into the design branch.
+  const systemRoot = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "timds-consumer-system-")));
+  git(systemRoot, "init", "-q", "-b", "main");
+  git(systemRoot, "config", "user.email", "test@example.com");
+  git(systemRoot, "config", "user.name", "Test");
+  git(systemRoot, "config", "commit.gpgsign", "false");
+  await writeFile(systemRoot, "timds.json", "{}\n");
+  git(systemRoot, "add", ".");
+  git(systemRoot, "commit", "-q", "-m", "system");
+  git(repoRoot, "checkout", "-q", "main");
+  git(repoRoot, "-c", "protocol.file.allow=always", "submodule", "add", "-q", systemRoot, "design-system");
+  // The recorded URL stops resolving, the way CI has no credentials for it
+  // outside the one checkout step: only the local link can provide the base.
+  git(repoRoot, "config", "-f", ".gitmodules", "submodule.design-system.url", path.join(systemRoot, "gone"));
+  git(repoRoot, "add", ".gitmodules", "design-system");
+  git(repoRoot, "commit", "-q", "-m", "pin the design system");
+  git(repoRoot, "checkout", "-q", "design/x");
+  git(repoRoot, "merge", "-q", "--no-edit", "main");
+  const lines = [];
+  const { preview } = await runConsumerPreview(["--root", repoRoot, "--app", "web", "--base", "main", "--no-install"], {
+    launchBrowser: renderingBrowser(),
+    output: (line) => lines.push(line),
+  });
+  assert.equal(preview.compare.status, "ready");
+  assert.equal(preview.routes[0].change, "changed");
+  assert.equal(lines.some((line) => /could not check out design-system/.test(line)), false, lines.join("\n"));
+  assert.equal(worktreeCount(repoRoot), 1, "the base worktree is removed");
+  assert.equal(worktreeCount(path.join(repoRoot, "design-system")), 1, "the linked Design System worktree is removed");
+  assert.equal(await portAnswers(port), false);
 });

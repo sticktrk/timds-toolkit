@@ -201,6 +201,13 @@ crawl it). `ready` defaults to `/`, `viewports` to `["desktop", "phone"]`
 `designSurface` and `protected` are globs (`**`, `*`, `?`) relative to the
 app's `cwd`; `protected` always wins.
 
+In crawl mode, `preview.discover` adds routes beyond `routes`: starting from
+`from` (default `["/"]`), it follows same-origin `<a href>` links breadth-first
+and reads `/sitemap.xml` when the app serves one (sitemap entries are used by
+path), skipping query strings, non-page files, and `exclude` URL path globs
+such as `"/admin/**"`, until `limit` routes (default 40, at most 200) are found.
+Declared `routes` always come first and always stay.
+
 - `timds consumer check [--app NAME] [--base REF]` validates the manifest,
   that the submodule is pinned and checked out (warning when the checkout
   drifts from the pin), and that every app's `cwd` exists. With `--base`, it
@@ -212,10 +219,55 @@ app's `cwd`; `protected` always wins.
   this on every pull request and reports a scope failure in the preview
   comment without failing the job, since developer pull requests leave the
   surface by design.
-- `timds consumer preview --app NAME [--publish]` builds or serves the app and
-  writes a review gallery to `.timds/preview/<app>/`.
-- `timds consumer init [--skip-install]` writes a manifest skeleton and installs the managed
-  consumer skill and preview workflow.
+- `timds consumer preview --app NAME [--base REF] [--publish]` builds or serves
+  the app and writes a review folder to `.timds/preview/<app>/`: `preview.json`,
+  a script-free gallery `index.html`, `captures/` (full-page PNGs per route,
+  viewport, and scheme), `pages/` (rendered HTML), and, in crawl mode,
+  `maps/<route>/<viewport>-<scheme>.json`: every visible element's full-page
+  rectangle, CSS selector, own text, and source location when the dev server
+  stamps one (Astro dev, `data-source-file`, lovable-tagger, react-dev-inspector,
+  React's `_debugSource`), relative to the repository. With `--base`, the
+  merge base of REF and HEAD is first built and served in a temporary git
+  worktree (with its own manifest, install, and commands, on the same port,
+  before the head starts) and every route is compared: each route records
+  `change` (`changed`, `unchanged`, `added`, `removed`) and `affectedBy`, the
+  changed files its element maps point at. Changed and declared routes get
+  `base/captures/` and `diffs/` overlays (the head faded, changed pixels in
+  magenta); unchanged discovered routes are listed without captures. When
+  the base cannot be built or has no manifest, the preview still covers the
+  head and `compare.reason` says why. When the folder would exceed the
+  portal's upload limits, the least useful images are left out and listed
+  under `dropped`.
+- `timds consumer init [--skip-install] [--portal-url URL]` writes a manifest
+  skeleton and installs the managed consumer skill, the preview and
+  designer-change workflows, `.claude/launch.json` entries, and the
+  `timds-design-system-read` HTTP MCP server in `.mcp.json` (authorized with
+  `TIMDS_ACCESS_TOKEN` from the environment). Merged entries beside your own
+  are tracked one by one; customized ones are kept unless `--force`.
+- `timds consumer notes [--app NAME] [--pull-request N] [--all] [--json]`
+  lists the notes a designer left on the pull request's preview in the portal,
+  grouped by page, with the element, its source `file:line` when the dev build
+  stamps one, and the designer's words. `timds consumer notes resolve ID...
+  [--commit SHA] [--dismiss]` marks them addressed (or dismissed) after the fix
+  is pushed. Both need `TIMDS_ACCESS_TOKEN` or `timds auth login`.
+
+The designer-change workflow (`.github/workflows/timds-designer-change.yml`)
+lets a designer start a change with no setup. An issue labeled
+`timds-design-change` (the portal opens one from a plain-language request), a
+comment carrying `<!-- timds-designer-request -->` on a `design/` pull request
+or on such an issue (the portal posts review notes this way, with a fenced
+`json` block of notes), or a manual dispatch runs Claude with the consumer
+skill on a `design/<issue>-<title>` branch. Claude stays inside the design
+surface, runs `consumer check`, pushes, opens a draft pull request that closes
+the issue, and the workflow then calls the preview workflow, because pushes
+made with the job token start no other workflows. Nothing is merged. Only
+owners, members, collaborators, and the bots listed in the
+`TIMDS_DESIGNER_BOTS` repository variable (the portal's GitHub App bot login)
+can trigger it, and fork branches are skipped. It needs the
+`ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` secret, the
+`timds-design-change` label, and permission for Actions to create pull
+requests; with `TIMDS_ACCESS_TOKEN` it also reads and resolves notes through
+the portal.
 
 Hosts and other tools read the manifest with `loadConsumer` from
 `@dtconcepts/timds/consumer`.

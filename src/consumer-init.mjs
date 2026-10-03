@@ -10,14 +10,22 @@
 //                                                 product half rendered from
 //                                                 the manifest
 //   .github/workflows/timds-consumer-preview.yml  the PR preview workflow
+//   .github/workflows/timds-designer-change.yml   the zero-setup designer
+//                                                 change workflow (Claude
+//                                                 makes a requested change on
+//                                                 a design/ branch)
 //   .claude/launch.json                           one entry per crawl-mode app,
 //                                                 merged beside existing ones
+//   .mcp.json                                     the Design System read MCP
+//                                                 server entry, merged beside
+//                                                 existing servers
 //
-// Every managed file's sha256 (and every launch entry's) is recorded under
-// `consumer` in root `.timds/installation.json`, so a rerun or a later
+// Every managed file's sha256 (and every launch and MCP entry's) is recorded
+// under `consumer` in root `.timds/installation.json`, so a rerun or a later
 // `upgrade` refreshes files nobody edited and refuses customized ones unless
-// forced. `renderConsumerSkill`, `consumerManagedFiles`, and
-// `consumerLaunchConfigurations` are exported for that reuse.
+// forced. `renderConsumerSkill`, `consumerManagedFiles`,
+// `consumerLaunchConfigurations`, and `consumerMcpServers` are exported for
+// that reuse.
 //
 // Boundary: init never edits product source, the Design System submodule, or
 // an existing manifest (it is kept unless --force regenerates it). The guesses
@@ -38,21 +46,29 @@ const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "
 export const CONSUMER_SKILL_NAME = "timds-consume-design-system";
 export const CONSUMER_SKILL_PATH = `.agents/skills/${CONSUMER_SKILL_NAME}`;
 export const CONSUMER_WORKFLOW_PATH = ".github/workflows/timds-consumer-preview.yml";
+export const CONSUMER_DESIGNER_WORKFLOW_PATH = ".github/workflows/timds-designer-change.yml";
 export const CONSUMER_LAUNCH_PATH = ".claude/launch.json";
+export const CONSUMER_MCP_PATH = ".mcp.json";
+export const CONSUMER_MCP_SERVER_NAME = "timds-design-system-read";
+export const CONSUMER_DESIGN_CHANGE_LABEL = "timds-design-change";
 export const CONSUMER_INSTALLATION_PATH = ".timds/installation.json";
 
 const DEFAULT_DESIGN_SYSTEM_PATH = "design-system";
+const DEFAULT_PORTAL_URL = "https://timds.com";
+const DEFAULT_DISCOVER = Object.freeze({ from: ["/"], limit: 40 });
 const SURFACE_CANDIDATES = ["src/styles", "src/components", "src/pages", "src/app", "public"];
 const SKIPPED_DIRECTORIES = new Set(["node_modules"]);
 
 const INIT_HELP = `Usage:
-  timds consumer init [--root PATH] [--force] [--skip-install]
+  timds consumer init [--root PATH] [--force] [--skip-install] [--portal-url URL]
 
 Writes timds.consumer.json (apps discovered from package.json files one
 directory down), selects @dtconcepts/timds in the root package.json, and
-installs the consumer skill, the preview workflow, and .claude/launch.json
-entries. An existing manifest is kept; --force regenerates it and replaces
-customized managed files.`;
+installs the consumer skill, the preview and designer-change workflows,
+.claude/launch.json entries, and the Design System read MCP server in
+.mcp.json (at --portal-url, default ${DEFAULT_PORTAL_URL}). An existing
+manifest is kept; --force regenerates it and replaces customized managed
+files.`;
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -192,6 +208,7 @@ async function discoverApps(repoRoot, designSystemPath) {
         port,
         ready: "/",
         routes: ["/"],
+        discover: structuredClone(DEFAULT_DISCOVER),
         viewports: ["desktop", "phone"],
         schemes: ["light", "dark"],
       },
@@ -204,7 +221,7 @@ async function discoverApps(repoRoot, designSystemPath) {
         ? `preview.serve is ${manager.run(serveScript).join(" ")} (from the "${serveScript}" script); it must serve the app on a fixed port without opening a browser`
         : "no dev, start, or preview script found; set preview.serve, or switch to static mode with preview.build and preview.output",
       `preview.port is ${port}${framework ? ` (the ${framework} default)` : " (a guess)"}; match what the serve command listens on`,
-      "preview.routes lists only \"/\"; add the pages a designer should review",
+      "preview.routes lists only \"/\" and preview.discover follows links from it (up to 40 pages); add routes that must always be reviewed, and preview.discover.exclude for pages designers should not see",
       surface.length
         ? `designSurface is ${surface.join(", ")}; trim it to what designers may change`
         : "designSurface is a placeholder (src/styles/**); set the folders designers may change",
@@ -320,7 +337,30 @@ export async function consumerManagedFiles(manifest, options = {}) {
   };
   await walk(skillRoot);
   files.push({ path: CONSUMER_WORKFLOW_PATH, content: await template("timds-consumer-preview.yml") });
+  files.push({ path: CONSUMER_DESIGNER_WORKFLOW_PATH, content: await template("timds-designer-change.yml") });
   return files;
+}
+
+/**
+ * `.mcp.json` servers TimDS manages, keyed by name: the Design System read
+ * tools over HTTP at the portal, authorized with TIMDS_ACCESS_TOKEN from the
+ * environment (never a literal token).
+ */
+export function consumerMcpServers({ portalUrl = DEFAULT_PORTAL_URL } = {}) {
+  let base;
+  try {
+    base = new URL(String(portalUrl));
+  } catch {
+    throw new Error(`--portal-url ${portalUrl} is not a valid URL`);
+  }
+  if (!["http:", "https:"].includes(base.protocol)) throw new Error("--portal-url must use HTTP or HTTPS");
+  return {
+    [CONSUMER_MCP_SERVER_NAME]: {
+      type: "http",
+      url: new URL("/api/timds/mcp/read", `${base.origin}/`).toString(),
+      headers: { Authorization: "Bearer ${TIMDS_ACCESS_TOKEN}" },
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -399,6 +439,37 @@ async function planLaunch(repoRoot, desired, recorded, force) {
   return { launchPath, content, changed, kept, managed };
 }
 
+async function planMcp(repoRoot, desired, recorded, force) {
+  const mcpPath = path.join(repoRoot, CONSUMER_MCP_PATH);
+  const existing = await readJsonFile(mcpPath, CONSUMER_MCP_PATH);
+  const config = existing ? structuredClone(existing) : { mcpServers: {} };
+  if (config.mcpServers === undefined) config.mcpServers = {};
+  if (!config.mcpServers || typeof config.mcpServers !== "object" || Array.isArray(config.mcpServers)) {
+    throw new Error(`${CONSUMER_MCP_PATH} has an mcpServers value that is not an object; fix it, then rerun timds consumer init`);
+  }
+  const kept = [];
+  const managed = {};
+  for (const [name, entry] of Object.entries(desired)) {
+    managed[name] = sha256(JSON.stringify(entry));
+    if (!Object.hasOwn(config.mcpServers, name)) {
+      config.mcpServers[name] = entry;
+      continue;
+    }
+    const current = config.mcpServers[name];
+    if (sameJson(current, entry)) continue;
+    if (force || sha256(JSON.stringify(current)) === recorded[name]) {
+      config.mcpServers[name] = entry;
+      continue;
+    }
+    kept.push(name);
+    managed[name] = recorded[name] ?? null;
+    if (managed[name] === null) delete managed[name];
+  }
+  const content = toJson(config);
+  const changed = !existing || toJson(existing) !== content;
+  return { mcpPath, content, changed, kept, managed };
+}
+
 async function ensureGitignoreLines(repoRoot, lines) {
   const gitignorePath = path.join(repoRoot, ".gitignore");
   const existing = (await readText(gitignorePath)) ?? "";
@@ -418,7 +489,7 @@ async function ensureGitignoreLines(repoRoot, lines) {
  * writing anything) without a design-system gitlink, on a conflicting toolkit
  * declaration, or on customized managed files unless `force`.
  */
-export async function initializeConsumer(rootInput = process.cwd(), { force = false, skipInstall = false, output = () => {} } = {}) {
+export async function initializeConsumer(rootInput = process.cwd(), { force = false, skipInstall = false, portalUrl = DEFAULT_PORTAL_URL, output = () => {} } = {}) {
   const repoRoot = await findGitRoot(rootInput);
   const manifestPath = path.join(repoRoot, CONSUMER_MANIFEST_FILE);
   const existingRaw = await readJsonFile(manifestPath, CONSUMER_MANIFEST_FILE);
@@ -446,6 +517,7 @@ export async function initializeConsumer(rootInput = process.cwd(), { force = fa
   const writes = await planManagedFiles(repoRoot, files, previous.managedFiles || {}, force);
   const packagePlan = await planPackageJson(repoRoot, force);
   const launchPlan = await planLaunch(repoRoot, await consumerLaunchConfigurations(manifest), previous.launchConfigurations || {}, force);
+  const mcpPlan = await planMcp(repoRoot, consumerMcpServers({ portalUrl }), previous.mcpServers || {}, force);
 
   const written = [];
   if (!keepManifest) {
@@ -464,6 +536,10 @@ export async function initializeConsumer(rootInput = process.cwd(), { force = fa
     await writeFile(launchPlan.launchPath, launchPlan.content);
     written.push(CONSUMER_LAUNCH_PATH);
   }
+  if (mcpPlan.changed) {
+    await writeFile(mcpPlan.mcpPath, mcpPlan.content);
+    written.push(CONSUMER_MCP_PATH);
+  }
   if (await ensureGitignoreLines(repoRoot, ["node_modules/", ".timds/preview/"])) written.push(".gitignore");
 
   installation.consumer = {
@@ -472,6 +548,7 @@ export async function initializeConsumer(rootInput = process.cwd(), { force = fa
     version: runtimeIdentity.version,
     managedFiles: Object.fromEntries(files.map((file) => [file.path, sha256(file.content)])),
     launchConfigurations: launchPlan.managed,
+    mcpServers: mcpPlan.managed,
   };
   await writeFile(installationPath, toJson(installation));
   written.push(CONSUMER_INSTALLATION_PATH);
@@ -482,6 +559,9 @@ export async function initializeConsumer(rootInput = process.cwd(), { force = fa
   for (const file of written) output(`  ${file}`);
   for (const name of launchPlan.kept) {
     output(`Kept the customized "${name}" entry in ${CONSUMER_LAUNCH_PATH}; rerun with --force to replace it.`);
+  }
+  for (const name of mcpPlan.kept) {
+    output(`Kept the customized "${name}" server in ${CONSUMER_MCP_PATH}; rerun with --force to replace it.`);
   }
 
   if (!skipInstall && packagePlan.changed) {
@@ -497,6 +577,9 @@ export async function initializeConsumer(rootInput = process.cwd(), { force = fa
     ...todos.flatMap(({ app, items }) => items.map((item) => `${app}: ${item}`)),
     "Add the TIMDS_ACCESS_TOKEN repository secret so the preview workflow can publish previews",
     "Add DESIGN_SYSTEM_DEPLOY_KEY (read-only deploy key on the Design System repository) or TIMDS_CONSUMER_SUBMODULE_TOKEN (contents:read on it) so CI can check out the private submodule",
+    "For designer changes: add the ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN repository secret so the designer-change workflow can run Claude",
+    `For designer changes: create the ${CONSUMER_DESIGN_CHANGE_LABEL} label, set the TIMDS_DESIGNER_BOTS repository variable to the TimDS portal's GitHub App bot login (comma-separated if more than one), and allow GitHub Actions to create pull requests (Settings > Actions > General)`,
+    `${CONSUMER_MCP_PATH} reads the Design System through the portal with TIMDS_ACCESS_TOKEN from the environment; export it locally to use the ${CONSUMER_MCP_SERVER_NAME} tools`,
     `After editing ${CONSUMER_MANIFEST_FILE}, rerun timds consumer init so the skill's product section and the launch entries match it`,
     `Commit ${CONSUMER_MANIFEST_FILE}, package.json, the lockfile, and the managed files; then run npm run timds -- consumer check`,
   ];
@@ -513,6 +596,7 @@ export async function initializeConsumer(rootInput = process.cwd(), { force = fa
     written,
     todos: checklist,
     keptLaunchConfigurations: launchPlan.kept,
+    keptMcpServers: mcpPlan.kept,
     installation: installation.consumer,
   };
 }
@@ -528,16 +612,16 @@ function parseInitArguments(argv) {
       options[name] = true;
       continue;
     }
-    if (name !== "root") throw new Error(`Unknown option --${rawName}\n${INIT_HELP}`);
+    if (name !== "root" && name !== "portalUrl") throw new Error(`Unknown option --${rawName}\n${INIT_HELP}`);
     const next = inlineValue ?? argv[index + 1];
     if (next === undefined || String(next).startsWith("-")) throw new Error(`--${rawName} requires a value`);
-    options.root = next;
+    options[name] = next;
     if (inlineValue === undefined) index += 1;
   }
   return options;
 }
 
-/** `timds consumer init [--root PATH] [--force] [--skip-install]` */
+/** `timds consumer init [--root PATH] [--force] [--skip-install] [--portal-url URL]` */
 export async function runConsumerInit(args = [], { output = (message = "") => process.stdout.write(`${message}\n`) } = {}) {
   const options = parseInitArguments(args);
   if (options.help) {
@@ -547,6 +631,7 @@ export async function runConsumerInit(args = [], { output = (message = "") => pr
   return initializeConsumer(options.root || process.cwd(), {
     force: Boolean(options.force),
     skipInstall: Boolean(options.skipInstall),
+    ...(options.portalUrl ? { portalUrl: options.portalUrl } : {}),
     output,
   });
 }

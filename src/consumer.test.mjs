@@ -156,6 +156,28 @@ test("validateConsumerManifest rejects every contract violation with an actionab
   assertInvalid(preview({ build: ["x"], output: "dist", extra: 1 }), /unknown field "extra"/);
 });
 
+test("validateConsumerManifest accepts preview.discover in crawl mode with defaults and rejects it elsewhere", () => {
+  const crawl = (discover, extra = {}) => baseManifest({ web: staticApp({ preview: { serve: ["npm", "run", "dev"], port: 4321, routes: ["/"], discover, ...extra } }) });
+  assert.deepEqual(validateConsumerManifest(crawl({})).apps.web.preview.discover, { from: ["/"], limit: 40, exclude: [] });
+  assert.deepEqual(
+    validateConsumerManifest(crawl({ from: ["/", "/blog"], limit: 200, exclude: ["/admin/**"] })).apps.web.preview.discover,
+    { from: ["/", "/blog"], limit: 200, exclude: ["/admin/**"] },
+  );
+  const staticCrawl = baseManifest({ web: staticApp({ preview: { build: ["x"], output: "dist", routes: ["/"], discover: { limit: 5 } } }) });
+  assert.equal(validateConsumerManifest(staticCrawl).apps.web.preview.discover.limit, 5);
+  assert.equal(validateConsumerManifest(crawl(undefined)).apps.web.preview.discover, undefined);
+  assertInvalid(baseManifest({ web: staticApp({ preview: { build: ["x"], output: "dist", discover: {} } }) }), /preview\.discover only works in crawl mode/);
+  assertInvalid(crawl({ limit: 0 }), /discover\.limit must be between 1 and 200/);
+  assertInvalid(crawl({ limit: 201 }), /discover\.limit must be between 1 and 200/);
+  assertInvalid(crawl({ limit: 2.5 }), /discover\.limit must be a whole number/);
+  assertInvalid(crawl({ from: [] }), /discover\.from must list at least one/);
+  assertInvalid(crawl({ from: ["blog"] }), /absolute URL paths/);
+  assertInvalid(crawl({ exclude: ["admin/**"] }), /exclude globs are URL path globs/);
+  assertInvalid(crawl({ exclude: "/admin/**" }), /exclude must be an array/);
+  assertInvalid(crawl({ depth: 2 }), /unknown field "depth"/);
+  assertInvalid(crawl("yes"), /preview\.discover must be an object/);
+});
+
 test("matchesGlob supports **, *, ? and literal directories", () => {
   assert.equal(matchesGlob("src/styles/a/b.css", "src/styles/**"), true);
   assert.equal(matchesGlob("src/a.css", "src/**/*.css"), true);
@@ -231,6 +253,8 @@ test("checkConsumer allows an adoption-shaped diff at the root but not nested pa
   await write(product, ".timds/installation.json", { version: 1 });
   await write(product, ".agents/skills/timds-consume-design-system/SKILL.md", "# Skill\n");
   await write(product, ".github/workflows/timds-consumer-preview.yml", "name: preview\n");
+  await write(product, ".github/workflows/timds-designer-change.yml", "name: designer change\n");
+  await write(product, ".mcp.json", { mcpServers: {} });
   git(product, "add", ".");
   git(product, "commit", "-q", "-m", "Adopt TimDS");
   await write(product, "pnpm-lock.yaml", "lockfileVersion: 9\n");
