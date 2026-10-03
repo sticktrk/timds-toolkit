@@ -15,6 +15,15 @@
 // location a dev-mode stamp or React fiber carries, read raw. It knows nothing
 // about routes, apps, repositories, or the preview layout;
 // `consumer-preview.mjs` owns those and normalises the source paths.
+//
+// Dev servers fight a faithful capture in three ways, handled here: a
+// document-start script (`instrumentPage`) records source stamps before page
+// code can strip them (Astro's dev toolbar removes them at load) and hides dev
+// overlays (`DEV_OVERLAY_SELECTORS`); and before capturing, `scrollThrough` and
+// `settleMedia` scroll the page once from top to bottom (with
+// `prefers-reduced-motion: reduce` emulated) so reveal-on-scroll and lazy
+// content renders, every wait bounded by `SETTLE_LIMITS`. The page's own
+// styles are never rewritten.
 
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
@@ -30,6 +39,55 @@ export const MAX_CAPTURE_HEIGHT = 16_384;
 
 /** Most elements one element map lists; stamped or text-bearing elements win when a page has more. */
 export const MAX_MAP_ELEMENTS = 2_000;
+
+/**
+ * Dev-server overlays that are never part of the page under review. They are
+ * hidden from the first frame, left out of element maps, and removed from the
+ * saved HTML. Only framework dev chrome belongs here, never a site's own
+ * fixed elements.
+ */
+export const DEV_OVERLAY_SELECTORS = Object.freeze([
+  "astro-dev-toolbar", // Astro dev toolbar
+  "vite-error-overlay", // Vite error overlay
+  "nextjs-portal", // Next.js dev overlay host
+  "[data-nextjs-toast]", // Next.js dev indicator toast
+  "#__next-build-watcher", // Next.js build activity indicator (pages router)
+  "[data-next-badge-root]", // Next.js dev badge
+  "#webpack-dev-server-client-overlay", // webpack-dev-server error overlay
+]);
+
+/**
+ * Attributes dev tooling stamps on elements to name their source; recorded at
+ * document start (see `instrumentPage`) and read by `collectElementMap`.
+ */
+export const SOURCE_STAMP_ATTRIBUTES = Object.freeze([
+  "data-astro-source-file", "data-astro-source-loc", // Astro dev
+  "data-source-file", "data-source-line", "data-source-column", // generic Vite/Babel plugins
+  "data-lov-id", // lovable-tagger
+  "data-component-path", "data-component-line", "data-component-column",
+  "data-inspector-relative-path", "data-inspector-line", "data-inspector-column", // react-dev-inspector
+]);
+
+/**
+ * Bounds on the pre-capture settle, so infinite scroll or animation cannot
+ * hang a capture: scroll steps of one viewport with `stepPauseMs` between
+ * them, at most `maxSteps` steps or `scrollMs` in all (and never past the
+ * capture height), then at most `networkMs` for the network, `imagesMs` for
+ * images, `animationsMs` for finite animations, and `frameMs` for the final
+ * frame back at the top.
+ */
+export const SETTLE_LIMITS = Object.freeze({
+  animationsMs: 3_000,
+  frameMs: 500,
+  imagesMs: 5_000,
+  maxSteps: 60,
+  networkMs: 10_000,
+  scrollMs: 15_000,
+  stepPauseMs: 150,
+});
+
+// Page-global the document-start script keeps its records under (non-enumerable).
+const CAPTURE_GLOBAL = "__timdsCapture";
 
 function loadRemotionRenderer() {
   // @remotion/renderer arrives through @remotion/cli; resolve it from there so
@@ -259,10 +317,13 @@ function trackNetwork(connection, sessionId) {
 }
 
 /**
- * Open `url` in a fresh tab at `width`×`height` with `prefers-color-scheme: scheme`,
- * wait for load and network idle, and return `{ png, html, contentHeight, status }`,
- * plus `links` (absolute hrefs of every `<a href>`) when `links` is set and
- * `map` (`{ width, height, elements }`, see `collectElementMap`) when `elementMap` is set.
+ * Open `url` in a fresh tab at `width`×`height` with `prefers-color-scheme: scheme`
+ * and `prefers-reduced-motion: reduce`, wait for load and network idle, scroll
+ * once through the page and let images and animations settle (bounded by
+ * `SETTLE_LIMITS`), and return `{ png, html, contentHeight, status }`, plus
+ * `links` (absolute hrefs of every `<a href>`) when `links` is set and `map`
+ * (`{ width, height, elements }`, see `collectElementMap`) when `elementMap`
+ * is set. Dev overlays (`DEV_OVERLAY_SELECTORS`) are absent from all three.
  */
 export async function capturePage(connection, {
   url,
@@ -275,16 +336,28 @@ export async function capturePage(connection, {
   links = false,
   elementMap = false,
   mapLimit = MAX_MAP_ELEMENTS,
+  settle = SETTLE_LIMITS,
 }) {
   const { targetId } = await connection.send("Target.createTarget", { url: "about:blank" });
   try {
     const { sessionId } = await connection.send("Target.attachToTarget", { flatten: true, targetId });
     const send = (method, params) => connection.send(method, params, sessionId);
+    const evaluate = (expression, budgetMs) => send("Runtime.evaluate", {
+      awaitPromise: true,
+      expression,
+      returnByValue: true,
+      // The in-page code bounds itself; this is the backstop for a page that never yields.
+      timeout: budgetMs + 5_000,
+    }).catch(() => null);
+    const pageConfig = { global: CAPTURE_GLOBAL, overlays: DEV_OVERLAY_SELECTORS, stamps: SOURCE_STAMP_ATTRIBUTES };
     await send("Page.enable");
     await send("Network.enable");
     await send("Runtime.enable");
+    await send("Page.addScriptToEvaluateOnNewDocument", { source: `(${instrumentPage.toString()})(${JSON.stringify(pageConfig)})` });
     await send("Emulation.setDeviceMetricsOverride", { deviceScaleFactor: 1, height, mobile: width < 768, width });
-    await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: scheme }] });
+    await send("Emulation.setEmulatedMedia", {
+      features: [{ name: "prefers-color-scheme", value: scheme }, { name: "prefers-reduced-motion", value: "reduce" }],
+    });
     let status = null;
     const offResponse = connection.on((message) => {
       if (message.sessionId === sessionId && message.method === "Network.responseReceived" && message.params?.type === "Document" && status === null) {
@@ -312,6 +385,12 @@ export async function capturePage(connection, {
         expression: "document.fonts ? document.fonts.ready.then(() => true) : true",
         timeout: 10_000,
       }).catch(() => {});
+      // Reveal-on-scroll and lazy content renders only once it has been in view.
+      const scrollConfig = { ...pageConfig, maxHeight, pauseMs: settle.stepPauseMs, maxSteps: settle.maxSteps, budgetMs: settle.scrollMs };
+      await evaluate(`(${scrollThrough.toString()})(${JSON.stringify(scrollConfig)})`, settle.scrollMs);
+      await network.idle({ quietMs, timeoutMs: Math.min(timeoutMs, settle.networkMs) });
+      const mediaConfig = { ...pageConfig, maxHeight, animationsMs: settle.animationsMs, frameMs: settle.frameMs, imagesMs: settle.imagesMs };
+      await evaluate(`(${settleMedia.toString()})(${JSON.stringify(mediaConfig)})`, settle.imagesMs + settle.animationsMs + settle.frameMs);
     } finally {
       network.off();
       offResponse();
@@ -325,13 +404,7 @@ export async function capturePage(connection, {
       clip: { height: captureHeight, scale: 1, width, x: 0, y: 0 },
       format: "png",
     });
-    const dom = await send("Runtime.evaluate", { expression: "document.documentElement.outerHTML", returnByValue: true });
-    const doctype = await send("Runtime.evaluate", {
-      expression: "document.doctype ? new XMLSerializer().serializeToString(document.doctype) : ''",
-      returnByValue: true,
-    });
-    const html = `${doctype.result?.value ? `${doctype.result.value}\n` : ""}${dom.result?.value ?? ""}`;
-    const result = { contentHeight, height: captureHeight, html, png: Buffer.from(shot.data, "base64"), status, width };
+    const result = { contentHeight, height: captureHeight, png: Buffer.from(shot.data, "base64"), status, width };
     if (links) {
       const found = await send("Runtime.evaluate", {
         expression: "Array.from(document.querySelectorAll('a[href]'), (anchor) => anchor.href).filter(Boolean)",
@@ -341,17 +414,144 @@ export async function capturePage(connection, {
     }
     if (elementMap) {
       const mapped = await send("Runtime.evaluate", {
-        expression: `(${collectElementMap.toString()})(${JSON.stringify({ maxElements: mapLimit, maxHeight: captureHeight })})`,
+        expression: `(${collectElementMap.toString()})(${JSON.stringify({ ...pageConfig, maxElements: mapLimit, maxHeight: captureHeight })})`,
         returnByValue: true,
         timeout: 30_000,
       }).catch(() => null);
       const elements = Array.isArray(mapped?.result?.value?.elements) ? mapped.result.value.elements : [];
       result.map = { width, height: captureHeight, elements };
     }
+    // Last, since it detaches the dev overlays from the live page.
+    const dom = await send("Runtime.evaluate", {
+      expression: `(() => { for (const node of document.querySelectorAll(${JSON.stringify(DEV_OVERLAY_SELECTORS.join(", "))})) node.remove(); return document.documentElement.outerHTML; })()`,
+      returnByValue: true,
+    });
+    const doctype = await send("Runtime.evaluate", {
+      expression: "document.doctype ? new XMLSerializer().serializeToString(document.doctype) : ''",
+      returnByValue: true,
+    });
+    result.html = `${doctype.result?.value ? `${doctype.result.value}\n` : ""}${dom.result?.value ?? ""}`;
     return result;
   } finally {
     await connection.send("Target.closeTarget", { targetId }).catch(() => {});
   }
+}
+
+/**
+ * Runs at document start in every page `capturePage` opens (serialized with
+ * `toString()`), before any page script. It records each element's source
+ * stamp attributes (`config.stamps`) as they are inserted or changed, keeping
+ * the last value even after page code removes the attribute, in a WeakMap
+ * under `window[config.global].stamps`; and it hides `config.overlays` with an
+ * adopted style sheet, which never appears in the serialized DOM.
+ */
+export function instrumentPage(config) {
+  if (window !== window.top || window[config.global]) return;
+  const stamps = new WeakMap();
+  const selector = config.stamps.map((name) => `[${name}]`).join(", ");
+  const record = (element, name, fallback) => {
+    const value = element.getAttribute(name) ?? fallback;
+    if (value === null || value === undefined) return;
+    let entry = stamps.get(element);
+    if (!entry) stamps.set(element, (entry = {}));
+    entry[name] = value;
+  };
+  const recordAll = (element) => {
+    for (const name of config.stamps) if (element.hasAttribute(name)) record(element, name);
+  };
+  const observer = new MutationObserver((mutations) => {
+    for (const mutation of mutations) {
+      if (mutation.type === "attributes") {
+        record(mutation.target, mutation.attributeName, mutation.oldValue);
+        continue;
+      }
+      for (const node of mutation.addedNodes) {
+        if (node.nodeType !== 1) continue;
+        recordAll(node);
+        for (const element of node.querySelectorAll(selector)) recordAll(element);
+      }
+    }
+  });
+  observer.observe(document, { attributeFilter: config.stamps, attributeOldValue: true, attributes: true, childList: true, subtree: true });
+  let sheet = null;
+  const hideOverlays = () => {
+    try {
+      if (!sheet) {
+        sheet = new CSSStyleSheet();
+        sheet.replaceSync(`${config.overlays.join(", ")} { display: none !important; }`);
+      }
+      if (!document.adoptedStyleSheets.includes(sheet)) document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+    } catch {
+      // No constructable style sheets; the overlays are still dropped from the map and HTML.
+    }
+  };
+  hideOverlays();
+  Object.defineProperty(window, config.global, { configurable: true, enumerable: false, value: { hideOverlays, stamps } });
+}
+
+/**
+ * Runs inside the page. Scrolls from top to bottom one viewport at a time,
+ * pausing `config.pauseMs` per step and re-reading the page height as lazy
+ * content grows it, until the bottom, `config.maxHeight`, `config.maxSteps`
+ * steps, or `config.budgetMs`, whichever comes first. Resolves to
+ * `{ steps, height, ms }`.
+ */
+export function scrollThrough(config) {
+  const started = Date.now();
+  const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const scrollTo = (top) => window.scrollTo({ behavior: "instant", left: 0, top });
+  const pageHeight = () => Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0);
+  return (async () => {
+    const step = Math.max(1, window.innerHeight || 1);
+    let steps = 0;
+    let top = 0;
+    while (steps < config.maxSteps && Date.now() - started < config.budgetMs) {
+      const limit = Math.min(pageHeight(), config.maxHeight);
+      if (top + step >= limit) break;
+      top += step;
+      scrollTo(top);
+      steps += 1;
+      await pause(config.pauseMs);
+    }
+    return { height: pageHeight(), ms: Date.now() - started, steps };
+  })();
+}
+
+/**
+ * Runs inside the page after `scrollThrough`. Scrolls back to the top and
+ * waits a frame, then waits, each wait bounded, for every rendered image above
+ * `config.maxHeight` to load and decode (`config.imagesMs`) and for finite
+ * running animations and transitions to finish (`config.animationsMs`); then
+ * re-applies the overlay style sheet and waits one more frame (`config.frameMs`). Resolves to `{ images, animations }`, the counts waited on.
+ */
+export function settleMedia(config) {
+  const within = (promise, ms) => Promise.race([promise, new Promise((resolve) => setTimeout(resolve, ms))]);
+  const frame = () => within(new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))), config.frameMs);
+  return (async () => {
+    // Back to the top first, so transitions the page starts on scroll are among those waited on.
+    window.scrollTo({ behavior: "instant", left: 0, top: 0 });
+    await frame();
+    // Only images the capture shows: an unrendered or below-the-capture lazy image never loads.
+    const images = Array.from(document.images).filter((image) => {
+      if (!(image.currentSrc || image.src) || image.getClientRects().length === 0) return false;
+      return image.getBoundingClientRect().top + window.scrollY < config.maxHeight;
+    });
+    await within(Promise.allSettled(images.map((image) => (image.complete
+      ? Promise.resolve()
+      : new Promise((resolve) => {
+        image.addEventListener("load", resolve, { once: true });
+        image.addEventListener("error", resolve, { once: true });
+      })).then(() => (image.naturalWidth && image.decode ? image.decode() : null)))), config.imagesMs);
+    const finite = (document.getAnimations ? document.getAnimations() : []).filter((animation) => {
+      const timing = animation.effect && animation.effect.getComputedTiming ? animation.effect.getComputedTiming() : null;
+      return animation.playState === "running" && timing && Number.isFinite(timing.endTime);
+    });
+    await within(Promise.allSettled(finite.map((animation) => animation.finished)), config.animationsMs);
+    const capture = window[config.global];
+    if (capture && capture.hideOverlays) capture.hideOverlays();
+    await frame();
+    return { animations: finite.length, images: images.length };
+  })();
 }
 
 /**
@@ -363,12 +563,16 @@ export async function capturePage(connection, {
  * characters), and `source` the raw `{ file, line, column }` from the first
  * stamp present (Astro dev, data-source-*, lovable-tagger data-lov-id,
  * data-component-*, react-dev-inspector, React fiber `_debugSource`) or null.
- * Elements entirely below `maxHeight` are left out; past `maxElements`,
- * stamped or text-bearing elements are kept first.
+ * Stamp attributes `instrumentPage` recorded (under `window[global]`) are read
+ * before the live ones, so stamps page code stripped still count. Elements
+ * entirely below `maxHeight`, and `overlays` with their contents, are left
+ * out; past `maxElements`, stamped or text-bearing elements are kept first.
  */
-export function collectElementMap({ maxElements, maxHeight }) {
+export function collectElementMap({ maxElements, maxHeight, global = "", overlays = [] }) {
   const body = document.body;
   if (!body) return { elements: [], total: 0 };
+  const recorded = (global && window[global] && window[global].stamps) || null;
+  const overlaySelector = overlays.join(", ");
   const scrollX = window.scrollX || 0;
   const scrollY = window.scrollY || 0;
   const escapeIdent = (value) => (window.CSS && CSS.escape ? CSS.escape(value) : String(value).replace(/[^A-Za-z0-9_-]/g, (char) => `\\${char}`));
@@ -406,7 +610,8 @@ export function collectElementMap({ maxElements, maxHeight }) {
     return match ? { file: match[1], line: number(match[2]), column: number(match[3]) } : null;
   };
   const sourceFor = (element) => {
-    const attr = (name) => element.getAttribute(name);
+    const stamped = recorded ? recorded.get(element) : null;
+    const attr = (name) => (stamped && stamped[name] != null ? stamped[name] : element.getAttribute(name));
     if (attr("data-astro-source-file")) {
       const [line, column] = String(attr("data-astro-source-loc") || "").split(":");
       return { file: attr("data-astro-source-file"), line: number(line), column: number(column) };
@@ -433,6 +638,7 @@ export function collectElementMap({ maxElements, maxHeight }) {
   };
   const candidates = [];
   for (const element of [body, ...body.querySelectorAll("*")]) {
+    if (overlaySelector && element.closest(overlaySelector)) continue;
     const rect = element.getBoundingClientRect();
     if (!(rect.width > 0 && rect.height > 0)) continue;
     const style = getComputedStyle(element);
