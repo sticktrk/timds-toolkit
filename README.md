@@ -511,6 +511,21 @@ page/block ids for the shared and format-specific writing brief. Consumers ask
 and Design System provenance, compile with `@dtconcepts/timds/video/producer`,
 and render with `@dtconcepts/timds/video/remotion`. This keeps client writing
 direction in the client system while TimDS owns the generic model boundary.
+Remote clients import `VideoAuthoringContractSchema`,
+`VideoFootageCatalogSchema`, and `VideoCompiledProductionSchema` from
+`@dtconcepts/timds/video/transport`. The producer validates its emitted responses
+with those same schemas. They preserve additive fields, normalize legacy
+single-prefix footage catalogs, and read authoring versions 1 and 2 and saved
+compilations that predate runtime identity. Compose application metadata with
+`.and()` or application policies with `.refine()`; do not recreate TimDS's
+response shapes. The transport uses the `zod/v3` compatibility API, so Zod 3
+hosts can include the shared validators in their own schemas.
+Hosts using a different Zod version can use the corresponding
+`safeParseVideoAuthoringContract`, `safeParseVideoFootageCatalog`, and
+`safeParseVideoCompiledProduction` functions; their declared result types do
+not depend on Zod's type hierarchy. Reading another
+supported producer release does not select a rendering runtime: compilation
+and finalization must still use the same client-pinned runtime.
 The compiler rejects over-limit summaries and engagement questions; it never
 truncates model copy into a fragment to make it fit.
 

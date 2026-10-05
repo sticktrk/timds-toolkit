@@ -1,4 +1,5 @@
 import { assertVideoContractRuntime, runtimeIdentity } from "./runtime.mjs";
+import { VideoAuthoringContractSchema, VideoCompiledProductionSchema } from "./video-transport.mjs";
 import { footageFamily, matchesFootagePrefix, verticalTextZone } from "../video/footage.mjs";
 import { deriveVideoChapters } from "../video/boards.mjs";
 import { validateVideoVerticalMetadata } from "./video-crops.mjs";
@@ -487,7 +488,7 @@ export function createVideoAuthoringContract({ contract, manifest, designSystemI
   ] : [
     "Do not write role eyebrows, CTA template copy, intro/outro structure, cover subjects, footage, timing, safe zones, or layout; the compiler owns them.",
   ];
-  return {
+  return VideoAuthoringContractSchema.parse({
     schemaVersion: PRODUCER_AUTHORING_SCHEMA_VERSION,
     producerContractVersion: config.schemaVersion,
     runtime: {...runtimeIdentity},
@@ -536,7 +537,7 @@ export function createVideoAuthoringContract({ contract, manifest, designSystemI
     ],
     ...(boardCatalog ? { boards: { ...boardCatalogSummary(boardCatalog), active: boardsActive } } : {}),
     inputSchema,
-  };
+  });
 }
 
 /** What the drafting model reads about the shelf: one line per kind, then the cadence in words. */
@@ -694,7 +695,7 @@ export function createVideoProducer({ contract, assetCatalog, mediaCatalog, vert
       }
       guarded(() => validateBoardCadence({ catalog: boardCatalog, scenes, label: `compile request ${productionSlug}`, format: input.outputFormat }));
     }
-    return {
+    return VideoCompiledProductionSchema.parse({
       schemaVersion: PRODUCER_SCHEMA_VERSION,
       producerContractVersion: config.schemaVersion,
       runtime: {...runtimeIdentity},
@@ -704,7 +705,7 @@ export function createVideoProducer({ contract, assetCatalog, mediaCatalog, vert
       topic: { ...input.topic, label: values.topic },
       scenes,
       cover: { eyebrow: config.cover.eyebrow, headline: exactQuestion },
-    };
+    });
   };
 
   const compatibleTextSides = (keys) => ["left", "right"].filter((side) => keys.every((key) => {
