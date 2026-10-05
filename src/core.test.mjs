@@ -807,3 +807,24 @@ test("standalone init accepts explicit immutable identity and JSON-safe text", a
   await assert.rejects(initializeRepository(root, { ...options, systemId: "other/id" }), /conflicts/);
   await assert.rejects(initializeRepository(path.join(parent, "bad"), { systemId: "../bad" }), /hierarchical/);
 });
+
+
+test("standalone publication treats a GitHub bootstrap commit as an initial contract", async (t) => {
+  const root = await temporaryDirectory(t);
+  execFileSync("git", ["init", "-b", "main"], { cwd: root, stdio: "ignore" });
+  execFileSync("git", ["config", "user.name", "Test"], { cwd: root });
+  execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: root });
+  await fs.writeFile(path.join(root, "README.md"), "Bootstrap\n");
+  execFileSync("git", ["add", "README.md"], { cwd: root });
+  execFileSync("git", ["commit", "-m", "Bootstrap"], { cwd: root, stdio: "ignore" });
+  const bootstrap = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root }).toString().trim();
+  await initializeRepository(root, { standalone: true });
+  const workflow = await fs.readFile(path.join(root, ".github/workflows/timds-design-system.yml"), "utf8");
+  const condition = workflow.split("\n").find((line) => line.includes('if [[ "$EVENT_NAME"'));
+  const script = `${condition}\n echo bump;\nelse\n echo initial;\nfi`;
+  const evaluate = (before) => execFileSync("bash", ["-c", script], { cwd: root, env: { ...process.env, EVENT_NAME: "push", BEFORE_SHA: before } }).toString().trim();
+  assert.equal(evaluate(bootstrap), "initial");
+  execFileSync("git", ["add", "timds.json"], { cwd: root });
+  execFileSync("git", ["commit", "-m", "Initial contract"], { cwd: root, stdio: "ignore" });
+  assert.equal(evaluate(execFileSync("git", ["rev-parse", "HEAD"], { cwd: root }).toString().trim()), "bump");
+});
