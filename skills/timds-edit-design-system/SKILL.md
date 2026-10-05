@@ -1,6 +1,6 @@
 ---
 name: timds-edit-design-system
-description: Edit repository-owned TimDS design systems in either a standalone design-system repository or an embedded root design-system/ directory. Use for getting a client design system running locally; changing tokens, documentation, components, navigation, imagery, fonts, or viewer source; adding externally stored full-resolution media; previewing the generated artifact; or preparing a guarded pull request for designer approval.
+description: Edit repository-owned TimDS design systems in either a standalone design-system repository or an embedded root design-system/ directory. Use for getting a client design system running locally; turning a freshly scaffolded starter into the client's system; changing tokens, documentation, components, navigation, imagery, fonts, or viewer source; adding externally stored full-resolution media; previewing the generated artifact; or preparing a guarded pull request for designer approval.
 ---
 
 # Edit a TimDS Design System
@@ -16,13 +16,71 @@ surface. Work only in the client repository supplied by the user.
 3. Read the applicable `AGENTS.md`, `README.md`, `timds.json`, and relevant
    authored source completely.
 4. Run `git status --short` and preserve all pre-existing work.
-5. Install the pinned lockfile with `npm ci` from repository root.
-6. Run `npm run timds -- doctor`, then `npm run timds -- dev` to open the
+5. Install the pinned lockfile with `npm ci` from repository root. A fresh
+   scaffold has no lockfile yet: run `npm install` once and include the
+   lockfile it writes in the first commit.
+6. Run `npm run timds -- doctor`, then `npm run timds -- check` and
+   `npm run timds -- brand` to see what the system already provides and every
+   brand-kit gap with its fix. Run `npm run timds -- dev` to open the
    repository-declared authoring server.
 7. Treat the approved `@dtconcepts/timds` release line and resolved lockfile,
-   `.timds/installation.json`, `.agents/skills/timds-edit-design-system/`,
-   `timds.json` workspace commands, and `.github/workflows/timds-design-system.yml`
-   as protected tooling. Change them only when the user asks to update TimDS.
+   `.timds/installation.json`, the managed skills under `.agents/skills/`,
+   the TimDS workflows under `.github/workflows/`, the release automation
+   scripts (`scripts/release.mjs`, `scripts/release.sh`,
+   `scripts/check-versions.mjs`, `scripts/prepare-merge-release.mjs` and its
+   test), and the `systemId`, `version`, `artifact`, `media`, `consumer`, and
+   `workspace` entries of `timds.json` as protected tooling. Change them only
+   when the user asks to update TimDS.
+
+## Start from a fresh scaffold
+
+A new contract ships a dependency-free starter viewer whose colors, fonts, and
+copy are neutral placeholders. It passes `check` with two expected warnings:
+no `brand/voice` page and no annotated logo. Turning it into the client's
+system is ordinary design work:
+
+1. Collect the approved inputs first: brand colors, licensed typefaces, logo
+   files, and voice guidance. Ask for what is missing rather than inventing it.
+2. Replace the values in `tokens.json`. The starter build emits each
+   `group.name` token as the `--group-name` custom property in `tokens.css`;
+   add a token before using a new value in `src/styles.css`.
+3. Replace the starter copy and examples in `src/index.html`, and add pages as
+   `src/<section>/<page>/index.html`. The build copies `src/` into the
+   artifact unchanged.
+4. Add the logo, the `brand/voice` page, and the other guidance pages, shaped
+   as described in the next section.
+5. The starter `dev` server builds once and does not watch files. Rerun
+   `npm run timds -- check` after an edit, then reload.
+
+The scaffolded `AGENTS.md` carries the same starter map. Once the system moves
+to another framework, follow `timds.json` `workspace` and that framework's
+layout instead.
+
+## Shape pages for the derived layer
+
+`check` reads the built HTML and CSS, never authored source, and derives
+`index.json`, `tokens.json`, `brand.json`, `llms.txt`, and a Markdown mirror of
+every page. Video, product repositories, and consumer agents read only that
+layer, so structure the pages for it whatever the framework:
+
+- Give every page one `<h1>`; a page without one is skipped. When the `<h1>`
+  is a direct child of `<main>`, the element before it becomes the eyebrow and
+  the first `<p>` after it the page summary.
+- Make each topic an outermost `<section>` inside `<main>` with a stable `id`.
+  Block ids are citations such as `brand/voice#principles`; renaming one
+  breaks every consumer that cites it.
+- Put specifications and do/don't guidance in a `<table>` (one rule per row,
+  named by its first cell), cautions in an `<aside>`, `<blockquote>`, or
+  `.note`, and code in a `<pre>`. Other text is untyped prose, which the
+  `check` summary counts. `timds.json` `machine` can name different selectors
+  when the markup cannot change.
+- Put a name on every asset with a `<figcaption>` or `alt`, and reference
+  artifact files by site-absolute path such as `/assets/logo.svg`.
+  Publication rewrites those to stable public URLs in the index and brand
+  kit; a relative `src` is recorded as written, which no consumer can resolve.
+- Local references must resolve inside the artifact; `check` fails on a
+  broken one. The artifact is limited to 2,000 files, 12 MB per file, and
+  80 MB in total, with no symbolic links.
 
 ## Upgrade protected tooling only when requested
 

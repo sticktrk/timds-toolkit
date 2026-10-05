@@ -121,9 +121,13 @@ lifecycle belong to the host.
 
 `templates/` is copied verbatim (with `__PLACEHOLDER__` substitution) by `init`
 and `video init`. `templates/starter/` is the standalone repo scaffold including
-its release scripts; `templates/*.yml` are the stock workflows. `skills/` are
-the two managed agent skills installed into client repos under
-`.agents/skills/`. `upgrade` compares managed files by hash against
+its release scripts; `templates/*.yml` are the stock workflows.
+`templates/design-system-AGENTS.md`, `design-system-CLAUDE.md`, and
+`design-system-README.md` are the scaffolded agent and human entry points;
+they are written once and then client-owned, so keep them accurate for a fresh
+scaffold. `skills/` holds the managed agent skills installed under
+`.agents/skills/`: two for Design System repos and
+`timds-consume-design-system` for consumer repos. `upgrade` compares managed files by hash against
 `.timds/installation.json` and refuses locally modified files without
 `--force`; `legacyStandaloneAutomationHashes` in core pins the recognized stock
 release files for the `--auto-release` migration. When a template or skill

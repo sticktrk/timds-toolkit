@@ -128,6 +128,17 @@ change. Work only in the Design System the user gave you.
   elsewhere.
 - Voice and compliance guidance reach the kit from \`brand/voice\` and
   \`*/compliance\` pages by convention.
+- The index is read from the built HTML, so structure decides what consumers
+  receive. Give every page one \`<h1>\` (a page without one is skipped) and
+  make each topic an outermost \`<section>\` inside \`<main>\` with a stable
+  \`id\`; block ids are citations such as \`brand/voice#principles\`, so do not
+  rename them casually. Put specifications and do/don't guidance in a
+  \`<table>\` (one rule per row), cautions in an \`<aside>\`, \`<blockquote>\`,
+  or \`.note\`, and code in a \`<pre>\`; other text is kept as untyped prose.
+  Name every asset with a \`<figcaption>\` or \`alt\`, and reference
+  artifact files by site-absolute path such as \`/assets/logo.svg\`:
+  publication rewrites those to stable public URLs, and a relative \`src\`
+  stays as written, which no consumer can resolve.
 - Use \`read_derived\` (\`brand\`, \`tokens\`, \`index\`) after a check to see
   exactly what consumers of the system will read.
 

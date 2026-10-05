@@ -485,6 +485,10 @@ test("initializes guarded tooling without overwriting the design-system manifest
   const result = await initializeRepository(repoRoot);
   assert.equal(await fs.readFile(manifestPath, "utf8"), before);
   assert.equal(result.repoRoot, repoRoot);
+  // Embedded skills sit at the repository root, one level above the Design System's entry file.
+  const claudeEntry = await fs.readFile(path.join(repoRoot, "design-system", "CLAUDE.md"), "utf8");
+  assert.match(claudeEntry, /^@AGENTS\.md$/m);
+  assert.match(claudeEntry, /`\.\.\/\.agents\/skills\/`/);
   const packageJson = JSON.parse(await fs.readFile(path.join(repoRoot, "package.json"), "utf8"));
   assert.equal(packageJson.devDependencies["@dtconcepts/timds"], "0.1.x");
   assert.equal(packageJson.scripts.timds, "timds");
@@ -661,6 +665,17 @@ test("initializes the reusable standalone repository shape", async (t) => {
   assert.equal(manifest.artifact.publishRef, "timds-published");
   assert.deepEqual(manifest.workspace.build, ["node", "scripts/build.mjs"]);
   assert.match(await fs.readFile(path.join(repoRoot, "README.md"), "utf8"), /npm run timds -- doctor/);
+  // The agent entry points name real commands and paths, with no template placeholder left behind.
+  const agentContract = await fs.readFile(path.join(repoRoot, "AGENTS.md"), "utf8");
+  assert.match(agentContract, /This repository is the editable source/);
+  assert.match(agentContract, /\.agents\/skills\/timds-edit-design-system\/SKILL\.md/);
+  assert.match(agentContract, /npm run timds -- brand/);
+  const claudeEntry = await fs.readFile(path.join(repoRoot, "CLAUDE.md"), "utf8");
+  assert.match(claudeEntry, /^@AGENTS\.md$/m);
+  assert.match(claudeEntry, /`\.agents\/skills\/`/);
+  for (const document of [agentContract, claudeEntry, await fs.readFile(path.join(repoRoot, "README.md"), "utf8")]) {
+    assert.doesNotMatch(document, /__(?:TIMDS_CLI|CONTRACT_DESCRIPTION|DIST_PATH|SKILLS_PATH)__/);
+  }
   const packageJson = JSON.parse(await fs.readFile(path.join(repoRoot, "package.json"), "utf8"));
   assert.equal(packageJson.version, "0.1.0");
   assert.equal(packageJson.devDependencies["@dtconcepts/timds"], "0.1.x");

@@ -879,8 +879,11 @@ export async function initializeRepository(repoRootInput, {
   const renderTemplate = (content) => content
     .replaceAll("__TIMDS_CLI__", cliCommand)
     .replaceAll("__CONTRACT_DESCRIPTION__", contractDescription)
-    .replaceAll("__DIST_PATH__", standalone ? "dist/" : "design-system/dist/");
+    .replaceAll("__DIST_PATH__", standalone ? "dist/" : "design-system/dist/")
+    .replaceAll("__SKILLS_PATH__", standalone ? ".agents/skills/" : "../.agents/skills/");
   await writeIfMissing(path.join(designSystemRoot, "AGENTS.md"), renderTemplate(await template("design-system-AGENTS.md")), created);
+  // Claude Code reads CLAUDE.md, not AGENTS.md; the pointer imports the contract.
+  await writeIfMissing(path.join(designSystemRoot, "CLAUDE.md"), renderTemplate(await template("design-system-CLAUDE.md")), created);
   await writeIfMissing(path.join(designSystemRoot, "README.md"), renderTemplate(await template("design-system-README.md")), created);
   await writeIfMissing(path.join(designSystemRoot, "CHANGELOG.md"), await template("CHANGELOG.md"), created);
   if (createsContract) {
