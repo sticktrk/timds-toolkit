@@ -1281,7 +1281,7 @@ export async function runCli(argv) {
     throw new Error(`Unknown auth command ${authCommand}`);
   }
   if (command === "init") {
-    const result = await initializeRepository(root, {
+    const initialize = () => initializeRepository(root, {
       consumerBranch: options.consumerBranch,
       consumerPath: options.consumerPath,
       consumerRepository: options.consumerRepository,
@@ -1291,6 +1291,9 @@ export async function runCli(argv) {
       force: options.force,
       standalone: options.standalone,
     });
+    const result = options.json
+      ? await runWithOutputSink((line) => process.stderr.write(`${line}\n`), initialize)
+      : await initialize();
     if (options.json) { output(JSON.stringify(result)); return result; }
     output(`TimDS tooling installed for ${result.repoRoot}`);
     output(`Design system: ${result.designSystemRoot}`);
