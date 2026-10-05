@@ -3,10 +3,13 @@
 // used to guess which runtime is executing a contract. The bounded release line
 // (MAJOR.MINOR.x) and the runtime dependency list are defined once here so
 // core, the upgrade command, and the components agree without a literal.
-import { readFileSync } from "node:fs";
+//
+// The producer imports this module, and a client's render components import the
+// producer (resolveBoardKind), so it is bundled for the browser: read the
+// package manifest as a JSON module, never through a Node built-in.
+import pkg from "../package.json" with {type: "json"};
 import {assertRuntimeCompatibility as assertCompatibility, releaseLineOf, runtimeIdentityFor} from "../video/runtime-compat.mjs";
 
-const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 export const runtimeIdentity = runtimeIdentityFor(pkg);
 export const isRuntimeDependency = (name) => ["react", "react-dom", "remotion"].includes(name) || name.startsWith("@remotion/");
 export const runtimeDependencies = Object.freeze(Object.fromEntries(Object.entries(pkg.dependencies).filter(([name]) => isRuntimeDependency(name))));
