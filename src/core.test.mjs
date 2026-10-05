@@ -5,6 +5,7 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import {
   checkWorkspace,
   createPreviewServer,
@@ -188,6 +189,18 @@ test("validates stable media catalog records and rejects signed URLs", () => {
     }),
     /expiring storage signature/,
   );
+});
+
+test("init --json emits one parseable result and sends build progress to stderr", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "timds-init-json-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  execFileSync("git", ["init", "-b", "main"], { cwd: root, stdio: "ignore" });
+  const cli = fileURLToPath(new URL("../bin/timds.mjs", import.meta.url));
+  const stdout = execFileSync(process.execPath, [cli, "init", "--standalone", "--root", root, "--name", 'JSON "system"', "--system-id", "test/json-output", "--description", "Worker contract", "--json"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  const result = JSON.parse(stdout);
+  assert.equal(result.manifest.systemId, "test/json-output");
+  assert.equal(result.manifest.name, 'JSON "system"');
+  assert.ok(result.initializedArtifact);
 });
 
 test("stages media outside Git then publishes only its stable public record", async (t) => {
