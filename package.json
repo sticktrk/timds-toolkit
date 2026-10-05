@@ -25,6 +25,7 @@
     "./video/boards": "./video/boards.mjs",
     "./video/footage": "./video/footage.mjs",
     "./video/producer": "./src/video-producer.mjs",
+    "./video/transport": "./src/video-transport.mjs",
     "./video/remotion": "./video/remotion.tsx",
     "./runtime": "./src/runtime.mjs",
     "./video/board-layouts": "./video/board-layouts.mjs"
@@ -65,6 +66,8 @@
     "src/video-boards.mjs",
     "src/video-crops.mjs",
     "src/video-producer.d.mts",
+    "src/video-transport.mjs",
+    "src/video-transport.d.mts",
     "src/video.mjs",
     "src/video-lab-server.mjs",
     "video",

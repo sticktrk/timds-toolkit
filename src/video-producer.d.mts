@@ -118,6 +118,7 @@ export type ProducerAuthoringContract = {
     topicLabelWords: {minimum: number; maximum: number};
     exactQuestion: {maximumWords: number; maximumCharacters: number; mustEndWithQuestionMark: true};
     engagementQuestion: {required: boolean; requireYesNoQuestion: boolean; maximumWords: number};
+    solution?: {offered: boolean; required: boolean};
     answerBeatRoles: ProducerBeatRole[];
     reservedSceneIds: string[];
   };
