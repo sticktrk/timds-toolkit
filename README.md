@@ -268,18 +268,21 @@ lets a designer start a change with no setup. An issue labeled
 `timds-design-change` (the portal opens one from a plain-language request), a
 comment carrying `<!-- timds-designer-request -->` on a `design/` pull request
 or on such an issue (the portal posts review notes this way, with a fenced
-`json` block of notes), or a manual dispatch runs Claude with the consumer
-skill on a `design/<issue>-<title>` branch. Claude stays inside the design
-surface, runs `consumer check`, pushes, opens a draft pull request that closes
-the issue, and the workflow then calls the preview workflow, because pushes
+`json` block of notes), or a manual dispatch runs Codex through the OpenAI API
+with the consumer skill on a `design/<issue>-<title>` branch. Codex edits in a
+workspace sandbox without a GitHub write token. A subsequent workflow step
+runs `consumer check` against the merge-base design surface, pushes validated
+edits and opens a draft pull request that closes the issue. The workflow then
+calls the preview workflow, because pushes
 made with the job token start no other workflows. Nothing is merged. Only
 owners, members, collaborators, and the bots listed in the
 `TIMDS_DESIGNER_BOTS` repository variable (the portal's GitHub App bot login)
 can trigger it, and fork branches are skipped. It needs the
-`ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` secret, the
+`OPENAI_API_KEY` repository or inherited organization secret, the
 `timds-design-change` label, and permission for Actions to create pull
 requests; with `TIMDS_ACCESS_TOKEN` it also reads and resolves notes through
-the portal.
+the portal after successfully pushing the change. It uses the official
+`openai/codex-action@v1` with `workspace-write` and `drop-sudo`.
 
 To upgrade a consumer, run `npm run timds -- upgrade` at the product root:
 it refreshes the consumer skill, the two consumer workflows, and the tracked

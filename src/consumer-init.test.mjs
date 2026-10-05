@@ -136,7 +136,7 @@ test("discovers apps and writes the manifest with guessed defaults", async (t) =
   assert.match(output, /TIMDS_ACCESS_TOKEN/);
   assert.match(output, /DESIGN_SYSTEM_DEPLOY_KEY/);
   assert.match(output, /web: preview\.routes lists only "\/" and preview\.discover follows links/);
-  assert.match(output, /ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN/);
+  assert.match(output, /OPENAI_API_KEY/);
   assert.match(output, /timds-design-change label, set the TIMDS_DESIGNER_BOTS repository variable/);
   assert.equal(result.keptManifest, false);
 
@@ -212,9 +212,17 @@ test("renders the skill from the manifest and records managed-file hashes", asyn
   assert.match(designer, /contains\(github\.event\.comment\.body, '<!-- timds-designer-request -->'\)/);
   assert.match(designer, /case "\$2" in OWNER\|MEMBER\|COLLABORATOR\) return 0/);
   assert.match(designer, /DESIGNER_BOTS: \$\{\{ vars\.TIMDS_DESIGNER_BOTS \}\}/);
-  assert.match(designer, /uses: anthropics\/claude-code-action@v1/);
-  assert.match(designer, /anthropic_api_key: \$\{\{ secrets\.ANTHROPIC_API_KEY \}\}/);
-  assert.match(designer, /claude_code_oauth_token: \$\{\{ secrets\.CLAUDE_CODE_OAUTH_TOKEN \}\}/);
+  assert.match(designer, /uses: openai\/codex-action@v1/);
+  assert.match(designer, /openai-api-key: \$\{\{ secrets\.OPENAI_API_KEY \}\}/);
+  assert.doesNotMatch(designer, /ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN|claude-code-action/);
+  assert.match(designer, /sandbox: workspace-write/);
+  assert.match(designer, /safety-strategy: drop-sudo/);
+  const codexStep = designer.slice(designer.indexOf("      - name: Make the design change with OpenAI"), designer.indexOf("      - name: Validate and publish the draft"));
+  assert.doesNotMatch(codexStep, /GH_TOKEN|github\.token|persist-credentials: true/);
+  assert.match(designer, /consumer check "\$\{check_args\[@\]\}"/);
+  assert.match(designer, /git diff --cached --quiet/);
+  assert.match(designer, /gh pr create.*--draft/);
+  assert.match(designer, /consumer notes resolve "\$\{note_ids\[@\]\}"/);
   assert.match(designer, /uses: \.\/\.github\/workflows\/timds-consumer-preview\.yml/);
   assert.match(designer, /cancel-in-progress: false/);
   // Event text reaches shell steps only through env, never ${{ }} inside run.
