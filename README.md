@@ -322,6 +322,13 @@ The scaffold initializes the repository, adds the Design System as the
   build: that build writes `tokens.css` from `tokens.json` into `dist/`, so
   the site compiles the pinned `tokens.json` by the same `--group-name` rule
   and `src/layouts/Base.astro` puts the result on every page.
+- Relative symlinks in `public/` for the Design System's top-level `public/`
+  files and directories. Root-relative stylesheet URLs such as
+  `/fonts/example.woff2` and `/images/background.svg` reach those pinned
+  assets in development and in the build. The links and their descendants
+  are protected from designer changes; a path that conflicts with the EmDash
+  template is refused. A developer must add a link if a later pin introduces
+  a new top-level public asset path.
 - `timds.consumer.json` with the site as one root app: `preview.serve` runs
   `astro dev` on port 4380 with `--ignore-lock` (Astro otherwise backgrounds
   the server when an agent starts it), `preview.ready` is EmDash's

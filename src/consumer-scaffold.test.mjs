@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { checkConsumer, runConsumerCli, validateConsumerManifest } from "./consumer.mjs";
+import { checkConsumer, classifyConsumerPath, runConsumerCli, validateConsumerManifest } from "./consumer.mjs";
 import {
   EMDASH_GENERATOR,
   compileTokenCss,
@@ -325,6 +325,85 @@ test("imports named stylesheets from a Design System on its own framework", asyn
   assert.equal(existsSync(path.join(site, "src/utils/design-system.ts")), false);
   assert.doesNotMatch(await fs.readFile(path.join(site, "DESIGN_SYSTEM.md"), "utf8"), /tokens\.json/);
   assert.ok(result.todos.some((item) => item.startsWith("The Design System fills no token for color.panel, color.muted, font.body, font.ui")));
+});
+
+test("links public assets from the pin for root-relative stylesheet URLs", async (t) => {
+  const root = await temporaryDirectory(t);
+  const designSystem = await frameworkDesignSystem(root, {
+    files: {
+      "src/styles/system.css": `@font-face { font-family: "Example"; src: url("/fonts/brand.woff2"); }\n:root { --font-body: "Example", sans-serif; }\nbody { background-image: url('/images/background.svg'); }\n`,
+      "public/fonts/brand.woff2": "first font bytes",
+      "public/images/background.svg": "<svg />\n",
+      "public/logo.svg": "<svg />\n",
+    },
+  });
+  const site = path.join(root, "site");
+  const result = await scaffoldEmdashSite(site, { designSystem, skipInstall: true, createSite: fakeGenerator(), output: quiet });
+
+  for (const entry of ["fonts", "images", "logo.svg"]) {
+    const relative = `public/${entry}`;
+    assert.equal(await fs.readlink(path.join(site, relative)), `../design-system/public/${entry}`);
+    assert.ok(result.written.includes(relative));
+    assert.equal(classifyConsumerPath(relative, result.manifest).status, "protected");
+    assert.equal(classifyConsumerPath(`${relative}/new-file`, result.manifest).status, "protected");
+  }
+  assert.equal(classifyConsumerPath("public/site-icon.svg", result.manifest).status, "allowed");
+  assert.equal(await fs.readFile(path.join(site, "public/fonts/brand.woff2"), "utf8"), "first font bytes");
+  assert.equal(await fs.readFile(path.join(site, "public/images/background.svg"), "utf8"), "<svg />\n");
+  git(site, "add", "public");
+  assert.equal(git(site, "ls-files", "--stage", "--", "public").split("\n").filter(Boolean).every((line) => line.startsWith("120000 ")), true, "git records links, not copied assets");
+  assert.match(await fs.readFile(path.join(site, "DESIGN_SYSTEM.md"), "utf8"), /relative symlinks into `design-system\/public\/`/);
+
+  await write(path.join(designSystem, "public/fonts/brand.woff2"), "updated font bytes");
+  await write(path.join(designSystem, "public/fonts/new.woff2"), "new font bytes");
+  await commitRepo(designSystem);
+  git(path.join(site, "design-system"), "fetch", "origin");
+  git(path.join(site, "design-system"), "checkout", git(designSystem, "rev-parse", "HEAD").trim());
+  assert.equal(await fs.readFile(path.join(site, "public/fonts/brand.woff2"), "utf8"), "updated font bytes");
+  assert.equal(await fs.readFile(path.join(site, "public/fonts/new.woff2"), "utf8"), "new font bytes");
+});
+
+test("refuses public asset collisions and rolls back the generated site", async (t) => {
+  const root = await temporaryDirectory(t);
+  const designSystem = await frameworkDesignSystem(root, {
+    files: { "src/styles/system.css": ":root { --ink: #111111; }\n", "public/logo.svg": "system logo\n" },
+  });
+  const site = path.join(root, "site");
+  await assert.rejects(scaffoldEmdashSite(site, {
+    designSystem,
+    skipInstall: true,
+    createSite: fakeGenerator([], { "public/logo.svg": "template logo\n" }),
+  }), /design-system\/public\/logo\.svg conflicts with the generated site's public\/logo\.svg/);
+  assert.equal(existsSync(site), false);
+  assert.equal(await fs.readFile(path.join(designSystem, "public/logo.svg"), "utf8"), "system logo\n");
+});
+
+test("validates the portal URL before creating a site or running the generator", async (t) => {
+  const root = await temporaryDirectory(t);
+  const site = path.join(root, "site");
+  const calls = [];
+  const options = { designSystem: "git@example.com:example/design-system.git", createSite: fakeGenerator(calls) };
+  await assert.rejects(scaffoldEmdashSite(site, { ...options, portalUrl: "not-a-url" }), /--portal-url not-a-url is not a valid URL/);
+  await assert.rejects(scaffoldEmdashSite(site, { ...options, portalUrl: "ftp://example.com" }), /--portal-url must use HTTP or HTTPS/);
+  assert.equal(existsSync(site), false);
+  assert.deepEqual(calls, []);
+});
+
+test("rolls back when consumer adoption fails, including an existing empty root", async (t) => {
+  const root = await temporaryDirectory(t);
+  const designSystem = await starterDesignSystem(root);
+  const site = path.join(root, "site");
+  const options = { designSystem, skipInstall: true, createSite: fakeGenerator([], { ".mcp.json": { mcpServers: [] } }) };
+  await assert.rejects(scaffoldEmdashSite(site, options), /has an mcpServers value that is not an object/);
+  assert.equal(existsSync(site), false);
+
+  await fs.mkdir(site);
+  await assert.rejects(scaffoldEmdashSite(site, options), /has an mcpServers value that is not an object/);
+  assert.deepEqual(await fs.readdir(site), []);
+
+  // The same root is immediately usable once the generator/adoption problem is fixed.
+  await scaffoldEmdashSite(site, { designSystem, skipInstall: true, createSite: fakeGenerator() });
+  assert.equal((await checkConsumer(site)).status, "passed");
 });
 
 test("refuses a root that is not empty or sits inside another repository", async (t) => {

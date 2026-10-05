@@ -14,6 +14,8 @@
 //   src/utils/design-system.ts   (starter-build systems only) compiles the
 //                                pinned tokens.json to custom properties by
 //                                the rule the system's own build uses
+//   public/*                     links the system's public assets from the
+//                                pin so root-relative CSS URLs reach them
 //   src/layouts/Base.astro       loads both
 //   timds.consumer.json          the site as one root app: seeded preview,
 //                                theme-only design surface
@@ -41,7 +43,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 import { CONSUMER_MANIFEST_FILE, validateConsumerManifest } from "./consumer.mjs";
-import { CONSUMER_MCP_PATH, initializeConsumer, rootAppName } from "./consumer-init.mjs";
+import { CONSUMER_MCP_PATH, consumerMcpServers, initializeConsumer, rootAppName } from "./consumer-init.mjs";
 import { BRAND_ROLES, importReferences, normalizeBrandRoles, parseCssTokens, resolveBrandRoles, resolveTokens } from "./tokens.mjs";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -226,7 +228,11 @@ export async function inspectDesignSystem(designSystemRoot, { stylesheets = [] }
   const resolved = resolveBrandRoles(resolveTokens(parseCssTokens(css)), mapping);
   const roles = Object.fromEntries(Object.entries(resolved.roles).map(([role, { token }]) => [role, token]));
   const missing = Object.keys(BRAND_ROLES).filter((role) => !roles[role]);
-  return { systemId, name: String(manifest.name || systemId), stylesheets: selected, tokens: Boolean(tokensJson), roles, missing };
+  const publicAssets = await fs.readdir(path.join(designSystemRoot, "public")).catch((caught) => {
+    if (caught?.code === "ENOENT") return [];
+    throw caught;
+  });
+  return { systemId, name: String(manifest.name || systemId), stylesheets: selected, tokens: Boolean(tokensJson), roles, missing, publicAssets: publicAssets.sort() };
 }
 
 // ---------------------------------------------------------------------------
@@ -302,7 +308,7 @@ export function nameCloudflareResources(source, siteName) {
 }
 
 /** `timds.consumer.json` for the site: one root app, previewed from a seeded local database. */
-export function emdashConsumerManifest({ appName, systemId }) {
+export function emdashConsumerManifest({ appName, systemId, publicAssets = [] }) {
   const manifest = {
     schemaVersion: 1,
     designSystem: { path: DESIGN_SYSTEM_PATH, systemId },
@@ -322,7 +328,8 @@ export function emdashConsumerManifest({ appName, systemId }) {
           schemes: ["light", "dark"],
         },
         designSurface: ["src/layouts/**", "src/components/**", "src/styles/**", "src/pages/**", "public/**"],
-        protected: [],
+        // These links reach Design System source, outside the designer's surface.
+        protected: publicAssets.flatMap((entry) => [`public/${entry}`, `public/${entry}/**`]),
       },
     },
   };
@@ -349,6 +356,26 @@ async function createEmdashSite(directory, { name, platform }) {
   const created = await run("npx", ["--yes", EMDASH_GENERATOR, name, "--template", "starter", "--platform", platform, "--pm", "npm", "--no-install", "--yes"], directory);
   if (created.code !== 0) throw new Error(`${EMDASH_GENERATOR} failed:\n${tail(created)}`);
   return path.join(directory, name);
+}
+
+/** Expose static assets at their original URLs without copying source out of the pin. */
+async function linkPublicAssets(repoRoot, entries) {
+  const written = [];
+  for (const entry of entries) {
+    const relative = `public/${entry}`;
+    const destination = path.join(repoRoot, relative);
+    const existing = await fs.lstat(destination).catch((caught) => {
+      if (caught?.code === "ENOENT") return null;
+      throw caught;
+    });
+    if (existing) throw new Error(`The Design System asset ${DESIGN_SYSTEM_PATH}/${relative} conflicts with the generated site's ${relative}. Choose a Design System public asset path that does not overlap the EmDash template.`);
+    const source = `${DESIGN_SYSTEM_PATH}/${relative}`;
+    const stat = await fs.stat(path.join(repoRoot, source));
+    await fs.mkdir(path.dirname(destination), { recursive: true });
+    await fs.symlink(path.posix.relative("public", source), destination, stat.isDirectory() ? "dir" : "file");
+    written.push(relative);
+  }
+  return written;
 }
 
 async function refuseUnusableRoot(root) {
@@ -389,6 +416,7 @@ export async function scaffoldEmdashSite(rootInput, {
     if (!isSafeRelativePath(stylesheet) || !stylesheet.endsWith(".css")) throw new Error(`--stylesheet ${stylesheet} must be a .css path relative to the Design System root`);
   }
   const mcpUrl = siteUrl ? emdashMcpUrl(siteUrl) : null;
+  consumerMcpServers({ portalUrl }); // Validate before creating the repository or running the generator.
   const root = path.resolve(rootInput);
   await refuseUnusableRoot(root);
 
@@ -402,6 +430,7 @@ export async function scaffoldEmdashSite(rootInput, {
   let repoRoot;
   let system;
   let appName;
+  let adopted;
   let cloudflare = null;
   const written = [];
   try {
@@ -434,6 +463,8 @@ export async function scaffoldEmdashSite(rootInput, {
       await fs.cp(path.join(generated, entry), path.join(repoRoot, entry), { recursive: true, verbatimSymlinks: true });
     }
 
+    written.push(...await linkPublicAssets(repoRoot, system.publicAssets));
+
     await writeFile(path.join(repoRoot, BASE_LAYOUT), patchedLayout);
     written.push(BASE_LAYOUT);
     await writeFile(path.join(repoRoot, THEME_STYLESHEET), renderThemeCss(system));
@@ -451,11 +482,12 @@ export async function scaffoldEmdashSite(rootInput, {
     }
 
     appName = rootAppName(packageJson.name, path.basename(repoRoot));
-    await writeFile(path.join(repoRoot, CONSUMER_MANIFEST_FILE), toJson(emdashConsumerManifest({ appName, systemId: system.systemId })));
+    await writeFile(path.join(repoRoot, CONSUMER_MANIFEST_FILE), toJson(emdashConsumerManifest({ appName, systemId: system.systemId, publicAssets: system.publicAssets })));
     written.push(CONSUMER_MANIFEST_FILE);
 
     const imports = [
       ...(system.tokens ? [`- \`${TOKEN_MODULE}\` compiles the pinned \`${DESIGN_SYSTEM_PATH}/tokens.json\` to CSS custom properties, by the rule the system's own build uses, and \`${BASE_LAYOUT}\` puts them on every page.`] : []),
+      ...(system.publicAssets.length ? [`- ${system.publicAssets.map((entry) => `\`public/${entry}\``).join(", ")} are relative symlinks into \`${DESIGN_SYSTEM_PATH}/public/\`, so stylesheet URLs such as \`/fonts/example.woff2\` read assets from the pin. These paths are protected: never edit through the links. A developer must add a link when a later pin introduces a new top-level public asset path.`] : []),
       `- \`${THEME_STYLESHEET}\` ${system.stylesheets.length ? `imports ${system.stylesheets.map((stylesheet) => `\`${DESIGN_SYSTEM_PATH}/${stylesheet}\``).join(", ")} from the pin and` : ""} styles the site shell with the system's tokens.`.replace(/\s+/g, " "),
     ].join("\n");
     await writeFile(path.join(repoRoot, "DESIGN_SYSTEM.md"), (await template("DESIGN_SYSTEM.md"))
@@ -479,15 +511,15 @@ export async function scaffoldEmdashSite(rootInput, {
       config.mcpServers = { ...(config.mcpServers || {}), [EMDASH_MCP_SERVER_NAME]: { type: "http", url: mcpUrl } };
       await writeFile(mcpPath, toJson(config));
     }
+
+    adopted = await initializeConsumer(repoRoot, { skipInstall: true, portalUrl });
+    written.push(...adopted.written.filter((file) => !written.includes(file)));
   } catch (caught) {
     await discard();
     throw caught;
   } finally {
     await fs.rm(staging, { force: true, recursive: true });
   }
-
-  const adopted = await initializeConsumer(repoRoot, { skipInstall: true, portalUrl });
-  written.push(...adopted.written.filter((file) => !written.includes(file)));
 
   if (!skipInstall) {
     output("Running npm install to write the lockfile...");
