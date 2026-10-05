@@ -70,7 +70,7 @@ jobs:
             echo "consumer_path=${consumer_path}"
           } >> "$GITHUB_OUTPUT"
 
-          if [[ "$EVENT_NAME" == "push" && -n "${BEFORE_SHA:-}" && ! "$BEFORE_SHA" =~ ^0+$ ]]; then
+          if [[ "$EVENT_NAME" == "push" && -n "${BEFORE_SHA:-}" && ! "$BEFORE_SHA" =~ ^0+$ ]] && git cat-file -e "${BEFORE_SHA}:timds.json" 2>/dev/null; then
             previous_version="$(git show "${BEFORE_SHA}:timds.json" | node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).version")"
             node scripts/prepare-merge-release.mjs \
               --previous "$previous_version" \
@@ -79,7 +79,7 @@ jobs:
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
             echo "version=$(node -p "require('./timds.json').version")" >> "$GITHUB_OUTPUT"
-            echo "Initial push or manual dispatch publishes the selected main commit without changing its version."
+            echo "Initial contract push or manual dispatch publishes the selected main commit without changing its version."
           fi
       - name: Verify and commit the synchronized version
         id: commit
