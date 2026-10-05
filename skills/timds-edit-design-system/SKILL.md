@@ -43,12 +43,16 @@ system is ordinary design work:
    files, and voice guidance. Ask for what is missing rather than inventing it.
 2. Replace the values in `tokens.json`. The starter build emits each
    `group.name` token as the `--group-name` custom property in `tokens.css`;
-   add a token before using a new value in `src/styles.css`.
-3. Replace the starter copy and examples in `src/index.html`, and add pages as
-   `src/<section>/<page>/index.html`. The build copies `src/` into the
-   artifact unchanged.
-4. Add the logo, the `brand/voice` page, and the other guidance pages, shaped
-   as described in the next section.
+   add a token before using a new value in `src/styles/`.
+3. Read `src/site.json`. It declares every view and page; a page marked
+   `"planned": true` has no source yet and is not built. Rewrite the authored
+   fragments under `src/pages/` for the client, then author the planned ones:
+   create `src/pages/<view>/<slug>.html` and remove the flag. Remove planned
+   pages the system will not have and add the pages and views it needs.
+4. Add the logo under `src/assets/` and write the `brand/logo`, `brand/voice`,
+   and other guidance pages, shaped as described in the next section. A
+   fragment holds only the content of `<main>`; `src/layout.html` supplies the
+   shell and the navigation.
 5. The starter `dev` server builds once and does not watch files. Rerun
    `npm run timds -- check` after an edit, then reload.
 

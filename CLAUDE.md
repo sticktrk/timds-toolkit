@@ -121,7 +121,12 @@ lifecycle belong to the host.
 
 `templates/` is copied verbatim (with `__PLACEHOLDER__` substitution) by `init`
 and `video init`. `templates/starter/` is the standalone repo scaffold including
-its release scripts; `templates/*.yml` are the stock workflows.
+its release scripts; `templates/*.yml` are the stock workflows. The starter
+viewer is client-owned once copied: `scripts/viewer.mjs` renders
+`src/site.json` (views and pages, authored or `planned`), `src/layout.html`,
+and the fragments under `src/pages/` into `dist/`, filling `{{tokens:GROUP}}`
+tables from `tokens.json`. Planned pages are never built, so a fresh scaffold
+keeps its two expected brand warnings.
 `templates/design-system-AGENTS.md`, `design-system-CLAUDE.md`, and
 `design-system-README.md` are the scaffolded agent and human entry points;
 they are written once and then client-owned, so keep them accurate for a fresh

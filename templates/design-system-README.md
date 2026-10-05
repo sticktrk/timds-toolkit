@@ -29,13 +29,19 @@ New contracts include a dependency-free starter viewer under `src/` and
 deterministic Node.js commands under `scripts/`. The starter exists so the
 contract builds and validates immediately; replace its neutral tokens and
 examples with approved client foundations rather than treating them as brand
-guidance.
+guidance. It is organized as views (Brand, Web), each a list of pages, all
+rendered into one shared shell. Some pages are authored from the starter
+tokens; the rest are declared as planned and built once someone writes them.
 
 | Path | Purpose |
 | --- | --- |
 | `tokens.json` | Authored tokens; the build emits each as a `--group-name` CSS custom property in `tokens.css` |
-| `src/index.html`, `src/styles.css` | The viewer; everything under `src/` is copied into the artifact |
-| `scripts/build.mjs`, `dev.mjs`, `check.mjs` | The `workspace` commands declared in `timds.json` |
+| `src/site.json` | The views and their pages, authored or planned; drives the navigation and the overview |
+| `src/pages/` | One content fragment per authored page, such as `src/pages/brand/color.html` |
+| `src/layout.html` | The shell every page shares |
+| `src/styles/system.css`, `src/styles/viewer.css` | The system's own styles, and the documentation chrome |
+| `src/assets/` | Small optimized assets such as logos, copied into the artifact |
+| `scripts/build.mjs`, `dev.mjs`, `check.mjs`, `viewer.mjs` | The `workspace` commands declared in `timds.json` and the renderer they share |
 | `CHANGELOG.md` | Change notes; add to `## Unreleased` |
 | `media.json`, `media-local/` | Published media catalog and ignored originals |
 

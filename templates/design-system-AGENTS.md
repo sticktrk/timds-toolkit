@@ -27,8 +27,11 @@ holds `timds.json`. Run `__TIMDS_CLI__` commands from the repository root.
 | Path | Role | During design work |
 | --- | --- | --- |
 | `tokens.json` | Authored design tokens | Edit |
-| `src/` | Authored viewer pages, styles, and small assets | Edit |
-| `scripts/build.mjs`, `dev.mjs`, `check.mjs` | The `workspace` commands that `timds.json` runs | Edit only when the viewer needs it |
+| `src/site.json` | The views and every page in them; the one place that declares which pages exist | Edit |
+| `src/pages/` | One content fragment per authored page | Edit |
+| `src/layout.html` | The shell every page shares: app bar, page navigation, content slot | Edit |
+| `src/styles/`, `src/assets/` | The system's styles, the viewer chrome, and small optimized assets | Edit |
+| `scripts/build.mjs`, `dev.mjs`, `check.mjs`, `viewer.mjs` | The `workspace` commands that `timds.json` runs and the renderer they share | Edit only when the viewer needs it |
 | `CHANGELOG.md` | Designer-facing change notes | Add to `## Unreleased` |
 | `README.md`, `AGENTS.md` | This system's own documentation | Keep accurate as the system changes |
 | `timds.json` | Manifest: identity, version, artifact entry, workspace commands | Only `brand` and `machine` mappings; the rest is protected |
@@ -41,18 +44,45 @@ holds `timds.json`. Run `__TIMDS_CLI__` commands from the repository root.
 
 A new contract ships a dependency-free viewer so it builds and validates
 immediately. Its colors, fonts, and copy are neutral placeholders, not brand
-guidance.
+guidance. Its structure is the part to keep: views, a shared shell, and pages
+built from the same few blocks.
 
-- `tokens.json` groups tokens as `group.name` with a string `value`. The build
-  writes each one to `tokens.css` as the CSS custom property `--group-name`
-  on `:root`. Use those properties in `src/styles.css`; add a token before
-  using a new value.
-- The build copies everything under `src/` into the artifact unchanged. Only
-  `src/index.html` has its name, description, version, and token count filled
-  in from `timds.json`.
-- Add a page as `src/<section>/<page>/index.html`; it becomes the page
-  `<section>/<page>`. `check` fails on a local reference that does not
-  resolve inside the artifact.
+- `src/site.json` lists the views (Brand, Web) and the pages in each, in
+  navigation order. A page is `{ "slug", "title", "summary" }` plus an
+  optional `group` heading for the sidebar. The page `<view>/<slug>` is
+  authored in `src/pages/<view>/<slug>.html` and built to
+  `dist/<view>/<slug>/index.html`; an empty slug is the view's own page,
+  `src/pages/<view>/index.html`. `src/pages/index.html` is the overview.
+- A page marked `"planned": true` is declared but not authored. It shows in
+  the navigation and the overview as planned, and nothing is built for it, so
+  the derived layer never carries placeholder guidance. To author it, create
+  the fragment and remove the flag. The build fails when the two disagree, and
+  when a fragment exists that `site.json` does not declare.
+- A fragment holds only what goes inside `<main>`: an eyebrow, one
+  `<h1 class="page-title">`, a `<p class="lede">`, then one
+  `<section class="block" id="...">` per topic. `src/layout.html` supplies the
+  app bar, the sidebar, and the previous/next links from `site.json`.
+- Write a block from the shared pieces in `src/styles/viewer.css`: a
+  `.block__head` with the `<h2 class="h2">` and an intro, a
+  `<table class="spec">` for rules, a `.note` for guidance that is not a row,
+  a `<pre>` for markup to copy, and a `<figure class="demo">` for a live
+  preview. A preview is a figure so its sample text stays out of the derived
+  rules.
+- `tokens.json` groups tokens as `group.name` with a string `value` and an
+  optional `description`. The build writes each one to `tokens.css` as the CSS
+  custom property `--group-name` on `:root`. Add a token before using a new
+  value; `check` fails on a color literal in `src/styles/`.
+- A fragment never restates a token. `{{tokens:GROUP}}` becomes the table of
+  that group, written from `tokens.json`; `{{sitemap}}` becomes the table of
+  every page; `{{name}}`, `{{description}}`, and `{{version}}` come from
+  `timds.json`. An unknown placeholder fails the build.
+- `src/styles/system.css` is the system itself, the base styles and
+  components a product adopts. `src/styles/viewer.css` is documentation
+  chrome. Keep them apart. `src/styles/` and `src/assets/` are copied into the
+  artifact unchanged.
+- Link pages and files by site-absolute path, such as `/brand/color/` and
+  `/assets/logo.svg`. `check` fails on a local reference that does not resolve
+  inside the artifact.
 - `dev` builds once and serves the artifact at `http://127.0.0.1:4321` (set
   `PORT` to change it). It does not watch files: rerun `__TIMDS_CLI__ check`
   after editing, then reload.
@@ -113,11 +143,16 @@ only that layer, so page structure decides what they receive.
    invent a client mark, a usage right, or a compliance rule.
 2. Replace the starter values in `tokens.json`. Keep role-friendly token names
    or map the roles in `timds.json`.
-3. Replace the starter copy and examples in `src/index.html`, then add the
-   foundation, component, and guidance pages the system needs.
-4. Add small optimized logo files under `src/`, reference them by
-   site-absolute path, and annotate them where they are shown.
-5. Write the `brand/voice` page.
+3. Rewrite the authored pages (`brand/color`, `brand/typography`,
+   `web/spacing`, `web/components`) for the client: their copy, their rules,
+   and the components in `src/styles/system.css`.
+4. Author the planned pages, starting with the Brand view. Add small
+   optimized logo files under `src/assets/`, then write `brand/logo` showing
+   each one by site-absolute path with its annotation. Write `brand/voice`
+   and `brand/foundation`.
+5. Shape the rest of `src/site.json` to the client: remove a planned page the
+   system will not have, and add pages or whole views (email, social, print,
+   video) it needs.
 6. Run `__TIMDS_CLI__ check` until it passes without warnings and
    `__TIMDS_CLI__ brand` lists the logo and the voice guidance.
 7. Inspect `__TIMDS_CLI__ preview` at desktop and mobile widths.
