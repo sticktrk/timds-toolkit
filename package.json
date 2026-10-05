@@ -44,6 +44,7 @@
     "src/core.mjs",
     "src/consumer.mjs",
     "src/consumer-init.mjs",
+    "src/consumer-scaffold.mjs",
     "src/consumer-notes.mjs",
     "src/consumer-preview.mjs",
     "src/consumer-browser.mjs",

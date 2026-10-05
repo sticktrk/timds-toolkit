@@ -52,6 +52,7 @@ const CONSUMER_HELP = `Usage:
   timds consumer check [--root PATH] [--app NAME] [--base REF] [--json]
   timds consumer preview --app NAME [--root PATH] [--output DIR] [--base REF] [--publish] [--pull-request N]
   timds consumer init [--root PATH] [--force] [--skip-install] [--portal-url URL]
+  timds consumer scaffold emdash --root PATH --design-system GIT_URL [--stylesheet PATH]... [--site-url URL] [--portal-url URL] [--skip-install]
   timds consumer notes [--root PATH] [--app NAME] [--pull-request N] [--all] [--json] [--portal-url URL]
   timds consumer notes resolve ID [ID...] [--commit SHA] [--dismiss]`;
 
@@ -587,7 +588,7 @@ function checkReport(result) {
   return lines.join("\n");
 }
 
-/** `timds consumer <check|preview|init|notes> ...` */
+/** `timds consumer <check|preview|init|scaffold|notes> ...` */
 export async function runConsumerCli(args = [], { output = defaultOutput } = {}) {
   const [subcommand = "help", ...rest] = args;
   if (["help", "--help", "-h"].includes(subcommand)) {
@@ -605,6 +606,10 @@ export async function runConsumerCli(args = [], { output = defaultOutput } = {})
   if (subcommand === "init") {
     const { runConsumerInit } = await import("./consumer-init.mjs");
     return runConsumerInit(rest, { output });
+  }
+  if (subcommand === "scaffold") {
+    const { runConsumerScaffold } = await import("./consumer-scaffold.mjs");
+    return runConsumerScaffold(rest, { output });
   }
   if (subcommand !== "check") throw new Error(`Unknown consumer command ${subcommand}\n${CONSUMER_HELP}`);
   const options = parseCheckArguments(rest);

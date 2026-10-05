@@ -38,6 +38,19 @@ tracked `.claude/launch.json` and `.mcp.json` entries, and `consumer` in
 with `--version`, the root package and lockfile) and never touches
 `timds.consumer.json`, other launch entries or MCP servers, or product source.
 
+`consumer scaffold emdash` creates a new EmDash site repository that consumes
+a Design System. It runs EmDash's own generator, never a vendored template;
+everything it writes beyond the consumer-managed boundary above (the theme,
+the token module, public asset symlinks, `timds.consumer.json`,
+`DESIGN_SYSTEM.md`) is product source from then on, so no upgrade may touch it.
+The site reads the pinned submodule at build time: never copy stylesheets,
+tokens, or media out of it. The token module mirrors the starter build's
+`--group-name` rule in
+`templates/starter/scripts/viewer.mjs`; change the two together.
+Public assets stay in the pin and are exposed through relative symlinks in
+the site's `public/`; the links and their descendants are protected paths.
+Refuse collisions with generated public files instead of replacing them.
+
 `upgrade --version VERSION` selects one exact tested resolution, restores the
 bounded requirement, runs `npm ci`, synchronizes adopted managed files with the
 selected CLI, and validates the graph and workspace. Explicit `--own-runtime`
