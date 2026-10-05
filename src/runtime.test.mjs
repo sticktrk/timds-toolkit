@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import { isBuiltin } from "node:module";
 import test from "node:test";
 import {acceptsToolkitReleaseRange, assertRuntimeCompatibility, assertVideoContractRuntime, declaredReleaseLine, runtimeIdentity, sharedRuntimeRequirements, toolkitReleaseRange} from "./runtime.mjs";
 import {releaseLineOf, runtimeIdentityFor} from "../video/runtime-compat.mjs";
@@ -48,4 +50,27 @@ test("explicit runtime requirements require contract schema 2 so old hosts rejec
   assert.throws(() => assertVideoContractRuntime({schemaVersion:1,runtime:sharedRuntimeRequirements()}), /schemaVersion 2 so older hosts reject/u);
   assert.throws(() => assertVideoContractRuntime({schemaVersion:2}), /requires explicit runtime/u);
   assert.doesNotThrow(() => assertVideoContractRuntime({schemaVersion:2,runtime:sharedRuntimeRequirements()}));
+});
+
+test("modules a render bundle reaches never import a Node built-in", async () => {
+  // A client's render components import the Remotion defaults and, for
+  // resolveBoardKind, the producer; webpack bundles everything they reach for
+  // the browser and fails the whole render on a single `node:` specifier.
+  const root = new URL("../", import.meta.url);
+  const manifest = JSON.parse(await fs.readFile(new URL("package.json", root), "utf8"));
+  const entries = ["./video/remotion", "./video/producer", "./video/transport", "./video/boards", "./video/footage", "./video/board-layouts"];
+  const pending = entries.map((entry) => new URL(manifest.exports[entry], root).href);
+  const seen = new Set(), offenders = [];
+  while (pending.length) {
+    const file = pending.pop();
+    if (seen.has(file) || file.endsWith(".json")) continue;
+    seen.add(file);
+    const source = await fs.readFile(new URL(file), "utf8");
+    for (const [, specifier] of source.matchAll(/^\s*(?:import|export)\b[^"'`;]*?["']([^"']+)["']/gmu)) {
+      if (specifier.startsWith(".")) pending.push(new URL(specifier, file).href);
+      else if (isBuiltin(specifier)) offenders.push(`${file.slice(root.href.length)} imports ${specifier}`);
+    }
+  }
+  assert.ok(seen.size > entries.length, "the walk follows relative imports");
+  assert.deepEqual(offenders, []);
 });
