@@ -19,8 +19,10 @@
 //                                theme-only design surface
 //   DESIGN_SYSTEM.md             which change goes where (CMS content, theme
 //                                pull request, Design System)
-//   wrangler.jsonc               (Cloudflare only) the Worker, database, and
-//                                bucket named after the site
+//   wrangler.jsonc, .github/workflows/deploy-cloudflare.yml
+//                                (Cloudflare only) the Worker, database, and
+//                                bucket named after the site, and a Wrangler
+//                                deploy that is started by hand the first time
 //
 // then hands over to `initializeConsumer` for the consumer-managed files.
 //
@@ -59,6 +61,8 @@ const DEV_PORT = 4380;
 // `astro dev`, and works the same on SQLite and on the local D1.
 const DEV_SEED_ROUTE = "/_emdash/api/setup/dev-bypass";
 const WRANGLER_CONFIG = "wrangler.jsonc";
+const DEPLOY_WORKFLOW = ".github/workflows/deploy-cloudflare.yml";
+const DEPLOY_ON_PUSH_VARIABLE = "CLOUDFLARE_DEPLOY_ON_PUSH";
 const BASE_LAYOUT = "src/layouts/Base.astro";
 const THEME_STYLESHEET = "src/styles/theme.css";
 const TOKEN_MODULE = "src/utils/design-system.ts";
@@ -81,8 +85,9 @@ the site comes from the system. It then runs the same adoption as timds
 consumer init. Nothing is committed.
 
 --platform is where the site is hosted: cloudflare (the default; Workers with
-a D1 database and an R2 bucket named after the site) or node (a Node.js server
-with SQLite and local file storage). The scaffold adds no deploy automation.
+a D1 database and an R2 bucket named after the site, and a deploy workflow
+that runs only when started by hand until ${DEPLOY_ON_PUSH_VARIABLE} is set)
+or node (a Node.js server with SQLite and local file storage).
 
 --stylesheet names a stylesheet, relative to the Design System root, that the
 site imports from the submodule; repeat it for several. It defaults to
@@ -441,6 +446,8 @@ export async function scaffoldEmdashSite(rootInput, {
     if (cloudflare) {
       await writeFile(path.join(repoRoot, WRANGLER_CONFIG), cloudflare.config);
       written.push(WRANGLER_CONFIG);
+      await writeFile(path.join(repoRoot, DEPLOY_WORKFLOW), await template("deploy-cloudflare.yml"));
+      written.push(DEPLOY_WORKFLOW);
     }
 
     appName = rootAppName(packageJson.name, path.basename(repoRoot));
@@ -457,7 +464,7 @@ export async function scaffoldEmdashSite(rootInput, {
       .replaceAll("__DESIGN_SYSTEM_PATH__", () => DESIGN_SYSTEM_PATH)
       .replaceAll("__DEV_SEED_ROUTE__", () => DEV_SEED_ROUTE)
       .replace("__HOSTING__", () => (cloudflare
-        ? `The site runs on Cloudflare Workers as \`${cloudflare.name}\`, with the D1 database \`${cloudflare.database_name}\` and the R2 bucket \`${cloudflare.bucket_name}\` (\`${WRANGLER_CONFIG}\`). The first deployment creates the database and the bucket; local development uses a local copy of both, so it needs no Cloudflare account.`
+        ? `The site runs on Cloudflare Workers as \`${cloudflare.name}\`, with the D1 database \`${cloudflare.database_name}\` and the R2 bucket \`${cloudflare.bucket_name}\` (\`${WRANGLER_CONFIG}\`). \`${DEPLOY_WORKFLOW}\` builds and deploys it with Wrangler: it runs when started by hand, and on every push to \`main\` once the repository variable \`${DEPLOY_ON_PUSH_VARIABLE}\` is \`true\`. The first deployment creates the database and the bucket; local development uses a local copy of both, so it needs no Cloudflare account.`
         : "The site runs as a Node.js server with a SQLite database (`data.db`) and uploaded media on local disk (`uploads/`); both stay out of git."))
       .replace("__IMPORTS__", () => imports));
     written.push("DESIGN_SYSTEM.md");
@@ -495,8 +502,9 @@ export async function scaffoldEmdashSite(rootInput, {
     `Commit everything (the ${DESIGN_SYSTEM_PATH} pin included), create the site's repository, and push; .env holds the local EMDASH_ENCRYPTION_KEY and stays out of git`,
     ...(cloudflare
       ? [
-        `Deployment is not automated: the site deploys to Cloudflare Workers as ${cloudflare.name}, and the first deployment creates the D1 database ${cloudflare.database_name} and the R2 bucket ${cloudflare.bucket_name} named in ${WRANGLER_CONFIG}`,
-        "Set EMDASH_ENCRYPTION_KEY (npx emdash secrets generate) as a Worker secret, and before creating the first administrator on a custom domain add its route and EMDASH_SITE_URL to wrangler.jsonc: passkeys only work on the address they were created on",
+        `To deploy, add the CLOUDFLARE_API_TOKEN (Workers Scripts, D1, and R2 edit) and CLOUDFLARE_ACCOUNT_ID secrets, then start ${DEPLOY_WORKFLOW} by hand: it deploys the Worker ${cloudflare.name}, and the first deployment creates the D1 database ${cloudflare.database_name} and the R2 bucket ${cloudflare.bucket_name}`,
+        `Create the first administrator at /_emdash/admin straight after that first deployment (until setup is completed, whoever opens it first becomes the administrator), then set the repository variable ${DEPLOY_ON_PUSH_VARIABLE} to true to deploy every push to main`,
+        "Add an EMDASH_ENCRYPTION_KEY secret (npx emdash secrets generate) for the deploy to upload to the Worker, and before creating the first administrator on a custom domain add its route and EMDASH_SITE_URL to wrangler.jsonc: passkeys only work on the address they were created on",
       ]
       : ["Set EMDASH_ENCRYPTION_KEY wherever the Node.js server is deployed, and keep data.db and uploads/ on persistent storage"]),
     `To have each Design System release open a pin-update pull request here, declare this repository as consumer in the Design System's timds.json; a same-host relative submodule URL in .gitmodules (../<design-system-repo>.git) lets one credential fetch both`,

@@ -226,7 +226,19 @@ test("scaffolds an EmDash site that reads a starter Design System from the pin",
   assert.match(wrangler, /\/\/ General maintenance cron trigger/);
   assert.doesNotMatch(wrangler, /my-emdash/);
   assert.ok(result.written.includes("wrangler.jsonc"));
-  assert.ok(result.todos.some((item) => item.startsWith("Deployment is not automated: the site deploys to Cloudflare Workers as acme-site")));
+
+  // The deploy is the site's own workflow: by hand first, then on push by opt-in.
+  const deploy = await fs.readFile(path.join(site, ".github/workflows/deploy-cloudflare.yml"), "utf8");
+  assert.equal(deploy, await fs.readFile(new URL("../templates/emdash/deploy-cloudflare.yml", import.meta.url), "utf8"));
+  assert.match(deploy, /^    if: github\.event_name == 'workflow_dispatch' \|\| vars\.CLOUDFLARE_DEPLOY_ON_PUSH == 'true'$/m);
+  assert.match(deploy, /npx wrangler deploy --secrets-file "\$secrets_file"/);
+  assert.doesNotMatch(deploy, /__[A-Z_]+__/);
+  const installation = JSON.parse(await fs.readFile(path.join(site, ".timds/installation.json"), "utf8"));
+  assert.ok(installation.consumer.managedFiles[".github/workflows/timds-consumer-preview.yml"]);
+  assert.equal(installation.consumer.managedFiles[".github/workflows/deploy-cloudflare.yml"], undefined, "upgrade never manages the deploy workflow");
+  assert.match(guide, /`\.github\/workflows\/deploy-cloudflare\.yml` builds and deploys it with Wrangler/);
+  assert.ok(result.todos.some((item) => item.startsWith("To deploy, add the CLOUDFLARE_API_TOKEN")));
+  assert.ok(result.todos.some((item) => item.includes("whoever opens it first becomes the administrator")));
   const agents = await fs.readFile(path.join(site, "AGENTS.md"), "utf8");
   assert.ok(agents.startsWith("This is an EmDash site.\n\n## Visual character\n\nNone imposed.\n\n## Design System\n"));
   assert.match(agents, /pinned at\n`design-system\/`/);
@@ -422,6 +434,7 @@ test("generates the Node.js platform without Cloudflare resources", async (t) =>
   assert.equal(result.platform, "node");
   assert.equal(result.cloudflare, undefined);
   assert.equal(existsSync(path.join(site, "wrangler.jsonc")), false);
+  assert.equal(existsSync(path.join(site, ".github/workflows/deploy-cloudflare.yml")), false);
   assert.match(await fs.readFile(path.join(site, "DESIGN_SYSTEM.md"), "utf8"), /runs as a Node\.js server with a SQLite database/);
   assert.ok(result.todos.some((item) => item.startsWith("Set EMDASH_ENCRYPTION_KEY wherever the Node.js server is deployed")));
   assert.equal((await checkConsumer(site)).status, "passed");

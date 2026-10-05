@@ -338,9 +338,17 @@ The scaffold initializes the repository, adds the Design System as the
 Workers variant, with a D1 database and an R2 bucket, and renames the Worker,
 database, and bucket in `wrangler.jsonc` after the site (the template ships
 one shared placeholder name, and two sites in an account would otherwise
-deploy over each other); `node` generates a Node.js server with SQLite and
-local file storage. Local development and previews need no Cloudflare account
-on either. The scaffold adds no deploy automation.
+deploy over each other) and writes `.github/workflows/deploy-cloudflare.yml`;
+`node` generates a Node.js server with SQLite and local file storage. Local
+development and previews need no Cloudflare account on either.
+
+The deploy workflow builds the site against the pinned Design System and runs
+`wrangler deploy` with the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`
+secrets; the first deployment creates the D1 database and the R2 bucket. It
+runs only when started by hand until the repository variable
+`CLOUDFLARE_DEPLOY_ON_PUSH` is `true`, because a deployed EmDash site lets its
+first visitor create the administrator until setup is completed. The workflow
+is product source: `upgrade` never touches it.
 
 `--stylesheet PATH` (relative to the Design System root, repeatable) names
 what the site imports; it defaults to `src/styles/system.css` when the system
