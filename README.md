@@ -259,6 +259,10 @@ Declared `routes` always come first and always stay.
   [--commit SHA] [--dismiss]` marks them addressed (or dismissed) after the fix
   is pushed. Both need `TIMDS_ACCESS_TOKEN` or `timds auth login`.
 
+- `timds consumer scaffold emdash --root PATH --design-system GIT_URL` creates
+  a new EmDash CMS site repository that consumes a Design System (see
+  **EmDash sites** below), then adopts it the way `consumer init` does.
+
 The designer-change workflow (`.github/workflows/timds-designer-change.yml`)
 lets a designer start a change with no setup. An issue labeled
 `timds-design-change` (the portal opens one from a plain-language request), a
@@ -290,6 +294,55 @@ Design System repositories only.
 
 Hosts and other tools read the manifest with `loadConsumer` from
 `@dtconcepts/timds/consumer`.
+
+### EmDash sites
+
+[EmDash](https://github.com/emdash-cms/emdash) is an Astro-based CMS: page
+content lives in its database and the theme is Astro source in the site
+repository. That makes an EmDash site an ordinary consumer, and one command
+creates it already wired to a Design System:
+
+```bash
+npx --yes @dtconcepts/timds@0.1.x consumer scaffold emdash \
+  --root /path/to/client-site \
+  --design-system git@github.com:ORG/CLIENT-design-system.git \
+  --site-url https://www.client.example
+```
+
+`--root` must not exist, or be empty, and must sit outside any git repository.
+The scaffold initializes the repository, adds the Design System as the
+`design-system` submodule, generates EmDash's unstyled `starter` template with
+`create-emdash@1` (Node.js with SQLite; the generator needs network access),
+and writes:
+
+- `src/styles/theme.css`, which imports the system's stylesheets from the
+  submodule and styles the site shell with the token that fills each brand
+  role (`var(--…)`, never a literal). A role nothing fills leaves its
+  declaration out and is listed for the developer.
+- `src/utils/design-system.ts`, only for a system that still runs the starter
+  build: that build writes `tokens.css` from `tokens.json` into `dist/`, so
+  the site compiles the pinned `tokens.json` by the same `--group-name` rule
+  and `src/layouts/Base.astro` puts the result on every page.
+- `timds.consumer.json` with the site as one root app: `install` seeds the
+  local database (`npm ci`, then `npm run seed`) so previews show content,
+  `preview.serve` runs `astro dev` on port 4380 with `--ignore-lock` (Astro
+  otherwise backgrounds the server when an agent starts it), and the design
+  surface is the theme (`src/layouts`, `src/components`, `src/styles`,
+  `src/pages`, `public`).
+- `DESIGN_SYSTEM.md` and a section in `AGENTS.md` that say which change goes
+  where: content through the EmDash admin or its MCP server, the theme through
+  a pull request inside the design surface, the brand through the Design
+  System and a pin update.
+
+`--stylesheet PATH` (relative to the Design System root, repeatable) names
+what the site imports; it defaults to `src/styles/system.css` when the system
+has one, and is required for a system on its own framework. With `--site-url`,
+`.mcp.json` also gets the site's EmDash MCP server
+(`<origin>/_emdash/api/mcp`), which signs each person in through the site's
+own OAuth with their EmDash role. Nothing is copied out of the Design System,
+nothing is committed, and a failure before the site is adopted removes what
+was created. The scaffold writes product source: `upgrade` later refreshes
+only the consumer-managed files, never the theme.
 
 ## Machine-readable artifacts
 

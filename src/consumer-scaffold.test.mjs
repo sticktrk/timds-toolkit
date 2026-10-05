@@ -1,0 +1,388 @@
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { existsSync, promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+
+import { checkConsumer, runConsumerCli, validateConsumerManifest } from "./consumer.mjs";
+import {
+  EMDASH_GENERATOR,
+  compileTokenCss,
+  emdashConsumerManifest,
+  inspectDesignSystem,
+  patchBaseLayout,
+  renderThemeCss,
+  runConsumerScaffold,
+  scaffoldEmdashSite,
+} from "./consumer-scaffold.mjs";
+import { initializeRepository } from "./core.mjs";
+
+const toolkitPackage = JSON.parse(await fs.readFile(new URL("../package.json", import.meta.url), "utf8"));
+const releaseLine = toolkitPackage.version.replace(/^(\d+\.\d+)\.\d+.*$/, "$1.x");
+
+// The scaffold adds the submodule itself; let its git read the local fixture.
+process.env.GIT_CONFIG_COUNT = "1";
+process.env.GIT_CONFIG_KEY_0 = "protocol.file.allow";
+process.env.GIT_CONFIG_VALUE_0 = "always";
+
+const quiet = () => {};
+
+async function temporaryDirectory(t) {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "timds-consumer-scaffold-"));
+  t.after(() => fs.rm(directory, { force: true, recursive: true, maxRetries: 5, retryDelay: 50 }));
+  return fs.realpath(directory);
+}
+
+function git(cwd, ...args) {
+  return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+}
+
+async function write(filePath, content) {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.writeFile(filePath, typeof content === "string" ? content : `${JSON.stringify(content, null, 2)}\n`, "utf8");
+}
+
+async function commitRepo(directory) {
+  git(directory, "add", "--all");
+  git(directory, "-c", "user.email=timds-test@example.com", "-c", "user.name=TimDS Test", "commit", "-m", "Initial");
+}
+
+/** A Design System exactly as `timds init --standalone` writes it. */
+async function starterDesignSystem(root) {
+  const directory = path.join(root, "acme-design-system");
+  await fs.mkdir(directory, { recursive: true });
+  git(directory, "init", "-b", "main");
+  await initializeRepository(directory, { standalone: true, name: "Acme", systemId: "acme/core" });
+  await commitRepo(directory);
+  return directory;
+}
+
+/** A Design System on its own framework: tokens live in authored stylesheets. */
+async function frameworkDesignSystem(root, { manifest = {}, files = {} } = {}) {
+  const directory = path.join(root, "acme-design-system");
+  await fs.mkdir(directory, { recursive: true });
+  git(directory, "init", "-b", "main");
+  await write(path.join(directory, "timds.json"), {
+    schemaVersion: 2,
+    systemId: "acme/core",
+    name: "Acme Design System",
+    version: "1.0.0",
+    workspace: { build: ["npm", "run", "build"] },
+    ...manifest,
+  });
+  for (const [file, content] of Object.entries(files)) await write(path.join(directory, file), content);
+  await commitRepo(directory);
+  return directory;
+}
+
+const BASE_LAYOUT = `---
+import { EmDashHead } from "emdash/ui";
+
+const { title } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+\t<head>
+\t\t<title>{title}</title>
+\t\t<EmDashHead />
+\t</head>
+\t<body>
+\t\t<main><slot /></main>
+\t</body>
+</html>
+`;
+
+/** Stands in for the EmDash generator: the starter template's shape, no network. */
+function fakeGenerator(calls = [], overrides = {}) {
+  return async (directory, { name }) => {
+    calls.push(name);
+    const site = path.join(directory, name);
+    const files = {
+      "package.json": {
+        name,
+        private: true,
+        type: "module",
+        emdash: { label: "Starter", seed: "seed/seed.json" },
+        scripts: { dev: "astro dev", build: "astro build" },
+        dependencies: { astro: "^7.3.2", emdash: "^1.0.1" },
+      },
+      ".gitignore": "node_modules\ndist\ndata.db\n.env\n",
+      ".env": "EMDASH_ENCRYPTION_KEY=fixture\n",
+      ".mcp.json": { mcpServers: { "emdash-docs": { type: "http", url: "https://docs.emdashcms.com/mcp" } } },
+      "AGENTS.md": "This is an EmDash site.\n\n## Visual character\n\nNone imposed.\n",
+      "astro.config.mjs": "export default {};\n",
+      "seed/seed.json": {},
+      "src/layouts/Base.astro": BASE_LAYOUT,
+      "src/pages/index.astro": "---\n---\n<h1>Home</h1>\n",
+      ...overrides,
+    };
+    for (const [file, content] of Object.entries(files)) {
+      if (content !== null) await write(path.join(site, file), content);
+    }
+    return site;
+  };
+}
+
+test("scaffolds an EmDash site that reads a starter Design System from the pin", async (t) => {
+  const root = await temporaryDirectory(t);
+  const designSystem = await starterDesignSystem(root);
+  const site = path.join(root, "acme-site");
+  const calls = [];
+  const lines = [];
+
+  const result = await scaffoldEmdashSite(site, { designSystem, skipInstall: true, createSite: fakeGenerator(calls), output: (line) => lines.push(line) });
+
+  assert.deepEqual(calls, ["acme-site"]);
+  assert.equal(result.systemId, "acme/core");
+  assert.equal(result.appName, "acme-site");
+  assert.equal(result.tokens, true);
+  assert.deepEqual(result.stylesheets, ["src/styles/system.css"]);
+  assert.deepEqual(result.missingRoles, []);
+
+  // A new repository with the Design System staged as its submodule, nothing committed.
+  assert.match(git(site, "ls-files", "--stage", "--", "design-system"), /^160000 [0-9a-f]{40} 0\tdesign-system$/m);
+  assert.throws(() => git(site, "rev-parse", "--verify", "HEAD"));
+  assert.equal(JSON.parse(await fs.readFile(path.join(site, "design-system", "timds.json"), "utf8")).systemId, "acme/core");
+
+  // The theme imports the system from the pin and names the tokens that fill the roles.
+  const theme = await fs.readFile(path.join(site, "src/styles/theme.css"), "utf8");
+  assert.match(theme, /^@import "\.\.\/\.\.\/design-system\/src\/styles\/system\.css";$/m);
+  assert.match(theme, /background: var\(--color-canvas\);/);
+  assert.match(theme, /color: var\(--color-accent\);/);
+  assert.match(theme, /font-family: var\(--font-serif\);/);
+  assert.doesNotMatch(theme, /#[0-9a-f]{3,8}\b/i, "the theme never restates a token value");
+
+  const layout = await fs.readFile(path.join(site, "src/layouts/Base.astro"), "utf8");
+  assert.ok(layout.startsWith(`---\nimport "../styles/theme.css";\nimport { designSystemTokenCss } from "../utils/design-system";\nimport { EmDashHead } from "emdash/ui";\n`));
+  assert.match(layout, /\t\t<EmDashHead \/>\n\t\t<style is:inline set:html=\{designSystemTokenCss\}><\/style>\n\t<\/head>/);
+  assert.match(await fs.readFile(path.join(site, "src/utils/design-system.ts"), "utf8"), /import tokens from "\.\.\/\.\.\/design-system\/tokens\.json";/);
+
+  // One root app, previewed from a seeded local database, theme-only surface.
+  const manifest = validateConsumerManifest(JSON.parse(await fs.readFile(path.join(site, "timds.consumer.json"), "utf8")));
+  assert.deepEqual(manifest.designSystem, { path: "design-system", systemId: "acme/core" });
+  const app = manifest.apps["acme-site"];
+  assert.equal(app.cwd, ".");
+  assert.deepEqual(app.install, ["bash", "-c", "npm ci --no-audit --no-fund && npm run seed"]);
+  assert.deepEqual(app.preview.serve, ["npm", "run", "dev", "--", "--port", "4380", "--host", "127.0.0.1", "--ignore-lock"]);
+  assert.equal(app.preview.port, 4380);
+  assert.deepEqual(app.preview.discover.exclude, ["/_emdash/**"]);
+  assert.deepEqual(app.designSurface, ["src/layouts/**", "src/components/**", "src/styles/**", "src/pages/**", "public/**"]);
+
+  const packageJson = JSON.parse(await fs.readFile(path.join(site, "package.json"), "utf8"));
+  assert.equal(packageJson.scripts.seed, "emdash seed seed/seed.json");
+  assert.equal(packageJson.scripts.dev, "astro dev");
+  assert.equal(packageJson.scripts.timds, "timds");
+  assert.equal(packageJson.devDependencies["@dtconcepts/timds"], releaseLine);
+
+  // The generator's files arrive whole; the docs say which change goes where.
+  assert.equal(await fs.readFile(path.join(site, ".env"), "utf8"), "EMDASH_ENCRYPTION_KEY=fixture\n");
+  const guide = await fs.readFile(path.join(site, "DESIGN_SYSTEM.md"), "utf8");
+  assert.match(guide, /`acme\/core` \(Acme\)/);
+  assert.match(guide, /`src\/utils\/design-system\.ts` compiles the pinned `design-system\/tokens\.json`/);
+  assert.match(guide, /imports `design-system\/src\/styles\/system\.css` from the pin/);
+  assert.doesNotMatch(guide, /__[A-Z_]+__/);
+  const agents = await fs.readFile(path.join(site, "AGENTS.md"), "utf8");
+  assert.ok(agents.startsWith("This is an EmDash site.\n\n## Visual character\n\nNone imposed.\n\n## Design System\n"));
+  assert.match(agents, /pinned at\n`design-system\/`/);
+
+  // Adopted exactly as `timds consumer init` adopts a product.
+  const mcp = JSON.parse(await fs.readFile(path.join(site, ".mcp.json"), "utf8"));
+  assert.deepEqual(Object.keys(mcp.mcpServers), ["emdash-docs", "timds-design-system-read"]);
+  for (const file of [".agents/skills/timds-consume-design-system/SKILL.md", ".github/workflows/timds-consumer-preview.yml", ".github/workflows/timds-designer-change.yml", ".claude/launch.json", ".timds/installation.json"]) {
+    assert.ok(existsSync(path.join(site, file)), file);
+    assert.ok(result.written.includes(file), file);
+  }
+  const launch = JSON.parse(await fs.readFile(path.join(site, ".claude/launch.json"), "utf8"));
+  assert.deepEqual(launch.configurations.map((entry) => [entry.name, entry.port]), [["acme-site", 4380]]);
+  assert.match(await fs.readFile(path.join(site, ".gitignore"), "utf8"), /^\.timds\/preview\/$/m);
+  assert.equal((await checkConsumer(site)).status, "passed");
+
+  assert.ok(result.todos.some((item) => item.startsWith("Run npm install and commit package-lock.json")));
+  assert.ok(result.todos.some((item) => item.includes("<site origin>/_emdash/api/mcp")));
+  assert.ok(result.todos.some((item) => item.includes("TIMDS_ACCESS_TOKEN repository secret")));
+  assert.ok(lines.includes(`Created the EmDash site acme-site at ${site}, consuming acme/core.`));
+  assert.ok(!lines.join("\n").includes("EMDASH_ENCRYPTION_KEY=fixture"));
+});
+
+test("compiles tokens.json exactly as the starter build writes tokens.css", async (t) => {
+  const root = await temporaryDirectory(t);
+  const designSystem = await starterDesignSystem(root);
+  const tokens = JSON.parse(await fs.readFile(path.join(designSystem, "tokens.json"), "utf8"));
+  assert.equal(compileTokenCss(tokens), await fs.readFile(path.join(designSystem, "dist", "tokens.css"), "utf8"));
+});
+
+test("adds the EmDash MCP server for --site-url, and refuses a bad one before writing", async (t) => {
+  const root = await temporaryDirectory(t);
+  const designSystem = await starterDesignSystem(root);
+  const site = path.join(root, "site");
+
+  await assert.rejects(scaffoldEmdashSite(site, { designSystem, siteUrl: "ftp://acme.example.com", createSite: fakeGenerator() }), /--site-url must use HTTP or HTTPS/);
+  await assert.rejects(scaffoldEmdashSite(site, { designSystem, siteUrl: "not a url", createSite: fakeGenerator() }), /--site-url not a url is not a valid URL/);
+  assert.equal(existsSync(site), false);
+
+  const result = await scaffoldEmdashSite(site, { designSystem, siteUrl: "https://acme.example.com/blog", skipInstall: true, createSite: fakeGenerator(), output: quiet });
+  const mcp = JSON.parse(await fs.readFile(path.join(site, ".mcp.json"), "utf8"));
+  assert.deepEqual(mcp.mcpServers.emdash, { type: "http", url: "https://acme.example.com/_emdash/api/mcp" });
+  assert.deepEqual(Object.keys(mcp.mcpServers), ["emdash-docs", "emdash", "timds-design-system-read"]);
+  assert.ok(result.todos.some((item) => item.includes('"emdash" MCP server in .mcp.json (https://acme.example.com/_emdash/api/mcp)')));
+});
+
+test("imports named stylesheets from a Design System on its own framework", async (t) => {
+  const root = await temporaryDirectory(t);
+  const designSystem = await frameworkDesignSystem(root, {
+    manifest: { brand: { roles: { "color.accent": "--gold-300" } } },
+    files: {
+      // A root tokens.json is not compiled unless the system runs the starter build.
+      "tokens.json": { color: { accent: { value: "#000000" } } },
+      "src/styles/ds/brand.css": `@import "./palette.css";\n:root { --color-bg: var(--paper); --ink: #111111; --font-serif: "Canela", serif; }\n`,
+      "src/styles/ds/palette.css": ":root { --paper: #faf7f0; --gold-300: #d4b876; }\n",
+      "src/styles/ds/marketing.css": ".hero { color: var(--ink); }\n",
+    },
+  });
+  const site = path.join(root, "site");
+
+  const result = await scaffoldEmdashSite(site, {
+    designSystem,
+    stylesheets: ["src/styles/ds/brand.css", "src/styles/ds/marketing.css"],
+    skipInstall: true,
+    createSite: fakeGenerator(),
+    output: quiet,
+  });
+
+  assert.equal(result.tokens, false);
+  assert.deepEqual(result.roles, { "color.background": "--color-bg", "color.accent": "--gold-300", "color.text": "--ink", "font.display": "--font-serif" });
+  assert.deepEqual(result.missingRoles, ["color.panel", "color.muted", "font.body", "font.ui"]);
+
+  const theme = await fs.readFile(path.join(site, "src/styles/theme.css"), "utf8");
+  assert.match(theme, /@import "\.\.\/\.\.\/design-system\/src\/styles\/ds\/brand\.css";\n@import "\.\.\/\.\.\/design-system\/src\/styles\/ds\/marketing\.css";\n/);
+  assert.match(theme, /body \{\n  margin: 0;\n  background: var\(--color-bg\);\n  color: var\(--ink\);\n\}/);
+  assert.match(theme, /a \{\n  color: var\(--gold-300\);\n\}/);
+  // A role nothing fills leaves its declaration out; it is never invented.
+  assert.doesNotMatch(theme, /main time/);
+  assert.doesNotMatch(theme, /header \{\n  background/);
+
+  const layout = await fs.readFile(path.join(site, "src/layouts/Base.astro"), "utf8");
+  assert.ok(layout.startsWith(`---\nimport "../styles/theme.css";\nimport { EmDashHead } from "emdash/ui";\n`));
+  assert.doesNotMatch(layout, /designSystemTokenCss/);
+  assert.equal(existsSync(path.join(site, "src/utils/design-system.ts")), false);
+  assert.doesNotMatch(await fs.readFile(path.join(site, "DESIGN_SYSTEM.md"), "utf8"), /tokens\.json/);
+  assert.ok(result.todos.some((item) => item.startsWith("The Design System fills no token for color.panel, color.muted, font.body, font.ui")));
+});
+
+test("refuses a root that is not empty or sits inside another repository", async (t) => {
+  const root = await temporaryDirectory(t);
+  const designSystem = await starterDesignSystem(root);
+  const calls = [];
+  const createSite = fakeGenerator(calls);
+
+  const occupied = path.join(root, "occupied");
+  await write(path.join(occupied, "notes.txt"), "keep me\n");
+  await assert.rejects(scaffoldEmdashSite(occupied, { designSystem, createSite }), /is not empty[\s\S]*timds consumer init/);
+  assert.equal(await fs.readFile(path.join(occupied, "notes.txt"), "utf8"), "keep me\n");
+
+  await assert.rejects(scaffoldEmdashSite(path.join(designSystem, "site"), { designSystem, createSite }), /is inside the git repository/);
+  assert.equal(existsSync(path.join(designSystem, "site")), false);
+
+  await assert.rejects(scaffoldEmdashSite(path.join(root, "site"), { createSite }), /--design-system is required/);
+  await assert.rejects(scaffoldEmdashSite("", { designSystem, createSite }), /--root is required/);
+  await assert.rejects(scaffoldEmdashSite(path.join(root, "site"), { designSystem, stylesheets: ["../outside.css"], createSite }), /must be a \.css path relative to the Design System root/);
+  await assert.rejects(scaffoldEmdashSite(path.join(root, "site"), { designSystem, stylesheets: ["src/styles/system.scss"], createSite }), /must be a \.css path/);
+  assert.equal(existsSync(path.join(root, "site")), false);
+  assert.deepEqual(calls, []);
+});
+
+test("removes what it created when the Design System cannot be consumed", async (t) => {
+  const root = await temporaryDirectory(t);
+  const calls = [];
+  const createSite = fakeGenerator(calls);
+  const site = path.join(root, "site");
+
+  const plain = path.join(root, "plain");
+  await fs.mkdir(plain, { recursive: true });
+  git(plain, "init", "-b", "main");
+  await write(path.join(plain, "README.md"), "# Not a Design System\n");
+  await commitRepo(plain);
+  await assert.rejects(scaffoldEmdashSite(site, { designSystem: plain, createSite }), /not a standalone TimDS Design System/);
+  assert.equal(existsSync(site), false);
+
+  await assert.rejects(scaffoldEmdashSite(site, { designSystem: path.join(root, "missing"), createSite }), /git submodule add .* failed/);
+  assert.equal(existsSync(site), false);
+
+  const designSystem = await frameworkDesignSystem(root, { files: { "src/styles/ds/brand.css": ":root { --ink: #111111; }\n" } });
+  await assert.rejects(scaffoldEmdashSite(site, { designSystem, createSite }), /cannot tell what a product imports[\s\S]*--stylesheet PATH/);
+  await assert.rejects(scaffoldEmdashSite(site, { designSystem, stylesheets: ["src/styles/ds/gone.css"], createSite }), /--stylesheet src\/styles\/ds\/gone\.css does not exist in the Design System \(acme\/core\)/);
+  assert.equal(existsSync(site), false);
+  // The Design System is inspected before the generator runs.
+  assert.deepEqual(calls, []);
+
+  // An empty folder that was already there is emptied again, not removed.
+  await fs.mkdir(site);
+  await assert.rejects(scaffoldEmdashSite(site, { designSystem, createSite }), /cannot tell what a product imports/);
+  assert.deepEqual(await fs.readdir(site), []);
+});
+
+test("removes what it created when the generator fails or its template has changed", async (t) => {
+  const root = await temporaryDirectory(t);
+  const designSystem = await starterDesignSystem(root);
+  const site = path.join(root, "site");
+
+  await assert.rejects(scaffoldEmdashSite(site, { designSystem, createSite: async () => { throw new Error("registry unreachable"); } }), /registry unreachable/);
+  assert.equal(existsSync(site), false);
+
+  await assert.rejects(scaffoldEmdashSite(site, { designSystem, createSite: fakeGenerator([], { "src/layouts/Base.astro": null }) }), /did not produce src\/layouts\/Base\.astro and package\.json/);
+  assert.equal(existsSync(site), false);
+
+  await assert.rejects(scaffoldEmdashSite(site, { designSystem, createSite: fakeGenerator([], { "src/layouts/Base.astro": "<html><body><slot /></body></html>\n" }) }), /has no frontmatter or no <\/head>/);
+  assert.equal(existsSync(site), false);
+
+  await assert.rejects(scaffoldEmdashSite(site, { designSystem, createSite: fakeGenerator([], { "design-system/README.md": "clash\n" }) }), /produced design-system, which the new repository already has/);
+  assert.equal(existsSync(site), false);
+});
+
+test("patches a layout in its own indentation and line endings", () => {
+  const spaces = "---\nconst a = 1;\n---\n<html>\n  <head>\n    <title>x</title>\n  </head>\n</html>\n";
+  assert.equal(
+    patchBaseLayout(spaces, { tokens: true }),
+    `---\nimport "../styles/theme.css";\nimport { designSystemTokenCss } from "../utils/design-system";\nconst a = 1;\n---\n<html>\n  <head>\n    <title>x</title>\n    <style is:inline set:html={designSystemTokenCss}></style>\n  </head>\n</html>\n`,
+  );
+  const windows = patchBaseLayout(spaces.replaceAll("\n", "\r\n"), { tokens: false });
+  assert.ok(windows.startsWith(`---\r\nimport "../styles/theme.css";\r\nconst a = 1;\r\n`));
+  assert.doesNotMatch(windows, /(?<!\r)\n/);
+  assert.throws(() => patchBaseLayout("<html><head></head></html>", { tokens: true }), /no frontmatter or no <\/head>/);
+});
+
+test("inspects a Design System and renders the theme from its roles alone", async (t) => {
+  const root = await temporaryDirectory(t);
+  const designSystem = await starterDesignSystem(root);
+  const system = await inspectDesignSystem(designSystem);
+  assert.equal(system.name, "Acme");
+  assert.equal(system.roles["color.panel"], "--color-surface");
+  assert.equal(system.roles["font.ui"], "--font-sans");
+
+  assert.doesNotMatch(renderThemeCss({ stylesheets: [], roles: {} }), /var\(--[a-z]/);
+  assert.match(renderThemeCss({ stylesheets: [], roles: { "color.text": "--ink" } }), /border-bottom: 1px solid color-mix\(in srgb, var\(--ink\) 14%, transparent\);/);
+  assert.equal(emdashConsumerManifest({ appName: "site", systemId: "acme/core" }).apps.site.protected.length, 0);
+});
+
+test("runs through the consumer CLI and explains itself", async (t) => {
+  const lines = [];
+  assert.equal(await runConsumerScaffold([], { output: (line) => lines.push(line) }), null);
+  assert.equal(await runConsumerScaffold(["emdash", "--help"], { output: (line) => lines.push(line) }), null);
+  assert.equal(lines.length, 2);
+  assert.match(lines[0], /timds consumer scaffold emdash --root PATH --design-system GIT_URL/);
+  assert.ok(lines[0].includes(EMDASH_GENERATOR));
+
+  await assert.rejects(runConsumerScaffold(["wordpress", "--root", "x"], { output: quiet }), /Unknown site kind wordpress/);
+  await assert.rejects(runConsumerScaffold(["emdash", "--template", "blog"], { output: quiet }), /Unknown option --template/);
+  await assert.rejects(runConsumerScaffold(["emdash", "--root"], { output: quiet }), /--root requires a value/);
+  await assert.rejects(runConsumerScaffold(["emdash", "--design-system", "git@example.com:a/b.git"], { output: quiet }), /--root is required/);
+
+  const root = await temporaryDirectory(t);
+  await assert.rejects(
+    runConsumerCli(["scaffold", "emdash", "--root", path.join(root, "site"), "--design-system", path.join(root, "missing"), "--stylesheet=a.css", "--stylesheet", "b.css", "--skip-install"], { output: quiet }),
+    /git submodule add .* failed/,
+  );
+  assert.equal(existsSync(path.join(root, "site")), false);
+});
