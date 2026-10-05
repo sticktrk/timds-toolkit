@@ -1,0 +1,125 @@
+/* Documentation chrome: the app bar, the page navigation, and the primitives
+   every page is written with. It is deliberately quieter than the system it
+   documents, and it reads the same tokens. */
+
+.skip-link {
+  position: fixed;
+  top: var(--space-2);
+  left: var(--space-2);
+  z-index: 10;
+  padding: var(--space-2) var(--space-4);
+  transform: translateY(-160%);
+  border-radius: var(--radius-sm);
+  background: var(--color-ink);
+  color: var(--color-surface);
+  font-weight: 700;
+}
+
+.skip-link:focus { transform: translateY(0); }
+
+/* ---- app bar ---- */
+.appbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  min-height: var(--size-header);
+  align-items: center;
+  gap: var(--space-6);
+  padding: 0 var(--space-6);
+  border-bottom: var(--size-line) solid var(--color-line);
+  background: color-mix(in srgb, var(--color-surface) 94%, transparent);
+  backdrop-filter: blur(14px);
+}
+
+.appbar__brand { font-size: var(--type-small); font-weight: 800; letter-spacing: 0.02em; text-decoration: none; }
+.appbar__views { display: flex; flex: 1; gap: var(--space-1); }
+.appbar__view { display: flex; flex-direction: column; padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); line-height: 1.25; text-decoration: none; transition: background-color var(--motion-fast) ease; }
+.appbar__view b { font-size: var(--type-small); }
+.appbar__view small { color: var(--color-muted); font-size: var(--type-label); }
+a.appbar__view:hover, .appbar__view[aria-current] { background: var(--color-accent-soft); }
+.appbar__view[aria-current] b { color: var(--color-accent); }
+.appbar__view.is-planned b { color: var(--color-muted); font-weight: 400; }
+.appbar__version { color: var(--color-muted); font-family: var(--font-mono); font-size: var(--type-label); }
+
+/* ---- shell ---- */
+.layout { display: grid; max-width: var(--size-content); grid-template-columns: var(--size-sidebar) minmax(0, 1fr); align-items: start; margin: 0 auto; }
+
+.sidenav {
+  position: sticky;
+  top: var(--size-header);
+  height: calc(100vh - var(--size-header));
+  overflow-y: auto;
+  padding: var(--space-8) var(--space-4) var(--space-12);
+  border-right: var(--size-line) solid var(--color-line);
+}
+
+.sidenav__group { margin: var(--space-6) 0 var(--space-2); color: var(--color-accent); font-size: var(--type-label); font-weight: 800; letter-spacing: 0.13em; text-transform: uppercase; }
+.sidenav__group:first-child { margin-top: 0; }
+.sidenav a, .sidenav__planned { display: block; padding: var(--space-2) var(--space-3); border-left: 2px solid transparent; color: var(--color-muted); font-size: var(--type-small); text-decoration: none; }
+.sidenav a { transition: background-color var(--motion-fast) ease, border-color var(--motion-fast) ease; }
+.sidenav a:hover, .sidenav a[aria-current] { border-left-color: var(--color-accent); background: var(--color-accent-soft); color: var(--color-ink); }
+.sidenav a[aria-current] { font-weight: 700; }
+.sidenav__planned small { margin-left: var(--space-1); font-size: var(--type-label); }
+
+.content { min-width: 0; padding: var(--space-12) clamp(var(--space-4), 5vw, var(--space-12)); }
+
+.colophon { padding: var(--space-6); border-top: var(--size-line) solid var(--color-line); background: var(--color-surface); color: var(--color-muted); font-size: var(--type-label); text-align: center; }
+
+/* ---- page header ---- */
+.eyebrow { display: inline-block; color: var(--color-accent); font-size: var(--type-label); font-weight: 800; letter-spacing: 0.13em; text-transform: uppercase; }
+.page-title { margin: var(--space-3) 0 0; font-family: var(--font-serif); font-size: var(--type-display); font-weight: 500; letter-spacing: -0.04em; line-height: 1; text-wrap: balance; }
+.lede { max-width: 62ch; margin: var(--space-4) 0 0; color: var(--color-muted); font-size: var(--type-lead); }
+.rule { width: 3.5rem; height: 2px; margin-top: var(--space-6); background: var(--color-accent); }
+
+/* ---- block: one citeable section of a page ---- */
+.block { margin-top: var(--space-12); scroll-margin-top: calc(var(--size-header) + var(--space-6)); }
+.block__head { max-width: 64ch; margin-bottom: var(--space-6); }
+.block__head p { margin: var(--space-2) 0 0; color: var(--color-muted); }
+.h2 { margin: 0; font-family: var(--font-serif); font-size: var(--type-title); font-weight: 500; letter-spacing: -0.03em; line-height: 1.1; }
+
+/* ---- spec table: one rule or token per row, named by its first cell ---- */
+.spec { width: 100%; border-collapse: collapse; font-size: var(--type-small); }
+.spec th, .spec td { padding: var(--space-3) var(--space-4) var(--space-3) 0; border-bottom: var(--size-line) solid var(--color-line); text-align: left; vertical-align: top; }
+.spec th { color: var(--color-muted); font-size: var(--type-label); letter-spacing: 0.1em; text-transform: uppercase; }
+.chip { display: inline-block; width: 1rem; height: 1rem; margin-right: var(--space-2); border: var(--size-line) solid var(--color-line); border-radius: var(--radius-round); vertical-align: -0.15em; }
+.tag { display: inline-block; padding: 0 var(--space-2); border: var(--size-line) solid var(--color-line); border-radius: var(--radius-sm); color: var(--color-muted); font-size: var(--type-label); white-space: nowrap; }
+
+/* ---- note: guidance that is not a table row ---- */
+.note { margin-top: var(--space-6); padding: var(--space-4) var(--space-6); border: var(--size-line) solid var(--color-line); border-left: 3px solid var(--color-accent); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-muted); font-size: var(--type-small); }
+.note b { color: var(--color-ink); }
+
+/* ---- demo: an isolated stage for a live preview. A figure, so the derived
+   layer reads it as illustration and keeps its sample text out of the rules. ---- */
+.demo { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4); margin: 0 0 var(--space-6); padding: var(--space-8); border: var(--size-line) solid var(--color-line); border-radius: var(--radius-md); background: var(--color-surface); }
+.demo--stack { flex-direction: column; align-items: stretch; }
+pre { margin: var(--space-6) 0 0; padding: var(--space-4) var(--space-6); overflow-x: auto; border-radius: var(--radius-md); background: var(--color-ink); color: var(--color-surface); line-height: 1.6; }
+
+/* ---- previous / next ---- */
+.pagenav { display: flex; justify-content: space-between; gap: var(--space-4); margin-top: var(--space-12); padding-top: var(--space-6); border-top: var(--size-line) solid var(--color-line); }
+.pagenav a { color: var(--color-accent); font-size: var(--type-small); font-weight: 700; text-decoration: none; }
+.pagenav a:hover { color: var(--color-ink); }
+
+/* ---- page-specific previews ---- */
+.specimen { margin: 0; padding: var(--space-6) 0; border-top: var(--size-line) solid var(--color-line); }
+.specimen figcaption { display: block; margin-bottom: var(--space-3); color: var(--color-muted); font-family: var(--font-mono); font-size: var(--type-label); text-transform: uppercase; }
+.specimen p { max-width: 62ch; margin: 0; }
+.ground { flex: 1 1 12rem; padding: var(--space-6); border: var(--size-line) solid var(--color-line); border-radius: var(--radius-sm); }
+.ground b, .ground span { display: block; }
+.ground span { font-size: var(--type-small); }
+.shape { display: grid; width: 6rem; height: 6rem; place-items: center; border: var(--size-line) solid var(--color-accent); background: var(--color-accent-soft); font-family: var(--font-mono); font-size: var(--type-label); }
+
+@media (max-width: 60rem) {
+  .layout { grid-template-columns: 1fr; }
+  .sidenav { position: static; height: auto; padding: var(--space-6) var(--space-4); border-right: 0; border-bottom: var(--size-line) solid var(--color-line); }
+  .appbar { gap: var(--space-3); padding: 0 var(--space-4); }
+  .appbar__view small, .appbar__version { display: none; }
+}
+
+@media (max-width: 40rem) {
+  .content { padding: var(--space-8) var(--space-4); }
+  .spec, .spec thead, .spec tbody, .spec tr, .spec th, .spec td { display: block; }
+  .spec thead { display: none; }
+  .spec tr { padding: var(--space-3) 0; border-bottom: var(--size-line) solid var(--color-line); }
+  .spec td { padding: var(--space-1) 0; border: 0; }
+}

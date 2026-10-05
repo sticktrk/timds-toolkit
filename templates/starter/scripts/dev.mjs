@@ -31,7 +31,9 @@ const contentTypes = {
 const server = createServer(async (request, response) => {
   try {
     const url = new URL(request.url || "/", "http://localhost");
-    const requested = decodeURIComponent(url.pathname.endsWith("/") ? `${url.pathname}index.html` : url.pathname);
+    const pathname = decodeURIComponent(url.pathname);
+    // Pages are directories: /brand/color and /brand/color/ both serve its index.html.
+    const requested = pathname.endsWith("/") ? `${pathname}index.html` : path.extname(pathname) ? pathname : `${pathname}/index.html`;
     const filePath = path.resolve(destination, `.${requested}`);
 
     if (!filePath.startsWith(`${destination}${path.sep}`)) {

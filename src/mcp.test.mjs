@@ -148,35 +148,35 @@ test("writes, reads, lists, and deletes authored files and reports each change t
   });
   const client = await connect(server);
 
-  const written = await ok(client, "write_file", { path: "src/pages/about.html", content: "<h1>About</h1>\n", note: "Add about page" });
+  const written = await ok(client, "write_file", { path: "src/drafts/about.html", content: "<h1>About</h1>\n", note: "Add about page" });
   assert.equal(written.created, true);
   assert.deepEqual(written.hook, { commit: "c1" });
-  assert.deepEqual(changes[0], { paths: ["src/pages/about.html"], note: "Add about page" });
-  const read = await ok(client, "read_file", { path: "src/pages/about.html" });
+  assert.deepEqual(changes[0], { paths: ["src/drafts/about.html"], note: "Add about page" });
+  const read = await ok(client, "read_file", { path: "src/drafts/about.html" });
   assert.equal(read.content, "<h1>About</h1>\n");
   assert.equal(read.encoding, "utf8");
   assert.equal(read.sha256, written.sha256);
 
-  const replaced = await ok(client, "write_file", { path: "src/pages/about.html", content: "<h1>About us</h1>\n" });
+  const replaced = await ok(client, "write_file", { path: "src/drafts/about.html", content: "<h1>About us</h1>\n" });
   assert.equal(replaced.created, false);
-  assert.deepEqual(changes[1], { paths: ["src/pages/about.html"], note: undefined });
-  const entries = await fs.readdir(path.join(repoRoot, "src", "pages"));
+  assert.deepEqual(changes[1], { paths: ["src/drafts/about.html"], note: undefined });
+  const entries = await fs.readdir(path.join(repoRoot, "src", "drafts"));
   assert.deepEqual(entries, ["about.html"], "no temporary files remain");
 
   const listed = await ok(client, "list_files", { path: "src" });
-  assert.ok(listed.files.some((file) => file.path === "src/pages/about.html"));
+  assert.ok(listed.files.some((file) => file.path === "src/drafts/about.html"));
   assert.ok(listed.files.every((file) => file.path.startsWith("src/")));
   const css = await ok(client, "list_files", { glob: "**/*.css" });
-  assert.deepEqual(css.files.map((file) => file.path), ["src/styles.css"]);
+  assert.deepEqual(css.files.map((file) => file.path), ["src/styles/system.css", "src/styles/viewer.css"]);
   const everything = await ok(client, "list_files", {});
   for (const file of everything.files) assert.equal(isProtectedPath(await loadWorkspace(repoRoot), file.path), false, file.path);
   assert.ok(!everything.files.some((file) => /^(dist|node_modules|\.timds|\.agents|\.github)\//.test(file.path)));
 
-  const deleted = await ok(client, "delete_file", { path: "src/pages/about.html", note: "Remove about page" });
+  const deleted = await ok(client, "delete_file", { path: "src/drafts/about.html", note: "Remove about page" });
   assert.equal(deleted.deleted, true);
-  assert.deepEqual(changes[2], { paths: ["src/pages/about.html"], note: "Remove about page" });
-  assert.equal((await call(client, "read_file", { path: "src/pages/about.html" })).isError, true);
-  assert.equal((await call(client, "delete_file", { path: "src/pages/about.html" })).isError, true);
+  assert.deepEqual(changes[2], { paths: ["src/drafts/about.html"], note: "Remove about page" });
+  assert.equal((await call(client, "read_file", { path: "src/drafts/about.html" })).isError, true);
+  assert.equal((await call(client, "delete_file", { path: "src/drafts/about.html" })).isError, true);
 });
 
 test("remote mode requires a draftId and passes it to resolveWorkspace", async (t) => {

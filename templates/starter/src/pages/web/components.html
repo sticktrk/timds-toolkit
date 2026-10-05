@@ -1,0 +1,51 @@
+<span class="eyebrow">Web</span>
+<h1 class="page-title">Components</h1>
+<p class="lede">Each component is a live preview, the rules for using it, and the markup to copy. Their styles live in <code>/styles/system.css</code>.</p>
+<div class="rule"></div>
+
+<section class="block" id="buttons">
+  <div class="block__head">
+    <h2 class="h2">Buttons</h2>
+    <p>A button starts an action. A link that only navigates stays a link.</p>
+  </div>
+  <figure class="demo">
+    <button class="button" type="button">Primary action</button>
+    <button class="button button--secondary" type="button">Secondary</button>
+  </figure>
+  <table class="spec">
+    <thead><tr><th>Variant</th><th>Class</th><th>Use</th></tr></thead>
+    <tbody>
+      <tr><td>Primary</td><td><code>.button</code></td><td>The one action a view exists for; at most one per view</td></tr>
+      <tr><td>Secondary</td><td><code>.button.button--secondary</code></td><td>Every other action beside or below the primary</td></tr>
+    </tbody>
+  </table>
+  <pre>&lt;button class="button" type="button"&gt;Primary action&lt;/button&gt;
+&lt;button class="button button--secondary" type="button"&gt;Secondary&lt;/button&gt;</pre>
+</section>
+
+<section class="block" id="fields">
+  <div class="block__head">
+    <h2 class="h2">Form fields</h2>
+    <p>A field is a label, a control, and optional help text, in that order.</p>
+  </div>
+  <figure class="demo demo--stack">
+    <div class="field">
+      <label for="starter-email">Email address</label>
+      <input id="starter-email" type="email" placeholder="name@example.com">
+      <small>Keep help text close to the control.</small>
+    </div>
+  </figure>
+  <table class="spec">
+    <thead><tr><th>Part</th><th>Element</th><th>Rule</th></tr></thead>
+    <tbody>
+      <tr><td>Label</td><td><code>label</code></td><td>Always visible and tied to the control with <code>for</code>; a placeholder is not a label</td></tr>
+      <tr><td>Control</td><td><code>input</code></td><td>At least 3rem tall so it is easy to hit on touch screens</td></tr>
+      <tr><td>Help text</td><td><code>small</code></td><td>One sentence directly under the control</td></tr>
+    </tbody>
+  </table>
+  <pre>&lt;div class="field"&gt;
+  &lt;label for="email"&gt;Email address&lt;/label&gt;
+  &lt;input id="email" type="email"&gt;
+  &lt;small&gt;Keep help text close to the control.&lt;/small&gt;
+&lt;/div&gt;</pre>
+</section>

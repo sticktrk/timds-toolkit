@@ -1,0 +1,40 @@
+<span class="eyebrow">Web</span>
+<h1 class="page-title">Spacing &amp; shape</h1>
+<p class="lede">The values that fix rhythm and geometry: one spacing scale, three radii, the constants of the page shell, and how long a state change takes.</p>
+<div class="rule"></div>
+
+<section class="block" id="scale">
+  <div class="block__head">
+    <h2 class="h2">Spacing scale</h2>
+    <p>Padding, margin, and gap all come from this scale. The step name is its multiple of 0.25rem.</p>
+  </div>
+  {{tokens:space}}
+</section>
+
+<section class="block" id="radius">
+  <div class="block__head">
+    <h2 class="h2">Radius</h2>
+  </div>
+  <figure class="demo">
+    <div class="shape" style="border-radius:var(--radius-sm)">sm</div>
+    <div class="shape" style="border-radius:var(--radius-md)">md</div>
+    <div class="shape" style="border-radius:var(--radius-round)">round</div>
+  </figure>
+  {{tokens:radius}}
+</section>
+
+<section class="block" id="layout-constants">
+  <div class="block__head">
+    <h2 class="h2">Layout constants</h2>
+    <p>Four values fix the page shell. Everything else is spacing.</p>
+  </div>
+  {{tokens:size}}
+</section>
+
+<section class="block" id="motion">
+  <div class="block__head">
+    <h2 class="h2">Motion</h2>
+    <p>Motion confirms a state change. Under <code>prefers-reduced-motion: reduce</code> every transition collapses, and nothing depends on animation to become readable.</p>
+  </div>
+  {{tokens:motion}}
+</section>

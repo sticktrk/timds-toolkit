@@ -683,8 +683,11 @@ test("initializes the reusable standalone repository shape", async (t) => {
   assert.equal(packageJson.scripts.release, "node scripts/release.mjs");
   assert.equal(packageJson.scripts["test:release"], "node --test scripts/prepare-merge-release.test.mjs");
   assert.equal(packageJson.scripts.timds, "timds");
-  await fs.access(path.join(repoRoot, "src", "index.html"));
+  await fs.access(path.join(repoRoot, "src", "site.json"));
+  await fs.access(path.join(repoRoot, "src", "layout.html"));
+  await fs.access(path.join(repoRoot, "src", "pages", "index.html"));
   await fs.access(path.join(repoRoot, "scripts", "build.mjs"));
+  await fs.access(path.join(repoRoot, "scripts", "viewer.mjs"));
   await fs.access(path.join(repoRoot, "scripts", "check-versions.mjs"));
   await fs.access(path.join(repoRoot, "scripts", "prepare-merge-release.mjs"));
   await fs.access(path.join(repoRoot, "scripts", "prepare-merge-release.test.mjs"));
@@ -818,6 +821,65 @@ test("initializes an embedded contract with a committed starter artifact", async
     execFileSync("git", ["show", "--name-only", "--format=", "HEAD"], { cwd: repoRoot, encoding: "utf8" }),
     /design-system\/dist\/index\.html/,
   );
+});
+
+
+test("the starter viewer renders its site model, and its build guards pages, placeholders, and color literals", async (t) => {
+  const repoRoot = await temporaryDirectory(t);
+  await initializeRepository(repoRoot, { standalone: true, name: "Client & Co" });
+  const run = (script) => execFileSync("node", [`scripts/${script}.mjs`], { cwd: repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  const fails = (script, pattern) => assert.throws(() => run(script), (error) => pattern.test(String(error.stderr)));
+  const read = (relative) => fs.readFile(path.join(repoRoot, relative), "utf8");
+  const site = JSON.parse(await read("src/site.json"));
+  const declared = site.views.flatMap((view) => view.pages.map((page) => ({ ...page, id: page.slug ? `${view.id}/${page.slug}` : view.id })));
+
+  // Every authored page is built into the shared shell; a planned page is declared but never built.
+  for (const page of declared) {
+    const built = path.join(repoRoot, "dist", page.id, "index.html");
+    if (page.planned) await assert.rejects(fs.access(built), page.id);
+    else assert.match(await fs.readFile(built, "utf8"), /<main id="content"/, page.id);
+  }
+  const overview = await read("dist/index.html");
+  assert.match(overview, /<h1 class="page-title">Client &amp; Co<\/h1>/);
+  assert.match(overview, /<span class="tag">Planned<\/span>/);
+  assert.doesNotMatch(overview, /\{\{/);
+  const color = await read("dist/brand/color/index.html");
+  assert.match(color, /<a href="\/brand\/color\/" aria-current="page">Color<\/a>/);
+  assert.match(color, /<td><code>color\.accent<\/code><\/td><td><code>--color-accent<\/code><\/td>/, "token tables come from tokens.json");
+  assert.match(color, /class="pagenav"[\s\S]*← Typography[\s\S]*Spacing &amp; shape →/, "previous and next follow the site model");
+
+  // The derived layer carries only authored guidance, so the brand kit still reports what the client has not supplied.
+  const { machine } = await checkWorkspace(repoRoot);
+  assert.deepEqual(machine.pages.map((page) => page.id), ["brand/color", "brand/typography", "index", "web/components", "web/spacing"]);
+  assert.equal(machine.counts.untyped, 0);
+  assert.deepEqual(machine.warnings.map((warning) => warning.split(":")[0]), ["guidance group voice is empty", 'no asset is annotated data-timds-role="logo"; the brand kit has no logo']);
+
+  // Authoring a planned page without clearing its flag, and the reverse, both stop the build.
+  await fs.writeFile(path.join(repoRoot, "src/pages/brand/voice.html"), '<span class="eyebrow">Brand</span>\n<h1 class="page-title">Voice</h1>\n<section class="block" id="rules"><h2 class="h2">Rules</h2><p>Lead with the answer.</p></section>\n');
+  fails("build", /remove "planned": true from brand\/voice/);
+  const voice = site.views[0].pages.find((page) => page.slug === "voice");
+  delete voice.planned;
+  await writeJson(path.join(repoRoot, "src/site.json"), site);
+  assert.match(run("build"), /6 pages/);
+  assert.match(await read("dist/brand/voice/index.html"), /Lead with the answer/);
+  await fs.rm(path.join(repoRoot, "src/pages/brand/voice.html"));
+  fails("build", /src\/pages\/brand\/voice\.html is missing/);
+  voice.planned = true;
+  await writeJson(path.join(repoRoot, "src/site.json"), site);
+
+  await fs.writeFile(path.join(repoRoot, "src/pages/orphan.html"), "<h1>Orphan</h1>\n");
+  fails("check", /src\/pages\/orphan\.html is not declared in src\/site\.json/);
+  await fs.rm(path.join(repoRoot, "src/pages/orphan.html"));
+
+  const colorSource = await read("src/pages/brand/color.html");
+  await fs.writeFile(path.join(repoRoot, "src/pages/brand/color.html"), colorSource.replace("{{tokens:color}}", "{{tokens:colour}}"));
+  fails("check", /tokens\.json has no colour group/);
+  await fs.writeFile(path.join(repoRoot, "src/pages/brand/color.html"), colorSource.replace("{{tokens:color}}", "{{palette}}"));
+  fails("check", /unknown placeholder \{\{palette\}\}/);
+  await fs.writeFile(path.join(repoRoot, "src/pages/brand/color.html"), colorSource);
+
+  await fs.appendFile(path.join(repoRoot, "src/styles/system.css"), "\n#facade { color: var(--color-ink); }\n.button--danger { background: #b00020; }\n");
+  fails("check", /Color literals belong in tokens\.json.*\(src\/styles\/system\.css:\d+\)/);
 });
 
 

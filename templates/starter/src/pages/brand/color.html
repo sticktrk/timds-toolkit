@@ -1,0 +1,34 @@
+<span class="eyebrow">Brand</span>
+<h1 class="page-title">Color</h1>
+<p class="lede">Every color is a token. Pages and components read the custom property, never the value, so changing one token recolors the whole system.</p>
+<div class="rule"></div>
+
+<section class="block" id="palette">
+  <div class="block__head">
+    <h2 class="h2">Palette</h2>
+    <p>The table is written from <code>tokens.json</code> at build time.</p>
+  </div>
+  {{tokens:color}}
+</section>
+
+<section class="block" id="grounds">
+  <div class="block__head">
+    <h2 class="h2">Grounds</h2>
+    <p>Text color is chosen with the ground behind it. Each pairing below is the only one the system uses on that ground.</p>
+  </div>
+  <figure class="demo">
+    <div class="ground" style="background:var(--color-canvas)"><b>Canvas</b><span style="color:var(--color-muted)">Secondary text</span></div>
+    <div class="ground" style="background:var(--color-surface)"><b>Surface</b><span style="color:var(--color-muted)">Secondary text</span></div>
+    <div class="ground" style="background:var(--color-accent-soft)"><b>Accent soft</b><span style="color:var(--color-muted)">Secondary text</span></div>
+    <div class="ground" style="background:var(--color-accent);color:var(--color-surface)"><b>Accent</b><span>No secondary text</span></div>
+  </figure>
+  <table class="spec">
+    <thead><tr><th>Ground</th><th>Text</th><th>Secondary text</th><th>Use</th></tr></thead>
+    <tbody>
+      <tr><td>Canvas</td><td><code>--color-ink</code></td><td><code>--color-muted</code></td><td>Page background</td></tr>
+      <tr><td>Surface</td><td><code>--color-ink</code></td><td><code>--color-muted</code></td><td>Panels, cards, and inputs</td></tr>
+      <tr><td>Accent soft</td><td><code>--color-ink</code></td><td><code>--color-muted</code></td><td>Hover and selected states</td></tr>
+      <tr><td>Accent</td><td><code>--color-surface</code></td><td>None</td><td>The primary action</td></tr>
+    </tbody>
+  </table>
+</section>

@@ -1,0 +1,32 @@
+<span class="eyebrow">Brand</span>
+<h1 class="page-title">Typography</h1>
+<p class="lede">A serif sets headings, a sans sets everything read at length, and a mono names tokens and code.</p>
+<div class="rule"></div>
+
+<section class="block" id="families">
+  <div class="block__head">
+    <h2 class="h2">Families</h2>
+    <p>System fonts keep the starter fast, portable, and free of licensing assumptions.</p>
+  </div>
+  {{tokens:font}}
+  <figure class="specimen">
+    <figcaption>Display / font.serif</figcaption>
+    <p style="font-family:var(--font-serif);font-size:var(--type-display);letter-spacing:-0.04em;line-height:1">Clear thinking, clearly expressed.</p>
+  </figure>
+  <figure class="specimen">
+    <figcaption>Body / font.sans</figcaption>
+    <p>Use hierarchy, rhythm, and plain language to make the next step easy to understand.</p>
+  </figure>
+  <figure class="specimen">
+    <figcaption>Code / font.mono</figcaption>
+    <p style="font-family:var(--font-mono);font-size:var(--type-small)">color: var(--color-ink);</p>
+  </figure>
+</section>
+
+<section class="block" id="scale">
+  <div class="block__head">
+    <h2 class="h2">Scale</h2>
+    <p>Six sizes, each with one job. Pick the role; never resize a role to make copy fit.</p>
+  </div>
+  {{tokens:type}}
+</section>
