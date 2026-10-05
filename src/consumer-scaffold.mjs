@@ -424,7 +424,9 @@ export async function scaffoldEmdashSite(rootInput, {
     for (const entry of await fs.readdir(generated)) {
       // The repository holds only .git, .gitmodules, and the submodule so far.
       if (existsSync(path.join(repoRoot, entry))) throw new Error(`${EMDASH_GENERATOR} produced ${entry}, which the new repository already has`);
-      await fs.cp(path.join(generated, entry), path.join(repoRoot, entry), { recursive: true });
+      // verbatimSymlinks: the template links .claude/skills to ../.agents/skills,
+      // and a resolved copy would commit an absolute path into the staging folder.
+      await fs.cp(path.join(generated, entry), path.join(repoRoot, entry), { recursive: true, verbatimSymlinks: true });
     }
 
     await writeFile(path.join(repoRoot, BASE_LAYOUT), patchedLayout);

@@ -144,6 +144,10 @@ function fakeGenerator(calls = [], overrides = {}) {
     for (const [file, content] of Object.entries(files)) {
       if (content !== null) await write(path.join(site, file), content);
     }
+    // The real template links its agent skills into .claude/ by relative path.
+    await write(path.join(site, ".agents/skills/emdash-cli/SKILL.md"), "EmDash CLI\n");
+    await fs.mkdir(path.join(site, ".claude"), { recursive: true });
+    await fs.symlink("../.agents/skills", path.join(site, ".claude/skills"));
     return site;
   };
 }
@@ -204,6 +208,8 @@ test("scaffolds an EmDash site that reads a starter Design System from the pin",
 
   // The generator's files arrive whole; the docs say which change goes where.
   assert.equal(await fs.readFile(path.join(site, ".env"), "utf8"), "EMDASH_ENCRYPTION_KEY=fixture\n");
+  assert.equal(await fs.readlink(path.join(site, ".claude/skills")), "../.agents/skills");
+  assert.equal(await fs.readFile(path.join(site, ".claude/skills/emdash-cli/SKILL.md"), "utf8"), "EmDash CLI\n");
   const guide = await fs.readFile(path.join(site, "DESIGN_SYSTEM.md"), "utf8");
   assert.match(guide, /`acme\/core` \(Acme\)/);
   assert.match(guide, /`src\/utils\/design-system\.ts` compiles the pinned `design-system\/tokens\.json`/);
