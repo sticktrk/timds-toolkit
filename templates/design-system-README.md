@@ -2,17 +2,26 @@
 
 __CONTRACT_DESCRIPTION__
 
+`AGENTS.md` is the working contract for anyone, human or AI agent, who edits
+this system: where things live, how pages reach the machine-readable layer,
+and what is protected. Read it before the first change.
+
 ## First local run
 
 ```bash
 npm install
 __TIMDS_CLI__ doctor
 __TIMDS_CLI__ check
+__TIMDS_CLI__ brand
 __TIMDS_CLI__ dev
 ```
 
-`dev` starts the repository-declared authoring server. `preview` serves the
-exact generated static artifact that TimDS will publish.
+`npm install` creates the lockfile in a fresh scaffold; commit it and use
+`npm ci` afterwards. `check` builds and validates the artifact. `brand` prints
+the derived brand kit with a fix for every gap; a fresh scaffold reports no
+logo and no voice guidance until you add them. `dev` starts the
+repository-declared authoring server. `preview` serves the exact generated
+static artifact that TimDS will publish.
 
 ## Starter viewer
 
@@ -20,7 +29,18 @@ New contracts include a dependency-free starter viewer under `src/` and
 deterministic Node.js commands under `scripts/`. The starter exists so the
 contract builds and validates immediately; replace its neutral tokens and
 examples with approved client foundations rather than treating them as brand
-guidance. Later clones should use `npm ci` with the committed lockfile.
+guidance.
+
+| Path | Purpose |
+| --- | --- |
+| `tokens.json` | Authored tokens; the build emits each as a `--group-name` CSS custom property in `tokens.css` |
+| `src/index.html`, `src/styles.css` | The viewer; everything under `src/` is copied into the artifact |
+| `scripts/build.mjs`, `dev.mjs`, `check.mjs` | The `workspace` commands declared in `timds.json` |
+| `CHANGELOG.md` | Change notes; add to `## Unreleased` |
+| `media.json`, `media-local/` | Published media catalog and ignored originals |
+
+The starter `dev` server builds once and serves on `http://127.0.0.1:4321`. It
+does not watch files, so rerun `__TIMDS_CLI__ check` after an edit and reload.
 
 Declare framework-specific local commands as argument arrays in `timds.json`:
 
@@ -97,6 +117,10 @@ __TIMDS_CLI__ assets pull founder-interview
 
 ## Optional video production
 
+Video is optional and off in a new contract. `__TIMDS_CLI__ video init` adds
+the `video` block to `timds.json` and scaffolds the contract, board catalog,
+asset map, and a lab sample under `video/`.
+
 When `timds.json` enables `video`, this repository owns the client-specific
 contract, asset choices, scripts, publishing data, captions, and production
 records. The installed `@dtconcepts/timds` package supplies the video engine and
@@ -137,6 +161,7 @@ working files and review packages stay under ignored `video-local/`.
 
 ```bash
 __TIMDS_CLI__ check
+__TIMDS_CLI__ brand
 __TIMDS_CLI__ preview
 __TIMDS_CLI__ diff
 ```

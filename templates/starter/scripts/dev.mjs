@@ -9,15 +9,29 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const destination = path.join(root, "dist");
 const port = Number(process.env.PORT || 4321);
 const contentTypes = {
+  ".avif": "image/avif",
   ".css": "text/css; charset=utf-8",
+  ".gif": "image/gif",
   ".html": "text/html; charset=utf-8",
-  ".json": "application/json; charset=utf-8"
+  ".ico": "image/x-icon",
+  ".jpeg": "image/jpeg",
+  ".jpg": "image/jpeg",
+  ".js": "text/javascript; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".md": "text/markdown; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
+  ".png": "image/png",
+  ".svg": "image/svg+xml",
+  ".txt": "text/plain; charset=utf-8",
+  ".webp": "image/webp",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2"
 };
 
 const server = createServer(async (request, response) => {
   try {
     const url = new URL(request.url || "/", "http://localhost");
-    const requested = decodeURIComponent(url.pathname === "/" ? "/index.html" : url.pathname);
+    const requested = decodeURIComponent(url.pathname.endsWith("/") ? `${url.pathname}index.html` : url.pathname);
     const filePath = path.resolve(destination, `.${requested}`);
 
     if (!filePath.startsWith(`${destination}${path.sep}`)) {

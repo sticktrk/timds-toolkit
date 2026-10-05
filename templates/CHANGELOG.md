@@ -6,4 +6,4 @@ Record designer-facing changes here before submitting a release candidate.
 
 ## 0.1.0
 
-- Initialize the standalone TimDS contract and viewer.
+- Initialize the TimDS contract and starter viewer.

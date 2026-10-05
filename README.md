@@ -55,7 +55,12 @@ npm run timds -- check
 ```
 
 New contracts include a small authored viewer, deterministic build/check/dev
-scripts, starter tokens, and a validated initial artifact. The initializer also
+scripts, starter tokens, and a validated initial artifact. They also include
+the agent entry points: `AGENTS.md` (the working contract: a start sequence,
+a map of the scaffold, how pages reach the machine-readable layer, a first
+design pass, and the protected tooling), a `CLAUDE.md` that imports it for
+Claude Code, and the managed skills under `.agents/skills/`. An agent can
+start designing from `AGENTS.md` alone. The initializer also
 adds the appropriate dependency and artifact ignore rules, so after
 `npm install` creates the exact lockfile, `git add --all` is safe. Commit
 `package.json`, the lockfile, `.agents/skills/`, the Design System contract,
@@ -343,9 +348,9 @@ maintains:
 
 ```html
 <div data-timds-role="logo primary" data-timds-lockup="horizontal" data-timds-on="light">
-  <img src="/design-system/plg-logo-colour.svg" alt="PLG colour logo">
+  <img src="/design-system/logo-colour.svg" alt="Colour logo">
 </div>
-<img src="/design-system/plg-logo-white.svg" alt="PLG white logo"
+<img src="/design-system/logo-white.svg" alt="White logo"
      data-timds-role="logo" data-timds-variant="white" data-timds-on="dark">
 <figure data-timds-role="photo" data-timds-tags="hero, family">…</figure>
 ```
