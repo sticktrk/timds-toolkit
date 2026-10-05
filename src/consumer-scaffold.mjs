@@ -5,7 +5,8 @@
 // content lives in its database, the theme is Astro source in the site
 // repository. The scaffold pins the Design System as the `design-system`
 // submodule of a new repository, generates the unstyled `starter` template
-// with EmDash's own generator, and wires the theme to the pin:
+// with EmDash's own generator (for Cloudflare Workers with D1 and R2, or for
+// Node.js with SQLite), and wires the theme to the pin:
 //
 //   src/styles/theme.css         imports the system's stylesheets from the
 //                                submodule and styles the site shell with the
@@ -18,6 +19,8 @@
 //                                theme-only design surface
 //   DESIGN_SYSTEM.md             which change goes where (CMS content, theme
 //                                pull request, Design System)
+//   wrangler.jsonc               (Cloudflare only) the Worker, database, and
+//                                bucket named after the site
 //
 // then hands over to `initializeConsumer` for the consumer-managed files.
 //
@@ -44,12 +47,18 @@ const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "
 /** The generator the scaffold runs: bounded to one major, like the toolkit's own release line. */
 export const EMDASH_GENERATOR = "create-emdash@1";
 export const EMDASH_MCP_SERVER_NAME = "emdash";
+export const EMDASH_PLATFORMS = Object.freeze(["cloudflare", "node"]);
 
 const DESIGN_SYSTEM_PATH = "design-system";
 const DEFAULT_PORTAL_URL = "https://timds.com";
 // Not Astro's default 4321: the starter Design System's own dev server and
 // other Astro sites already listen there.
 const DEV_PORT = 4380;
+// EmDash's development-only setup route: applies the bundled seed (schema and
+// demo content) to the local database, then redirects. It answers 403 outside
+// `astro dev`, and works the same on SQLite and on the local D1.
+const DEV_SEED_ROUTE = "/_emdash/api/setup/dev-bypass";
+const WRANGLER_CONFIG = "wrangler.jsonc";
 const BASE_LAYOUT = "src/layouts/Base.astro";
 const THEME_STYLESHEET = "src/styles/theme.css";
 const TOKEN_MODULE = "src/utils/design-system.ts";
@@ -61,14 +70,19 @@ const MAX_IMPORT_DEPTH = 8;
 
 const SCAFFOLD_HELP = `Usage:
   timds consumer scaffold emdash --root PATH --design-system GIT_URL
-      [--stylesheet PATH]... [--site-url URL] [--portal-url URL] [--skip-install]
+      [--platform cloudflare|node] [--stylesheet PATH]... [--site-url URL]
+      [--portal-url URL] [--skip-install]
 
 Creates a new EmDash CMS site repository at --root (which must not exist, or
 be empty) that consumes a TimDS Design System: the Design System is pinned as
 the design-system submodule, the EmDash starter template is generated with
-${EMDASH_GENERATOR} (Node.js, SQLite), and its theme reads the pin, so every
-color and font on the site comes from the system. It then runs the same
-adoption as timds consumer init. Nothing is committed.
+${EMDASH_GENERATOR}, and its theme reads the pin, so every color and font on
+the site comes from the system. It then runs the same adoption as timds
+consumer init. Nothing is committed.
+
+--platform is where the site is hosted: cloudflare (the default; Workers with
+a D1 database and an R2 bucket named after the site) or node (a Node.js server
+with SQLite and local file storage). The scaffold adds no deploy automation.
 
 --stylesheet names a stylesheet, relative to the Design System root, that the
 site imports from the submodule; repeat it for several. It defaults to
@@ -264,6 +278,24 @@ export function patchBaseLayout(source, { tokens }) {
   return lines.join(newline);
 }
 
+/**
+ * EmDash's wrangler.jsonc with the Worker, its D1 database, and its R2 bucket
+ * named after the site instead of the template's shared placeholders, so two
+ * sites in one Cloudflare account never deploy over each other. Comments and
+ * layout are kept; a config without the three names is refused.
+ */
+export function nameCloudflareResources(source, siteName) {
+  const name = slug(siteName).slice(0, 50).replace(/-+$/, "") || "site";
+  const values = { name, database_name: name, bucket_name: `${name}-media` };
+  let config = source;
+  for (const [key, value] of Object.entries(values)) {
+    const pattern = new RegExp(`^(\\s*"${key}"\\s*:\\s*)"[^"\\n]*"`, "m");
+    if (!pattern.test(config)) throw new Error(`${WRANGLER_CONFIG} from ${EMDASH_GENERATOR} has no "${key}", so the scaffold cannot name the site's Cloudflare resources. The EmDash starter template has changed; report it to TimDS.`);
+    config = config.replace(pattern, (_match, prefix) => `${prefix}"${value}"`);
+  }
+  return { config, ...values };
+}
+
 /** `timds.consumer.json` for the site: one root app, previewed from a seeded local database. */
 export function emdashConsumerManifest({ appName, systemId }) {
   const manifest = {
@@ -272,13 +304,13 @@ export function emdashConsumerManifest({ appName, systemId }) {
     apps: {
       [appName]: {
         cwd: ".",
-        // The preview needs content: seed the local SQLite database first.
-        install: ["bash", "-c", "npm ci --no-audit --no-fund && npm run seed"],
+        install: ["npm", "ci", "--no-audit", "--no-fund"],
         preview: {
           // --ignore-lock keeps astro dev in the foreground when an agent starts it.
           serve: ["npm", "run", "dev", "--", "--port", String(DEV_PORT), "--host", "127.0.0.1", "--ignore-lock"],
           port: DEV_PORT,
-          ready: "/",
+          // The preview needs content: waiting on the seed route loads it.
+          ready: `${DEV_SEED_ROUTE}?redirect=/`,
           routes: ["/"],
           discover: { from: ["/"], limit: 40, exclude: ["/_emdash/**"] },
           viewports: ["desktop", "phone"],
@@ -308,8 +340,8 @@ function emdashMcpUrl(siteUrl) {
 // Generation
 
 /** Run EmDash's generator in `directory`; returns the generated site folder. */
-async function createEmdashSite(directory, { name }) {
-  const created = await run("npx", ["--yes", EMDASH_GENERATOR, name, "--template", "starter", "--platform", "node", "--pm", "npm", "--no-install", "--yes"], directory);
+async function createEmdashSite(directory, { name, platform }) {
+  const created = await run("npx", ["--yes", EMDASH_GENERATOR, name, "--template", "starter", "--platform", platform, "--pm", "npm", "--no-install", "--yes"], directory);
   if (created.code !== 0) throw new Error(`${EMDASH_GENERATOR} failed:\n${tail(created)}`);
   return path.join(directory, name);
 }
@@ -336,6 +368,7 @@ async function refuseUnusableRoot(root) {
  */
 export async function scaffoldEmdashSite(rootInput, {
   designSystem,
+  platform = "cloudflare",
   stylesheets = [],
   siteUrl = "",
   portalUrl = DEFAULT_PORTAL_URL,
@@ -346,6 +379,7 @@ export async function scaffoldEmdashSite(rootInput, {
   if (!rootInput) throw new Error(`--root is required\n${SCAFFOLD_HELP}`);
   const url = String(designSystem || "").trim();
   if (!url) throw new Error(`--design-system is required: the git URL of the standalone Design System repository\n${SCAFFOLD_HELP}`);
+  if (!EMDASH_PLATFORMS.includes(platform)) throw new Error(`--platform ${platform} must be one of ${EMDASH_PLATFORMS.join(", ")}`);
   for (const stylesheet of stylesheets) {
     if (!isSafeRelativePath(stylesheet) || !stylesheet.endsWith(".css")) throw new Error(`--stylesheet ${stylesheet} must be a .css path relative to the Design System root`);
   }
@@ -363,6 +397,7 @@ export async function scaffoldEmdashSite(rootInput, {
   let repoRoot;
   let system;
   let appName;
+  let cloudflare = null;
   const written = [];
   try {
     await fs.mkdir(root, { recursive: true });
@@ -375,11 +410,17 @@ export async function scaffoldEmdashSite(rootInput, {
     system = await inspectDesignSystem(path.join(repoRoot, DESIGN_SYSTEM_PATH), { stylesheets });
 
     output(`Generating the EmDash site with ${EMDASH_GENERATOR}...`);
-    const generated = await createSite(staging, { name: slug(path.basename(repoRoot)) });
+    const siteName = slug(path.basename(repoRoot));
+    const generated = await createSite(staging, { name: siteName, platform });
     const layout = await fs.readFile(path.join(generated, BASE_LAYOUT), "utf8").catch(() => null);
     const packageJson = await readJson(path.join(generated, "package.json"), "the generated package.json");
     if (layout === null || !packageJson) throw new Error(`${EMDASH_GENERATOR} did not produce ${BASE_LAYOUT} and package.json. The EmDash starter template has changed; report it to TimDS.`);
     const patchedLayout = patchBaseLayout(layout, { tokens: system.tokens });
+    if (platform === "cloudflare") {
+      const wrangler = await fs.readFile(path.join(generated, WRANGLER_CONFIG), "utf8").catch(() => null);
+      if (wrangler === null) throw new Error(`${EMDASH_GENERATOR} did not produce ${WRANGLER_CONFIG} for the cloudflare platform. The EmDash starter template has changed; report it to TimDS.`);
+      cloudflare = nameCloudflareResources(wrangler, siteName);
+    }
     for (const entry of await fs.readdir(generated)) {
       // The repository holds only .git, .gitmodules, and the submodule so far.
       if (existsSync(path.join(repoRoot, entry))) throw new Error(`${EMDASH_GENERATOR} produced ${entry}, which the new repository already has`);
@@ -395,10 +436,10 @@ export async function scaffoldEmdashSite(rootInput, {
       written.push(TOKEN_MODULE);
     }
 
-    const seed = String(packageJson.emdash?.seed || "seed/seed.json");
-    packageJson.scripts = { ...(packageJson.scripts || {}), seed: packageJson.scripts?.seed || `emdash seed ${seed}` };
-    await writeFile(path.join(repoRoot, "package.json"), toJson(packageJson));
-    written.push("package.json");
+    if (cloudflare) {
+      await writeFile(path.join(repoRoot, WRANGLER_CONFIG), cloudflare.config);
+      written.push(WRANGLER_CONFIG);
+    }
 
     appName = rootAppName(packageJson.name, path.basename(repoRoot));
     await writeFile(path.join(repoRoot, CONSUMER_MANIFEST_FILE), toJson(emdashConsumerManifest({ appName, systemId: system.systemId })));
@@ -412,6 +453,10 @@ export async function scaffoldEmdashSite(rootInput, {
       .replaceAll("__SYSTEM_ID__", () => system.systemId)
       .replaceAll("__SYSTEM_NAME__", () => system.name)
       .replaceAll("__DESIGN_SYSTEM_PATH__", () => DESIGN_SYSTEM_PATH)
+      .replaceAll("__DEV_SEED_ROUTE__", () => DEV_SEED_ROUTE)
+      .replace("__HOSTING__", () => (cloudflare
+        ? `The site runs on Cloudflare Workers as \`${cloudflare.name}\`, with the D1 database \`${cloudflare.database_name}\` and the R2 bucket \`${cloudflare.bucket_name}\` (\`${WRANGLER_CONFIG}\`). The first deployment creates the database and the bucket; local development uses a local copy of both, so it needs no Cloudflare account.`
+        : "The site runs as a Node.js server with a SQLite database (`data.db`) and uploaded media on local disk (`uploads/`); both stay out of git."))
       .replace("__IMPORTS__", () => imports));
     written.push("DESIGN_SYSTEM.md");
     const agentsPath = path.join(repoRoot, "AGENTS.md");
@@ -444,8 +489,14 @@ export async function scaffoldEmdashSite(rootInput, {
   const todos = [
     ...(skipInstall ? ["Run npm install and commit package-lock.json; the preview installs with npm ci"] : []),
     ...(system.missing.length ? [`The Design System fills no token for ${system.missing.join(", ")}, so ${THEME_STYLESHEET} leaves ${system.missing.length === 1 ? "that declaration" : "those declarations"} out; add the tokens in the Design System (or map the roles in its timds.json brand.roles), then use them in the theme`] : []),
-    "Run npm run dev and open /_emdash/admin to create the first administrator; npm run seed loads the starter's demo content into a fresh local database",
-    `Commit everything (the ${DESIGN_SYSTEM_PATH} pin included), create the site's repository, and push; .env holds the local EMDASH_ENCRYPTION_KEY and stays out of git, so set that secret wherever the site is deployed`,
+    `Run npm run dev and open ${DEV_SEED_ROUTE}?redirect=/_emdash/admin once: it loads the starter's demo content into the local database and signs you in as a development administrator`,
+    `Commit everything (the ${DESIGN_SYSTEM_PATH} pin included), create the site's repository, and push; .env holds the local EMDASH_ENCRYPTION_KEY and stays out of git`,
+    ...(cloudflare
+      ? [
+        `Deployment is not automated: the site deploys to Cloudflare Workers as ${cloudflare.name}, and the first deployment creates the D1 database ${cloudflare.database_name} and the R2 bucket ${cloudflare.bucket_name} named in ${WRANGLER_CONFIG}`,
+        "Set EMDASH_ENCRYPTION_KEY (npx emdash secrets generate) as a Worker secret, and before creating the first administrator on a custom domain add its route and EMDASH_SITE_URL to wrangler.jsonc: passkeys only work on the address they were created on",
+      ]
+      : ["Set EMDASH_ENCRYPTION_KEY wherever the Node.js server is deployed, and keep data.db and uploads/ on persistent storage"]),
     `To have each Design System release open a pin-update pull request here, declare this repository as consumer in the Design System's timds.json; a same-host relative submodule URL in .gitmodules (../<design-system-repo>.git) lets one credential fetch both`,
     mcpUrl
       ? `Content is edited through the "${EMDASH_MCP_SERVER_NAME}" MCP server in ${CONSUMER_MCP_PATH} (${mcpUrl}); it signs in through the site's own OAuth, with the EmDash role of the person connecting`
@@ -463,6 +514,8 @@ export async function scaffoldEmdashSite(rootInput, {
   return {
     repoRoot,
     appName,
+    platform,
+    ...(cloudflare ? { cloudflare: { name: cloudflare.name, databaseName: cloudflare.database_name, bucketName: cloudflare.bucket_name } } : {}),
     systemId: system.systemId,
     stylesheets: system.stylesheets,
     tokens: system.tokens,
@@ -489,7 +542,7 @@ function parseScaffoldArguments(argv) {
       options[name === "h" ? "help" : name] = true;
       continue;
     }
-    if (!["root", "designSystem", "stylesheet", "siteUrl", "portalUrl"].includes(name)) throw new Error(`Unknown option --${rawName}\n${SCAFFOLD_HELP}`);
+    if (!["root", "designSystem", "platform", "stylesheet", "siteUrl", "portalUrl"].includes(name)) throw new Error(`Unknown option --${rawName}\n${SCAFFOLD_HELP}`);
     const next = inlineValue ?? argv[index + 1];
     if (next === undefined || String(next).startsWith("-")) throw new Error(`--${rawName} requires a value`);
     if (name === "stylesheet") options.stylesheets.push(next);
@@ -509,6 +562,7 @@ export async function runConsumerScaffold(args = [], { output = (message = "") =
   if (positional.length > 1 || positional[0] !== "emdash") throw new Error(`Unknown site kind ${positional.join(" ")}; timds consumer scaffold creates emdash sites\n${SCAFFOLD_HELP}`);
   return scaffoldEmdashSite(options.root, {
     designSystem: options.designSystem,
+    ...(options.platform ? { platform: options.platform } : {}),
     stylesheets: options.stylesheets,
     siteUrl: options.siteUrl,
     skipInstall: Boolean(options.skipInstall),

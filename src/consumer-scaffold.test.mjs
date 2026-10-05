@@ -11,6 +11,7 @@ import {
   compileTokenCss,
   emdashConsumerManifest,
   inspectDesignSystem,
+  nameCloudflareResources,
   patchBaseLayout,
   renderThemeCss,
   runConsumerScaffold,
@@ -94,12 +95,34 @@ const { title } = Astro.props;
 </html>
 `;
 
+const WRANGLER_CONFIG = `{
+\t"$schema": "node_modules/wrangler/config-schema.json",
+\t"name": "my-emdash-site",
+\t"main": "./src/worker.ts",
+\t"d1_databases": [
+\t\t{
+\t\t\t"binding": "DB",
+\t\t\t"database_name": "my-emdash-site",
+\t\t},
+\t],
+\t"r2_buckets": [
+\t\t{
+\t\t\t"binding": "MEDIA",
+\t\t\t"bucket_name": "my-emdash-media",
+\t\t},
+\t],
+\t// General maintenance cron trigger
+\t"triggers": { "crons": ["* * * * *"] },
+}
+`;
+
 /** Stands in for the EmDash generator: the starter template's shape, no network. */
 function fakeGenerator(calls = [], overrides = {}) {
-  return async (directory, { name }) => {
-    calls.push(name);
+  return async (directory, { name, platform }) => {
+    calls.push(`${platform}:${name}`);
     const site = path.join(directory, name);
     const files = {
+      ...(platform === "cloudflare" ? { "wrangler.jsonc": WRANGLER_CONFIG, "src/worker.ts": "export default {};\n" } : {}),
       "package.json": {
         name,
         private: true,
@@ -134,7 +157,9 @@ test("scaffolds an EmDash site that reads a starter Design System from the pin",
 
   const result = await scaffoldEmdashSite(site, { designSystem, skipInstall: true, createSite: fakeGenerator(calls), output: (line) => lines.push(line) });
 
-  assert.deepEqual(calls, ["acme-site"]);
+  assert.deepEqual(calls, ["cloudflare:acme-site"]);
+  assert.equal(result.platform, "cloudflare");
+  assert.deepEqual(result.cloudflare, { name: "acme-site", databaseName: "acme-site", bucketName: "acme-site-media" });
   assert.equal(result.systemId, "acme/core");
   assert.equal(result.appName, "acme-site");
   assert.equal(result.tokens, true);
@@ -164,15 +189,16 @@ test("scaffolds an EmDash site that reads a starter Design System from the pin",
   assert.deepEqual(manifest.designSystem, { path: "design-system", systemId: "acme/core" });
   const app = manifest.apps["acme-site"];
   assert.equal(app.cwd, ".");
-  assert.deepEqual(app.install, ["bash", "-c", "npm ci --no-audit --no-fund && npm run seed"]);
+  assert.deepEqual(app.install, ["npm", "ci", "--no-audit", "--no-fund"]);
   assert.deepEqual(app.preview.serve, ["npm", "run", "dev", "--", "--port", "4380", "--host", "127.0.0.1", "--ignore-lock"]);
   assert.equal(app.preview.port, 4380);
+  // Waiting on EmDash's development seed route is what loads the preview's content.
+  assert.equal(app.preview.ready, "/_emdash/api/setup/dev-bypass?redirect=/");
   assert.deepEqual(app.preview.discover.exclude, ["/_emdash/**"]);
   assert.deepEqual(app.designSurface, ["src/layouts/**", "src/components/**", "src/styles/**", "src/pages/**", "public/**"]);
 
   const packageJson = JSON.parse(await fs.readFile(path.join(site, "package.json"), "utf8"));
-  assert.equal(packageJson.scripts.seed, "emdash seed seed/seed.json");
-  assert.equal(packageJson.scripts.dev, "astro dev");
+  assert.deepEqual(Object.keys(packageJson.scripts), ["dev", "build", "timds"]);
   assert.equal(packageJson.scripts.timds, "timds");
   assert.equal(packageJson.devDependencies["@dtconcepts/timds"], releaseLine);
 
@@ -182,7 +208,19 @@ test("scaffolds an EmDash site that reads a starter Design System from the pin",
   assert.match(guide, /`acme\/core` \(Acme\)/);
   assert.match(guide, /`src\/utils\/design-system\.ts` compiles the pinned `design-system\/tokens\.json`/);
   assert.match(guide, /imports `design-system\/src\/styles\/system\.css` from the pin/);
+  assert.match(guide, /runs on Cloudflare Workers as `acme-site`, with the D1 database `acme-site` and the R2 bucket `acme-site-media`/);
+  assert.match(guide, /Open `\/_emdash\/api\/setup\/dev-bypass\?redirect=\/_emdash\/admin` once/);
   assert.doesNotMatch(guide, /__[A-Z_]+__/);
+
+  // The Worker, database, and bucket carry the site's name, not the template's.
+  const wrangler = await fs.readFile(path.join(site, "wrangler.jsonc"), "utf8");
+  assert.match(wrangler, /^\t"name": "acme-site",$/m);
+  assert.match(wrangler, /^\t\t\t"database_name": "acme-site",$/m);
+  assert.match(wrangler, /^\t\t\t"bucket_name": "acme-site-media",$/m);
+  assert.match(wrangler, /\/\/ General maintenance cron trigger/);
+  assert.doesNotMatch(wrangler, /my-emdash/);
+  assert.ok(result.written.includes("wrangler.jsonc"));
+  assert.ok(result.todos.some((item) => item.startsWith("Deployment is not automated: the site deploys to Cloudflare Workers as acme-site")));
   const agents = await fs.readFile(path.join(site, "AGENTS.md"), "utf8");
   assert.ok(agents.startsWith("This is an EmDash site.\n\n## Visual character\n\nNone imposed.\n\n## Design System\n"));
   assert.match(agents, /pinned at\n`design-system\/`/);
@@ -366,6 +404,40 @@ test("inspects a Design System and renders the theme from its roles alone", asyn
   assert.equal(emdashConsumerManifest({ appName: "site", systemId: "acme/core" }).apps.site.protected.length, 0);
 });
 
+test("generates the Node.js platform without Cloudflare resources", async (t) => {
+  const root = await temporaryDirectory(t);
+  const designSystem = await starterDesignSystem(root);
+  const site = path.join(root, "node-site");
+  const calls = [];
+
+  const result = await scaffoldEmdashSite(site, { designSystem, platform: "node", skipInstall: true, createSite: fakeGenerator(calls), output: quiet });
+
+  assert.deepEqual(calls, ["node:node-site"]);
+  assert.equal(result.platform, "node");
+  assert.equal(result.cloudflare, undefined);
+  assert.equal(existsSync(path.join(site, "wrangler.jsonc")), false);
+  assert.match(await fs.readFile(path.join(site, "DESIGN_SYSTEM.md"), "utf8"), /runs as a Node\.js server with a SQLite database/);
+  assert.ok(result.todos.some((item) => item.startsWith("Set EMDASH_ENCRYPTION_KEY wherever the Node.js server is deployed")));
+  assert.equal((await checkConsumer(site)).status, "passed");
+
+  await assert.rejects(scaffoldEmdashSite(path.join(root, "other"), { designSystem, platform: "heroku", createSite: fakeGenerator(calls) }), /--platform heroku must be one of cloudflare, node/);
+  await assert.rejects(
+    scaffoldEmdashSite(path.join(root, "other"), { designSystem, createSite: fakeGenerator([], { "wrangler.jsonc": null }) }),
+    /did not produce wrangler\.jsonc for the cloudflare platform/,
+  );
+  assert.equal(existsSync(path.join(root, "other")), false);
+});
+
+test("names the Cloudflare resources after the site and keeps the rest of the config", () => {
+  const named = nameCloudflareResources(WRANGLER_CONFIG, "Acme & Sons_Site");
+  assert.deepEqual([named.name, named.database_name, named.bucket_name], ["acme-sons-site", "acme-sons-site", "acme-sons-site-media"]);
+  assert.equal(named.config, WRANGLER_CONFIG.replaceAll("my-emdash-site", "acme-sons-site").replace("my-emdash-media", "acme-sons-site-media"));
+  // A bucket name may be at most 63 characters, suffix included.
+  assert.ok(nameCloudflareResources(WRANGLER_CONFIG, "a".repeat(49) + "-" + "b".repeat(30)).bucket_name.length <= 63);
+  assert.equal(nameCloudflareResources(WRANGLER_CONFIG, "a".repeat(49) + "-" + "b".repeat(30)).name, "a".repeat(49));
+  assert.throws(() => nameCloudflareResources(WRANGLER_CONFIG.replace('"bucket_name"', '"bucket"'), "site"), /has no "bucket_name"/);
+});
+
 test("runs through the consumer CLI and explains itself", async (t) => {
   const lines = [];
   assert.equal(await runConsumerScaffold([], { output: (line) => lines.push(line) }), null);
@@ -376,12 +448,13 @@ test("runs through the consumer CLI and explains itself", async (t) => {
 
   await assert.rejects(runConsumerScaffold(["wordpress", "--root", "x"], { output: quiet }), /Unknown site kind wordpress/);
   await assert.rejects(runConsumerScaffold(["emdash", "--template", "blog"], { output: quiet }), /Unknown option --template/);
+  await assert.rejects(runConsumerScaffold(["emdash", "--root", "x", "--design-system", "y", "--platform", "heroku"], { output: quiet }), /--platform heroku must be one of/);
   await assert.rejects(runConsumerScaffold(["emdash", "--root"], { output: quiet }), /--root requires a value/);
   await assert.rejects(runConsumerScaffold(["emdash", "--design-system", "git@example.com:a/b.git"], { output: quiet }), /--root is required/);
 
   const root = await temporaryDirectory(t);
   await assert.rejects(
-    runConsumerCli(["scaffold", "emdash", "--root", path.join(root, "site"), "--design-system", path.join(root, "missing"), "--stylesheet=a.css", "--stylesheet", "b.css", "--skip-install"], { output: quiet }),
+    runConsumerCli(["scaffold", "emdash", "--root", path.join(root, "site"), "--design-system", path.join(root, "missing"), "--platform", "node", "--stylesheet=a.css", "--stylesheet", "b.css", "--skip-install"], { output: quiet }),
     /git submodule add .* failed/,
   );
   assert.equal(existsSync(path.join(root, "site")), false);

@@ -312,8 +312,7 @@ npx --yes @dtconcepts/timds@0.1.x consumer scaffold emdash \
 `--root` must not exist, or be empty, and must sit outside any git repository.
 The scaffold initializes the repository, adds the Design System as the
 `design-system` submodule, generates EmDash's unstyled `starter` template with
-`create-emdash@1` (Node.js with SQLite; the generator needs network access),
-and writes:
+`create-emdash@1` (the generator needs network access), and writes:
 
 - `src/styles/theme.css`, which imports the system's stylesheets from the
   submodule and styles the site shell with the token that fills each brand
@@ -323,16 +322,25 @@ and writes:
   build: that build writes `tokens.css` from `tokens.json` into `dist/`, so
   the site compiles the pinned `tokens.json` by the same `--group-name` rule
   and `src/layouts/Base.astro` puts the result on every page.
-- `timds.consumer.json` with the site as one root app: `install` seeds the
-  local database (`npm ci`, then `npm run seed`) so previews show content,
-  `preview.serve` runs `astro dev` on port 4380 with `--ignore-lock` (Astro
-  otherwise backgrounds the server when an agent starts it), and the design
-  surface is the theme (`src/layouts`, `src/components`, `src/styles`,
-  `src/pages`, `public`).
+- `timds.consumer.json` with the site as one root app: `preview.serve` runs
+  `astro dev` on port 4380 with `--ignore-lock` (Astro otherwise backgrounds
+  the server when an agent starts it), `preview.ready` is EmDash's
+  development-only seed route (`/_emdash/api/setup/dev-bypass?redirect=/`), so
+  waiting for the server also loads the starter's demo content into the local
+  database, and the design surface is the theme (`src/layouts`,
+  `src/components`, `src/styles`, `src/pages`, `public`).
 - `DESIGN_SYSTEM.md` and a section in `AGENTS.md` that say which change goes
   where: content through the EmDash admin or its MCP server, the theme through
   a pull request inside the design surface, the brand through the Design
   System and a pin update.
+
+`--platform` chooses the hosting: `cloudflare` (the default) generates the
+Workers variant, with a D1 database and an R2 bucket, and renames the Worker,
+database, and bucket in `wrangler.jsonc` after the site (the template ships
+one shared placeholder name, and two sites in an account would otherwise
+deploy over each other); `node` generates a Node.js server with SQLite and
+local file storage. Local development and previews need no Cloudflare account
+on either. The scaffold adds no deploy automation.
 
 `--stylesheet PATH` (relative to the Design System root, repeatable) names
 what the site imports; it defaults to `src/styles/system.css` when the system

@@ -36,11 +36,18 @@ CMS. When a request mixes them, split it.
   `src/layouts/Base.astro` (`EmDashHead`, `EmDashBodyStart`, `EmDashBodyEnd`,
   the menu and settings queries) when restyling it.
 
+## Hosting
+
+__HOSTING__
+
 ## Run it locally
 
 ```bash
 git submodule update --init __DESIGN_SYSTEM_PATH__
 npm ci
-npm run seed    # demo content into a fresh local database
-npm run dev     # http://localhost:4321, admin at /_emdash/admin
+npm run dev     # http://localhost:4321
 ```
+
+Open `__DEV_SEED_ROUTE__?redirect=/_emdash/admin` once on a fresh checkout. It
+loads the starter's demo content into the local database and signs you in as
+a development administrator; the route answers only under `npm run dev`.
