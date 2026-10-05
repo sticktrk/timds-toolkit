@@ -1155,3 +1155,12 @@ leaves that run failing on a version conflict.
 Release tags must match `package.json` as `v<version>`. The npm package is
 public; this repository remains `UNLICENSED` until DT Concepts selects an
 open-source license.
+
+
+Portal provisioning can pass immutable identity explicitly:
+
+```sh
+npm run timds -- init --standalone --root ./new-system --name "Client Design System" --system-id "client/unique-id" --description "Shared standards" --json
+```
+
+`--json` returns the initialization result with the manifest, layout, exact toolkit package version, created paths, and validation artifact. Existing contracts retain their identity; conflicting explicit inputs are rejected.

@@ -791,3 +791,19 @@ test("initializes an embedded contract with a committed starter artifact", async
     /design-system\/dist\/index\.html/,
   );
 });
+
+
+test("standalone init accepts explicit immutable identity and JSON-safe text", async (t) => {
+  const parent = await temporaryDirectory(t);
+  const root = path.join(parent, "ephemeral-workspace");
+  const options = { standalone: true, name: 'Client "Brand"', systemId: "client/immutable-123", description: "First line\nSecond line" };
+  const result = await initializeRepository(root, options);
+  assert.equal(result.manifest.name, options.name);
+  assert.equal(result.manifest.systemId, options.systemId);
+  assert.equal(result.manifest.description, options.description);
+  assert.equal(result.layout, "standalone");
+  assert.match(result.package.version, /^0\.1\./);
+  await initializeRepository(root, options);
+  await assert.rejects(initializeRepository(root, { ...options, systemId: "other/id" }), /conflicts/);
+  await assert.rejects(initializeRepository(path.join(parent, "bad"), { systemId: "../bad" }), /hierarchical/);
+});
