@@ -322,6 +322,8 @@ function appSection(name, app) {
     lines.push(`- Run locally: build with ${code(preview.build.join(" "))} (output in ${code(`${preview.output}/`)}), or from repository root run ${code(`npm run timds -- consumer preview --app ${name}`)} and open ${code(`.timds/preview/${name}/index.html`)}.`);
   }
   if (preview.routes?.length) lines.push(`- Review routes: ${list(preview.routes)}.`);
+  const designs = Object.entries(preview.designs || {});
+  if (designs.length) lines.push(`- Designs to match: ${designs.map(([route, reference]) => `${code(route)} matches ${code(reference)}`).join(", ")}. The preview shows each design beside its route; read it with ${code("read_design")} or under ${code(`${app.cwd === "." ? "" : "../"}design-system/dist/designs/`)} after the pin is built.`);
   lines.push(`- Review at: ${list(preview.viewports)} widths; ${list(preview.schemes)} schemes.`);
   lines.push(`- Design surface (may change): ${list(app.designSurface)}.`);
   lines.push(app.protected.length

@@ -158,7 +158,7 @@ test("renders the skill from the manifest and records managed-file hashes", asyn
       web: {
         cwd: "web",
         install: ["npm", "ci"],
-        preview: { serve: ["npm", "run", "dev"], port: 4321, routes: ["/", "/estate-planning", "/contact"] },
+        preview: { serve: ["npm", "run", "dev"], port: 4321, routes: ["/", "/estate-planning", "/contact"], designs: { "/contact": "website:/contact" } },
         designSurface: ["src/styles/**", "src/pages/**"],
         protected: ["src/server/**"],
       },
@@ -180,6 +180,7 @@ test("renders the skill from the manifest and records managed-file hashes", asyn
   assert.match(skill, /consumer check --base origin\/main/);
   assert.match(skill, /### `web`[\s\S]*Folder: `web\/`/);
   assert.match(skill, /Review routes: `\/`, `\/estate-planning`, `\/contact`\./);
+  assert.match(skill, /Designs to match: `\/contact` matches `website:\/contact`\. The preview shows each design beside its route; read it with `read_design` or under `\.\.\/design-system\/dist\/designs\/`/);
   assert.match(skill, /Design surface \(may change\): `src\/styles\/\*\*`, `src\/pages\/\*\*`\./);
   assert.match(skill, /Protected \(never change, even inside the surface\): `src\/server\/\*\*`\./);
   assert.match(skill, /the `web` entry in `\.claude\/launch\.json` \(`npm run dev`\), then open http:\/\/localhost:4321\//);
@@ -423,7 +424,7 @@ test("discovers an app at the repository root and checks its design surface from
   git(product, "commit", "-m", "Recolor links");
   const passed = await checkConsumer(product, { base: "main" });
   assert.equal(passed.status, "passed", passed.errors.join("\n"));
-  assert.deepEqual(passed.apps, [{ name: "site", cwd: ".", cwdExists: true, mode: "crawl" }]);
+  assert.deepEqual(passed.apps, [{ name: "site", cwd: ".", cwdExists: true, mode: "crawl", designs: 0 }]);
   assert.deepEqual(passed.changes, [{ path: "src/styles/site.css", status: "allowed", app: "site" }]);
 
   await fs.writeFile(path.join(product, "src", "server", "api.js"), "export {};\n", "utf8");

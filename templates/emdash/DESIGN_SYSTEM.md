@@ -36,6 +36,11 @@ design's HTML file in as a page, and never restyle it. A state the site
 cannot express yet is a developer change to say so about, not a design to
 simplify.
 
+`preview.designs` in `timds.consumer.json` pairs a route with its design
+(`"/": "website:/"`); the pull-request preview then shows the design beside
+the route at every width and scheme, so the port is reviewed against its
+reference. Pairing a new route is a developer change to the manifest.
+
 ## Rules for theme changes
 
 - Never edit, pull, or commit inside `__DESIGN_SYSTEM_PATH__/`, and never

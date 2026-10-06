@@ -132,7 +132,9 @@ clean.
   with states as `<state>.html` beside the default, lists them at
   `/designs/`, and the viewer's app bar links there. `designs.json` beside
   `index.json` carries every page's HTML for consumers, who read it with
-  the `list_designs` and `read_design` tools.
+  the `list_designs` and `read_design` tools. A product pairs a route with
+  its design in its `timds.consumer.json` (`"/": "website:/"`), and its
+  pull-request preview then shows the design beside the route.
 - The starter ships one sample design, `website`, composed from the site
   layout pieces on `web/components`. Replace it with the client's pages, or
   remove `src/designs/` entirely; `check` ignores a system without it. A

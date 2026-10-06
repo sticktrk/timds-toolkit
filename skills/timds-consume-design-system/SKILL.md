@@ -102,8 +102,11 @@ Take every color, font, spacing value, logo, and image from the system:
 Start the app with its `.claude/launch.json` entry (named below) in the
 browser pane, or run its serve command from the app folder. Visit each review
 route at desktop and phone width, in light and dark scheme, and check the
-requested change, overflow, navigation, and images. Fix what you find before
-opening the pull request.
+requested change, overflow, navigation, and images. A route listed under
+**Designs to match** below has a design in the system; compare the route with
+it, state by state. Fix what you find before opening the pull request. The
+pull-request preview shows each paired design beside its route, so the
+designer reviews the port against its reference.
 
 ## Open the pull request only when asked
 

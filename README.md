@@ -206,6 +206,22 @@ crawl it). `ready` defaults to `/`, `viewports` to `["desktop", "phone"]`
 `designSurface` and `protected` are globs (`**`, `*`, `?`) relative to the
 app's `cwd`; `protected` always wins.
 
+In crawl mode, `preview.designs` pairs a route with a page of a website
+design in the pinned Design System, as `"<design>:<route>"`:
+
+```json
+"preview": { "serve": ["npm", "run", "dev"], "port": 4321, "routes": ["/", "/contact"], "designs": { "/": "website:/", "/contact": "website:/contact" } }
+```
+
+Every paired route must be in `routes`; `consumer check` verifies each pairing
+against the pin's `src/designs/`. The preview then builds the pin's artifact
+with its own declared commands when it is not built yet, renders its designs,
+and captures the design page at the same widths and schemes into `designs/`,
+so the gallery and the portal show the design beside the route: the reference
+on one side, the product on the other. `preview.json` records the pairing on
+each route as `design` and the outcome under `designs`; a pin that cannot be
+shown is reported there and never fails the preview.
+
 In crawl mode, `preview.discover` adds routes beyond `routes`: starting from
 `from` (default `["/"]`), it follows same-origin `<a href>` links breadth-first
 and reads `/sitemap.xml` when the app serves one (sitemap entries are used by

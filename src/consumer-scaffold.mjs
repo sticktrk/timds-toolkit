@@ -232,7 +232,12 @@ export async function inspectDesignSystem(designSystemRoot, { stylesheets = [] }
     if (caught?.code === "ENOENT") return [];
     throw caught;
   });
-  return { systemId, name: String(manifest.name || systemId), stylesheets: selected, tokens: Boolean(tokensJson), roles, missing, publicAssets: publicAssets.sort() };
+  // The website designs the system holds, so the site's home route can be
+  // paired with the design of the home page from the first preview on.
+  const { readDesignCatalog } = await import("./designs.mjs");
+  const catalog = await readDesignCatalog(designSystemRoot);
+  const designs = catalog.designs.map((design) => ({ id: design.id, routes: design.pages.map((page) => page.route) }));
+  return { systemId, name: String(manifest.name || systemId), stylesheets: selected, tokens: Boolean(tokensJson), roles, missing, publicAssets: publicAssets.sort(), designs };
 }
 
 // ---------------------------------------------------------------------------
@@ -308,7 +313,8 @@ export function nameCloudflareResources(source, siteName) {
 }
 
 /** `timds.consumer.json` for the site: one root app, previewed from a seeded local database. */
-export function emdashConsumerManifest({ appName, systemId, publicAssets = [] }) {
+export function emdashConsumerManifest({ appName, systemId, publicAssets = [], designs = [] }) {
+  const home = designs.find((design) => design.routes.includes("/"));
   const manifest = {
     schemaVersion: 1,
     designSystem: { path: DESIGN_SYSTEM_PATH, systemId },
@@ -326,6 +332,8 @@ export function emdashConsumerManifest({ appName, systemId, publicAssets = [] })
           discover: { from: ["/"], limit: 40, exclude: ["/_emdash/**"] },
           viewports: ["desktop", "phone"],
           schemes: ["light", "dark"],
+          // The home page is reviewed beside its design when the system designed one.
+          ...(home ? { designs: { "/": `${home.id}:/` } } : {}),
         },
         designSurface: ["src/layouts/**", "src/components/**", "src/styles/**", "src/pages/**", "public/**"],
         // These links reach Design System source, outside the designer's surface.
@@ -482,7 +490,7 @@ export async function scaffoldEmdashSite(rootInput, {
     }
 
     appName = rootAppName(packageJson.name, path.basename(repoRoot));
-    await writeFile(path.join(repoRoot, CONSUMER_MANIFEST_FILE), toJson(emdashConsumerManifest({ appName, systemId: system.systemId, publicAssets: system.publicAssets })));
+    await writeFile(path.join(repoRoot, CONSUMER_MANIFEST_FILE), toJson(emdashConsumerManifest({ appName, systemId: system.systemId, publicAssets: system.publicAssets, designs: system.designs })));
     written.push(CONSUMER_MANIFEST_FILE);
 
     const imports = [
