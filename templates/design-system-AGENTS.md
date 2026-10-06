@@ -29,6 +29,7 @@ holds `timds.json`. Run `__TIMDS_CLI__` commands from the repository root.
 | `tokens.json` | Authored design tokens | Edit |
 | `src/site.json` | The views and every page in them; the one place that declares which pages exist | Edit |
 | `src/pages/` | One content fragment per authored page | Edit |
+| `src/designs/` | Website designs: whole pages in plain HTML on the system's stylesheets, one directory per design | Edit |
 | `src/layout.html` | The shell every page shares: app bar, page navigation, content slot | Edit |
 | `src/styles/`, `src/assets/` | The system's styles, the viewer chrome, and small optimized assets | Edit |
 | `scripts/build.mjs`, `dev.mjs`, `check.mjs`, `viewer.mjs` | The `workspace` commands that `timds.json` runs and the renderer they share | Edit only when the viewer needs it |
@@ -92,6 +93,52 @@ If this system has moved to another framework, `timds.json` `workspace` names
 the real commands and this section no longer applies. Replace it with that
 framework's layout.
 
+## Website designs
+
+The system is designer-owned down to the pages themselves. A whole website,
+or any set of screens, is designed here in plain HTML on the system's own
+stylesheets, and a backend engineer ports it to whatever runs production:
+EmDash, WordPress, a static host, anything. The design is the reference the
+port must match. It is never the production site itself, however simple the
+stack, so the ownership line between this repository and a product stays
+clean.
+
+- One design per directory under `src/designs/<design>/`: `design.json`
+  (`title`, `summary`, and optionally `pages` with a `title` per route for a
+  page whose heading is a headline rather than a name), an optional
+  `layout.html` shell with `{{content}}` (plus `{{title}}`, `{{name}}`,
+  `{{description}}`, `{{version}}`), and `pages/`.
+- The file name is the route. `pages/index.html` is `/`, `pages/about.html`
+  is `/about`, `pages/contact/index.html` is `/contact`; directories are
+  route segments. Link between pages by their eventual site route
+  (`href="/contact"`); the build points those links at the design's place
+  in the artifact and leaves every other reference as written.
+- A state is a file beside its page, never a script. `contact.sent.html` is
+  `/contact` after the form is sent; `index.signed-in.html`,
+  `orders.empty.html`, and `checkout.error.html` work the same way. Every
+  state a port must handle is a file a port can see.
+- A design uses only what the system defines. `check` refuses `<script>`,
+  inline event handlers, `<style>`, `style` attributes, a class no linked
+  stylesheet declares, and a relative reference. When a page needs a style
+  the system lacks, add it to `src/styles/system.css` and document it on
+  `web/components`; never add it to the page.
+- Link the system's stylesheets by site-absolute path (`/tokens.css`,
+  `/styles/system.css`) and never `viewer.css`, which is documentation
+  chrome a product does not have. Reference imagery by site-absolute path
+  or a published media URL.
+- Design the pages, not the content. A blog is its archive page and one
+  sample post, not forty posts.
+- TimDS builds the designs to `dist/designs/<design>/<route>/index.html`
+  with states as `<state>.html` beside the default, lists them at
+  `/designs/`, and the viewer's app bar links there. `designs.json` beside
+  `index.json` carries every page's HTML for consumers, who read it with
+  the `list_designs` and `read_design` tools.
+- The starter ships one sample design, `website`, composed from the site
+  layout pieces on `web/components`. Replace it with the client's pages, or
+  remove `src/designs/` entirely; `check` ignores a system without it. A
+  system scaffolded before designs existed adopts them with
+  `__TIMDS_CLI__ designs init`.
+
 ## Write pages the derived layer can read
 
 `check` reads the built HTML and CSS, never authored source, and writes
@@ -153,10 +200,15 @@ only that layer, so page structure decides what they receive.
 5. Shape the rest of `src/site.json` to the client: remove a planned page the
    system will not have, and add pages or whole views (email, social, print,
    video) it needs.
-6. Run `__TIMDS_CLI__ check` until it passes without warnings and
+6. Replace the sample website design under `src/designs/website/` with the
+   client's pages, each state as its own file, using only the system's
+   classes. Add a layout piece or component to `src/styles/system.css` and
+   `web/components` when a page needs one.
+7. Run `__TIMDS_CLI__ check` until it passes without warnings and
    `__TIMDS_CLI__ brand` lists the logo and the voice guidance.
-7. Inspect `__TIMDS_CLI__ preview` at desktop and mobile widths.
-8. Record the change under `## Unreleased` in `CHANGELOG.md`.
+8. Inspect `__TIMDS_CLI__ preview` at desktop and mobile widths, the designs
+   under `/designs/` included.
+9. Record the change under `## Unreleased` in `CHANGELOG.md`.
 
 ## Source and artifact boundary
 
@@ -187,7 +239,8 @@ __TIMDS_CLI__ doctor    # contract, layout, toolkit version, brand kit summary
 __TIMDS_CLI__ dev       # the authoring server declared in timds.json
 __TIMDS_CLI__ check     # build, validate the artifact, derive the machine layer
 __TIMDS_CLI__ brand     # the derived brand kit and a fix for every gap
-__TIMDS_CLI__ preview   # serve the exact built artifact
+__TIMDS_CLI__ preview   # serve the exact built artifact; designs under /designs/
+__TIMDS_CLI__ designs init   # adopt website designs in a system scaffolded without them
 __TIMDS_CLI__ diff      # design-system changes against the default branch (--base REF)
 ```
 

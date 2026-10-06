@@ -67,6 +67,13 @@ Take every color, font, spacing value, logo, and image from the system:
   the pinned commit, which may trail it.
 - Prefer brand roles over guessing from token names. In product CSS use the
   token's `name` (`var(--…)`), never its resolved literal.
+- When the system holds a website design for the route you are changing
+  (`list_designs` and `read_design`, or `designs.json` and `dist/designs/`
+  in the pin), the design is the reference the product route must match:
+  port its markup and every state it shows onto the product's stack with the
+  system's stylesheets. Never copy the design's HTML file into the product
+  as a page, and never restyle it. A state the product cannot express is a
+  developer change; say so.
 - An unfilled role or missing token is a gap, not something to invent. Report
   it, and file it with `report_gap` when the user agrees.
 - Compliance guidance is binding. When requested copy conflicts with it, say

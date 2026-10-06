@@ -55,6 +55,48 @@ code, pre { font-family: var(--font-mono); font-size: 0.85em; }
 }
 .field small { color: var(--color-muted); font-size: var(--type-small); }
 
+/* ---- site layout ---- */
+/* The pieces a whole page is composed from; the website design under
+   /designs/ uses only these and the components above. */
+.wrap { width: min(100% - 2 * var(--space-6), var(--size-content)); margin-inline: auto; }
+
+.site-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  min-height: var(--size-header);
+  padding-block: var(--space-3);
+  border-bottom: var(--size-line) solid var(--color-line);
+}
+.site-header__brand { font-family: var(--font-serif); font-size: var(--type-lead); font-weight: 700; text-decoration: none; }
+.site-nav { display: flex; flex-wrap: wrap; gap: var(--space-4); }
+.site-nav a { color: var(--color-muted); text-decoration: none; }
+.site-nav a:hover, .site-nav a[aria-current="page"] { color: var(--color-accent); }
+
+.hero { padding-block: var(--space-12); }
+.hero h1 { margin: 0 0 var(--space-4); font-family: var(--font-serif); font-size: var(--type-display); line-height: 1.1; }
+.hero p { max-width: 36rem; margin: 0 0 var(--space-6); color: var(--color-muted); font-size: var(--type-lead); }
+.hero .button + .button { margin-left: var(--space-3); }
+
+.section { padding-block: var(--space-8); border-top: var(--size-line) solid var(--color-line); }
+.section h2 { margin: 0 0 var(--space-3); font-family: var(--font-serif); font-size: var(--type-title); line-height: 1.2; }
+.section p { max-width: 40rem; margin: 0 0 var(--space-4); }
+
+.form { display: grid; gap: var(--space-4); max-width: 28rem; }
+.form .button { justify-self: start; }
+
+.notice {
+  padding: var(--space-4) var(--space-6);
+  border: var(--size-line) solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-accent-soft);
+}
+
+.site-footer { padding-block: var(--space-6); border-top: var(--size-line) solid var(--color-line); color: var(--color-muted); font-size: var(--type-small); }
+/* ---- end site layout ---- */
+
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   * { transition-duration: 0.01ms !important; }

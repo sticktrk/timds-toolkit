@@ -38,6 +38,7 @@ tokens; the rest are declared as planned and built once someone writes them.
 | `tokens.json` | Authored tokens; the build emits each as a `--group-name` CSS custom property in `tokens.css` |
 | `src/site.json` | The views and their pages, authored or planned; drives the navigation and the overview |
 | `src/pages/` | One content fragment per authored page, such as `src/pages/brand/color.html` |
+| `src/designs/` | Website designs: whole pages in plain HTML on the system's stylesheets, one directory per design, built to `/designs/` |
 | `src/layout.html` | The shell every page shares |
 | `src/styles/system.css`, `src/styles/viewer.css` | The system's own styles, and the documentation chrome |
 | `src/assets/` | Small optimized assets such as logos, copied into the artifact |
@@ -47,6 +48,18 @@ tokens; the rest are declared as planned and built once someone writes them.
 
 The starter `dev` server builds once and serves on `http://127.0.0.1:4321`. It
 does not watch files, so rerun `__TIMDS_CLI__ check` after an edit and reload.
+
+## Website designs
+
+The system is designer-owned down to the pages. A whole website, or any set
+of screens, is designed under `src/designs/<design>/` in plain HTML on the
+system's own stylesheets, one file per route and state
+(`pages/contact.html`, `pages/contact.sent.html`), and an engineer ports it to
+whatever runs production. `check` builds the designs to `/designs/` and
+refuses anything the system does not define: scripts, inline styles,
+undeclared classes, relative references. The starter ships one sample design
+to replace; a system scaffolded before designs existed adopts them with
+`__TIMDS_CLI__ designs init`. `AGENTS.md` holds the rules.
 
 Declare framework-specific local commands as argument arrays in `timds.json`:
 

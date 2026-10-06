@@ -18,9 +18,9 @@ const KIT = {
 
 test("derived file paths follow the artifact entry directory", () => {
   assert.deepEqual(derivedLayerPaths("design-system/index.html"), {
-    index: "design-system/index.json", tokens: "design-system/tokens.json", brand: "design-system/brand.json", llms: "design-system/llms.txt",
+    index: "design-system/index.json", tokens: "design-system/tokens.json", brand: "design-system/brand.json", llms: "design-system/llms.txt", designs: "design-system/designs.json",
   });
-  assert.deepEqual(derivedLayerPaths(), { index: "index.json", tokens: "tokens.json", brand: "brand.json", llms: "llms.txt" });
+  assert.deepEqual(derivedLayerPaths(), { index: "index.json", tokens: "tokens.json", brand: "brand.json", llms: "llms.txt", designs: "designs.json" });
   assert.equal(derivedFilePath("/ds", { artifact: { entry: "design-system/index.html" } }, "brand"), "/ds/dist/design-system/brand.json");
   assert.throws(() => derivedFilePath("/ds", {}, "nope"), /unknown derived file/);
 });
@@ -32,7 +32,7 @@ test("reads the local derived layer, tolerating files check has not written and 
     const empty = await readDerivedLayer(root, manifest);
     assert.equal(empty.derived, false);
     assert.equal(empty.stale, false);
-    assert.deepEqual([empty.index, empty.tokens, empty.brand, empty.llms], [null, null, null, null]);
+    assert.deepEqual([empty.index, empty.tokens, empty.brand, empty.llms, empty.designs], [null, null, null, null, null]);
     assert.deepEqual(empty.source, { kind: "local", root, artifactRoot: path.join(root, "dist") });
 
     await fs.mkdir(path.join(root, "dist", "design-system"), { recursive: true });
@@ -77,6 +77,7 @@ test("fetches the published derived layer from the provenance stamp alone", asyn
   assert.equal(layer.provenance.sourceCommit, "a".repeat(40));
   assert.equal(layer.brand.roles["color.accent"].value, "#111");
   assert.equal(layer.tokens, null); // not published: null, exactly as locally
+  assert.equal(layer.designs, null); // a system without website designs publishes none
   assert.equal(layer.llms, "# Client\n");
   assert.equal(requested[0], "https://cdn.example.com/artifact/.timds-artifact.json");
 
@@ -84,6 +85,10 @@ test("fetches the published derived layer from the provenance stamp alone", asyn
   const legacy = { ...served, ".timds-artifact.json": JSON.stringify({ schemaVersion: 1, sourceCommit: "b".repeat(40), version: "2.0.0", entry: "design-system/index.html" }) };
   const legacyLayer = await fetchDerivedLayer("https://cdn.example.com/artifact", { fetchImpl: async (url) => new Response(legacy[url.replace("https://cdn.example.com/artifact/", "")] ?? "x", { status: legacy[url.replace("https://cdn.example.com/artifact/", "")] ? 200 : 404 }) });
   assert.equal(legacyLayer.brand.system.version, "2.0.0");
+  // A stamp whose file map predates designs still looks for designs.json where the entry says.
+  const partial = { ...served, "design-system/designs.json": JSON.stringify({ schemaVersion: 1, designs: [] }), ".timds-artifact.json": JSON.stringify({ schemaVersion: 1, sourceCommit: "c".repeat(40), version: "2.0.0", entry: "design-system/index.html", files: { index: "design-system/index.json", tokens: "design-system/tokens.json", brand: "design-system/brand.json", llms: "design-system/llms.txt" } }) };
+  const partialLayer = await fetchDerivedLayer("https://cdn.example.com/artifact", { fetchImpl: async (url) => new Response(partial[url.replace("https://cdn.example.com/artifact/", "")] ?? "x", { status: partial[url.replace("https://cdn.example.com/artifact/", "")] ? 200 : 404 }) });
+  assert.deepEqual(partialLayer.designs, { schemaVersion: 1, designs: [] });
 
   await assert.rejects(fetchDerivedLayer("https://cdn.example.com/nothing", { fetchImpl: async () => new Response("", { status: 404 }) }), /\.timds-artifact\.json responded 404/);
   await assert.rejects(fetchDerivedLayer("ftp://cdn"), /must be an HTTP or HTTPS URL/);

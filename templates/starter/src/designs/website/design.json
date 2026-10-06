@@ -1,0 +1,7 @@
+{
+  "title": "Marketing site",
+  "summary": "The public website: a home page and a contact page with its sent state, composed from the system's layout pieces and components. Starter pages; replace them with the client's.",
+  "pages": {
+    "/": { "title": "Home" }
+  }
+}

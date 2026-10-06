@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import {
   checkWorkspace,
   createPreviewServer,
+  initializeDesigns,
   initializeRepository,
   loadWorkspace,
   submitWorkspace,
@@ -843,16 +844,43 @@ test("the starter viewer renders its site model, and its build guards pages, pla
   assert.match(overview, /<h1 class="page-title">Client &amp; Co<\/h1>/);
   assert.match(overview, /<span class="tag">Planned<\/span>/);
   assert.doesNotMatch(overview, /\{\{/);
+  // The sample website design is listed by the viewer and built by TimDS as whole pages, states beside them.
+  assert.match(overview, /<a class="appbar__view" href="\/designs\/"><b>Designs<\/b>/);
+  assert.match(overview, /<a href="\/designs\/website\/">Marketing site<\/a><\/td><td>Designs<\/td>[\s\S]*?<td>2 pages<\/td>/);
+  assert.match(await read("dist/designs/index.html"), /<a href="\/designs\/website\/contact\/sent\.html">sent<\/a>/);
+  const contact = await read("dist/designs/website/contact/index.html");
+  assert.match(contact, /<a class="site-header__brand" href="\/designs\/website\/">Client &amp; Co<\/a>/, "site routes point at the design's place in the artifact");
+  assert.doesNotMatch(contact, /viewer\.css/, "a design loads the system, not the documentation chrome");
   const color = await read("dist/brand/color/index.html");
   assert.match(color, /<a href="\/brand\/color\/" aria-current="page">Color<\/a>/);
   assert.match(color, /<td><code>color\.accent<\/code><\/td><td><code>--color-accent<\/code><\/td>/, "token tables come from tokens.json");
   assert.match(color, /class="pagenav"[\s\S]*← Typography[\s\S]*Spacing &amp; shape →/, "previous and next follow the site model");
 
   // The derived layer carries only authored guidance, so the brand kit still reports what the client has not supplied.
-  const { machine } = await checkWorkspace(repoRoot);
-  assert.deepEqual(machine.pages.map((page) => page.id), ["brand/color", "brand/typography", "index", "web/components", "web/spacing"]);
+  const { designs, machine } = await checkWorkspace(repoRoot);
+  assert.deepEqual(machine.pages.map((page) => page.id), ["brand/color", "brand/typography", "index", "web/components", "web/spacing"], "design pages are not guidance");
   assert.equal(machine.counts.untyped, 0);
   assert.deepEqual(machine.warnings.map((warning) => warning.split(":")[0]), ["guidance group voice is empty", 'no asset is annotated data-timds-role="logo"; the brand kit has no logo']);
+  assert.deepEqual(designs, { enabled: true, designCount: 1, pageCount: 2, stateCount: 3 });
+  assert.deepEqual(machine.index.designs, { url: "/designs.json", count: 1, pages: 2, states: 3 });
+  const designsDocument = JSON.parse(await read("dist/designs.json"));
+  assert.deepEqual(designsDocument.designs[0].pages.map((page) => [page.route, page.title, page.states.map((state) => state.name)]), [["/", "Home", ["default"]], ["/contact", "Contact", ["default", "sent"]]]);
+
+  // A design may use only what the system defines; check names the file and what it reached for.
+  await fs.writeFile(path.join(repoRoot, "src/designs/website/pages/about.html"), '<section class="hero fancy"><h1>About</h1><p style="color:red">x</p><script>1</script></section>\n');
+  await assert.rejects(checkWorkspace(repoRoot), (error) => /src\/designs\/website\/pages\/about\.html: uses classes the linked stylesheets do not declare \(fancy\)/.test(error.message)
+    && /about\.html: contains 1 <script> element/.test(error.message)
+    && /about\.html: 1 element has a style attribute/.test(error.message));
+  await fs.rm(path.join(repoRoot, "src/designs/website/pages/about.html"));
+  // A state without its default page, and a view that would collide with the designs output, both stop the build.
+  await fs.writeFile(path.join(repoRoot, "src/designs/website/pages/orders.empty.html"), "<h1>No orders</h1>\n");
+  await assert.rejects(checkWorkspace(repoRoot), /route \/orders of design website has states .* but no default page; author pages\/orders\.html first/);
+  await fs.rm(path.join(repoRoot, "src/designs/website/pages/orders.empty.html"));
+  site.views.push({ id: "designs", label: "Designs", pages: [{ slug: "", title: "Designs", planned: true }] });
+  await writeJson(path.join(repoRoot, "src/site.json"), site);
+  fails("build", /may not declare a view named designs while src\/designs\/ exists/);
+  site.views.pop();
+  await writeJson(path.join(repoRoot, "src/site.json"), site);
 
   // Authoring a planned page without clearing its flag, and the reverse, both stop the build.
   await fs.writeFile(path.join(repoRoot, "src/pages/brand/voice.html"), '<span class="eyebrow">Brand</span>\n<h1 class="page-title">Voice</h1>\n<section class="block" id="rules"><h2 class="h2">Rules</h2><p>Lead with the answer.</p></section>\n');
@@ -882,6 +910,47 @@ test("the starter viewer renders its site model, and its build guards pages, pla
   fails("check", /Color literals belong in tokens\.json.*\(src\/styles\/system\.css:\d+\)/);
 });
 
+
+test("designs init adopts website designs in a system scaffolded without them", async (t) => {
+  const repoRoot = await temporaryDirectory(t);
+  await initializeRepository(repoRoot, { standalone: true });
+  const read = (relative) => fs.readFile(path.join(repoRoot, relative), "utf8");
+  // Simulate the earlier scaffold: no designs, and a system stylesheet without the layout block.
+  await fs.rm(path.join(repoRoot, "src/designs"), { recursive: true });
+  const stylesheet = await read("src/styles/system.css");
+  const stripped = stylesheet.replace(/\/\* ---- site layout ---- \*\/[\s\S]*?\/\* ---- end site layout ---- \*\/\n/, "");
+  assert.notEqual(stripped, stylesheet);
+  await fs.writeFile(path.join(repoRoot, "src/styles/system.css"), stripped);
+  await fs.appendFile(path.join(repoRoot, "scripts/build.mjs"), "// client change\n");
+
+  const result = await initializeDesigns(repoRoot);
+  await fs.access(path.join(repoRoot, "src/designs/website/pages/contact.sent.html"));
+  assert.deepEqual(result.scripts, [{ path: "scripts/build.mjs", status: "customized" }, { path: "scripts/viewer.mjs", status: "current" }]);
+  assert.equal(result.stylesheet, "appended", "the stock token names let the layout block be restored");
+  assert.deepEqual(result.missingClasses, []);
+  assert.match(await read("src/styles/system.css"), /\/\* ---- site layout ---- \*\/[\s\S]*\.site-footer/);
+  assert.match(await read("scripts/build.mjs"), /client change/, "a customized script is never replaced");
+  const checked = await checkWorkspace(repoRoot);
+  assert.equal(checked.designs.pageCount, 2);
+  await assert.rejects(initializeDesigns(repoRoot), /src\/designs\/ already exists/);
+
+  // A system that renamed its tokens is told which classes the sample needs rather than given a block that would not resolve.
+  await fs.rm(path.join(repoRoot, "src/designs"), { recursive: true });
+  await fs.writeFile(path.join(repoRoot, "src/styles/system.css"), stripped);
+  const tokens = JSON.parse(await read("tokens.json"));
+  tokens.spacing = tokens.space;
+  delete tokens.space;
+  await writeJson(path.join(repoRoot, "tokens.json"), tokens);
+  const renamed = await initializeDesigns(repoRoot);
+  assert.equal(renamed.stylesheet, "untouched");
+  assert.deepEqual(renamed.missingClasses, ["form", "hero", "notice", "section", "site-footer", "site-header", "site-header__brand", "site-nav", "wrap"]);
+  assert.equal(await read("src/styles/system.css"), stripped);
+
+  // --force rewrites the sample and the customized script.
+  const forced = await initializeDesigns(repoRoot, { force: true });
+  assert.deepEqual(forced.scripts.map((script) => script.status), ["updated", "current"]);
+  assert.doesNotMatch(await read("scripts/build.mjs"), /client change/);
+});
 
 test("standalone init accepts explicit immutable identity and JSON-safe text", async (t) => {
   const parent = await temporaryDirectory(t);
