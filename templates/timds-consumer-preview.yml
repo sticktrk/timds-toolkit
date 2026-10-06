@@ -2,11 +2,14 @@ name: TimDS consumer preview
 
 # Managed by TimDS (`timds consumer init`); `upgrade` refreshes it while it is
 # unmodified. Every pull request has its manifest and Design System pin
-# validated; each app is then previewed (routes x viewports x schemes),
-# published to the TimDS portal, and linked from ONE comment per app that later
-# pushes update in place. The design surface in timds.consumer.json is checked
-# too, but a pull request that leaves it is not failed (a developer's pull
-# request legitimately does): the job warns and the comment says so, so a
+# validated, which takes seconds. Only a pull request that can change how an
+# app looks is previewed: each app whose design surface it changes, or every
+# app when it moves the Design System pin or changes timds.consumer.json. Such
+# an app is previewed (routes x viewports x schemes), published to the TimDS
+# portal, and linked from ONE comment per app that later pushes update in
+# place. Any other pull request skips the preview job. The design surface is
+# checked too, but a pull request that leaves it is not failed (a developer's
+# pull request legitimately does): the job warns and the comment says so, so a
 # reviewer sees when a design change needs a developer.
 #
 # Repository secrets:
@@ -102,13 +105,22 @@ jobs:
             echo "scope=outside" >> "$GITHUB_OUTPUT"
             echo "::warning title=TimDS design surface::This pull request changes paths outside the design surface in timds.consumer.json (listed above). A design change must stay inside it; anything else needs a developer."
           fi
-      - name: List apps
+      - name: List the apps to preview
         id: apps
+        env:
+          CHANGED: ${{ steps.scope.outputs.preview-apps }}
         run: |
-          echo "apps=$(node -e "process.stdout.write(JSON.stringify(Object.keys(require('./timds.consumer.json').apps)))")" >> "$GITHUB_OUTPUT"
+          # The check names the apps whose look the pull request can change.
+          # Every app when it could not (it failed before comparing with the base).
+          apps="${CHANGED:-$(node -e "process.stdout.write(JSON.stringify(Object.keys(require('./timds.consumer.json').apps)))")}"
+          echo "apps=${apps}" >> "$GITHUB_OUTPUT"
+          if [[ "$apps" == "[]" ]]; then
+            echo "::notice title=TimDS consumer preview::No app's design surface, Design System pin, or manifest changed, so no preview was built."
+          fi
 
   preview:
     needs: check
+    if: needs.check.outputs.apps != '[]'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:

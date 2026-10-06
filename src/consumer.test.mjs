@@ -285,6 +285,42 @@ test("checkConsumer passes on an in-scope change", async (t) => {
   assert.deepEqual(result.errors, []);
   assert.deepEqual(result.apps, [{ name: "web", cwd: "web", cwdExists: true, mode: "static", designs: 0 }]);
   assert.deepEqual(result.changes.map((change) => change.path), [".claude/launch.json", "web/src/components/Hero.astro", "web/src/styles/site.css"]);
+  assert.deepEqual(result.previewApps, ["web"]);
+  assert.equal((await checkConsumer(product)).previewApps, null);
+});
+
+test("checkConsumer names only the apps a branch can change the look of, and the CLI hands them to the workflow", async (t) => {
+  const { product } = await consumerFixture(t, baseManifest({ web: staticApp(), admin: staticApp({ cwd: "admin" }) }));
+  await write(product, "admin/src/styles/site.css", "body{}\n");
+  git(product, "add", ".");
+  git(product, "commit", "-q", "-m", "Admin app");
+  git(product, "switch", "-q", "-c", "fix/api");
+  // Developer work beside the apps, inside one app but off its surface, and in a protected path.
+  await write(product, "services/worker.ts", "export {};\n");
+  await write(product, "web/src/lib/api.ts", "export const x = 2;\n");
+  await write(product, "web/src/components/server/db.ts", "export const y = 1;\n");
+  const developer = await checkConsumer(product, { base: "main" });
+  assert.equal(developer.status, "failed");
+  assert.deepEqual(developer.previewApps, []);
+
+  const outputFile = path.join(await temporaryDirectory(t), "github-output");
+  const lines = [];
+  await assert.rejects(runConsumerCli(["check", "--root", product, "--base", "main"], { env: { GITHUB_OUTPUT: outputFile }, output: (line) => lines.push(line) }), /consumer check failed/);
+  assert.equal(await fs.readFile(outputFile, "utf8"), "preview-apps=[]\n");
+  assert.match(lines.join("\n"), /Preview: no app's design surface, Design System pin, or manifest changed/);
+
+  await write(product, "admin/src/styles/site.css", "body{margin:0}\n");
+  assert.deepEqual((await checkConsumer(product, { base: "main" })).previewApps, ["admin"]);
+  await runConsumerCli(["check", "--root", product, "--base", "main", "--json"], { env: { GITHUB_OUTPUT: outputFile }, output: () => {} }).catch(() => {});
+  assert.equal(await fs.readFile(outputFile, "utf8"), 'preview-apps=[]\npreview-apps=["admin"]\n');
+  // Without --base there is no diff to judge, so nothing is written.
+  await runConsumerCli(["check", "--root", product], { env: { GITHUB_OUTPUT: outputFile }, output: () => {} });
+  assert.equal((await fs.readFile(outputFile, "utf8")).split("\n").length, 3);
+
+  // The manifest declares the routes and commands a preview runs, so changing it previews every app.
+  git(product, "checkout", "-q", "--", "admin/src/styles/site.css");
+  await write(product, CONSUMER_MANIFEST_FILE, baseManifest({ web: staticApp({ protected: [] }), admin: staticApp({ cwd: "admin" }) }));
+  assert.deepEqual((await checkConsumer(product, { base: "main" })).previewApps, ["web", "admin"]);
 });
 
 test("checkConsumer allows an adoption-shaped diff at the root but not nested package files", async (t) => {
@@ -330,7 +366,7 @@ test("checkConsumer fails on out-of-scope and protected changes and lists the pa
   assert.match(guarded, /- web\/src\/components\/server\/db\.ts \(protected in app "web"\)/);
 
   const lines = [];
-  await assert.rejects(runConsumerCli(["check", "--root", product, "--base", "main"], { output: (line) => lines.push(line) }), /consumer check failed with 2 errors/);
+  await assert.rejects(runConsumerCli(["check", "--root", product, "--base", "main"], { env: {}, output: (line) => lines.push(line) }), /consumer check failed with 2 errors/);
   assert.match(lines.join("\n"), /Error: Changes outside the design surface[\s\S]*TimDS consumer check failed\./);
 });
 
@@ -384,6 +420,7 @@ test("checkConsumer passes a branch that adds the submodule, then refuses a move
   const adopted = await checkConsumer(product, { base: "main" });
   assert.equal(adopted.status, "passed", adopted.errors.join("\n"));
   assert.deepEqual(adopted.changes.map((change) => change.path), [".gitmodules", "design-system", CONSUMER_MANIFEST_FILE]);
+  assert.deepEqual(adopted.previewApps, ["web"]);
 
   // Build output and a drifted checkout inside the submodule are not changes to the product.
   await write(product, "design-system/dist/index.json", {});
@@ -391,6 +428,7 @@ test("checkConsumer passes a branch that adds the submodule, then refuses a move
   git(product, "switch", "-q", "-c", "design/pin");
   const untouched = await checkConsumer(product, { base: "chore/adopt-timds" });
   assert.equal(untouched.status, "passed", untouched.errors.join("\n"));
+  assert.deepEqual(untouched.previewApps, []);
   await fs.rm(path.join(product, "design-system/notes.txt"));
 
   await write(dsRepo, "timds.json", { schemaVersion: 2, systemId: "acme/core", name: "Acme 2" });
@@ -403,6 +441,8 @@ test("checkConsumer passes a branch that adds the submodule, then refuses a move
   const moved = await checkConsumer(product, { base: "chore/adopt-timds" });
   assert.equal(moved.status, "failed");
   assert.match(moved.errors.join("\n"), /The Design System pin at design-system changed/);
+  // A new Design System release can change every app's look.
+  assert.deepEqual(moved.previewApps, ["web"]);
 });
 
 test("timds consumer check refuses an unknown option or an empty --base instead of skipping the scope check", async (t) => {

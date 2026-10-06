@@ -7,7 +7,9 @@
 // and validates that manifest, resolves the pinned Design System (gitlink
 // commit, presence of the checkout), and guards the design-surface scope of a
 // branch diff for `timds consumer check`. The scope is judged against the
-// manifest at the merge base, so a branch cannot widen its own surface.
+// manifest at the merge base, so a branch cannot widen its own surface. The
+// same diff names the apps worth previewing (`previewApps`), so the stock
+// workflow skips the preview on a pull request that cannot change a look.
 //
 // Boundary: nothing here knows the product's stack. TimDS never builds,
 // installs, or edits the product; the commands the manifest declares are run
@@ -490,7 +492,7 @@ export async function checkConsumer(repoRootInput = process.cwd(), options = {})
   try {
     consumer = await loadConsumer(repoRootInput);
   } catch (error) {
-    return { status: "failed", errors: [error.message], warnings, apps: [], repoRoot: null, designSystem: null, changes: [] };
+    return { status: "failed", errors: [error.message], warnings, apps: [], repoRoot: null, designSystem: null, changes: [], previewApps: null };
   }
   const { designSystem, manifest, repoRoot } = consumer;
   const selected = options.app ? [resolveConsumerApp(consumer, options.app).name] : Object.keys(manifest.apps);
@@ -550,6 +552,7 @@ export async function checkConsumer(repoRootInput = process.cwd(), options = {})
   }
 
   let changes = [];
+  let previewApps = null;
   if (options.base) {
     // Scope is judged against every app, so a designer PR may touch any app's surface;
     // `--app` only narrows which apps' cwd and preview are checked.
@@ -581,6 +584,12 @@ export async function checkConsumer(repoRootInput = process.cwd(), options = {})
     if (developerOwned.length && !atBase.missing) {
       warnings.push(`Developer-owned files changed (allowed so adoption and upgrade branches pass; a design change should not touch them):\n${developerOwned.map((change) => `- ${change.path}`).join("\n")}`);
     }
+    // The apps whose look this branch can change, which is what a preview is
+    // for: an app whose design surface changed, or every app when the Design
+    // System pin or the manifest (routes, commands, the surface itself) moved.
+    const everyApp = atBase.missing || changes.some((change) => change.status === "pin" || change.path === CONSUMER_MANIFEST_FILE);
+    const touched = new Set(changes.filter((change) => change.status === "allowed" && change.app).map((change) => change.app));
+    previewApps = Object.keys(manifest.apps).filter((name) => everyApp || touched.has(name));
   }
 
   return {
@@ -591,6 +600,7 @@ export async function checkConsumer(repoRootInput = process.cwd(), options = {})
     repoRoot,
     designSystem,
     changes,
+    previewApps,
   };
 }
 
@@ -637,6 +647,7 @@ function checkReport(result) {
     const allowed = result.changes.filter((change) => change.status === "allowed").length;
     lines.push(`Changes: ${result.changes.length} (${allowed} inside the design surface)`);
   }
+  if (result.previewApps) lines.push(`Preview: ${result.previewApps.join(", ") || "no app's design surface, Design System pin, or manifest changed"}`);
   for (const warning of result.warnings) lines.push(`Warning: ${warning}`);
   for (const error of result.errors) lines.push(`Error: ${error}`);
   lines.push(result.status === "passed" ? "TimDS consumer check passed." : "TimDS consumer check failed.");
@@ -644,7 +655,7 @@ function checkReport(result) {
 }
 
 /** `timds consumer <check|preview|init|scaffold|notes> ...` */
-export async function runConsumerCli(args = [], { output = defaultOutput } = {}) {
+export async function runConsumerCli(args = [], { env = process.env, output = defaultOutput } = {}) {
   const [subcommand = "help", ...rest] = args;
   if (["help", "--help", "-h"].includes(subcommand)) {
     output(CONSUMER_HELP);
@@ -675,6 +686,10 @@ export async function runConsumerCli(args = [], { output = defaultOutput } = {})
   const result = await checkConsumer(options.root || process.cwd(), { app: options.app, base: options.base });
   if (options.json) output(JSON.stringify(result, null, 2));
   else output(checkReport(result));
+  // The stock workflow previews only these apps; written before a scope failure throws.
+  if (result.previewApps && env.GITHUB_OUTPUT) {
+    await fs.appendFile(env.GITHUB_OUTPUT, `preview-apps=${JSON.stringify(result.previewApps)}\n`, "utf8").catch(() => {});
+  }
   if (result.status !== "passed") {
     const error = new Error(`consumer check failed with ${result.errors.length} error${result.errors.length === 1 ? "" : "s"}`);
     error.result = result;
