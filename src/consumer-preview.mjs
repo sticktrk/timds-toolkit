@@ -18,6 +18,13 @@
 // `--publish` tars that folder and posts it to the portal, which returns the
 // private preview URL the PR workflow comments.
 //
+// `preview.designs` pairs a route with a page of a website design in the
+// pinned Design System (`"/contact": "website:/contact"`). The pin's artifact
+// is built with its own declared commands when it is not built yet, its
+// designs are rendered by TimDS, and the design page is captured at the same
+// widths and schemes into `designs/`, so the review shows the design beside
+// the route: the reference on one side, the product on the other.
+//
 // Boundary: TimDS never builds the product. It runs the product's declared
 // `install`, `build`, and `serve` commands in the app's cwd (for the base,
 // as the base's own manifest declares them) and captures what a reviewer
@@ -43,10 +50,12 @@ import {
   consumerPreviewMode,
   loadConsumer,
   matchesGlob,
+  parseDesignReference,
   resolveConsumerApp,
   validateConsumerManifest,
 } from "./consumer.mjs";
-import { createPreviewServer, execute } from "./core.mjs";
+import { createPreviewServer, execute, loadWorkspace } from "./core.mjs";
+import { buildDesigns } from "./designs.mjs";
 import { portalEndpoint } from "./media.mjs";
 
 export const PREVIEW_SCHEMA_VERSION = 1;
@@ -652,7 +661,7 @@ async function captureHeadRoutes(browser, origin, preview, cells, outputDir, { b
   };
   const visit = async (routePath, { declared }) => {
     const slug = nextSlug(routePath);
-    const route = { path: routePath, slug, declared, discovered: !declared, html: null, pages: [], status: null, change: "unknown", affectedBy: [], captures: [] };
+    const route = { path: routePath, slug, declared, discovered: !declared, html: null, pages: [], status: null, change: "unknown", affectedBy: [], captures: [], design: null };
     const routeSources = new Set();
     routes.push(route);
     sources.set(route, routeSources);
@@ -742,6 +751,92 @@ async function captureHeadRoutes(browser, origin, preview, cells, outputDir, { b
     throw new Error(`No route could be captured:\n${routes.map((route) => `- ${route.path}: ${route.error}`).join("\n")}`);
   }
   return { routes, sources };
+}
+
+/**
+ * Make the pinned Design System's website designs servable: build the pin's
+ * artifact with its own declared commands when it is not built yet (a starter
+ * needs nothing installed), then render the designs into it the way `check`
+ * does. Returns `{ status: "ready", artifactRoot, designs }` or
+ * `{ status: "unavailable", reason }`; a pin that cannot be shown never fails
+ * the product's preview.
+ */
+async function prepareDesignReference(consumer, { commandEnv, install, output }) {
+  const { designSystem } = consumer;
+  if (!designSystem.present) {
+    return { status: "unavailable", reason: `${designSystem.path}/timds.json is not checked out; run git submodule update --init ${designSystem.path}.` };
+  }
+  try {
+    const workspace = await loadWorkspace(designSystem.root);
+    const { designSystemRoot, manifest } = workspace;
+    const artifactRoot = path.join(designSystemRoot, "dist");
+    if (!existsSync(path.join(artifactRoot, ...manifest.artifact.entry.split("/")))) {
+      if (manifest.workspace.install && install) {
+        output(`Installing the Design System at ${designSystem.path}: ${manifest.workspace.install.join(" ")}`);
+        await execute(manifest.workspace.install, { cwd: designSystemRoot, env: commandEnv });
+      }
+      if (manifest.workspace.build) {
+        output(`Building the Design System at ${designSystem.path}: ${manifest.workspace.build.join(" ")}`);
+        await execute(manifest.workspace.build, { cwd: designSystemRoot, env: commandEnv });
+      }
+    }
+    const built = await buildDesigns(designSystemRoot, { manifest });
+    if (!built.designs.length) return { status: "unavailable", reason: `${designSystem.path} has no website designs under src/designs/.` };
+    return { status: "ready", artifactRoot, designs: built.designs };
+  } catch (error) {
+    return { status: "unavailable", reason: `${designSystem.path} could not be built to show its designs: ${error.message}` };
+  }
+}
+
+/**
+ * Capture the design page paired with each route at every cell into
+ * `designs/<slug>/`, recording it on the route as `design`. A pairing the
+ * pin cannot satisfy is recorded with its error and the route still stands.
+ */
+async function captureDesignReferences(browser, { origin, reference, preview, routes, cells, outputDir, captureTimeoutMs, output }) {
+  const pairings = new Map(Object.entries(preview.designs || {}).map(([route, value]) => [routeKey(route), value]));
+  for (const route of routes) {
+    const value = pairings.get(routeKey(route.path));
+    if (!value) continue;
+    const { design: designId, route: designRoute } = parseDesignReference(value);
+    const design = reference.designs.find((entry) => entry.id === designId) || null;
+    const page = design?.pages.find((entry) => entry.route === designRoute) || null;
+    route.design = { id: designId, route: designRoute, title: page?.title ?? null, url: page?.url ?? null, captures: [], pages: [], error: null };
+    if (!page) {
+      route.design.error = design
+        ? `design ${designId} has no route ${designRoute} (routes: ${design.pages.map((entry) => entry.route).join(", ")})`
+        : `the Design System has no design ${designId} (designs: ${reference.designs.map((entry) => entry.id).join(", ")})`;
+      output(`Warning: ${route.path}: ${route.design.error}`);
+      continue;
+    }
+    const failures = [];
+    for (const cell of cells) {
+      let shot;
+      try {
+        shot = await browser.capture({ height: cell.height, scheme: cell.scheme, timeoutMs: captureTimeoutMs, url: `${origin}${page.url}`, width: cell.width });
+      } catch (error) {
+        failures.push(`${cell.viewport}/${cell.scheme}: ${error.message}`);
+        continue;
+      }
+      if (shot.png.length > PREVIEW_LIMITS.maxFileBytes) {
+        failures.push(`${cell.viewport}/${cell.scheme}: the capture is ${shot.png.length} bytes, over the ${PREVIEW_LIMITS.maxFileBytes}-byte file limit`);
+        continue;
+      }
+      const capture = { viewport: cell.viewport, scheme: cell.scheme, width: cell.width, height: cell.height, file: `designs/${route.slug}/${cell.name}.png` };
+      await writeOutputFile(outputDir, capture.file, shot.png);
+      route.design.captures.push(capture);
+      if (!route.design.pages.some((entry) => entry.scheme === cell.scheme)) {
+        const file = `designs/${route.slug}/${cell.scheme}.html`;
+        await writeOutputFile(outputDir, file, shot.html, "utf8");
+        route.design.pages.push({ scheme: cell.scheme, file });
+      }
+    }
+    if (failures.length) {
+      route.design.error = failures.join("; ");
+      output(`Warning: ${route.path}: the design ${designId}${designRoute} could not be fully captured: ${route.design.error}`);
+    }
+    output(`Captured the design for ${route.path} (${designId}${designRoute}, ${route.design.captures.length} of ${cells.length})`);
+  }
 }
 
 // The detect pass for one route: added or removed when exactly one side is a
@@ -969,6 +1064,13 @@ async function enforcePreviewLimits(outputDir, routes, limits = PREVIEW_LIMITS) 
       }
       await remove(route, "before and changes images of an unchanged page", list);
     }),
+    ...backwards((route) => route.design?.captures.length > 1).map((route) => async () => {
+      const extra = route.design.captures.splice(1);
+      const schemes = new Set(route.design.captures.map((capture) => capture.scheme));
+      const pages = route.design.pages.filter((page) => !schemes.has(page.scheme)).map((page) => page.file);
+      route.design.pages = route.design.pages.filter((page) => schemes.has(page.scheme));
+      await remove(route, "design captures beyond the first viewport and scheme", [...extra.map((capture) => capture.file), ...pages]);
+    }),
     ...backwards((route) => !route.declared && route.captures.length > 1).map((route) => async () => {
       const extra = route.captures.splice(1);
       const list = extra.flatMap((capture) => [capture.file, capture.base?.file, capture.diff?.file, capture.map]);
@@ -978,6 +1080,12 @@ async function enforcePreviewLimits(outputDir, routes, limits = PREVIEW_LIMITS) 
       const list = route.captures.flatMap((capture) => [capture.file, capture.base?.file, capture.diff?.file, capture.map]);
       route.captures = [];
       await remove(route, "all captures of a discovered page", [...list, ...keepPages(route)]);
+    }),
+    ...backwards((route) => route.change === "unchanged" && route.design?.captures.length).map((route) => async () => {
+      const list = [...route.design.captures.map((capture) => capture.file), ...route.design.pages.map((page) => page.file)];
+      route.design.captures = [];
+      route.design.pages = [];
+      await remove(route, "design captures of an unchanged page", list);
     }),
     ...backwards((route) => route.declared && route.captures.length > 1).map((route) => async () => {
       const list = route.captures.slice(1).map((capture) => capture.base?.file);
@@ -1049,30 +1157,50 @@ function renderCapture(route, capture, alt, page, counter) {
         </figure>`;
 }
 
+/** The design page paired with a route, shown first in the row so the reference sits beside the product. */
+function renderDesignCapture(route, capture, page) {
+  const label = `${route.design.id}${route.design.route}`;
+  const alt = `The design ${label} at ${capture.viewport} width in ${capture.scheme} mode`;
+  const caption = `Design <code>${escapeHtml(label)}</code> · ${escapeHtml(titleCase(capture.scheme))}${page ? ` · <a href="${relativeHref(page.file)}">Rendered HTML</a>` : ""}`;
+  return `<figure class="design scheme-${escapeHtml(capture.scheme)}">
+          <a class="shot" href="${relativeHref(capture.file)}"><img src="${relativeHref(capture.file)}" alt="${escapeHtml(alt)}" loading="lazy" width="${capture.width}"></a>
+          <figcaption>${caption}</figcaption>
+        </figure>`;
+}
+
 function renderRoute(route, counter) {
-  const viewports = [...new Set(route.captures.map((capture) => capture.viewport))];
+  const designCaptures = route.design?.captures || [];
+  const viewports = [...new Set([...route.captures, ...designCaptures].map((capture) => capture.viewport))];
   const groups = viewports.map((viewport) => {
     const captures = route.captures.filter((capture) => capture.viewport === viewport);
-    const { width, height } = captures[0];
-    const figures = captures.map((capture) => {
-      const page = route.pages?.find((entry) => entry.scheme === capture.scheme);
-      const alt = `${route.path} at ${viewport} width in ${capture.scheme} mode`;
-      return renderCapture(route, capture, alt, page, counter);
-    }).join("\n");
+    const references = designCaptures.filter((capture) => capture.viewport === viewport);
+    const { width, height } = captures[0] || references[0];
+    // Design first, then the product, scheme by scheme, so each pair reads left to right.
+    const figures = [...new Set([...references, ...captures].map((capture) => capture.scheme))].flatMap((scheme) => [
+      ...references.filter((capture) => capture.scheme === scheme).map((capture) => renderDesignCapture(route, capture, route.design.pages?.find((entry) => entry.scheme === scheme))),
+      ...captures.filter((capture) => capture.scheme === scheme).map((capture) => {
+        const page = route.pages?.find((entry) => entry.scheme === capture.scheme);
+        const alt = `${route.path} at ${viewport} width in ${capture.scheme} mode`;
+        return renderCapture(route, capture, alt, page, counter);
+      }),
+    ]).join("\n");
     return `<div class="viewport viewport-${escapeHtml(viewport)}">
         <h3>${escapeHtml(titleCase(viewport))} <span>${width}×${height}</span></h3>
-        <div class="shots">${figures}</div>
+        <div class="shots${references.length ? " shots-paired" : ""}">${figures}</div>
       </div>`;
   }).join("\n");
   const status = route.status ? `<span class="status${route.status >= 400 ? " bad" : ""}">${route.status}</span>` : "";
   const badge = isChangedRoute(route) ? `<span class="badge badge-${escapeHtml(route.change)}">${CHANGE_LABELS[route.change]}</span>` : "";
   const found = route.discovered ? `<span class="status">found by crawling</span>` : "";
+  const paired = route.design ? `<span class="status design-ref">design ${escapeHtml(`${route.design.id}${route.design.route}`)}</span>` : "";
   const error = route.error ? `<p class="error">${escapeHtml(route.error)}</p>` : "";
+  const designError = route.design?.error ? `<p class="error">The design could not be shown: ${escapeHtml(route.design.error)}</p>` : "";
   const empty = route.change === "unchanged" ? "<p>No visible change.</p>" : route.error ? "" : "<p>No captures.</p>";
   return `<section id="route-${escapeHtml(route.slug)}">
-      <h2><code>${escapeHtml(route.path)}</code> ${badge} ${status} ${found}</h2>
+      <h2><code>${escapeHtml(route.path)}</code> ${badge} ${status} ${found} ${paired}</h2>
       ${affectedSentence(route)}
       ${error}
+      ${designError}
       ${groups || empty}
     </section>`;
 }
@@ -1093,6 +1221,7 @@ export function renderPreviewGallery(preview) {
     ["Design System", `${preview.designSystem?.systemId || "unknown"} @ ${shortCommit(preview.designSystem?.commit)}`],
     ["Mode", preview.mode],
     ...(preview.compare ? [["Compared with", `${preview.compare.base} @ ${shortCommit(preview.compare.baseCommit)}`]] : []),
+    ...(preview.designs ? [["Designs", preview.designs.status === "ready" ? `${preview.designs.pairedRoutes} route${preview.designs.pairedRoutes === 1 ? "" : "s"} shown beside the design` : `not shown: ${preview.designs.reason || "unknown reason"}`]] : []),
     ["Generated", preview.generatedAt],
   ];
   const counter = { value: 0, next() { this.value += 1; return this.value; } };
@@ -1161,6 +1290,10 @@ figure { margin: 0; }
 .shot { display: block; max-height: 720px; overflow: hidden; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); }
 .shot img { display: block; width: 100%; height: auto; }
 figcaption { font-size: .85rem; color: var(--muted); margin-top: 4px; }
+.shots-paired { grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); }
+.design .shot { border-color: var(--accent); }
+.design figcaption { color: var(--accent); }
+.design-ref { border-color: var(--accent); color: var(--accent); }
 .status, .badge { font-size: .8rem; border: 1px solid var(--line); border-radius: 999px; padding: 0 8px; color: var(--muted); }
 .badge { border-color: var(--changed); color: var(--changed); font-weight: 600; }
 .status.bad, .error { color: var(--bad); }
@@ -1250,6 +1383,13 @@ export async function buildConsumerPreview(consumer, app, options = {}) {
       await execute(app.install, { cwd: app.cwd, env: commandEnv });
     }
 
+    // The design pages paired with routes come from the pin, prepared once
+    // before the product starts so a pin that cannot be shown is reported,
+    // not fatal.
+    const paired = mode === "crawl" && Object.keys(preview.designs || {}).length;
+    const designReference = paired ? await prepareDesignReference(consumer, { commandEnv, install: options.install !== false, output }) : null;
+    if (designReference?.status === "unavailable") output(`Designs not shown: ${designReference.reason}`);
+
     let routes = [];
     let sources = new Map();
     let site = null;
@@ -1259,6 +1399,16 @@ export async function buildConsumerPreview(consumer, app, options = {}) {
       const releaseBrowser = guard.add(() => browser.close());
       try {
         ({ routes, sources } = await captureHeadRoutes(browser, origin, preview, cells, outputDir, { base, captureTimeoutMs, normalizeSource, output }));
+        if (designReference?.status === "ready") {
+          const designServer = await startStaticServer(designReference.artifactRoot);
+          const releaseDesignServer = guard.add(() => designServer.stop());
+          try {
+            await captureDesignReferences(browser, { origin: designServer.origin, reference: designReference, preview, routes, cells, outputDir, captureTimeoutMs, output });
+          } finally {
+            await designServer.stop();
+            releaseDesignServer();
+          }
+        }
       } finally {
         await browser.close();
         releaseBrowser();
@@ -1327,6 +1477,11 @@ export async function buildConsumerPreview(consumer, app, options = {}) {
       ...(site ? { site } : {}),
       compare,
       changedRouteCount: compare?.status === "ready" ? routes.filter(isChangedRoute).length : 0,
+      designs: designReference
+        ? (designReference.status === "ready"
+          ? { status: "ready", pairedRoutes: routes.filter((route) => route.design).length }
+          : { status: "unavailable", reason: designReference.reason })
+        : null,
       routes,
       dropped,
       generatedAt: timestamp(options.now || new Date()),
@@ -1359,6 +1514,7 @@ export function previewMetadataHeader(preview) {
     changedRouteCount: preview.changedRouteCount ?? 0,
     routeCount: routes.length,
     captureCount: routes.reduce((sum, route) => sum + (route.captures?.length || 0), 0),
+    designRouteCount: routes.filter((route) => route.design?.captures?.length).length,
   };
   return Buffer.from(JSON.stringify(metadata), "utf8").toString("base64");
 }

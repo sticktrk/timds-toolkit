@@ -67,6 +67,13 @@ Take every color, font, spacing value, logo, and image from the system:
   the pinned commit, which may trail it.
 - Prefer brand roles over guessing from token names. In product CSS use the
   token's `name` (`var(--…)`), never its resolved literal.
+- When the system holds a website design for the route you are changing
+  (`list_designs` and `read_design`, or `designs.json` and `dist/designs/`
+  in the pin), the design is the reference the product route must match:
+  port its markup and every state it shows onto the product's stack with the
+  system's stylesheets. Never copy the design's HTML file into the product
+  as a page, and never restyle it. A state the product cannot express is a
+  developer change; say so.
 - An unfilled role or missing token is a gap, not something to invent. Report
   it, and file it with `report_gap` when the user agrees.
 - Compliance guidance is binding. When requested copy conflicts with it, say
@@ -95,8 +102,11 @@ Take every color, font, spacing value, logo, and image from the system:
 Start the app with its `.claude/launch.json` entry (named below) in the
 browser pane, or run its serve command from the app folder. Visit each review
 route at desktop and phone width, in light and dark scheme, and check the
-requested change, overflow, navigation, and images. Fix what you find before
-opening the pull request.
+requested change, overflow, navigation, and images. A route listed under
+**Designs to match** below has a design in the system; compare the route with
+it, state by state. Fix what you find before opening the pull request. The
+pull-request preview shows each paired design beside its route, so the
+designer reviews the port against its reference.
 
 ## Open the pull request only when asked
 

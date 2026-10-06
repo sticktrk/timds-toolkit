@@ -129,8 +129,40 @@ export type IndexDocument = {
   pageCount: number;
   tokens: { url: string; count: number; stylesheets: number; roles: number };
   brand: { url: string; logos: number; imagery: number; guidance: number };
+  /** Present when the system holds website designs: where designs.json sits and how much it holds. */
+  designs?: { url: string; count: number; pages: number; states: number };
   video?: {runtime?: RuntimeRequirements | null; engine?: RuntimeIdentity; boards?: VideoBoardCatalogSummary};
   pages: IndexPage[];
+};
+
+/* ── designs.json ────────────────────────────────────────────────────────── */
+
+export type DesignPageState = {
+  /** `default`, or the state's name from the file (`contact.sent.html` → `sent`). */
+  name: string;
+  title: string;
+  /** Artifact-relative URL of the built page. */
+  url: string;
+  /** The page as built: the designer's HTML on the system's stylesheets. */
+  html: string;
+  /** Site-absolute stylesheets and media the page loads, resolvable under `base`. */
+  references: string[];
+};
+
+export type DesignPage = { route: string; title: string; url: string; states: DesignPageState[] };
+
+export type Design = { id: string; title: string; summary: string; url: string; pages: DesignPage[] };
+
+export type DesignsDocument = {
+  schemaVersion: 1;
+  system: SystemStamp;
+  /** The published prefix site-absolute references resolve against; null locally. */
+  base: string | null;
+  url: string;
+  designCount: number;
+  pageCount: number;
+  stateCount: number;
+  designs: Design[];
 };
 
 /* ── the layer ───────────────────────────────────────────────────────────── */
@@ -141,7 +173,7 @@ export type Provenance = {
   version: string;
   systemId?: string;
   entry?: string;
-  files?: Record<"index" | "tokens" | "brand" | "llms", string>;
+  files?: Partial<Record<DerivedFileName, string>>;
 };
 
 export type DerivedLayer = {
@@ -156,7 +188,11 @@ export type DerivedLayer = {
   tokens: TokensDocument | null;
   brand: BrandKit | null;
   llms: string | null;
+  /** Null for a system that designs no pages. */
+  designs: DesignsDocument | null;
 };
+
+export type DerivedFileName = "index" | "tokens" | "brand" | "llms" | "designs";
 
 export type BrandKitSummary = {
   version: string | null;
@@ -167,10 +203,10 @@ export type BrandKitSummary = {
   guidance: string[];
 };
 
-export const DERIVED_LAYER_FILES: Readonly<Record<"index" | "tokens" | "brand" | "llms", string>>;
+export const DERIVED_LAYER_FILES: Readonly<Record<DerivedFileName, string>>;
 export const PROVENANCE_FILE: ".timds-artifact.json";
-export function derivedLayerPaths(entry?: string): Record<"index" | "tokens" | "brand" | "llms", string>;
-export function derivedFilePath(designSystemRoot: string, manifest: { artifact?: { entry?: string } }, name: "index" | "tokens" | "brand" | "llms"): string;
+export function derivedLayerPaths(entry?: string): Record<DerivedFileName, string>;
+export function derivedFilePath(designSystemRoot: string, manifest: { artifact?: { entry?: string } }, name: DerivedFileName): string;
 export function readDerivedLayer(designSystemRoot: string, manifest: { systemId?: string; name?: string; version?: string; artifact?: { entry?: string } }): Promise<DerivedLayer>;
 export function fetchDerivedLayer(publicBase: string, options?: { fetchImpl?: typeof fetch }): Promise<DerivedLayer>;
 export function summarizeBrandKit(kit: BrandKit | null | undefined): BrandKitSummary | null;

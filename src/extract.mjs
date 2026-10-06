@@ -34,6 +34,7 @@ import {
   walk,
 } from "./html.mjs";
 import { annotationFor, buildBrandKit } from "./brand.mjs";
+import { designsDocument } from "./designs.mjs";
 import { buildTokensDocument, importReferences, parseCssTokens, stylesheetReferences } from "./tokens.mjs";
 
 export const EXTRACT_SCHEMA_VERSION = 1;
@@ -339,12 +340,13 @@ export function pageToMarkdown(page) {
   return `${lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd()}\n`;
 }
 
-export function buildLlmsText(manifest, pages, indexUrl, tokensUrl = null, brandUrl = null) {
+export function buildLlmsText(manifest, pages, indexUrl, tokensUrl = null, brandUrl = null, designsUrl = null) {
   const lines = [`# ${manifest.name}`, ""];
   if (manifest.description) lines.push(`> ${manifest.description}`, "");
   lines.push(`Machine-readable index: ${indexUrl} — every page below also exists as \`index.md\`.`);
   if (tokensUrl) lines.push(`Design tokens: ${tokensUrl} — every CSS custom property the pages load, resolved by scope.`);
   if (brandUrl) lines.push(`Brand kit: ${brandUrl} — role colors and fonts, logos, and imagery for on-brand production.`);
+  if (designsUrl) lines.push(`Website designs: ${designsUrl} — whole pages as plain HTML on the system's stylesheets, the reference a product port must match.`);
   lines.push("");
   for (const view of [...new Set(pages.map((page) => page.view))]) {
     lines.push(`## ${view || "pages"}`, "");
@@ -441,12 +443,15 @@ async function harvestStylesheets(pageFiles, baseDirectory, artifactRoot) {
 
 /* ── artifact walk ──────────────────────────────────────────────────────── */
 
-async function htmlPages(root) {
+async function htmlPages(root, { skip = [] } = {}) {
   const found = [];
+  const skipped = new Set(skip.map((directory) => path.resolve(directory)));
   const visit = async (directory) => {
     for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
       const absolutePath = path.join(directory, entry.name);
-      if (entry.isDirectory()) await visit(absolutePath);
+      if (entry.isDirectory()) {
+        if (!skipped.has(path.resolve(absolutePath))) await visit(absolutePath);
+      }
       else if (entry.isFile() && entry.name.toLowerCase().endsWith(".html")) found.push(absolutePath);
     }
   };
@@ -476,8 +481,11 @@ export async function deriveTokensFromArtifact({ artifactRoot, manifest }) {
 /**
  * Harvest a built artifact and write the machine-readable files beside it.
  * Returns the index plus counts, and writes nothing when `machine.enabled` is false.
+ * `designs` is the rendered design set from designs.mjs, or null when the
+ * system designs no pages; its output directory is not guidance and is
+ * skipped by the page walk.
  */
-export async function extractArtifact({ artifactRoot, manifest, mediaCatalog = { assets: [] }, video = null, write = true }) {
+export async function extractArtifact({ artifactRoot, manifest, mediaCatalog = { assets: [] }, video = null, designs = null, write = true }) {
   const config = normalizeMachineConfig(manifest.machine);
   if (!config.enabled) return { enabled: false, pages: [], written: [] };
 
@@ -505,7 +513,7 @@ export async function extractArtifact({ artifactRoot, manifest, mediaCatalog = {
 
   const pages = [];
   const written = [];
-  const pageFiles = await htmlPages(baseDirectory);
+  const pageFiles = await htmlPages(baseDirectory, { skip: designs ? [path.join(artifactRoot, ...designs.outputDirectory.split("/"))] : [] });
   for (const file of pageFiles) {
     const relativeDirectory = path.relative(baseDirectory, path.dirname(file)).split(path.sep).filter(Boolean).join("/");
     const name = path.basename(file, ".html");
@@ -531,6 +539,8 @@ export async function extractArtifact({ artifactRoot, manifest, mediaCatalog = {
   const tokensUrl = `${basePrefix}/tokens.json`;
   const { kit: brand, warnings: brandWarnings } = buildBrandKit({ manifest, tokens, pages, renderBlock: blockToMarkdown });
   const brandUrl = `${basePrefix}/brand.json`;
+  const designsUrl = designs ? `${basePrefix}/designs.json` : null;
+  const designsDoc = designs ? designsDocument(designs, manifest) : null;
 
   const index = {
     schemaVersion: EXTRACT_SCHEMA_VERSION,
@@ -538,6 +548,8 @@ export async function extractArtifact({ artifactRoot, manifest, mediaCatalog = {
     pageCount: pages.length,
     tokens: { url: tokensUrl, count: tokens.count, stylesheets: tokens.stylesheets.length, roles: Object.keys(tokens.roles).length },
     brand: { url: brandUrl, logos: brand.logos.length, imagery: brand.imagery.length, guidance: Object.keys(brand.guidance).length },
+    // The website designs, when the system has any: where the document sits and how much it holds.
+    ...(designsDoc ? { designs: { url: designsUrl, count: designsDoc.designCount, pages: designsDoc.pageCount, states: designsDoc.stateCount } } : {}),
     // The video board catalog summary (kinds, guidance, budgets, cadence) when the system has one.
     ...(video ? {video} : {}),
     pages,
@@ -552,8 +564,13 @@ export async function extractArtifact({ artifactRoot, manifest, mediaCatalog = {
     await fs.writeFile(indexPath, `${JSON.stringify(index, (key, value) => (key === "markdown" ? undefined : value), 2)}\n`);
     await fs.writeFile(tokensPath, `${JSON.stringify(tokens, null, 2)}\n`);
     await fs.writeFile(brandPath, `${JSON.stringify(brand, null, 2)}\n`);
-    await fs.writeFile(llmsPath, buildLlmsText(manifest, pages, `${basePrefix}/index.json`, tokensUrl, brandUrl));
+    await fs.writeFile(llmsPath, buildLlmsText(manifest, pages, `${basePrefix}/index.json`, tokensUrl, brandUrl, designsUrl));
     written.push(indexPath, tokensPath, brandPath, llmsPath);
+    if (designsDoc) {
+      const designsPath = path.join(baseDirectory, "designs.json");
+      await fs.writeFile(designsPath, `${JSON.stringify(designsDoc, null, 2)}\n`);
+      written.push(designsPath);
+    }
   }
 
   const counts = pages.reduce(
@@ -583,5 +600,5 @@ export async function extractArtifact({ artifactRoot, manifest, mediaCatalog = {
     ...brandWarnings,
   ];
 
-  return { enabled: true, brand, counts, index, pages, tokens, warnings, written };
+  return { enabled: true, brand, counts, designs: designsDoc, index, pages, tokens, warnings, written };
 }

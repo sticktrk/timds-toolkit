@@ -76,8 +76,8 @@ test("the local read server describes, resolves roles, lists tokens and pages, a
   const { tools } = await client.listTools();
   const names = tools.map((tool) => tool.name).sort();
   assert.deepEqual(names, [
-    "describe_system", "get_brand", "get_consumer_guide", "get_tokens", "list_design_systems", "list_media",
-    "list_pages", "read_page", "report_gap", "resolve_role", "search_guidance",
+    "describe_system", "get_brand", "get_consumer_guide", "get_tokens", "list_design_systems", "list_designs", "list_media",
+    "list_pages", "read_design", "read_page", "report_gap", "resolve_role", "search_guidance",
   ]);
   for (const tool of tools) {
     assert.equal(tool.annotations.readOnlyHint, tool.name !== "report_gap", tool.name);
@@ -98,6 +98,25 @@ test("the local read server describes, resolves roles, lists tokens and pages, a
   assert.ok(described.brand.summary.roles.filled > 0);
   assert.ok(typeof described.llms === "string");
   assert.equal(described.video, null, "a system without a board catalog lists no boards");
+  assert.deepEqual(described.designs, { count: 1, pages: 2, states: 3, designs: [{ id: "website", title: "Marketing site", pageCount: 2 }] });
+
+  // The website designs are whole pages: the directory names routes and states, and a read returns the HTML as authored.
+  const designs = await ok(client, "list_designs", {});
+  assert.equal(designs.total, 1);
+  assert.equal(designs.base, null, "nothing is published locally");
+  assert.deepEqual(designs.designs[0].pages.map((page) => [page.route, page.states]), [["/", ["default"]], ["/contact", ["default", "sent"]]]);
+  const sent = await ok(client, "read_design", { design: "website", route: "/contact", state: "sent" });
+  assert.deepEqual([sent.design.id, sent.page.route, sent.state, sent.url], ["website", "/contact", "sent", "/designs/website/contact/sent.html"]);
+  assert.match(sent.html, /<div class="notice">/);
+  assert.deepEqual(sent.references, ["/styles/system.css", "/tokens.css"]);
+  const home = await ok(client, "read_design", { design: "website", route: "/" });
+  assert.equal(home.title, "Home");
+  assert.match(home.html, /<form|<section class="hero">/);
+  const missingRoute = await call(client, "read_design", { design: "website", route: "/nope" });
+  assert.ok(missingRoute.isError);
+  assert.match(missingRoute.content[0].text, /has no route "\/nope"; routes: \/, \/contact/);
+  const missingState = await call(client, "read_design", { design: "website", route: "/contact", state: "empty" });
+  assert.match(missingState.content[0].text, /has no state "empty"; states: default, sent/);
 
   const roles = await ok(client, "resolve_role", { roles: ["color.accent", "font.display", "color.nonsense"] });
   assert.equal(roles.roles["color.accent"].filled, true);

@@ -173,7 +173,10 @@ test("publishExtractedIndex uploads assets and mirrors first, then index, llms.t
       "dist/design-system/social/video-assets/index.md": "# Video assets\n",
       "dist/design-system/tokens.json": '{"schemaVersion":1,"tokens":[{"name":"--navy","resolved":"#0a1729"}]}\n',
       "dist/design-system/brand.json": JSON.stringify({ schemaVersion: 1, roles: {}, logos: [{ name: "Mark", role: "logo", media: { url: "/design-system/photos/elder-hands.webp" } }], imagery: [] }),
-      "dist/design-system/llms.txt": "Machine-readable index: /design-system/index.json\nDesign tokens: /design-system/tokens.json\nBrand kit: /design-system/brand.json\n\n- [Video assets](/design-system/social/video-assets/index.md)\n",
+      "dist/design-system/llms.txt": "Machine-readable index: /design-system/index.json\nDesign tokens: /design-system/tokens.json\nBrand kit: /design-system/brand.json\nWebsite designs: /design-system/designs.json — whole pages.\n\n- [Video assets](/design-system/social/video-assets/index.md)\n",
+      // The website designs carry their HTML and name the stylesheet they load, which publishes beside them.
+      "dist/design-system/designs.json": JSON.stringify({ schemaVersion: 1, base: null, designs: [{ id: "site", pages: [{ route: "/", states: [{ name: "default", html: "<link rel=\"stylesheet\" href=\"/design-system/styles/site.css\">", references: ["/design-system/styles/site.css"] }] }] }] }),
+      "dist/design-system/styles/site.css": ".wrap{}",
     };
     for (const [relative, content] of Object.entries(artifact)) {
       const target = path.join(designSystemRoot, ...relative.split("/"));
@@ -224,14 +227,16 @@ test("publishExtractedIndex uploads assets and mirrors first, then index, llms.t
     assert.equal(published.llmsUrl, "https://cdn.example.com/clients/c/design-systems/s/artifact/design-system/llms.txt");
     assert.equal(published.tokensUrl, "https://cdn.example.com/clients/c/design-systems/s/artifact/design-system/tokens.json");
     assert.equal(published.brandUrl, "https://cdn.example.com/clients/c/design-systems/s/artifact/design-system/brand.json");
+    assert.equal(published.designsUrl, "https://cdn.example.com/clients/c/design-systems/s/artifact/design-system/designs.json");
     assert.equal(published.docCount, 1);
-    assert.equal(published.uploaded, 6);
+    assert.equal(published.uploaded, 8);
     assert.equal(published.skipped, 1);
-    assert.equal(published.total, 7);
+    assert.equal(published.total, 9);
 
     assert.equal(sessions.length, 2);
     assert.deepEqual(sessions[0].files.map((file) => file.path), [
       "design-system/photos/elder-hands.webp",
+      "design-system/styles/site.css",
       "design-system/social/video-assets/index.md",
     ]);
     assert.equal(sessions[0].systemId, "client/system");
@@ -239,10 +244,15 @@ test("publishExtractedIndex uploads assets and mirrors first, then index, llms.t
     assert.deepEqual(sessions[1].files.map((file) => file.path).sort(), [
       ".timds-artifact.json",
       "design-system/brand.json",
+      "design-system/designs.json",
       "design-system/index.json",
       "design-system/llms.txt",
       "design-system/tokens.json",
     ]);
+    // Designs publish as written, plus the base their site-absolute references resolve against.
+    const designs = JSON.parse(puts.get("design-system/designs.json"));
+    assert.equal(designs.base, "https://cdn.example.com/clients/c/design-systems/s/artifact");
+    assert.equal(designs.designs[0].pages[0].states[0].references[0], "/design-system/styles/site.css");
     // Kit media resolve on the CDN exactly like index assets, with the uploaded file's integrity.
     const kit = JSON.parse(puts.get("design-system/brand.json"));
     assert.equal(kit.logos[0].media.url, "https://cdn.example.com/clients/c/design-systems/s/artifact/design-system/photos/elder-hands.webp");
@@ -256,6 +266,7 @@ test("publishExtractedIndex uploads assets and mirrors first, then index, llms.t
     assert.match(llms, /Machine-readable index: https:\/\/cdn\.example\.com\/clients\/c\/design-systems\/s\/artifact\/design-system\/index\.json/);
     assert.match(llms, /Design tokens: https:\/\/cdn\.example\.com\/clients\/c\/design-systems\/s\/artifact\/design-system\/tokens\.json/);
     assert.match(llms, /Brand kit: https:\/\/cdn\.example\.com\/clients\/c\/design-systems\/s\/artifact\/design-system\/brand\.json/);
+    assert.match(llms, /Website designs: https:\/\/cdn\.example\.com\/clients\/c\/design-systems\/s\/artifact\/design-system\/designs\.json/);
     assert.doesNotMatch(llms, /\]\(\//);
 
     const uploadedIndex = JSON.parse(puts.get("design-system/index.json"));
@@ -272,7 +283,7 @@ test("publishExtractedIndex uploads assets and mirrors first, then index, llms.t
       version: "1.2.3",
       systemId: "client/system",
       entry: "design-system/index.html",
-      files: { index: "design-system/index.json", tokens: "design-system/tokens.json", brand: "design-system/brand.json", llms: "design-system/llms.txt" },
+      files: { index: "design-system/index.json", tokens: "design-system/tokens.json", brand: "design-system/brand.json", llms: "design-system/llms.txt", designs: "design-system/designs.json" },
     });
   } finally {
     await fs.rm(designSystemRoot, { force: true, recursive: true });

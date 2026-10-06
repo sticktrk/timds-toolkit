@@ -21,8 +21,7 @@
         { "slug": "spacing", "title": "Spacing & shape", "group": "Tokens", "summary": "The spacing scale, radii, layout constants, and motion durations." },
         { "slug": "photography", "title": "Photography", "group": "Imagery", "summary": "Subjects, treatment, crops, and the approved image library.", "planned": true },
         { "slug": "components", "title": "Components", "group": "Library", "summary": "Buttons and form fields, each with a live preview, its rules, and its markup." },
-        { "slug": "layout", "title": "Layout", "summary": "Grid, section rhythm, breakpoints, and how long content wraps.", "planned": true },
-        { "slug": "archetypes", "title": "Page archetypes", "group": "Compositions", "summary": "The canonical page compositions built from the library.", "planned": true }
+        { "slug": "layout", "title": "Layout", "summary": "Grid, section rhythm, breakpoints, and how long content wraps.", "planned": true }
       ]
     }
   ]

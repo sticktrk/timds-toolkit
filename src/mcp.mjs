@@ -109,6 +109,14 @@ change. Work only in the Design System the user gave you.
 - Edit authored tokens, source, documentation, components, navigation, and
   lightweight assets. Preserve the framework and visual language unless the
   user asks for a migration or redesign.
+- Website designs live under \`src/designs/<design>/\`: whole pages in plain
+  HTML on the system's stylesheets, one file per route and state
+  (\`pages/contact.html\`, \`pages/contact.sent.html\`), with an optional
+  \`layout.html\` shell. \`run_check\` refuses scripts, inline styles,
+  classes the linked stylesheets do not declare, and relative references,
+  so a design uses only what the system defines. When a design needs a
+  style the system lacks, add it to the system's stylesheet and document
+  it, never to the page.
 - Never hand-edit \`dist/\`: \`run_check\` builds it from source.
 - Use genuine licensed assets. Never invent client marks or usage rights.
 - Give every \`write_file\` and \`delete_file\` a short \`note\` that says what

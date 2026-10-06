@@ -13,6 +13,7 @@ import {
   resolveConsumerApp,
   runConsumerCli,
   validateConsumerManifest,
+  parseDesignReference,
 } from "./consumer.mjs";
 import { runCli } from "./core.mjs";
 
@@ -178,6 +179,48 @@ test("validateConsumerManifest accepts preview.discover in crawl mode with defau
   assertInvalid(crawl("yes"), /preview\.discover must be an object/);
 });
 
+test("validateConsumerManifest pairs routes with design pages only in crawl mode and only for listed routes", () => {
+  const crawl = (designs) => baseManifest({ web: { ...staticApp(), preview: { serve: ["npm", "run", "dev"], port: 4321, routes: ["/", "/contact"], designs } } });
+  const valid = validateConsumerManifest(crawl({ "/": "website:/", "/contact/": "website:/contact" }));
+  assert.deepEqual(valid.apps.web.preview.designs, { "/": "website:/", "/contact/": "website:/contact" });
+  assert.deepEqual(parseDesignReference("website:/contact/"), { design: "website", route: "/contact" });
+  assert.deepEqual(parseDesignReference("website:/"), { design: "website", route: "/" });
+  assert.equal(parseDesignReference("website"), null);
+  assertInvalid(crawl({ "/": "website" }), /"<design>:<route>", such as "website:\/contact"/);
+  assertInvalid(crawl({ "/": "Web Site:/" }), /"<design>:<route>"/);
+  assertInvalid(crawl({ "/about": "website:/about" }), /pairs \/about, which preview\.routes does not list/);
+  assertInvalid(crawl(["website:/"]), /preview\.designs must be an object keyed by route/);
+  assertInvalid(baseManifest({ web: { ...staticApp(), preview: { build: ["npm", "run", "build"], output: "dist", designs: { "/": "website:/" } } } }), /needs preview\.routes \(crawl mode\)/);
+});
+
+test("checkConsumer verifies every design pairing against the pin's own catalog", async (t) => {
+  const crawl = (designs) => baseManifest({ web: { ...staticApp(), preview: { serve: ["npm", "run", "dev"], port: 4321, routes: ["/", "/contact", "/about"], designs } } });
+  const { product } = await consumerFixture(t, crawl({ "/": "website:/", "/contact": "website:/contact", "/about": "shop:/about" }));
+  // Without designs in the pin, every pairing is an error that names the gap.
+  let result = await checkConsumer(product);
+  assert.equal(result.status, "failed");
+  assert.match(result.errors.join("\n"), /pairs \/ with website:\/, but design-system has no src\/designs\//);
+  await write(product, "design-system/src/designs/website/design.json", { title: "Site" });
+  await write(product, "design-system/src/designs/website/pages/index.html", "<h1>Home</h1>");
+  result = await checkConsumer(product);
+  assert.equal(result.status, "failed");
+  assert.deepEqual(result.errors, [
+    'App "web": preview.designs pairs /contact with website:/contact, but design website has no route /contact (routes: /)',
+    'App "web": preview.designs pairs /about with shop:/about, but design-system has no design shop (designs: website)',
+  ]);
+  assert.deepEqual(result.apps, [{ name: "web", cwd: "web", cwdExists: true, mode: "crawl", designs: 3 }]);
+  await write(product, "design-system/src/designs/website/pages/contact.html", "<h1>Contact</h1>");
+  await write(product, "design-system/src/designs/shop/design.json", { title: "Shop" });
+  await write(product, "design-system/src/designs/shop/pages/about.html", "<h1>About</h1>");
+  await write(product, "design-system/src/designs/shop/pages/index.html", "<h1>Shop</h1>");
+  result = await checkConsumer(product);
+  assert.equal(result.status, "passed", result.errors.join("\n"));
+  // A pin whose catalog is malformed is a warning, not a silent pass.
+  await write(product, "design-system/src/designs/shop/design.json", "{ nope");
+  result = await checkConsumer(product);
+  assert.match(result.warnings.join("\n"), /website designs could not be read: .*design\.json is invalid JSON/);
+});
+
 test("matchesGlob supports **, *, ? and literal directories", () => {
   assert.equal(matchesGlob("src/styles/a/b.css", "src/styles/**"), true);
   assert.equal(matchesGlob("src/a.css", "src/**/*.css"), true);
@@ -240,7 +283,7 @@ test("checkConsumer passes on an in-scope change", async (t) => {
   const result = await checkConsumer(product, { base: "main" });
   assert.equal(result.status, "passed", result.errors.join("\n"));
   assert.deepEqual(result.errors, []);
-  assert.deepEqual(result.apps, [{ name: "web", cwd: "web", cwdExists: true, mode: "static" }]);
+  assert.deepEqual(result.apps, [{ name: "web", cwd: "web", cwdExists: true, mode: "static", designs: 0 }]);
   assert.deepEqual(result.changes.map((change) => change.path), [".claude/launch.json", "web/src/components/Hero.astro", "web/src/styles/site.css"]);
 });
 

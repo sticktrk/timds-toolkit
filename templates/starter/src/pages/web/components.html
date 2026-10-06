@@ -49,3 +49,22 @@
   &lt;small&gt;Keep help text close to the control.&lt;/small&gt;
 &lt;/div&gt;</pre>
 </section>
+
+<section class="block" id="layout">
+  <div class="block__head">
+    <h2 class="h2">Site layout</h2>
+    <p>The pieces a whole page is composed from. The website design under <a href="/designs/">Designs</a> uses only these and the components above, so a page needs nothing a product does not already get from <code>/styles/system.css</code>.</p>
+  </div>
+  <table class="spec">
+    <thead><tr><th>Piece</th><th>Class</th><th>Use</th></tr></thead>
+    <tbody>
+      <tr><td>Wrap</td><td><code>.wrap</code></td><td>Centers a band of the page at the content width with side gutters; the header, main content, and footer each sit in one</td></tr>
+      <tr><td>Site header</td><td><code>.site-header</code>, <code>.site-header__brand</code>, <code>.site-nav</code></td><td>The brand link and the site navigation at the top of every page</td></tr>
+      <tr><td>Hero</td><td><code>.hero</code></td><td>The opening band: one heading, one paragraph, then the actions</td></tr>
+      <tr><td>Section</td><td><code>.section</code></td><td>Each further band of a page, with a heading and short copy; give it an <code>id</code> so the page can link to it</td></tr>
+      <tr><td>Form</td><td><code>.form</code></td><td>Stacks fields and their submit button</td></tr>
+      <tr><td>Notice</td><td><code>.notice</code></td><td>A confirmation or status message in its own panel</td></tr>
+      <tr><td>Site footer</td><td><code>.site-footer</code></td><td>The closing line of every page</td></tr>
+    </tbody>
+  </table>
+</section>

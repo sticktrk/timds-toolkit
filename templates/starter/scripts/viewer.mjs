@@ -5,6 +5,10 @@
 // authored page. Rendering fills the shell's navigation from the site model
 // and each fragment's token tables from tokens.json, so a page never restates
 // a value and the navigation never drifts from the pages that exist.
+//
+// Website designs under src/designs/ are whole pages on the system's own
+// stylesheets, rendered by TimDS (see build.mjs). The viewer only lists them:
+// the app bar links /designs/ and the overview's sitemap names each one.
 import { existsSync } from "node:fs";
 import { cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
@@ -104,6 +108,27 @@ function readSiteModel(site) {
   return { home, pages, views };
 }
 
+/** The website designs declared under src/designs/, for the app bar and the sitemap; TimDS renders them. */
+async function designList() {
+  const directory = path.join(source, "designs");
+  if (!existsSync(directory)) return [];
+  const designs = [];
+  for (const entry of (await readdir(directory, { withFileTypes: true })).sort((left, right) => left.name.localeCompare(right.name))) {
+    if (!entry.isDirectory() || !existsSync(path.join(directory, entry.name, "design.json"))) continue;
+    const design = await readJson(`src/designs/${entry.name}/design.json`);
+    const pages = existsSync(path.join(directory, entry.name, "pages")) ? await pageFiles(path.join(directory, entry.name, "pages")) : [];
+    designs.push({
+      id: entry.name,
+      title: design.title || entry.name,
+      summary: design.summary || "",
+      href: `/designs/${entry.name}/`,
+      // A state file (contact.sent.html) belongs to its page (contact.html).
+      pages: pages.filter((file) => !/\.[^./]+\.html$/.test(file)).length,
+    });
+  }
+  return designs;
+}
+
 async function pageFiles(directory = path.join(source, "pages"), prefix = "") {
   const found = [];
   for (const entry of await readdir(directory, { withFileTypes: true })) {
@@ -133,12 +158,15 @@ function renderTokenTable(tokens, group, file) {
   ].join("\n");
 }
 
-function renderSitemap(model) {
+function renderSitemap(model, designs) {
   const rows = model.views.flatMap((view) => view.pages.map((page) => {
     const name = page.planned ? escapeHtml(page.title) : `<a href="${page.href}">${escapeHtml(page.title)}</a>`;
     const status = page.planned ? '<span class="tag">Planned</span>' : "Authored";
     return `      <tr><td>${name}</td><td>${escapeHtml(view.label)}</td><td>${escapeHtml(page.summary)}</td><td>${status}</td></tr>`;
   }));
+  for (const design of designs) {
+    rows.push(`      <tr><td><a href="${design.href}">${escapeHtml(design.title)}</a></td><td>Designs</td><td>${escapeHtml(design.summary)}</td><td>${design.pages} page${design.pages === 1 ? "" : "s"}</td></tr>`);
+  }
   return [
     '<table class="spec">',
     "      <thead><tr><th>Page</th><th>View</th><th>What it owns</th><th>Status</th></tr></thead>",
@@ -153,13 +181,15 @@ function firstAuthored(view) {
   return view.pages.find((page) => !page.planned) || null;
 }
 
-function renderViews(model, current) {
-  return model.views.map((view) => {
+function renderViews(model, current, designs) {
+  const views = model.views.map((view) => {
     const target = firstAuthored(view);
     const label = `<b>${escapeHtml(view.label)}</b>${view.blurb ? `<small>${escapeHtml(view.blurb)}</small>` : ""}`;
     if (!target) return `<span class="appbar__view is-planned">${label}</span>`;
     return `<a class="appbar__view" href="${target.href}"${view.id === current.view ? ' aria-current="true"' : ""}>${label}</a>`;
-  }).join("\n        ");
+  });
+  if (designs.length) views.push('<a class="appbar__view" href="/designs/"><b>Designs</b><small>Whole pages</small></a>');
+  return views.join("\n        ");
 }
 
 function renderSidenav(model, current) {
@@ -212,6 +242,9 @@ export async function renderSite() {
   const tokens = await readJson("tokens.json");
   const compiled = compileTokens(tokens);
   const model = readSiteModel(await readJson("src/site.json"));
+  const designs = await designList();
+  // TimDS builds the designs to dist/designs/, so no view may claim that path.
+  if (designs.length && model.views.some((view) => view.id === "designs")) throw new Error("src/site.json may not declare a view named designs while src/designs/ exists; the designs are built there");
   const layout = await readFile(path.join(source, "layout.html"), "utf8");
   if (!/\{\{\s*content\s*\}\}/.test(layout)) throw new Error("src/layout.html must contain {{content}}");
 
@@ -239,13 +272,13 @@ export async function renderSite() {
     if ((fragment.match(/<h1[\s>]/gi) || []).length !== 1) throw new Error(`${file} must contain exactly one <h1>`);
     const content = fill(fragment, file, {
       ...shared,
-      sitemap: () => renderSitemap(model),
+      sitemap: () => renderSitemap(model, designs),
       tokens: (group) => renderTokenTable(tokens, group, page.file),
     });
     rendered.set(page.output, fill(layout, "src/layout.html", {
       ...shared,
       title: escapeHtml(page.title),
-      views: renderViews(model, page),
+      views: renderViews(model, page, designs),
       sidenav: renderSidenav(model, page),
       pagenav: renderPagenav(authored, page),
       content: content.trim(),
@@ -253,6 +286,7 @@ export async function renderSite() {
   }
 
   return {
+    designs,
     files: rendered,
     pages: authored.length,
     planned: model.pages.filter((page) => page.planned).map((page) => page.id),

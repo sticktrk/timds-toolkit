@@ -19,9 +19,27 @@ __IMPORTS__
 | Pages, posts, menus, media, site settings | The EmDash database | The admin at `/_emdash/admin`, or an agent through the site's EmDash MCP server at `/_emdash/api/mcp`. No pull request. |
 | Layouts, components, page templates, site styles | This repository | A draft pull request that stays inside the design surface in `timds.consumer.json`; the TimDS preview shows it before it merges. |
 | Colors, fonts, tokens, logos, brand guidance | The Design System repository | A pull request there, then the pin update here. |
+| The design of a page or route, and its states | The Design System repository, under `__DESIGN_SYSTEM_PATH__/dist/designs/` | The designer authors it there in plain HTML on the system's stylesheets; a developer ports it here. |
 
 Content never needs a pull request, and the theme is never edited through the
 CMS. When a request mixes them, split it.
+
+## Porting a design
+
+When the Design System holds a website design (`list_designs` and
+`read_design` on its read MCP server, or `designs.json` and `dist/designs/`
+in the pin), that design is the reference the matching route here must
+match: the same markup composed from the same system classes, and every
+state the design shows (a sent form, an empty list, an error) as the route
+can reach it. Port it into this site's layouts and components; never copy a
+design's HTML file in as a page, and never restyle it. A state the site
+cannot express yet is a developer change to say so about, not a design to
+simplify.
+
+`preview.designs` in `timds.consumer.json` pairs a route with its design
+(`"/": "website:/"`); the pull-request preview then shows the design beside
+the route at every width and scheme, so the port is reviewed against its
+reference. Pairing a new route is a developer change to the manifest.
 
 ## Rules for theme changes
 

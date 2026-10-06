@@ -64,6 +64,7 @@ export const artifactContentType = (file) =>
 const sha256Of = (data) => createHash("sha256").update(data).digest("hex");
 
 import { eachBrandKitMedia } from "./brand.mjs";
+import { eachDesignReference } from "./designs.mjs";
 import { PROVENANCE_FILE, derivedLayerPaths } from "./derived.mjs";
 
 const eachIndexMedia = (index, visit) => {
@@ -131,6 +132,34 @@ export function rewriteIndexForPublish(index, files, publicBase, each = eachInde
 /** The brand kit's logos and imagery are index assets, so they resolve the same way. */
 export const rewriteBrandKitForPublish = (kit, files, publicBase) => rewriteIndexForPublish(kit, files, publicBase, eachBrandKitMedia);
 
+/**
+ * The stylesheets and media the website designs load, added to `files` so a
+ * consumer reading designs.json from the CDN can resolve every site-absolute
+ * reference under its `base`. The HTML itself travels inside designs.json.
+ */
+export async function collectDesignReferenceFiles(designs, artifactRoot, files = new Map()) {
+  const references = [];
+  eachDesignReference(designs, (reference) => references.push(reference));
+  for (const url of references) {
+    const relative = url.split("?", 1)[0].replace(/^\/+/, "");
+    if (!relative || files.has(relative)) continue;
+    const localPath = path.join(artifactRoot, ...relative.split("/"));
+    let body;
+    try {
+      body = await fs.readFile(localPath);
+    } catch {
+      throw new Error(`Website designs reference ${url} but the artifact has no ${relative}`);
+    }
+    files.set(relative, {
+      bytes: body.length,
+      contentType: artifactContentType(relative),
+      localPath,
+      sha256: sha256Of(body),
+    });
+  }
+  return files;
+}
+
 /** The extract-written page mirrors and llms.txt, as artifact-relative paths. */
 export async function collectMachineDocFiles(artifactRoot, entryDirectory) {
   const baseDirectory = entryDirectory === "." ? artifactRoot : path.join(artifactRoot, ...entryDirectory.split("/"));
@@ -158,7 +187,7 @@ export function rewriteLlmsForPublish(text, publicBase) {
   const base = String(publicBase).replace(/\/+$/, "");
   return String(text)
     .replace(/\]\(\//g, `](${base}/`)
-    .replace(/^(Machine-readable index: |Design tokens: |Brand kit: )(\/\S+)/gm, (_match, label, target) => `${label}${base}${target}`);
+    .replace(/^(Machine-readable index: |Design tokens: |Brand kit: |Website designs: )(\/\S+)/gm, (_match, label, target) => `${label}${base}${target}`);
 }
 
 export function detectSourceCommit(cwd) {
@@ -234,6 +263,12 @@ export async function publishExtractedIndex(workspace, options = {}) {
   // Referenced files and page mirrors publish first, so no entry point ever
   // precedes the files it names.
   const files = await collectIndexAssetFiles(index, artifactRoot);
+  // Website designs publish with the stylesheets and media they load, and
+  // learn the base they resolve against; a system without designs has no file.
+  const designsRelative = entryDirectory === "." ? "designs.json" : `${entryDirectory}/designs.json`;
+  const designsSource = await fs.readFile(path.join(artifactRoot, ...designsRelative.split("/")), "utf8").catch(() => null);
+  const designs = designsSource === null ? null : JSON.parse(designsSource);
+  if (designs) await collectDesignReferenceFiles(designs, artifactRoot, files);
   const docs = await collectMachineDocFiles(artifactRoot, entryDirectory);
   for (const relative of docs) {
     if (files.has(relative)) continue;
@@ -287,6 +322,9 @@ export async function publishExtractedIndex(workspace, options = {}) {
       ...(llmsSource === null
         ? []
         : [{ body: Buffer.from(rewriteLlmsForPublish(llmsSource, publicBase)), contentType: "text/plain; charset=utf-8", path: llmsRelative }]),
+      ...(designs === null
+        ? []
+        : [{ body: Buffer.from(`${JSON.stringify({ ...designs, base: publicBase }, null, 2)}\n`), contentType: "application/json", path: designsRelative }]),
       // The stamp is the one file a remote consumer must know: it names the
       // version, the commit, and where every derived file sits under this base.
       {
@@ -320,9 +358,10 @@ export async function publishExtractedIndex(workspace, options = {}) {
     await fs.rm(staging, { force: true, recursive: true });
   }
 
-  const total = files.size + 2 + (llmsSource === null ? 0 : 1) + (tokensSource === null ? 0 : 1) + (brandSource === null ? 0 : 1);
+  const total = files.size + 2 + (llmsSource === null ? 0 : 1) + (tokensSource === null ? 0 : 1) + (brandSource === null ? 0 : 1) + (designs === null ? 0 : 1);
   return {
     brandUrl: brandSource === null ? null : `${publicBase}/${brandRelative}`,
+    designsUrl: designs === null ? null : `${publicBase}/${designsRelative}`,
     docCount: docs.length,
     indexUrl: `${publicBase}/${indexRelative}`,
     llmsUrl: llmsSource === null ? null : `${publicBase}/${llmsRelative}`,

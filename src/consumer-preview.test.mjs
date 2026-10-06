@@ -28,6 +28,7 @@ import {
   startAppServer,
 } from "./consumer-preview.mjs";
 import { loadConsumer, resolveConsumerApp } from "./consumer.mjs";
+import { initializeRepository } from "./core.mjs";
 
 const DESIGN_SYSTEM_COMMIT = "df31440aa1b2c3d4e5f60718293a4b5c6d7e8f90";
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -184,6 +185,7 @@ test("static mode installs, builds, copies the output to site/, and writes previ
     site: "site/index.html",
     compare: null,
     changedRouteCount: 0,
+    designs: null,
     routes: [],
     dropped: [],
     generatedAt: "2026-10-03T00:00:00Z",
@@ -243,7 +245,70 @@ test("build + output + routes serves the build with the static server and crawls
     change: "unknown",
     affectedBy: [],
     captures: [{ viewport: "phone", scheme: "dark", width: 390, height: 844, file: "captures/contact/phone-dark.png", base: null, diff: null, map: null }],
+    design: null,
   });
+});
+
+test("preview.designs shows the pinned system's design beside each paired route, building the pin when it is not built", async () => {
+  const port = await freePort();
+  const fixture = await createConsumerRepo({
+    serve: ["node", "server.mjs", String(port)],
+    port,
+    routes: ["/", "/contact", "/missing"],
+    designs: { "/": "website:/", "/contact/": "website:/contact", "/missing": "website:/nope" },
+  }, { install: null });
+  const { appRoot, repoRoot } = fixture;
+  // Without the pin checked out, the product is still previewed and the gap is recorded.
+  let captures = [];
+  let preview = await buildConsumerPreview(fixture.consumer, fixture.app, { env: cleanEnv(), launchBrowser: fakeBrowser(captures) });
+  assert.deepEqual(preview.designs, { status: "unavailable", reason: "design-system/timds.json is not checked out; run git submodule update --init design-system." });
+  assert.ok(preview.routes.every((route) => route.design === null));
+
+  // The pin: a scaffolded standalone system (its own repository, as a submodule is), with its artifact not built.
+  const pin = path.join(repoRoot, "design-system");
+  await fs.mkdir(pin);
+  git(pin, "init", "-q", "-b", "main");
+  await initializeRepository(pin, { standalone: true, name: "Acme" });
+  await fs.rm(path.join(pin, "dist"), { recursive: true });
+  const consumer = await loadConsumer(repoRoot);
+  const app = resolveConsumerApp(consumer, "web");
+  captures = [];
+  const lines = [];
+  preview = await buildConsumerPreview(consumer, app, { env: cleanEnv(), launchBrowser: fakeBrowser(captures), output: (line) => lines.push(line) });
+  const outputDir = path.join(repoRoot, ".timds", "preview", "web");
+  assert.ok(lines.some((line) => line.startsWith("Building the Design System at design-system: node scripts/build.mjs")), lines.join("\n"));
+  assert.ok(existsSync(path.join(pin, "dist", "designs", "website", "contact", "index.html")), "the pin's designs are rendered into its artifact");
+  assert.deepEqual(preview.designs, { status: "ready", pairedRoutes: 3 });
+  assert.equal(preview.routes.length, 3);
+  assert.equal(captures.length, 3 * 4 + 2 * 4, "each resolvable pairing is captured at every cell");
+  const [home, contact, missing] = preview.routes;
+  assert.deepEqual([home.design.id, home.design.route, home.design.title, home.design.url, home.design.error], ["website", "/", "Home", "/designs/website/", null]);
+  assert.deepEqual(home.design.captures.map((capture) => capture.file), [
+    "designs/root/desktop-light.png", "designs/root/phone-light.png", "designs/root/desktop-dark.png", "designs/root/phone-dark.png",
+  ]);
+  assert.deepEqual(home.design.pages.map((page) => page.file), ["designs/root/light.html", "designs/root/dark.html"]);
+  assert.match(await fs.readFile(path.join(outputDir, "designs/root/light.html"), "utf8"), /class="site-header wrap"/, "the design page itself is captured");
+  assert.equal(contact.design.route, "/contact", "a trailing slash in the pairing still matches the route");
+  assert.equal(contact.design.captures.length, 4);
+  assert.deepEqual([missing.design.id, missing.design.captures.length], ["website", 0]);
+  assert.match(missing.design.error, /design website has no route \/nope \(routes: \/, \/contact\)/);
+  assert.ok(lines.some((line) => line.includes("Warning: /missing: design website has no route /nope")));
+  for (const route of [home, contact]) {
+    for (const capture of route.design.captures) assert.ok(existsSync(path.join(outputDir, capture.file)), capture.file);
+  }
+  const gallery = await fs.readFile(path.join(outputDir, "index.html"), "utf8");
+  assert.match(gallery, /<span class="status design-ref">design website\/<\/span>/);
+  assert.match(gallery, /<figure class="design scheme-light">[\s\S]*?designs\/root\/desktop-light\.png[\s\S]*?<figcaption>Design <code>website\/<\/code> · Light · <a href="designs\/root\/light\.html">Rendered HTML<\/a>/);
+  assert.ok(gallery.indexOf("designs/root/desktop-light.png") < gallery.indexOf("captures/root/desktop-light.png"), "the design sits before the product capture");
+  assert.match(gallery, /<dt>Designs<\/dt><dd>3 routes shown beside the design<\/dd>/);
+  assert.match(gallery, /The design could not be shown: design website has no route \/nope/);
+  for (const match of gallery.matchAll(/(?:href|src)="([^"]+)"/g)) {
+    if (!match[1].startsWith("#")) assert.ok(existsSync(path.join(outputDir, decodeURIComponent(match[1]))), match[1]);
+  }
+  const header = JSON.parse(Buffer.from(previewMetadataHeader(preview), "base64").toString("utf8"));
+  assert.equal(header.designRouteCount, 2);
+  assert.deepEqual(header.designs, { status: "ready", pairedRoutes: 3 });
+  assert.ok(appRoot);
 });
 
 test("crawl mode starts serve, waits for ready, captures every route × viewport × scheme, and stops the server", async () => {
@@ -401,7 +466,7 @@ test("publish tars and gzips the preview and posts it with metadata and bearer a
   assert.equal(init.headers["Content-Type"], "application/gzip");
   const metadata = JSON.parse(Buffer.from(init.headers["x-timds-build-metadata"], "base64").toString("utf8"));
   const { routes: _routes, ...summary } = preview;
-  assert.deepEqual(metadata, { ...summary, compare: null, changedRouteCount: 0, routeCount: 1, captureCount: 1 });
+  assert.deepEqual(metadata, { ...summary, compare: null, changedRouteCount: 0, routeCount: 1, captureCount: 1, designRouteCount: 0 });
   const compared = {
     ...preview,
     compare: { base: "main", baseCommit: "f00d", status: "ready", reason: null, changedFiles: ["web/src/a.css"] },

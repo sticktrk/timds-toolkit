@@ -206,6 +206,22 @@ crawl it). `ready` defaults to `/`, `viewports` to `["desktop", "phone"]`
 `designSurface` and `protected` are globs (`**`, `*`, `?`) relative to the
 app's `cwd`; `protected` always wins.
 
+In crawl mode, `preview.designs` pairs a route with a page of a website
+design in the pinned Design System, as `"<design>:<route>"`:
+
+```json
+"preview": { "serve": ["npm", "run", "dev"], "port": 4321, "routes": ["/", "/contact"], "designs": { "/": "website:/", "/contact": "website:/contact" } }
+```
+
+Every paired route must be in `routes`; `consumer check` verifies each pairing
+against the pin's `src/designs/`. The preview then builds the pin's artifact
+with its own declared commands when it is not built yet, renders its designs,
+and captures the design page at the same widths and schemes into `designs/`,
+so the gallery and the portal show the design beside the route: the reference
+on one side, the product on the other. `preview.json` records the pairing on
+each route as `design` and the outcome under `designs`; a pin that cannot be
+shown is reported there and never fails the preview.
+
 In crawl mode, `preview.discover` adds routes beyond `routes`: starting from
 `from` (default `["/"]`), it follows same-origin `<a href>` links breadth-first
 and reads `/sitemap.xml` when the app serves one (sitemap entries are used by
@@ -456,9 +472,32 @@ against the extracted index:
 }
 ```
 
+### Website designs
+
+A Design System is designer-owned down to the pages. Under
+`src/designs/<design>/` a designer authors a whole website, or any set of
+screens, in plain HTML on the system's own stylesheets: `design.json` names
+it, an optional `layout.html` is the shell, and `pages/` holds one file per
+route and state (`index.html` is `/`, `contact.html` is `/contact`,
+`contact.sent.html` is `/contact` after the form is sent). A backend engineer
+ports the design to whatever runs production; the design is the reference the
+port must match, never the production site itself.
+
+`check` builds the designs to `/designs/` and refuses anything the system does
+not define: `<script>`, inline handlers, `<style>`, `style` attributes, a
+class no linked stylesheet declares, a relative reference. A design that
+passes needs only the system's stylesheets and its markup to port.
+`designs.json` beside `index.json` carries every page state's HTML and the
+files it loads; `list_designs` and `read_design` serve it to consumers, and
+`extract --publish` uploads it with the stylesheets and media it references.
+`@dtconcepts/timds/designs` exports the renderer (`buildDesigns`), the check
+(`checkDesigns`), and the catalog reader. A system scaffolded before designs
+existed adopts them with `timds designs init`.
+
 ### The derived layer is the contract consumers read
 
-Together `index.json`, `tokens.json`, `brand.json`, and `llms.txt` are the
+Together `index.json`, `tokens.json`, `brand.json`, `llms.txt`, and, for a
+system with website designs, `designs.json` are the
 **derived layer**: generated on every `check`, published on every
 `extract --publish`, and the only thing a consumer — an MCP server, a render
 host, a pipeline, another agent — needs. Nothing in it is authored by hand,

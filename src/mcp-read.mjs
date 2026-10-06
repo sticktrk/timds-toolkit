@@ -20,6 +20,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import * as z from "zod/v4";
 import { findRepositoryRoot, loadWorkspace, setOutputStream } from "./core.mjs";
 import { fetchDerivedLayer, readDerivedLayer, summarizeBrandKit } from "./derived.mjs";
+import { DEFAULT_STATE, designsDirectory, findDesignPage } from "./designs.mjs";
 import { blockToMarkdown, pageToMarkdown } from "./extract.mjs";
 import { readMediaCatalog } from "./media.mjs";
 import { BRAND_ROLES } from "./tokens.mjs";
@@ -93,6 +94,21 @@ pages, and the media catalog. Nothing here is editable; use it to be on-brand.
   context. \`list_pages\` is the directory.
 - Compliance guidance is binding. When copy you are asked to produce
   conflicts with it, say so instead of complying silently.
+
+## Website designs
+
+- \`list_designs\` lists the whole pages the designer has designed in the
+  system: each design, its routes, and the states each route has (a sent
+  form, an empty list, an error). \`read_design\` returns one page state as
+  the plain HTML the designer authored on the system's stylesheets, with
+  the stylesheets and media it loads.
+- A design is the reference a product route must match. Port its markup
+  onto the product's stack and the system's stylesheets; never copy the HTML
+  file into the product as a page, and never restyle it. When the product
+  cannot express a state the design shows, say so.
+- Site-absolute references in a design resolve under the document's
+  \`base\` when it is published, and inside the pinned Design System
+  checkout otherwise.
 
 ## When the system falls short
 
@@ -385,7 +401,7 @@ export function registerDesignSystemReadTools(server, { resolveSystem, listSyste
   tool("describe_system", {
     title: "Describe a Design System",
     annotations: READ_ONLY,
-    description: "Describe a Design System at the served version: name, versions (served, pinned, published), page directory, token and role counts, brand kit summary, guidance groups, media catalog size, and the video board kinds it offers.",
+    description: "Describe a Design System at the served version: name, versions (served, pinned, published), page directory, token and role counts, brand kit summary, guidance groups, media catalog size, the website designs it holds, and the video board kinds it offers.",
   }, async (args) => {
     const resolved = await systemFor(args);
     const { layer } = resolved;
@@ -400,6 +416,7 @@ export function registerDesignSystemReadTools(server, { resolveSystem, listSyste
       tokens: tokens ? { count: tokens.count, kinds: tokens.kinds, roles: Object.keys(tokens.roles ?? {}), missingRoles: tokens.missingRoles ?? [], scopes: tokens.scopes?.length ?? 0 } : null,
       brand: kit ? { summary: summarizeBrandKit(kit), guidance: guidanceSummary(kit) } : null,
       media: { catalog: Boolean(resolved.media), assets: resolved.media?.assets?.length ?? 0 },
+      designs: layer.designs ? { count: layer.designs.designCount ?? 0, pages: layer.designs.pageCount ?? 0, states: layer.designs.stateCount ?? 0, designs: designsDirectory(layer.designs).map(({ id, title, pageCount }) => ({ id, title, pageCount })) } : null,
       video: index?.video?.boards ? { boards: index.video.boards.kinds ?? [], cadence: index.video.boards.cadence ?? null, formats: index.video.boards.formats ?? null } : null,
       llms: layer.llms ?? null,
     };
@@ -518,6 +535,47 @@ export function registerDesignSystemReadTools(server, { resolveSystem, listSyste
       return { ...header, block: block.id, ...(format === "markdown" ? { markdown: blockToMarkdown(block) } : { blocks: [block] }) };
     }
     return { ...header, ...(format === "markdown" ? { markdown: pageToMarkdown(page) } : { blocks: page.blocks ?? [] }) };
+  });
+
+  tool("list_designs", {
+    title: "List website designs",
+    annotations: READ_ONLY,
+    description: "The website designs the designer has authored in the system: each design with its title, summary, routes, and the states each route has. A design is the reference a product port must match; read a page with read_design.",
+  }, async (args) => {
+    const resolved = await systemFor(args);
+    const document = resolved.layer.designs;
+    const designs = designsDirectory(document);
+    return { system: systemStamp(resolved), base: document?.base ?? null, total: designs.length, designs, ...(designs.length ? {} : { note: "This system publishes no website designs" }) };
+  });
+
+  tool("read_design", {
+    title: "Read a design page",
+    annotations: READ_ONLY,
+    description: "One page of a website design as the plain HTML the designer authored on the system's stylesheets, with the stylesheets and media it loads. Address it by design id and route (/, /about); pass a state name for a route's other states (list_designs names them).",
+    inputSchema: {
+      design: z.string().min(1).max(100).describe("Design id from list_designs"),
+      route: z.string().min(1).max(300).describe("The page route, such as / or /contact"),
+      state: z.string().min(1).max(100).optional().describe(`State name; defaults to ${DEFAULT_STATE}`),
+    },
+  }, async (args) => {
+    const resolved = await systemFor(args);
+    const document = resolved.layer.designs;
+    if (!document) throw new Error("This system publishes no website designs");
+    const { design, page, state } = findDesignPage(document, args.design.trim(), args.route, args.state?.trim() || DEFAULT_STATE);
+    if (!design) throw new Error(`No design ${JSON.stringify(args.design)}; list_designs shows the directory`);
+    if (!page) throw new Error(`Design ${design.id} has no route ${JSON.stringify(args.route)}; routes: ${design.pages.map((entry) => entry.route).join(", ")}`);
+    if (!state) throw new Error(`Route ${page.route} of design ${design.id} has no state ${JSON.stringify(args.state)}; states: ${page.states.map((entry) => entry.name).join(", ")}`);
+    return {
+      system: systemStamp(resolved),
+      base: document.base ?? null,
+      design: { id: design.id, title: design.title, url: design.url },
+      page: { route: page.route, title: page.title, url: page.url, states: page.states.map((entry) => entry.name) },
+      state: state.name,
+      title: state.title,
+      url: state.url,
+      references: state.references ?? [],
+      html: state.html,
+    };
   });
 
   tool("search_guidance", {

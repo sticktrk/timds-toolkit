@@ -91,6 +91,23 @@ const urlPathGlob = z.string().min(1, "preview.discover.exclude globs must be no
   message: 'preview.discover.exclude globs are URL path globs such as "/admin/**" or "/blog/*/print"',
 });
 
+/** A design reference: `<design id>:<route>`, the page of a website design in the pinned system. */
+const DESIGN_REFERENCE = /^([a-z0-9]+(?:-[a-z0-9]+)*):(\/[^\s\0]*)$/;
+
+/** Parse `website:/contact` into `{ design, route }` with the route normalized (`/`, `/contact`). */
+export function parseDesignReference(value) {
+  const match = DESIGN_REFERENCE.exec(String(value ?? "").trim());
+  if (!match) return null;
+  const route = match[2].length > 1 ? `/${match[2].replace(/^\/+|\/+$/g, "")}` : "/";
+  return { design: match[1], route };
+}
+
+const normalizeRoute = (value) => (value.length > 1 ? `/${value.replace(/^\/+|\/+$/g, "")}` : "/");
+
+const designReference = z.string().refine((value) => DESIGN_REFERENCE.test(value), {
+  message: 'preview.designs values name a page of a website design in the pinned Design System as "<design>:<route>", such as "website:/contact"',
+});
+
 /** Route discovery limits: how many routes beyond `routes` a crawl may add. */
 export const CONSUMER_DISCOVER_LIMIT = Object.freeze({ default: 40, max: 200 });
 
@@ -119,6 +136,7 @@ const previewSchema = z.object({
     .min(1, "preview.schemes must not be empty")
     .default(["light", "dark"]),
   discover: discoverSchema.optional(),
+  designs: z.record(routePath, designReference, { error: 'preview.designs must be an object keyed by route, such as { "/contact": "website:/contact" }' }).optional(),
 }, { error: "preview must be an object" }).strict().superRefine((preview, context) => {
   const staticKeys = ["build", "output"].filter((key) => preview[key] !== undefined);
   const crawlKeys = ["serve", "port"].filter((key) => preview[key] !== undefined);
@@ -143,6 +161,18 @@ const previewSchema = z.object({
   }
   if (preview.discover && !preview.serve && !preview.routes) {
     context.addIssue({ code: "custom", path: ["discover"], message: "preview.discover only works in crawl mode (serve + port + routes, or build + output + routes)" });
+  }
+  if (preview.designs) {
+    if (!preview.routes) {
+      context.addIssue({ code: "custom", path: ["designs"], message: "preview.designs pairs routes with design pages, so it needs preview.routes (crawl mode)" });
+    } else {
+      const declared = new Set(preview.routes.map(normalizeRoute));
+      for (const route of Object.keys(preview.designs)) {
+        if (!declared.has(normalizeRoute(route))) {
+          context.addIssue({ code: "custom", path: ["designs", route], message: `preview.designs pairs ${route}, which preview.routes does not list; add it there so it is always captured` });
+        }
+      }
+    }
   }
 });
 
@@ -486,12 +516,37 @@ export async function checkConsumer(repoRootInput = process.cwd(), options = {})
     }
   }
 
+  // Design pairings are checked against the pin's own catalog, so a renamed
+  // design or route fails here rather than silently leaving the preview bare.
+  let designCatalog = null;
+  if (designSystem.present && selected.some((name) => manifest.apps[name].preview.designs)) {
+    const { readDesignCatalog } = await import("./designs.mjs");
+    try {
+      designCatalog = await readDesignCatalog(designSystem.root);
+    } catch (error) {
+      warnings.push(`${designSystem.path} website designs could not be read: ${error.message}`);
+    }
+  }
+
   const apps = [];
   for (const name of selected) {
     const app = resolveConsumerApp(consumer, name);
     const cwdExists = existsSync(app.cwd);
     if (!cwdExists) errors.push(`App "${name}": cwd ${app.cwdRelative} does not exist`);
-    apps.push({ name, cwd: app.cwdRelative, cwdExists, mode: consumerPreviewMode(app.preview) });
+    if (designCatalog) {
+      for (const [route, reference] of Object.entries(app.preview.designs || {})) {
+        const { design: designId, route: designRoute } = parseDesignReference(reference);
+        const design = designCatalog.designs.find((entry) => entry.id === designId);
+        if (!designCatalog.exists) {
+          errors.push(`App "${name}": preview.designs pairs ${route} with ${reference}, but ${designSystem.path} has no src/designs/`);
+        } else if (!design) {
+          errors.push(`App "${name}": preview.designs pairs ${route} with ${reference}, but ${designSystem.path} has no design ${designId} (designs: ${designCatalog.designs.map((entry) => entry.id).join(", ") || "none"})`);
+        } else if (!design.pages.some((page) => page.route === designRoute)) {
+          errors.push(`App "${name}": preview.designs pairs ${route} with ${reference}, but design ${designId} has no route ${designRoute} (routes: ${design.pages.map((page) => page.route).join(", ")})`);
+        }
+      }
+    }
+    apps.push({ name, cwd: app.cwdRelative, cwdExists, mode: consumerPreviewMode(app.preview), designs: Object.keys(app.preview.designs || {}).length });
   }
 
   let changes = [];

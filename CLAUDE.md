@@ -67,11 +67,23 @@ servers must keep stdout as a protocol stream.
 
 ### The derived layer (the consumer contract)
 
+`designs.mjs` owns website designs: whole pages a designer authors under
+`src/designs/<design>/pages/` in plain HTML on the system's stylesheets, one
+file per route and state. It reads the catalog, renders the pages (layout
+shell, route rewriting under `/designs/<id>/`, a directory page) into `dist/`,
+enforces portability in `check` (no scripts, inline styles, undeclared
+classes, or relative references), and serializes `designs.json`. `check`
+always builds designs itself after the workspace build; the starter build
+calls the same function so `dev` shows them. `timds designs init` is the
+migration for systems scaffolded without them (`legacyStarterScriptHashes` in
+core pins the stock starter scripts it may replace).
+
 `extract.mjs` harvests the built HTML in `dist/` (using the tolerant parser in
 `html.mjs`, which exists so the package needs no HTML dependency) and writes
 `index.json`, `tokens.json` (`tokens.mjs`, CSS custom properties resolved by
 scope plus brand roles), `brand.json` (`brand.mjs`, from `data-timds-role`
-annotations), `llms.txt`, and per-page `index.md`. `derived.mjs` is the
+annotations), `llms.txt`, per-page `index.md`, and `designs.json` (the
+designs output directory is skipped by the page walk). `derived.mjs` is the
 read side: `readDerivedLayer` (local) and `fetchDerivedLayer` (published URL)
 return the same shape. `artifact.mjs` publishes that layer to the portal CDN
 via `extract --publish`. Everything downstream (MCP read server, video brand
@@ -125,8 +137,11 @@ its release scripts; `templates/*.yml` are the stock workflows. The starter
 viewer is client-owned once copied: `scripts/viewer.mjs` renders
 `src/site.json` (views and pages, authored or `planned`), `src/layout.html`,
 and the fragments under `src/pages/` into `dist/`, filling `{{tokens:GROUP}}`
-tables from `tokens.json`. Planned pages are never built, so a fresh scaffold
-keeps its two expected brand warnings.
+tables from `tokens.json`, and lists the designs under `src/designs/` in the
+app bar and sitemap. Planned pages are never built, so a fresh scaffold
+keeps its two expected brand warnings. The sample design uses the site layout
+block in `src/styles/system.css` (between its marker comments), which
+`designs init` appends to a migrating system that kept the starter tokens.
 `templates/design-system-AGENTS.md`, `design-system-CLAUDE.md`, and
 `design-system-README.md` are the scaffolded agent and human entry points;
 they are written once and then client-owned, so keep them accurate for a fresh
