@@ -196,6 +196,9 @@ test("renders the skill from the manifest and records managed-file hashes", asyn
   assert.match(workflow, /BASE_REF: \$\{\{ github\.base_ref \|\| github\.event\.repository\.default_branch \}\}/);
   assert.match(workflow, /if npm run timds -- consumer check --base "origin\/\$\{BASE_REF\}"; then/);
   assert.doesNotMatch(workflow, /run:[^\n]*\$\{\{ github\.base_ref/);
+  // Only the apps the check names are previewed; a pull request that cannot change a look skips the job.
+  assert.match(workflow, /CHANGED: \$\{\{ steps\.scope\.outputs\.preview-apps \}\}/);
+  assert.match(workflow, /preview:\n\s+needs: check\n\s+if: needs\.check\.outputs\.apps != '\[\]'/);
   assert.match(workflow, /ref: \$\{\{ inputs\.ref \|\| github\.event\.pull_request\.head\.sha \}\}/);
   assert.match(workflow, /consumer preview --app "\$APP" --base "origin\/\$\{BASE_REF\}" --publish --pull-request/);
   assert.match(workflow, /<!-- timds-consumer-preview:\$\{APP\} -->/);

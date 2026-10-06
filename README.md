@@ -239,7 +239,12 @@ Declared `routes` always come first and always stay.
   manifest is an adoption and may add the submodule. The stock workflow runs
   this on every pull request and reports a scope failure in the preview
   comment without failing the job, since developer pull requests leave the
-  surface by design.
+  surface by design. The same diff names the apps worth previewing
+  (`previewApps` in `--json`, `preview-apps` as a GitHub Actions step output):
+  an app whose design surface changed, or every app when the Design System pin
+  or `timds.consumer.json` changed. The stock workflow builds a preview only
+  for those apps, so a pull request that cannot change how an app looks skips
+  the preview job.
 - `timds consumer preview --app NAME [--base REF] [--publish]` builds or serves
   the app and writes a review folder to `.timds/preview/<app>/`: `preview.json`,
   a script-free gallery `index.html`, `captures/` (full-page PNGs per route,
