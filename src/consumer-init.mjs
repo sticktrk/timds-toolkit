@@ -660,8 +660,8 @@ export async function initializeConsumer(rootInput = process.cwd(), { force = fa
   const checklist = [
     ...general,
     ...todos.flatMap(({ app, items }) => items.map((item) => `${app}: ${item}`)),
-    "Add the TIMDS_ACCESS_TOKEN repository secret so the preview workflow can publish previews",
-    "Add DESIGN_SYSTEM_DEPLOY_KEY (read-only deploy key on the Design System repository) or TIMDS_CONSUMER_SUBMODULE_TOKEN (contents:read on it) so CI can check out the private submodule",
+    "Automatic previews are off by default; to enable them, set the TIMDS_PREVIEWS_ENABLED repository variable to true and add the TIMDS_ACCESS_TOKEN repository secret",
+    "For previews or designer changes: add DESIGN_SYSTEM_DEPLOY_KEY (read-only deploy key on the Design System repository) or TIMDS_CONSUMER_SUBMODULE_TOKEN (contents:read on it) so CI can check out the private submodule",
     "For designer changes: add the OPENAI_API_KEY repository or organization secret so the designer-change workflow can run Codex through the OpenAI API",
     `For designer changes: create the ${CONSUMER_DESIGN_CHANGE_LABEL} label, set the TIMDS_DESIGNER_BOTS repository variable to the TimDS portal's GitHub App bot login (comma-separated if more than one), and allow GitHub Actions to create pull requests (Settings > Actions > General)`,
     `${CONSUMER_MCP_PATH} reads the Design System through the portal with TIMDS_ACCESS_TOKEN from the environment; export it locally to use the ${CONSUMER_MCP_SERVER_NAME} tools`,

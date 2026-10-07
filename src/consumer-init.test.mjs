@@ -134,6 +134,7 @@ test("discovers apps and writes the manifest with guessed defaults", async (t) =
   assert.match(output, /web: preview\.port is 4321 \(the astro default\)/);
   assert.match(output, /spa: install is bun install --frozen-lockfile \(bun is not set up/);
   assert.match(output, /TIMDS_ACCESS_TOKEN/);
+  assert.match(output, /Automatic previews are off by default; to enable them, set the TIMDS_PREVIEWS_ENABLED repository variable to true and add the TIMDS_ACCESS_TOKEN repository secret/);
   assert.match(output, /DESIGN_SYSTEM_DEPLOY_KEY/);
   assert.match(output, /web: preview\.routes lists only "\/" and preview\.discover follows links/);
   assert.match(output, /OPENAI_API_KEY/);
@@ -186,6 +187,9 @@ test("renders the skill from the manifest and records managed-file hashes", asyn
   assert.match(skill, /the `web` entry in `\.claude\/launch\.json` \(`npm run dev`\), then open http:\/\/localhost:4321\//);
   assert.match(skill, /### `docs`[\s\S]*build with `npm run build` \(output in `dist\/`\)[\s\S]*consumer preview --app docs/);
   assert.match(skill, /Protected: nothing beyond/);
+  assert.match(skill, /TIMDS_PREVIEWS_ENABLED=true[\s\S]*TIMDS_ACCESS_TOKEN/);
+  assert.match(skill, /provide the local review URL and screenshots; do not wait for/);
+  assert.match(skill, /state that\nvisual checks were not performed/);
   assert.equal(skill, await renderConsumerSkill(result.manifest, { defaultBranch: "main" }));
   await fs.access(path.join(product, ".agents", "skills", "timds-consume-design-system", "agents", "openai.yaml"));
 
@@ -198,7 +202,7 @@ test("renders the skill from the manifest and records managed-file hashes", asyn
   assert.doesNotMatch(workflow, /run:[^\n]*\$\{\{ github\.base_ref/);
   // Only the apps the check names are previewed; a pull request that cannot change a look skips the job.
   assert.match(workflow, /CHANGED: \$\{\{ steps\.scope\.outputs\.preview-apps \}\}/);
-  assert.match(workflow, /preview:\n\s+needs: check\n\s+if: needs\.check\.outputs\.apps != '\[\]'/);
+  assert.match(workflow, /preview:\n\s+needs: check\n\s+if: needs\.check\.result == 'success' && needs\.check\.outputs\.apps != '\[\]'/);
   assert.match(workflow, /ref: \$\{\{ inputs\.ref \|\| github\.event\.pull_request\.head\.sha \}\}/);
   assert.match(workflow, /consumer preview --app "\$APP" --base "origin\/\$\{BASE_REF\}" --publish --pull-request/);
   assert.match(workflow, /<!-- timds-consumer-preview:\$\{APP\} -->/);

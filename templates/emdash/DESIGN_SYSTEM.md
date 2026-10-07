@@ -17,7 +17,7 @@ __IMPORTS__
 | Change | Lives in | How it is made |
 | --- | --- | --- |
 | Pages, posts, menus, media, site settings | The EmDash database | The admin at `/_emdash/admin`, or an agent through the site's EmDash MCP server at `/_emdash/api/mcp`. No pull request. |
-| Layouts, components, page templates, site styles | This repository | A draft pull request that stays inside the design surface in `timds.consumer.json`; the TimDS preview shows it before it merges. |
+| Layouts, components, page templates, site styles | This repository | A draft pull request that stays inside the design surface in `timds.consumer.json`; review locally or through an enabled TimDS preview before merging. |
 | Colors, fonts, tokens, logos, brand guidance | The Design System repository | A pull request there, then the pin update here. |
 | The design of a page or route, and its states | The Design System repository, under `__DESIGN_SYSTEM_PATH__/dist/designs/` | The designer authors it there in plain HTML on the system's stylesheets; a developer ports it here. |
 
@@ -37,9 +37,14 @@ cannot express yet is a developer change to say so about, not a design to
 simplify.
 
 `preview.designs` in `timds.consumer.json` pairs a route with its design
-(`"/": "website:/"`); the pull-request preview then shows the design beside
-the route at every width and scheme, so the port is reviewed against its
+(`"/": "website:/"`); a local or enabled pull-request preview shows the design
+beside the route at every width and scheme, so the port is reviewed against its
 reference. Pairing a new route is a developer change to the manifest.
+
+Automatic previews are off by default. A developer can enable them with the
+`TIMDS_PREVIEWS_ENABLED=true` repository variable, the `TIMDS_ACCESS_TOKEN`
+secret, and CI read access to the Design System submodule. Otherwise include
+local review details and screenshots in the draft pull request.
 
 ## Rules for theme changes
 
