@@ -1,8 +1,11 @@
 name: TimDS consumer preview
 
 # Managed by TimDS (`timds consumer init`); `upgrade` refreshes it while it is
-# unmodified. Every pull request has its manifest and Design System pin
-# validated, which takes seconds. Only a pull request that can change how an
+# unmodified. Previews are off by default: opt in with
+# TIMDS_PREVIEWS_ENABLED=true and a TIMDS_ACCESS_TOKEN. Otherwise this workflow
+# skips checkout, installation, validation, rendering, upload, and comments.
+# When enabled, each pull request has its manifest and Design System pin
+# validated. Only a pull request that can change how an
 # app looks is previewed: each app whose design surface it changes, or every
 # app when it moves the Design System pin or changes timds.consumer.json. Such
 # an app is previewed (routes x viewports x schemes), published to the TimDS
@@ -13,14 +16,16 @@ name: TimDS consumer preview
 # reviewer sees when a design change needs a developer.
 #
 # Repository secrets:
-#   TIMDS_ACCESS_TOKEN               CLI token bound to this client; publishes
-#                                    previews. Without it the preview is only
-#                                    uploaded as a workflow artifact.
+#   TIMDS_ACCESS_TOKEN               CLI token bound to this client; required
+#                                    for previews. Without it nothing is built.
 #   DESIGN_SYSTEM_DEPLOY_KEY         private half of a read-only deploy key on
 #                                    the Design System repository, or
 #   TIMDS_CONSUMER_SUBMODULE_TOKEN   a token with contents:read on it.
 #                                    One of the two is required: the job token
 #                                    cannot read another private repository.
+# Repository variable:
+#   TIMDS_PREVIEWS_ENABLED           set to true to enable previews; unset or
+#                                    false skips the workflow's jobs.
 #
 # The designer-change workflow calls this one (workflow_call) with the pull
 # request and branch it pushed, because pushes made with the job token do not
@@ -47,10 +52,33 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  check:
+  gate:
     # Secrets and comment permissions are unavailable to fork pull requests.
     # A workflow_call comes from a workflow in this repository.
-    if: inputs.pull_request || github.event.pull_request.head.repo.full_name == github.repository
+    if: >-
+      vars.TIMDS_PREVIEWS_ENABLED == 'true'
+      && (inputs.pull_request || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    outputs:
+      enabled: ${{ steps.token.outputs.enabled }}
+    steps:
+      # GitHub does not allow secrets in job-level if expressions. Check only
+      # presence here, before allocating any checkout/install/render job.
+      - name: Check preview token availability
+        id: token
+        env:
+          HAS_ACCESS_TOKEN: ${{ secrets.TIMDS_ACCESS_TOKEN != '' }}
+        run: |
+          set -euo pipefail
+          echo "enabled=${HAS_ACCESS_TOKEN}" >> "$GITHUB_OUTPUT"
+          if [[ "$HAS_ACCESS_TOKEN" != "true" ]]; then
+            echo "TIMDS_ACCESS_TOKEN is not configured; skipping previews."
+          fi
+
+  check:
+    needs: gate
+    if: needs.gate.outputs.enabled == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     outputs:
@@ -120,7 +148,7 @@ jobs:
 
   preview:
     needs: check
-    if: needs.check.outputs.apps != '[]'
+    if: needs.check.result == 'success' && needs.check.outputs.apps != '[]'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -178,12 +206,7 @@ jobs:
           TIMDS_ACCESS_TOKEN: ${{ secrets.TIMDS_ACCESS_TOKEN }}
         run: |
           set -euo pipefail
-          if [[ -n "${TIMDS_ACCESS_TOKEN:-}" ]]; then
-            npm run timds -- consumer preview --app "$APP" --base "origin/${BASE_REF}" --publish --pull-request "$PULL_REQUEST"
-          else
-            echo "TIMDS_ACCESS_TOKEN is not configured; the preview is uploaded as a workflow artifact only."
-            npm run timds -- consumer preview --app "$APP" --base "origin/${BASE_REF}" --pull-request "$PULL_REQUEST"
-          fi
+          npm run timds -- consumer preview --app "$APP" --base "origin/${BASE_REF}" --publish --pull-request "$PULL_REQUEST"
       - name: Upload the preview
         if: always()
         uses: actions/upload-artifact@v4

@@ -237,6 +237,7 @@ test("scaffolds an EmDash site that reads a starter Design System from the pin",
   assert.ok(installation.consumer.managedFiles[".github/workflows/timds-consumer-preview.yml"]);
   assert.equal(installation.consumer.managedFiles[".github/workflows/deploy-cloudflare.yml"], undefined, "upgrade never manages the deploy workflow");
   assert.match(guide, /`\.github\/workflows\/deploy-cloudflare\.yml` builds and deploys it with Wrangler/);
+  assert.match(guide, /Automatic previews are off by default[\s\S]*TIMDS_PREVIEWS_ENABLED=true/);
   assert.ok(result.todos.some((item) => item.startsWith("To deploy, add the CLOUDFLARE_API_TOKEN")));
   assert.ok(result.todos.some((item) => item.includes("whoever opens it first becomes the administrator")));
   const agents = await fs.readFile(path.join(site, "AGENTS.md"), "utf8");

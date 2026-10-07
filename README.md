@@ -236,9 +236,10 @@ Declared `routes` always come first and always stay.
   design surface or inside a protected path, or moves the Design System pin,
   listing those paths. The surface is read from the manifest at the merge
   base, so a branch cannot widen its own scope; a branch whose base has no
-  manifest is an adoption and may add the submodule. The stock workflow runs
-  this on every pull request and reports a scope failure in the preview
-  comment without failing the job, since developer pull requests leave the
+  manifest is an adoption and may add the submodule. When automatic previews
+  are enabled, the stock workflow runs this on each eligible pull request
+  and reports a scope failure in the preview comment without failing the job,
+  since developer pull requests leave the
   surface by design. The same diff names the apps worth previewing
   (`previewApps` in `--json`, `preview-apps` as a GitHub Actions step output):
   an app whose design surface changed, or every app when the Design System pin
@@ -284,6 +285,21 @@ Declared `routes` always come first and always stay.
   a new EmDash CMS site repository that consumes a Design System (see
   **EmDash sites** below), then adopts it the way `consumer init` does.
 
+Automatic consumer previews are **off by default**. To enable
+`.github/workflows/timds-consumer-preview.yml`, set the repository variable
+`TIMDS_PREVIEWS_ENABLED` to `true` and configure the `TIMDS_ACCESS_TOKEN`
+repository secret. Also configure `DESIGN_SYSTEM_DEPLOY_KEY` (a read-only
+deploy key) or `TIMDS_CONSUMER_SUBMODULE_TOKEN` (with `contents:read`) so CI can
+check out the private Design System submodule. An unset or false variable
+skips all preview jobs without allocating a runner. With the variable enabled
+but no publishing token, only a short token-presence job runs; checkout,
+installation, validation, rendering, artifact upload, and comments are skipped.
+There is no artifact-only preview fallback. Product build, test, and smoke
+workflows remain independent, and `consumer check` and local
+`consumer preview --app NAME` still work without enabling CI previews.
+When previews are disabled, review locally and include the review URL,
+screenshots, and routes in the draft pull request.
+
 The designer-change workflow (`.github/workflows/timds-designer-change.yml`)
 lets a designer start a change with no setup. An issue labeled
 `timds-design-change` (the portal opens one from a plain-language request), a
@@ -293,10 +309,13 @@ or on such an issue (the portal posts review notes this way, with a fenced
 with the consumer skill on a `design/<issue>-<title>` branch. Codex edits in a
 workspace sandbox without a GitHub write token. A subsequent workflow step
 runs `consumer check` against the merge-base design surface, pushes validated
-edits and opens a draft pull request that closes the issue. The workflow then
-calls the preview workflow, because pushes
-made with the job token start no other workflows. Nothing is merged. Only
-owners, members, collaborators, and the bots listed in the
+edits and opens a draft pull request that closes the issue. When
+`TIMDS_PREVIEWS_ENABLED=true`, the workflow then calls the preview workflow,
+which checks for the publishing token, because pushes made with the job token
+start no other workflows. Without previews, the draft describes the routes
+to review and states that visual checks were not performed. Designer changes
+and note handling still run independently of the preview flag. Nothing is
+merged. Only owners, members, collaborators, and the bots listed in the
 `TIMDS_DESIGNER_BOTS` repository variable (the portal's GitHub App bot login)
 can trigger it, and fork branches are skipped. It needs the
 `OPENAI_API_KEY` repository or inherited organization secret, the
@@ -310,7 +329,11 @@ it refreshes the consumer skill, the two consumer workflows, and the tracked
 launch and MCP entries from the installed toolkit, replacing only what nobody
 edited since TimDS wrote it (customized files are refused, customized entries
 kept, until `--force`), and records the new version in
-`.timds/installation.json`. `upgrade --version 0.1.<patch>` (or `0.1.x`) first
+`.timds/installation.json`. Upgrading an unmodified preview workflow adopts
+the opt-in behavior above; customized workflows and skills still require
+review or explicit replacement with `--force`. Repository variables and
+secrets stay in GitHub settings and are never written by TimDS.
+`upgrade --version 0.1.<patch>` (or `0.1.x`) first
 selects that release under the bounded requirement, runs `npm ci`, and lets
 the new CLI do the refresh. It never touches `timds.consumer.json` or product
 source, and `--own-runtime`, `--auto-release`, and `--dependency-prs` are for

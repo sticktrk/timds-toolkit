@@ -97,6 +97,7 @@ test("upgrade refreshes unmodified managed files from the installed templates an
   await simulateOlderRelease(product, {
     files: {
       [PREVIEW_WORKFLOW]: "name: TimDS consumer preview (older release)\n",
+      [DESIGNER_WORKFLOW]: "name: TimDS designer change (older release)\n",
       [SKILL]: "---\nname: timds-consume-design-system\n---\nOlder skill.\n",
       // A file an older release shipped and this one no longer does.
       ".agents/skills/timds-consume-design-system/retired.md": "Retired.\n",
@@ -116,12 +117,14 @@ test("upgrade refreshes unmodified managed files from the installed templates an
   assert.match(output, new RegExp(`Toolkit: 0\\.1\\.0 -> ${toolkit.version.replaceAll(".", "\\.")}`));
   assert.match(output, /refreshed \.github\/workflows\/timds-consumer-preview\.yml/);
   assert.match(output, /refreshed \.agents\/skills\/timds-consume-design-system\/SKILL\.md/);
-  assert.match(output, /unchanged \.github\/workflows\/timds-designer-change\.yml/);
+  assert.match(output, /refreshed \.github\/workflows\/timds-designer-change\.yml/);
   assert.match(output, /removed {3}\.agents\/skills\/timds-consume-design-system\/retired\.md/);
   assert.match(output, /unchanged \.claude\/launch\.json entry "web"/);
 
   assert.equal(await fs.readFile(path.join(product, PREVIEW_WORKFLOW), "utf8"), await readTemplate("timds-consumer-preview.yml"));
   assert.equal(await fs.readFile(path.join(product, DESIGNER_WORKFLOW), "utf8"), await readTemplate("timds-designer-change.yml"));
+  assert.match(await fs.readFile(path.join(product, PREVIEW_WORKFLOW), "utf8"), /vars\.TIMDS_PREVIEWS_ENABLED == 'true'/);
+  assert.match(await fs.readFile(path.join(product, DESIGNER_WORKFLOW), "utf8"), /vars\.TIMDS_PREVIEWS_ENABLED == 'true'/);
   assert.match(await fs.readFile(path.join(product, SKILL), "utf8"), /### `web`/);
   await assert.rejects(fs.access(path.join(product, ".agents/skills/timds-consume-design-system/retired.md")));
   assert.deepEqual(await fs.readFile(path.join(product, "timds.consumer.json")), manifestBefore);

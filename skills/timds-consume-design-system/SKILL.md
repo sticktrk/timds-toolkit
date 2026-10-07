@@ -1,6 +1,6 @@
 ---
 name: timds-consume-design-system
-description: Make design changes to a product that consumes a TimDS Design System through its pinned design-system/ submodule, on behalf of a designer who reviews the result rather than the code. Use for changing a product's styles, components, page layout, copy placement, or imagery within its declared design surface; running the product locally to look at a change; and opening a draft pull request with a cloud preview link.
+description: Make design changes to a product that consumes a TimDS Design System through its pinned design-system/ submodule, on behalf of a designer who reviews the result rather than the code. Use for changing a product's styles, components, page layout, copy placement, or imagery within its declared design surface; running the product locally to look at a change; and opening a draft pull request with local review details or an enabled cloud preview.
 ---
 
 # Use the TimDS Design System in this product
@@ -26,15 +26,18 @@ may touch. Work only in the repository the user supplied.
 
 ## Designer notes
 
-The designer reviews the preview in the TimDS portal and leaves notes on it.
-Run `npm run timds -- consumer notes` at the start and again after each push
-(it needs `TIMDS_ACCESS_TOKEN` or `timds auth login`). Each note names the
+When a preview is published, the designer can review it in the TimDS portal
+and leave notes. Run `npm run timds -- consumer notes` at the start and again
+after each push (it needs `TIMDS_ACCESS_TOKEN` or `timds auth login`). Each note names the
 page, the element, and usually the source file and line. Treat the
 designer's words as the request and the element as where it applies. After
 pushing the fix, run `npm run timds -- consumer notes resolve <id>` for each
 note you addressed. Never mark a note addressed that you did not address; say
 why instead (in the pull request or your report), or
 `consumer notes resolve <id> --dismiss` when the designer agreed to drop it.
+
+When no preview is published or portal access is unavailable, use the
+designer's request and pull-request comments instead.
 
 ## The Design System is pinned, not edited here
 
@@ -105,8 +108,8 @@ route at desktop and phone width, in light and dark scheme, and check the
 requested change, overflow, navigation, and images. A route listed under
 **Designs to match** below has a design in the system; compare the route with
 it, state by state. Fix what you find before opening the pull request. The
-pull-request preview shows each paired design beside its route, so the
-designer reviews the port against its reference.
+pull-request preview, when enabled, shows each paired design beside its route,
+so the designer reviews the port against its reference.
 
 ## Open the pull request only when asked
 
@@ -124,10 +127,13 @@ npm run timds -- consumer check --base origin/__DEFAULT_BRANCH__
 3. Write the description for the designer: what changed and why in plain
    language, which pages and routes to look at, and anything left undecided.
    No code walkthrough.
-4. The `timds-consumer-preview` workflow comments a preview link on the pull
-   request for each app and updates that comment on every push. Give the
-   designer that link; if the comment is missing, say so and offer the local
-   preview instead.
+4. Automatic previews require the repository variable
+   `TIMDS_PREVIEWS_ENABLED=true` and the `TIMDS_ACCESS_TOKEN` secret. They are
+   off by default; without a token the workflow skips all preview work. When
+   enabled, `timds-consumer-preview` comments a preview link for each app and
+   updates it on each push. Give the designer that link when available.
+   Otherwise provide the local review URL and screenshots; do not wait for
+   or promise a cloud preview.
 5. Never merge, mark ready for review, deploy, move the Design System pin, or
    change managed TimDS files (`.agents/skills/timds-consume-design-system/`,
    `.github/workflows/timds-consumer-preview.yml`,
@@ -140,16 +146,19 @@ npm run timds -- consumer check --base origin/__DEFAULT_BRANCH__
 When this skill runs inside `.github/workflows/timds-designer-change.yml`, the
 run is non-interactive: do not ask questions; make reasonable assumptions and
 state them in the pull request description. There is no local browser pane;
-skip **Look at it**, because the preview workflow publishes the review page
-after the run. The workflow authorizes committing, pushing, and opening the
-draft pull request; the rest of **Open the pull request only when asked**
+skip **Look at it**. The preview workflow publishes a review page only when
+previews are enabled; otherwise describe the review routes and state that
+visual checks were not performed. The workflow authorizes committing,
+pushing, and opening the draft pull request; the rest of
+**Open the pull request only when asked**
 (never merge, never move the pin, never edit managed files) still holds.
 
 ## Report the result
 
 Lead with what changed, in the designer's words. Include the pull-request link,
-the preview link, the routes and widths you checked, the Design System roles
-and tokens used, and anything that needs a developer or a Design System change.
+the available cloud or local review link, the routes and widths you checked,
+the Design System roles and tokens used, and anything that needs a developer
+or a Design System change.
 
 ## This product
 
