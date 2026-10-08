@@ -36,7 +36,8 @@
     "typecheck": "tsc --noEmit",
     "pack:check": "npm pack --dry-run",
     "release": "./scripts/release.sh",
-    "test:shared-upgrades": "node scripts/check-shared-upgrades.mjs"
+    "test:shared-upgrades": "node scripts/check-shared-upgrades.mjs",
+    "golden-drift": "node scripts/golden-drift.mjs"
   },
   "files": [
     "bin",

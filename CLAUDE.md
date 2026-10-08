@@ -17,6 +17,7 @@ node --test src/core.test.mjs # one test file
 node --test --test-name-pattern="upgrade" src/core.test.mjs   # one test by name
 tsx --test video/remotion.test.tsx                            # the React component test
 node bin/timds.mjs <command> --root /path/to/client-design-system   # run the CLI from source
+npm run golden-drift -- --golden /path/to/golden-checkout            # where templates/starter has drifted from the golden system (exit 1 on drift)
 ```
 
 CI (`.github/workflows/ci.yml`) runs `npm ci && npm test && npm run pack:check`
@@ -137,8 +138,12 @@ its release scripts; `templates/*.yml` are the stock workflows. The starter
 viewer is client-owned once copied: `scripts/viewer.mjs` renders
 `src/site.json` (views and pages, authored or `planned`), `src/layout.html`,
 and the fragments under `src/pages/` into `dist/`, filling `{{tokens:GROUP}}`
-tables from `tokens.json`, and lists the designs under `src/designs/` in the
-app bar and sitemap. Planned pages are never built, so a fresh scaffold
+tables from `tokens.json` and `{{formats:GROUP}}` tables and `{{canvas:ID}}`
+preview variables from `src/formats.json` (the catalog of print sheets and
+screen canvases, each tied to its page; `src/styles/canvas.css` is the
+script-free preview engine), and lists the designs under `src/designs/` in the
+app bar and sitemap. The starter's views mirror the golden client system
+(Brand, Web DS, Digital DS, Social DS, Print DS); keep them in step with it. Planned pages are never built, so a fresh scaffold
 keeps its two expected brand warnings. The sample design uses the site layout
 block in `src/styles/system.css` (between its marker comments), which
 `designs init` appends to a migrating system that kept the starter tokens.

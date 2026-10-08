@@ -855,10 +855,16 @@ test("the starter viewer renders its site model, and its build guards pages, pla
   assert.match(color, /<a href="\/brand\/color\/" aria-current="page">Color<\/a>/);
   assert.match(color, /<td><code>color\.accent<\/code><\/td><td><code>--color-accent<\/code><\/td>/, "token tables come from tokens.json");
   assert.match(color, /class="pagenav"[\s\S]*← Typography[\s\S]*Spacing &amp; shape →/, "previous and next follow the site model");
+  // Format tables and previews come from src/formats.json; a format's planned page is named, never linked.
+  const digital = await read("dist/digital/index.html");
+  assert.match(digital, /<td><strong>Medium rectangle<\/strong><\/td><td><span style="white-space:nowrap">300 × 250 px<\/span><\/td><td>12 px<\/td><td>PNG or JPG<\/td><td>150 KB<\/td><td>Google Display Ads <span class="tag">Planned<\/span><\/td>/);
+  assert.match(digital, /<div class="canvas-frame canvas-frame--actual" style="--cw:728;--ch:90;--safe:8;--bleed:0;--ui-t:0;--ui-b:0;--ui-l:0;--ui-r:0;--clear-l:0;--clear-r:0">/);
+  assert.match(await read("dist/print/index.html"), /<td><strong>Letterhead · US Letter<\/strong><\/td><td><span style="white-space:nowrap">8\.5″ × 11″<\/span><\/td><td>0\.125″<\/td><td>0\.5″<\/td>/);
+  assert.match(await read("dist/social/index.html"), /style="--cw:1080;--ch:1920;--safe:64;--bleed:0;--ui-t:250;--ui-b:340;/, "platform bands reach the preview");
 
   // The derived layer carries only authored guidance, so the brand kit still reports what the client has not supplied.
   const { designs, machine } = await checkWorkspace(repoRoot);
-  assert.deepEqual(machine.pages.map((page) => page.id), ["brand/color", "brand/typography", "index", "web/components", "web/spacing"], "design pages are not guidance");
+  assert.deepEqual(machine.pages.map((page) => page.id), ["brand/color", "brand/typography", "digital", "index", "print", "social", "web/components", "web/spacing"], "design pages are not guidance");
   assert.equal(machine.counts.untyped, 0);
   assert.deepEqual(machine.warnings.map((warning) => warning.split(":")[0]), ["guidance group voice is empty", 'no asset is annotated data-timds-role="logo"; the brand kit has no logo']);
   assert.deepEqual(designs, { enabled: true, designCount: 1, pageCount: 2, stateCount: 3 });
@@ -888,7 +894,7 @@ test("the starter viewer renders its site model, and its build guards pages, pla
   const voice = site.views[0].pages.find((page) => page.slug === "voice");
   delete voice.planned;
   await writeJson(path.join(repoRoot, "src/site.json"), site);
-  assert.match(run("build"), /6 pages/);
+  assert.match(run("build"), /9 pages/);
   assert.match(await read("dist/brand/voice/index.html"), /Lead with the answer/);
   await fs.rm(path.join(repoRoot, "src/pages/brand/voice.html"));
   fails("build", /src\/pages\/brand\/voice\.html is missing/);
@@ -905,6 +911,24 @@ test("the starter viewer renders its site model, and its build guards pages, pla
   await fs.writeFile(path.join(repoRoot, "src/pages/brand/color.html"), colorSource.replace("{{tokens:color}}", "{{palette}}"));
   fails("check", /unknown placeholder \{\{palette\}\}/);
   await fs.writeFile(path.join(repoRoot, "src/pages/brand/color.html"), colorSource);
+
+  // A format names a declared page, ids are unique across groups, and a page previews only a declared format.
+  const formats = JSON.parse(await read("src/formats.json"));
+  formats.print.formats.letterhead.page = "print/stationery";
+  await writeJson(path.join(repoRoot, "src/formats.json"), formats);
+  fails("check", /format print\.letterhead names the page "print\/stationery", which src\/site\.json does not declare/);
+  formats.print.formats.letterhead.page = "print/letterheads";
+  formats.social.formats.letterhead = { ...formats.print.formats.letterhead };
+  await writeJson(path.join(repoRoot, "src/formats.json"), formats);
+  fails("check", /declares the format letterhead twice/);
+  delete formats.social.formats.letterhead;
+  await writeJson(path.join(repoRoot, "src/formats.json"), formats);
+  const digitalSource = await read("src/pages/digital/index.html");
+  await fs.writeFile(path.join(repoRoot, "src/pages/digital/index.html"), digitalSource.replace("{{canvas:gdn-728x90}}", "{{canvas:gdn-728x91}}"));
+  fails("check", /uses \{\{canvas:gdn-728x91\}\}, but src\/formats\.json declares no format gdn-728x91/);
+  await fs.writeFile(path.join(repoRoot, "src/pages/digital/index.html"), digitalSource.replace("{{formats:digital}}", "{{formats:screen}}"));
+  fails("check", /src\/formats\.json has no screen group/);
+  await fs.writeFile(path.join(repoRoot, "src/pages/digital/index.html"), digitalSource);
 
   await fs.appendFile(path.join(repoRoot, "src/styles/system.css"), "\n#facade { color: var(--color-ink); }\n.button--danger { background: #b00020; }\n");
   fails("check", /Color literals belong in tokens\.json.*\(src\/styles\/system\.css:\d+\)/);

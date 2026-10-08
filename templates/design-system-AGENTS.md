@@ -28,6 +28,7 @@ holds `timds.json`. Run `__TIMDS_CLI__` commands from the repository root.
 | --- | --- | --- |
 | `tokens.json` | Authored design tokens | Edit |
 | `src/site.json` | The views and every page in them; the one place that declares which pages exist | Edit |
+| `src/formats.json` | Every print sheet and screen canvas the system produces, each tied to the page that shows it; previews and spec tables read it | Edit |
 | `src/pages/` | One content fragment per authored page | Edit |
 | `src/designs/` | Website designs: whole pages in plain HTML on the system's stylesheets, one directory per design | Edit |
 | `src/layout.html` | The shell every page shares: app bar, page navigation, content slot | Edit |
@@ -48,7 +49,8 @@ immediately. Its colors, fonts, and copy are neutral placeholders, not brand
 guidance. Its structure is the part to keep: views, a shared shell, and pages
 built from the same few blocks.
 
-- `src/site.json` lists the views (Brand, Web) and the pages in each, in
+- `src/site.json` lists the views (Brand, Web DS, Digital DS, Social DS,
+  Print DS) and the pages in each, in
   navigation order. A page is `{ "slug", "title", "summary" }` plus an
   optional `group` heading for the sidebar. The page `<view>/<slug>` is
   authored in `src/pages/<view>/<slug>.html` and built to
@@ -59,6 +61,14 @@ built from the same few blocks.
   the derived layer never carries placeholder guidance. To author it, create
   the fragment and remove the flag. The build fails when the two disagree, and
   when a fragment exists that `site.json` does not declare.
+- `src/formats.json` is the catalog of asset formats: `print` in inches,
+  `digital` and `social` in pixels, each format with its safe area, limits,
+  and the page that shows it. `{{formats:GROUP}}` renders a group's table and
+  `{{canvas:ID}}` fills a preview's `style` attribute, so a page never
+  restates a size and a format without a declared page fails the build.
+  A preview is a `.canvas-frame` holding a `.canvas` composed from the
+  pieces in `src/styles/canvas.css`, written in design units (`--u`, or
+  `--t` for type) so one rule set fits every size without a script.
 - A fragment holds only what goes inside `<main>`: an eyebrow, one
   `<h1 class="page-title">`, a `<p class="lede">`, then one
   `<section class="block" id="...">` per topic. `src/layout.html` supplies the
@@ -193,15 +203,18 @@ only that layer, so page structure decides what they receive.
 2. Replace the starter values in `tokens.json`. Keep role-friendly token names
    or map the roles in `timds.json`.
 3. Rewrite the authored pages (`brand/color`, `brand/typography`,
-   `web/spacing`, `web/components`) for the client: their copy, their rules,
-   and the components in `src/styles/system.css`.
+   `web/spacing`, `web/components`, and the `digital`, `social`, and `print`
+   overviews) for the client: their copy, their rules, and the components in
+   `src/styles/system.css`.
 4. Author the planned pages, starting with the Brand view. Add small
    optimized logo files under `src/assets/`, then write `brand/logo` showing
    each one by site-absolute path with its annotation. Write `brand/voice`
    and `brand/foundation`.
-5. Shape the rest of `src/site.json` to the client: remove a planned page the
-   system will not have, and add pages or whole views (email, social, print,
-   video) it needs.
+5. Shape `src/site.json` to the client: remove a planned page, or a whole
+   view, the system will not have, and add the pages it needs. Keep every
+   template's size in `src/formats.json`; when a template page is authored,
+   its formats' rows link to it. Templates ship in the three steps of the
+   scale the Print overview defines.
 6. Replace the sample website design under `src/designs/website/` with the
    client's pages, each state as its own file, using only the system's
    classes. Add a layout piece or component to `src/styles/system.css` and

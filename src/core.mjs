@@ -86,7 +86,10 @@ const legacyStarterScriptHashes = new Map([
     "1bac8e95f8ee166d4f7b1e5f080dd78dd056afe9f4be7967b5c8e755d71f1479",
     "9fcddb635f5738f2e722e711483bbde182518e68a2ab6da97b097aaf567b2001",
   ]],
-  ["scripts/viewer.mjs", ["7c534a20e242f2ba51f86907233684ae3b61161d8ba1dbcc92665d379968b721"]],
+  ["scripts/viewer.mjs", [
+    "7c534a20e242f2ba51f86907233684ae3b61161d8ba1dbcc92665d379968b721",
+    "673344052d11194f219bc32ba724ad4c5cd954b19ba95be684b7001774074bc9",
+  ]],
 ]);
 const legacyStandaloneAutomationHashes = new Map([
   [".github/workflows/timds-design-system.yml", [

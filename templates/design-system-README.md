@@ -29,18 +29,19 @@ New contracts include a dependency-free starter viewer under `src/` and
 deterministic Node.js commands under `scripts/`. The starter exists so the
 contract builds and validates immediately; replace its neutral tokens and
 examples with approved client foundations rather than treating them as brand
-guidance. It is organized as views (Brand, Web), each a list of pages, all
-rendered into one shared shell. Some pages are authored from the starter
+guidance. It is organized as views (Brand, Web DS, Digital DS, Social DS,
+Print DS), each a list of pages, all rendered into one shared shell. Some pages are authored from the starter
 tokens; the rest are declared as planned and built once someone writes them.
 
 | Path | Purpose |
 | --- | --- |
 | `tokens.json` | Authored tokens; the build emits each as a `--group-name` CSS custom property in `tokens.css` |
 | `src/site.json` | The views and their pages, authored or planned; drives the navigation and the overview |
+| `src/formats.json` | Every print sheet and screen canvas the system produces, each tied to its page; `{{formats:GROUP}}` tables and `{{canvas:ID}}` previews read it |
 | `src/pages/` | One content fragment per authored page, such as `src/pages/brand/color.html` |
 | `src/designs/` | Website designs: whole pages in plain HTML on the system's stylesheets, one directory per design, built to `/designs/` |
 | `src/layout.html` | The shell every page shares |
-| `src/styles/system.css`, `src/styles/viewer.css` | The system's own styles, and the documentation chrome |
+| `src/styles/system.css`, `src/styles/canvas.css`, `src/styles/viewer.css` | The system's own styles, the format previews, and the documentation chrome |
 | `src/assets/` | Small optimized assets such as logos, copied into the artifact |
 | `scripts/build.mjs`, `dev.mjs`, `check.mjs`, `viewer.mjs` | The `workspace` commands declared in `timds.json` and the renderer they share |
 | `CHANGELOG.md` | Change notes; add to `## Unreleased` |

@@ -49,6 +49,9 @@ system is ordinary design work:
    fragments under `src/pages/` for the client, then author the planned ones:
    create `src/pages/<view>/<slug>.html` and remove the flag. Remove planned
    pages the system will not have and add the pages and views it needs.
+   Every print sheet and screen canvas is sized from `src/formats.json`;
+   add a format there, naming its page, before a template page previews it
+   with `{{canvas:ID}}`.
 4. Add the logo under `src/assets/` and write the `brand/logo`, `brand/voice`,
    and other guidance pages, shaped as described in the next section. A
    fragment holds only the content of `<main>`; `src/layout.html` supplies the

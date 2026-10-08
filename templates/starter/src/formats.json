@@ -1,0 +1,66 @@
+{
+  "$comment": "Every asset format the system produces, in one place: print sheets in inches, screen canvases in pixels. A page never restates a size: {{formats:GROUP}} renders a group's table and {{canvas:ID}} fills a preview's style attribute (see src/styles/canvas.css). Each format names the page that shows it, so a format without a page fails the build. Sizes and limits are the platforms' and printers' own; confirm them against current platform specifications before a campaign ships.",
+  "print": {
+    "unit": "in",
+    "formats": {
+      "letterhead": { "name": "Letterhead · US Letter", "width": 8.5, "height": 11, "bleed": 0.125, "safe": 0.5, "stock": "70–80 lb uncoated text, white or natural; laser and inkjet compatible.", "page": "print/letterheads", "note": "Minimal prints without bleed in the office; Accent and Bold need a press with bleed." },
+      "letterhead-second": { "name": "Second sheet · US Letter", "width": 8.5, "height": 11, "bleed": 0.125, "safe": 0.5, "stock": "Same stock as the first sheet.", "page": "print/letterheads" },
+      "business-card": { "name": "Business card · US", "width": 3.5, "height": 2, "bleed": 0.125, "safe": 0.125, "stock": "16–32 pt uncoated or soft-touch cover.", "page": "print/business-cards" },
+      "brochure": { "name": "Tri-fold brochure · letter", "width": 11, "height": 8.5, "bleed": 0.125, "safe": 0.25, "stock": "100 lb gloss or silk text; 80 lb uncoated for Minimal.", "page": "print/brochures", "note": "Roll fold: the tuck-in panel is 1/16″ narrower than the other two." },
+      "booklet": { "name": "Booklet · 6 × 9 trade", "width": 6, "height": 9, "bleed": 0.125, "safe": 0.375, "stock": "Interior 60–70 lb natural uncoated text; cover 100 lb cover with matte laminate.", "page": "print/booklets", "note": "Saddle-stitched at 48 pages or fewer with a page count that is a multiple of 4; perfect bound above that." },
+      "worksheet": { "name": "Worksheet · US Letter", "width": 8.5, "height": 11, "bleed": 0, "safe": 0.5, "stock": "24 lb bond or 70 lb uncoated text so it takes pen and pencil.", "page": "print/worksheets", "note": "No bleed: a white margin on every template so it prints on any office printer." },
+      "calendar": { "name": "Calendar · US Letter", "width": 8.5, "height": 11, "bleed": 0.125, "safe": 0.5, "stock": "100 lb uncoated cover, so the sheet pins flat and takes pen.", "page": "print/calendars", "note": "Two single-sheet templates share this format: the year at a glance and the month page." },
+      "notepad": { "name": "Notepad · half letter", "width": 5.5, "height": 8.5, "bleed": 0.125, "safe": 0.375, "stock": "60–70 lb uncoated text, 50 sheets, padded at the head onto chipboard.", "page": "print/notepads", "note": "Top-glued: the padding compound takes about 1/8″ at the head, so nothing sits above the safe line." },
+      "notepad-desk": { "name": "Desk pad · 4 × 6", "width": 4, "height": 6, "bleed": 0.125, "safe": 0.25, "stock": "Same text stock, 50 sheets, padded at the head.", "page": "print/notepads" },
+      "pull-up": { "name": "Retractable pull-up banner", "width": 33, "height": 80, "bleed": 0.5, "safe": 1, "stock": "13 oz anti-curl vinyl or polyester fabric.", "page": "print/conference-banners", "note": "The bottom 8″ disappears into the stand cassette; keep everything critical above it." },
+      "wide-banner": { "name": "Hanging or table banner", "width": 96, "height": 36, "bleed": 0.5, "safe": 1.5, "stock": "13 oz matte vinyl with grommets, or dye-sublimated fabric.", "page": "print/conference-banners", "note": "Grommets sit 1″ in from each corner and every 24″; nothing within 1.5″ of the edge." },
+      "poster-11x17": { "name": "Poster · tabloid", "width": 11, "height": 17, "bleed": 0.125, "safe": 0.5, "stock": "100 lb gloss text; in-office or digital press.", "page": "print/posters" },
+      "poster-18x24": { "name": "Poster · medium", "width": 18, "height": 24, "bleed": 0.125, "safe": 0.75, "stock": "100 lb silk cover or 9 mil satin photo paper.", "page": "print/posters" },
+      "poster-24x36": { "name": "Poster · large", "width": 24, "height": 36, "bleed": 0.125, "safe": 1, "stock": "9 mil satin photo paper; foam-core mount for easels.", "page": "print/posters" },
+      "poster-27x40": { "name": "Poster · one-sheet", "width": 27, "height": 40, "bleed": 0.125, "safe": 1, "stock": "9 mil satin photo paper, or backlit film for light boxes.", "page": "print/posters" }
+    }
+  },
+  "digital": {
+    "unit": "px",
+    "formats": {
+      "gdn-300x250": { "name": "Medium rectangle", "width": 300, "height": 250, "safe": 12, "maxKB": 150, "file": "PNG or JPG", "page": "digital/display-ads" },
+      "gdn-336x280": { "name": "Large rectangle", "width": 336, "height": 280, "safe": 12, "maxKB": 150, "file": "PNG or JPG", "page": "digital/display-ads" },
+      "gdn-728x90": { "name": "Leaderboard", "width": 728, "height": 90, "safe": 8, "maxKB": 150, "file": "PNG or JPG", "page": "digital/display-ads" },
+      "gdn-970x250": { "name": "Billboard", "width": 970, "height": 250, "safe": 14, "maxKB": 150, "file": "PNG or JPG", "page": "digital/display-ads" },
+      "gdn-300x600": { "name": "Half page", "width": 300, "height": 600, "safe": 14, "maxKB": 150, "file": "PNG or JPG", "page": "digital/display-ads" },
+      "gdn-160x600": { "name": "Wide skyscraper", "width": 160, "height": 600, "safe": 10, "maxKB": 150, "file": "PNG or JPG", "page": "digital/display-ads" },
+      "gdn-320x50": { "name": "Mobile banner", "width": 320, "height": 50, "safe": 6, "maxKB": 150, "file": "PNG or JPG", "page": "digital/display-ads", "note": "Too small for a disclaimer line; do not use it where one is required." },
+      "gdn-320x100": { "name": "Large mobile banner", "width": 320, "height": 100, "safe": 8, "maxKB": 150, "file": "PNG or JPG", "page": "digital/display-ads" },
+      "rda-1200x628": { "name": "Responsive landscape", "width": 1200, "height": 628, "safe": 60, "maxKB": 5120, "file": "JPG", "page": "digital/responsive-ads", "note": "The platform crops and overlays its own copy on responsive ads; keep text off the image." },
+      "rda-1200x1200": { "name": "Responsive square", "width": 1200, "height": 1200, "safe": 60, "maxKB": 5120, "file": "JPG", "page": "digital/responsive-ads", "note": "The platform crops and overlays its own copy on responsive ads; keep text off the image." },
+      "web-1920x600": { "name": "Webinar page hero", "width": 1920, "height": 600, "safe": 80, "ui": { "left": 240, "right": 240 }, "file": "JPG, under 400 KB", "page": "digital/webinar-banners", "note": "The outer 240 px crop away on narrow screens; keep copy in the centre 1440 px." },
+      "web-1200x628": { "name": "Registration banner", "width": 1200, "height": 628, "safe": 60, "file": "JPG or PNG", "page": "digital/webinar-banners" },
+      "web-1920x1080": { "name": "Webinar title slide", "width": 1920, "height": 1080, "safe": 96, "file": "PNG", "page": "digital/webinar-banners" },
+      "zoom-1920x1080": { "name": "Virtual background", "width": 1920, "height": 1080, "safe": 96, "keepClear": { "left": 560, "right": 560 }, "file": "JPG or PNG, under 5 MB", "page": "digital/virtual-backgrounds", "note": "The speaker covers the central keep-clear region; the brand sits top left and the message upper right." },
+      "email-1200x400": { "name": "Email header", "width": 1200, "height": 400, "safe": 48, "file": "JPG at 2×, displayed 600 × 200", "page": "digital/email-banners" },
+      "sig-1200x200": { "name": "Email signature banner", "width": 1200, "height": 200, "safe": 24, "file": "PNG at 2×, displayed 600 × 100", "page": "digital/email-banners" },
+      "site-1920x800": { "name": "Website promo hero", "width": 1920, "height": 800, "safe": 96, "ui": { "left": 240, "right": 240 }, "file": "WebP or JPG, under 300 KB", "page": "digital/web-promos" },
+      "site-1440x120": { "name": "Website promo strip", "width": 1440, "height": 120, "safe": 24, "file": "HTML preferred; WebP fallback", "page": "digital/web-promos" },
+      "gbp-1200x900": { "name": "Business profile post", "width": 1200, "height": 900, "safe": 60, "file": "JPG or PNG", "page": "digital/business-profile" }
+    }
+  },
+  "social": {
+    "unit": "px",
+    "formats": {
+      "eventbrite-2160x1080": { "name": "Eventbrite event image", "width": 2160, "height": 1080, "safe": 108, "ui": { "left": 280, "right": 280 }, "file": "JPG or PNG, under 10 MB", "page": "social/event-templates", "note": "Listings crop toward the centre; keep the headline in the middle 1600 px." },
+      "fb-event-1920x1005": { "name": "Facebook event cover", "width": 1920, "height": 1005, "safe": 96, "file": "JPG or PNG", "page": "social/event-templates" },
+      "li-event-1776x444": { "name": "LinkedIn event cover", "width": 1776, "height": 444, "safe": 64, "file": "JPG or PNG", "page": "social/event-templates" },
+      "webinar-1080x1080": { "name": "Webinar promo post", "width": 1080, "height": 1080, "safe": 64, "file": "JPG or PNG", "page": "social/event-templates" },
+      "webinar-1080x1920": { "name": "Webinar story", "width": 1080, "height": 1920, "safe": 64, "ui": { "top": 250, "bottom": 340 }, "file": "JPG or PNG", "page": "social/event-templates" },
+      "fb-1080x1080": { "name": "Facebook square post", "width": 1080, "height": 1080, "safe": 64, "file": "JPG or PNG", "page": "social/facebook-posts" },
+      "fb-1200x630": { "name": "Facebook link or landscape post", "width": 1200, "height": 630, "safe": 60, "file": "JPG or PNG", "page": "social/facebook-posts" },
+      "fb-1080x1920": { "name": "Facebook story", "width": 1080, "height": 1920, "safe": 64, "ui": { "top": 250, "bottom": 340 }, "file": "JPG or PNG", "page": "social/facebook-posts" },
+      "ig-1080x1080": { "name": "Instagram square", "width": 1080, "height": 1080, "safe": 64, "file": "JPG", "page": "social/instagram-posts" },
+      "ig-1080x1350": { "name": "Instagram portrait", "width": 1080, "height": 1350, "safe": 64, "file": "JPG", "page": "social/instagram-posts", "note": "The profile grid crops portrait posts to 3:4; keep copy inside the centred 1012 × 1350." },
+      "ig-1080x1920": { "name": "Instagram story or reel cover", "width": 1080, "height": 1920, "safe": 64, "ui": { "top": 250, "bottom": 340 }, "file": "JPG", "page": "social/instagram-posts" },
+      "meta-1080x1080": { "name": "Meta feed ad", "width": 1080, "height": 1080, "safe": 64, "file": "JPG or PNG", "page": "social/paid-social" },
+      "meta-1080x1350": { "name": "Meta feed ad · portrait", "width": 1080, "height": 1350, "safe": 64, "file": "JPG or PNG", "page": "social/paid-social" },
+      "li-1200x627": { "name": "LinkedIn sponsored", "width": 1200, "height": 627, "safe": 60, "file": "JPG or PNG", "page": "social/paid-social" }
+    }
+  }
+}

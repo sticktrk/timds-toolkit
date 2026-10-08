@@ -106,6 +106,63 @@ Custom overrides require reviewed exact runtime versions. Shared geometry and
 fit limits live in `video/board-layouts.mjs`. Keep packed-release checks with
 two brands and before/after visual comparisons in CI.
 
+## The starter scaffold mirrors the golden system
+
+One private client Design System is the golden reference for
+`templates/starter/`. Its name never enters this public repository; the
+maintainer supplies it. When it gains a view, a sidebar group, a template
+family, or shared plumbing, rework the starter to match, so a fresh scaffold
+is organized the way a fleshed-out system ends up.
+
+Mirror structure, never content:
+
+- Views, in `src/site.json`: ids, labels, blurbs, order, sidebar groups, and
+  page lists. Keep the golden view labels (`Web DS`, `Digital DS`); the golden
+  `marketing` view is the starter's `web` view. Keep a page title unless it
+  is ambiguous outside its sidebar group (`LinkedIn specs`, not `Specs`).
+  A page that needs the client's mark, photos, or copy stays `planned`.
+  Author a view's overview when it carries what every system needs:
+  principles, the catalog table, and how a preview is built.
+- Single-owner catalogs become JSON the viewer validates: asset sizes in
+  `src/formats.json`, the counterpart of the golden format modules, with
+  every entry naming its page. A page never restates a size or a token.
+- Preview engines and shared atoms become script-free CSS under
+  `src/styles/`, written against the starter tokens with no color literals.
+- Platform facts (standard ad sizes, upload limits, print trims) may be
+  mirrored; say on the page that they need confirming before use.
+- Leave out client copy, names and addresses, photos and focus points,
+  campaign content, ink builds, field-specific compliance text, and
+  product-specific sub-systems such as an admin theme.
+
+When mirroring a golden change:
+
+1. Run `npm run golden-drift -- --golden PATH` against a checkout of the
+   change: it lists the views, groups, pages, and formats the starter lacks
+   or declares differently. Then read the navigation model, catalogs,
+   stylesheet imports, and overview pages before the template pages; the
+   templates follow from those.
+2. Update `src/site.json`, `src/formats.json`, the stylesheets, and the
+   fragments. A fresh scaffold must still pass `check` with exactly its two
+   expected warnings (no voice page, no annotated logo) and no untyped prose.
+3. Keep the scaffolded `templates/design-system-AGENTS.md`,
+   `design-system-README.md`, the edit skill, and this repository's
+   `CLAUDE.md` describing the new structure.
+4. If `scripts/viewer.mjs` or `scripts/build.mjs` changed, add the previous
+   stock file's sha256 to `legacyStarterScriptHashes` in `src/core.mjs` so
+   `designs init` still recognizes systems scaffolded from earlier releases.
+5. Update the starter assertions in `src/core.test.mjs` (page ids, page
+   counts, rendered tables) and `src/mcp.test.mjs` (the stylesheet list),
+   then run `npm test` and `npm run pack:check`. Rerun the drift script
+   until it reports none; a deliberate omission is recorded with its reason
+   in `MAPPING` in `scripts/golden-drift.mjs`, never left as noise.
+6. Cite the golden pull request by number in the commit message, never by
+   repository name.
+
+The golden repository's own workflow opens a `golden-mirror` issue here
+when a merged pull request touched its structure-bearing files (navigation
+model, catalogs and content modules, shared stylesheets, layout). Work the
+issue with the steps above and close it from the mirror pull request.
+
 Never add client-specific content, credentials, private URLs, access tokens,
 media, or portal-internal implementation to this public repository or npm
 package.
