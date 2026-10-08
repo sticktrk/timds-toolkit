@@ -52,6 +52,7 @@
     "src/consumer-browser.mjs",
     "src/consumer-png.mjs",
     "src/defaults.mjs",
+    "src/starter.mjs",
     "src/artifact.mjs",
     "src/auth.mjs",
     "src/extract.mjs",

@@ -151,6 +151,26 @@ clean.
   system scaffolded before designs existed adopts them with
   `__TIMDS_CLI__ designs init`.
 
+## The starter stays current through upgrade
+
+The scaffold's plumbing and structure are kept current by TimDS, the way its
+skills are: `.timds/starter.json` records what the toolkit wrote, and every
+`__TIMDS_CLI__ upgrade` re-syncs it (a system scaffolded before the record
+existed opts in once with `__TIMDS_CLI__ starter sync`). The sync refreshes
+the stock `scripts/build.mjs`, `check.mjs`, `dev.mjs`, `viewer.mjs`,
+`src/styles/canvas.css`, and `src/styles/viewer.css` while they are
+unmodified; appends views, planned pages, and asset formats a newer scaffold
+declares to `src/site.json` and `src/formats.json` without removing,
+reordering, or retitling anything declared here; writes the Digital, Social,
+and Print overview fragments when it adds or authors their page; and adds a
+missing stock stylesheet link to `src/layout.html`. It never touches other
+fragments, `tokens.json`, `system.css`, or `timds.json`. A file changed here
+is reported as customized and kept; a sync that would fail `check` is rolled
+back. So: edit `system.css` and the pages freely, but leave the stock scripts
+and `viewer.css` alone unless the change is meant to stay local, and expect
+new planned pages after an upgrade, which are primitives to author, not
+mistakes to delete.
+
 ## Write pages the derived layer can read
 
 `check` reads the built HTML and CSS, never authored source, and writes
@@ -256,6 +276,7 @@ __TIMDS_CLI__ check     # build, validate the artifact, derive the machine layer
 __TIMDS_CLI__ brand     # the derived brand kit and a fix for every gap
 __TIMDS_CLI__ preview   # serve the exact built artifact; designs under /designs/
 __TIMDS_CLI__ designs init   # adopt website designs in a system scaffolded without them
+__TIMDS_CLI__ starter sync   # bring the starter's scripts, views, and format catalog up to the installed release (every upgrade repeats it)
 __TIMDS_CLI__ diff      # design-system changes against the default branch (--base REF)
 ```
 

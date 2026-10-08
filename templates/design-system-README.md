@@ -62,6 +62,13 @@ undeclared classes, relative references. The starter ships one sample design
 to replace; a system scaffolded before designs existed adopts them with
 `__TIMDS_CLI__ designs init`. `AGENTS.md` holds the rules.
 
+The scaffold itself stays current: `.timds/starter.json` records the starter
+scripts, viewer stylesheets, views, and asset formats TimDS wrote, and every
+`__TIMDS_CLI__ upgrade` refreshes what is unmodified and appends new views,
+planned pages, and formats without touching what this system declares. A
+system scaffolded before the record existed opts in once with
+`__TIMDS_CLI__ starter sync`.
+
 Declare framework-specific local commands as argument arrays in `timds.json`:
 
 ```json

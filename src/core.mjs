@@ -26,6 +26,7 @@ import { migrateVideoComponents } from "./video-migration.mjs";
 import { acceptsToolkitReleaseRange, assertVideoContractRuntime, runtimeIdentity, toolkitReleaseRange } from "./runtime.mjs";
 import { publishExtractedIndex } from "./artifact.mjs";
 import { DESIGNS_SOURCE_DIRECTORY, buildDesigns, checkDesigns, declaredClasses, readDesignCatalog, renderDesigns } from "./designs.mjs";
+import { STARTER_RECORD_FILE, describeStarterSync, isStarterSystem, legacyStarterFileHashes, planStockFile, readStarterRecord, recordFreshStarter, syncStarter } from "./starter.mjs";
 import { extractArtifact, normalizeMachineConfig } from "./extract.mjs";
 import { normalizeBrandGuidance } from "./brand.mjs";
 import { describeBrandKit, readDerivedLayer, summarizeBrandKit } from "./derived.mjs";
@@ -75,21 +76,12 @@ const dependencyAutomationFiles = Object.freeze([
 // is never mistaken for a customized one.
 // The starter scripts `designs init` may replace: [design-system path,
 // template name]. A script is replaced only when it is byte-identical to a
-// stock version an earlier release scaffolded (by sha256 below) or to the
-// current one; a customized script is reported, never overwritten.
+// stock version (the toolkit's `legacyStarterFileHashes` and the starter
+// record in src/starter.mjs) or to the current one; a customized script is
+// reported, never overwritten. `starter sync` keeps the whole plumbing set.
 const starterScriptFiles = Object.freeze([
   ["scripts/build.mjs", "starter/scripts/build.mjs"],
   ["scripts/viewer.mjs", "starter/scripts/viewer.mjs"],
-]);
-const legacyStarterScriptHashes = new Map([
-  ["scripts/build.mjs", [
-    "1bac8e95f8ee166d4f7b1e5f080dd78dd056afe9f4be7967b5c8e755d71f1479",
-    "9fcddb635f5738f2e722e711483bbde182518e68a2ab6da97b097aaf567b2001",
-  ]],
-  ["scripts/viewer.mjs", [
-    "7c534a20e242f2ba51f86907233684ae3b61161d8ba1dbcc92665d379968b721",
-    "673344052d11194f219bc32ba724ad4c5cd954b19ba95be684b7001774074bc9",
-  ]],
 ]);
 const legacyStandaloneAutomationHashes = new Map([
   [".github/workflows/timds-design-system.yml", [
@@ -922,6 +914,10 @@ export async function initializeRepository(repoRootInput, {
   await writeIfMissing(path.join(designSystemRoot, "CHANGELOG.md"), await template("CHANGELOG.md"), created);
   if (createsContract) {
     await copyDirectory(path.join(packageRoot, "templates", "starter"), designSystemRoot, { created });
+    // A fresh scaffold is adopted from the start: the record of what the
+    // toolkit wrote lets every later `upgrade` refresh the starter's plumbing
+    // and structure without guessing what the client has changed.
+    created.push(await recordFreshStarter(designSystemRoot, identity.version));
   }
   await writeIfMissing(
     path.join(repoRoot, ".github", "workflows", "timds-design-system.yml"),
@@ -955,7 +951,7 @@ export async function upgradeRepository(repoRootInput, { autoRelease = false, de
   }
   const paths = managedToolkitPaths(workspace.repoRoot, workspace.designSystemRoot);
   if (!force) {
-    const pathspecs = [paths.legacyVendoredCliRoot, paths.installationPath, paths.skillDestination, paths.videoSkillDestination]
+    const pathspecs = [paths.legacyVendoredCliRoot, paths.installationPath, paths.skillDestination, paths.videoSkillDestination, path.join(workspace.designSystemRoot, ...STARTER_RECORD_FILE.split("/"))]
       .map((filePath) => path.relative(workspace.repoRoot, filePath).split(path.sep).join("/"));
     const status = await git(["status", "--porcelain", "--untracked-files=all", "--", ...pathspecs], workspace.repoRoot);
     if (status.stdout.trim()) {
@@ -983,7 +979,25 @@ export async function upgradeRepository(repoRootInput, { autoRelease = false, de
     repoRoot: workspace.repoRoot,
     replace: true,
   });
-  return { ...workspace, ...installed, previousVersion, releaseAutomationChanges };
+  // An adopted starter is synced on every upgrade, the way the managed
+  // boundary is; a system that has not opted in is only told how to.
+  const starterAdopted = (await readStarterRecord(workspace.designSystemRoot)) !== null;
+  const starter = starterAdopted
+    ? await syncStarter({ check: () => checkWorkspace(workspace.repoRoot), designSystemRoot: workspace.designSystemRoot, force, version: identity.version })
+    : null;
+  const starterAvailable = !starterAdopted && await isStarterSystem(workspace.designSystemRoot);
+  return { ...workspace, ...installed, previousVersion, releaseAutomationChanges, starter, starterAvailable };
+}
+
+/**
+ * `timds starter sync`: adopt an existing starter-based Design System into
+ * the recurring sync, or run it by hand. See src/starter.mjs for the layers
+ * it touches and the ones it never does.
+ */
+export async function syncStarterWorkspace(repoRootInput, { force = false } = {}) {
+  const workspace = await loadWorkspace(repoRootInput);
+  const identity = await toolkitPackageIdentity();
+  return syncStarter({ check: () => checkWorkspace(workspace.repoRoot), designSystemRoot: workspace.designSystemRoot, force, version: identity.version });
 }
 
 /**
@@ -1007,30 +1021,18 @@ export async function initializeDesigns(repoRootInput, { force = false } = {}) {
   const destination = path.join(designSystemRoot, ...DESIGNS_SOURCE_DIRECTORY.split("/"));
   await copyDirectory(source, destination, { created, overwrite: force });
   const scripts = [];
+  const starterRecord = await readStarterRecord(designSystemRoot);
   for (const [relative, templateName] of starterScriptFiles) {
     const target = path.join(designSystemRoot, relative);
     const desired = await template(templateName);
-    let current = null;
-    try {
-      current = await fs.readFile(target, "utf8");
-    } catch (caught) {
-      if (caught?.code !== "ENOENT") throw caught;
-    }
-    if (current === null) {
+    const knownHashes = [...(legacyStarterFileHashes.get(relative) ?? []), ...(starterRecord?.files?.[relative] ? [starterRecord.files[relative]] : [])];
+    const planned = await planStockFile(target, desired, { force, knownHashes });
+    if (planned.status === "created") {
       scripts.push({ path: relative, status: "absent" });
       continue;
     }
-    if (current === desired) {
-      scripts.push({ path: relative, status: "current" });
-      continue;
-    }
-    const hash = createHash("sha256").update(current).digest("hex");
-    if (force || (legacyStarterScriptHashes.get(relative) ?? []).includes(hash)) {
-      await fs.writeFile(target, desired, "utf8");
-      scripts.push({ path: relative, status: "updated" });
-      continue;
-    }
-    scripts.push({ path: relative, status: "customized" });
+    if (planned.write) await fs.writeFile(target, desired, "utf8");
+    scripts.push({ path: relative, status: planned.status });
   }
   // The sample uses the starter's classes; a system that renamed them learns
   // which to add or change before `check` says the same thing.
@@ -1312,7 +1314,7 @@ function machineSummary({ counts }) {
 }
 
 function helpText() {
-  return `TimDS local design-system workflow\n\nUsage:\n  timds init [--root PATH] [--standalone] [--name NAME] [--system-id ID] [--description TEXT] [--json] [--consumer-repository OWNER/REPO] [--consumer-branch BRANCH] [--consumer-path PATH] [--force]\n  timds upgrade [--root PATH] [--auto-release] [--dependency-prs] [--force]\n  timds upgrade --version VERSION [--own-runtime] [--root PATH]\n  timds dependencies check [--root PATH]\n  timds auth login [--token TOKEN] [--portal-url URL]\n  timds auth status [--portal-url URL]\n  timds auth logout [--portal-url URL]\n  timds defaults [--root PATH] [--apply]\n  timds designs init [--root PATH] [--force]\n  timds doctor [--root PATH]\n  timds brand [--root PATH] [--json]\n  timds dev [--root PATH]\n  timds check [--root PATH] [--skip-build] [--require-clean-dist]\n  timds extract [--root PATH] [--skip-build] [--publish]\n  timds preview [--root PATH] [--port 4400] [--no-build]\n  timds diff [--root PATH] [--base origin/main]\n  timds assets list [--root PATH]\n  timds assets add FILE [--key LOGICAL_KEY] [--title TEXT] [--tags a,b]\n  timds assets backfill-metadata [--root PATH] [--force]\n  timds assets publish [--root PATH]\n  timds assets pull KEY [--output PATH] [--force]\n  timds video --help\n  timds mcp [edit] [--root PATH]\n  timds mcp read [--root PATH | --published URL]\n  timds submit --message "Change summary" [--dry-run] [--no-push] [--no-pr]\n  timds consumer check [--root PATH] [--app NAME] [--base REF]\n  timds consumer preview --app NAME [--root PATH] [--base REF] [--output DIR] [--publish] [--pull-request N]\n  timds consumer init [--root PATH] [--force] [--skip-install] [--portal-url URL]\n  timds consumer scaffold emdash --root PATH --design-system GIT_URL [--stylesheet PATH]... [--site-url URL] [--skip-install]\n  timds consumer notes [--root PATH] [--app NAME] [--pull-request N] [--all] [--json]\n  timds consumer notes resolve ID [ID...] [--commit SHA] [--dismiss]\n\nCheck and extract derive index.json, tokens.json, brand.json, llms.txt, and per-page Markdown from the built artifact so agents and pipelines can read the system without scraping HTML or CSS. Brand prints the derived brand kit in plain language with a fix for every gap. Extract --publish uploads the index, tokens, brand kit, llms.txt, the per-page Markdown mirrors, a .timds-artifact.json provenance stamp, and the artifact files the index references to the system's stable CDN prefix through the portal, so pipelines and agents consume the system from one stable URL. Large public media is copied into ignored media-local/ for authoring. assets add measures timed-media duration and dimensions before upload; backfill-metadata repairs older catalogs from their stable public URLs without re-uploading them. Designs init adds the website-designs contract to an existing Design System: whole pages under src/designs/ in plain HTML on the system's stylesheets, built to /designs/ and checked for portability, so an engineer can port them to any production stack; a fresh scaffold already has it. Video-enabled systems keep client rules and production data in the Design System while TimDS owns validation, voiceover orchestration, Remotion rendering, and packaging. Mcp serves the Design System editing tools (guide, workspace description, guarded file reads and writes, check, derived layer, media catalog) over stdio for an MCP-capable agent; protected tooling and generated paths stay read-only. Mcp read serves the consumer read tools (brand roles, tokens, guidance search, pages, media catalog, gap reports) over the derived layer of the current checkout or of a published base URL. Submit creates a review branch and draft pull request. Consumer commands run in a product repository that pins the Design System as the design-system submodule and declares its apps in timds.consumer.json: check validates the manifest, the pin, and that a branch only touches the declared design surface; preview captures each app's routes for review; init writes the manifest skeleton, the consumer skill, the preview and designer-change workflows, and the read MCP entry; scaffold emdash creates a new EmDash CMS site repository that pins a Design System as that submodule, reads its stylesheets and tokens from the pin, and is adopted the way init adopts a product; notes lists the designer's notes on a pull request's preview and resolves them once addressed.`;
+  return `TimDS local design-system workflow\n\nUsage:\n  timds init [--root PATH] [--standalone] [--name NAME] [--system-id ID] [--description TEXT] [--json] [--consumer-repository OWNER/REPO] [--consumer-branch BRANCH] [--consumer-path PATH] [--force]\n  timds upgrade [--root PATH] [--auto-release] [--dependency-prs] [--force]\n  timds upgrade --version VERSION [--own-runtime] [--root PATH]\n  timds dependencies check [--root PATH]\n  timds auth login [--token TOKEN] [--portal-url URL]\n  timds auth status [--portal-url URL]\n  timds auth logout [--portal-url URL]\n  timds defaults [--root PATH] [--apply]\n  timds designs init [--root PATH] [--force]\n  timds starter sync [--root PATH] [--force]\n  timds doctor [--root PATH]\n  timds brand [--root PATH] [--json]\n  timds dev [--root PATH]\n  timds check [--root PATH] [--skip-build] [--require-clean-dist]\n  timds extract [--root PATH] [--skip-build] [--publish]\n  timds preview [--root PATH] [--port 4400] [--no-build]\n  timds diff [--root PATH] [--base origin/main]\n  timds assets list [--root PATH]\n  timds assets add FILE [--key LOGICAL_KEY] [--title TEXT] [--tags a,b]\n  timds assets backfill-metadata [--root PATH] [--force]\n  timds assets publish [--root PATH]\n  timds assets pull KEY [--output PATH] [--force]\n  timds video --help\n  timds mcp [edit] [--root PATH]\n  timds mcp read [--root PATH | --published URL]\n  timds submit --message "Change summary" [--dry-run] [--no-push] [--no-pr]\n  timds consumer check [--root PATH] [--app NAME] [--base REF]\n  timds consumer preview --app NAME [--root PATH] [--base REF] [--output DIR] [--publish] [--pull-request N]\n  timds consumer init [--root PATH] [--force] [--skip-install] [--portal-url URL]\n  timds consumer scaffold emdash --root PATH --design-system GIT_URL [--stylesheet PATH]... [--site-url URL] [--skip-install]\n  timds consumer notes [--root PATH] [--app NAME] [--pull-request N] [--all] [--json]\n  timds consumer notes resolve ID [ID...] [--commit SHA] [--dismiss]\n\nCheck and extract derive index.json, tokens.json, brand.json, llms.txt, and per-page Markdown from the built artifact so agents and pipelines can read the system without scraping HTML or CSS. Brand prints the derived brand kit in plain language with a fix for every gap. Extract --publish uploads the index, tokens, brand kit, llms.txt, the per-page Markdown mirrors, a .timds-artifact.json provenance stamp, and the artifact files the index references to the system's stable CDN prefix through the portal, so pipelines and agents consume the system from one stable URL. Large public media is copied into ignored media-local/ for authoring. assets add measures timed-media duration and dimensions before upload; backfill-metadata repairs older catalogs from their stable public URLs without re-uploading them. Designs init adds the website-designs contract to an existing Design System: whole pages under src/designs/ in plain HTML on the system's stylesheets, built to /designs/ and checked for portability, so an engineer can port them to any production stack; a fresh scaffold already has it. Starter sync brings a starter-based system up to the installed release's scaffold and opts it into doing so on every upgrade: stock scripts and viewer stylesheets are refreshed while unmodified, new views, planned pages, and asset formats are merged into src/site.json and src/formats.json without touching what the client declared, and the overview fragments the starter mirrors are written for views the sync adds; customized files are reported, never replaced without --force, and the sync is rolled back if check fails afterwards. Video-enabled systems keep client rules and production data in the Design System while TimDS owns validation, voiceover orchestration, Remotion rendering, and packaging. Mcp serves the Design System editing tools (guide, workspace description, guarded file reads and writes, check, derived layer, media catalog) over stdio for an MCP-capable agent; protected tooling and generated paths stay read-only. Mcp read serves the consumer read tools (brand roles, tokens, guidance search, pages, media catalog, gap reports) over the derived layer of the current checkout or of a published base URL. Submit creates a review branch and draft pull request. Consumer commands run in a product repository that pins the Design System as the design-system submodule and declares its apps in timds.consumer.json: check validates the manifest, the pin, and that a branch only touches the declared design surface; preview captures each app's routes for review; init writes the manifest skeleton, the consumer skill, the preview and designer-change workflows, and the read MCP entry; scaffold emdash creates a new EmDash CMS site repository that pins a Design System as that submodule, reads its stylesheets and tokens from the pin, and is adopted the way init adopts a product; notes lists the designer's notes on a pull request's preview and resolves them once addressed.`;
 }
 
 export async function runCli(argv) {
@@ -1391,6 +1393,18 @@ export async function runCli(argv) {
       return result;
     }
     throw new Error(`Unknown video command ${videoCommand}`);
+  }
+  if (command === "starter") {
+    const [starterCommand = "sync"] = positional;
+    if (starterCommand !== "sync") throw new Error("Usage: timds starter sync [--root PATH] [--force]");
+    const result = await syncStarterWorkspace(root, { force: options.force });
+    output(`${result.adopted ? "Starter adopted" : "Starter synced"}: ${result.designSystemRoot}`);
+    for (const line of describeStarterSync(result)) output(line);
+    if (result.files.some((file) => file.status === "customized")) output("Customized files were left alone; rerun with --force to replace them with the stock versions.");
+    output(result.written.length
+      ? `Record: ${path.relative(result.designSystemRoot, result.record)}. Review the diff, then commit; every timds upgrade keeps this starter current from now on.`
+      : "Nothing to change; this starter is current.");
+    return result;
   }
   if (command === "designs") {
     const [designsCommand = "init"] = positional;
@@ -1519,6 +1533,12 @@ export async function runCli(argv) {
     if (result.releaseAutomationChanges.length) {
       output(`Managed automation: ${result.releaseAutomationChanges.length} files updated`);
     }
+    if (result.starter) {
+      output(result.starter.written.length ? `Starter: ${result.starter.written.length} file${result.starter.written.length === 1 ? "" : "s"} synced with the ${result.package.version} scaffold.` : "Starter: current.");
+      for (const line of describeStarterSync(result.starter)) output(line);
+    } else if (result.starterAvailable) {
+      output("Starter: not adopted. Run timds starter sync once to opt in; every upgrade then keeps the starter's scripts, catalogs, and views current.");
+    }
     if (!(await readDesignCatalog(result.designSystemRoot)).exists) {
       output(`Website designs: not set up. Run timds designs init to add ${DESIGNS_SOURCE_DIRECTORY}/ and its sample; see the Website designs section of AGENTS.md.`);
     }
@@ -1541,6 +1561,8 @@ export async function runCli(argv) {
     output(`Media assets: ${workspace.mediaCatalog.assets.length}`);
     const designCatalog = await readDesignCatalog(workspace.designSystemRoot);
     output(`Designs: ${designCatalog.exists ? `${designCatalog.designs.length} design${designCatalog.designs.length === 1 ? "" : "s"}, ${designCatalog.designs.reduce((sum, design) => sum + design.pages.length, 0)} pages` : "not set up (timds designs init)"}`);
+    const starterRecord = await readStarterRecord(workspace.designSystemRoot);
+    output(`Starter: ${starterRecord ? `synced with ${starterRecord.version}` : await isStarterSystem(workspace.designSystemRoot) ? "not adopted (timds starter sync)" : "not a starter system"}`);
     output(`Video: ${workspace.manifest.video ? "enabled" : "disabled"}`);
     if (workspace.manifest.consumer) {
       output(`Consumer: ${workspace.manifest.consumer.repository}@${workspace.manifest.consumer.branch}:${workspace.manifest.consumer.path}`);

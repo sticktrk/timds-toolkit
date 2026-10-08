@@ -522,6 +522,38 @@ files it loads; `list_designs` and `read_design` serve it to consumers, and
 (`checkDesigns`), and the catalog reader. A system scaffolded before designs
 existed adopts them with `timds designs init`.
 
+### The starter stays current through upgrade
+
+A starter-based system is upgradeable the way a CMS is: the scaffold's
+plumbing and structure are TimDS's to refresh, the client's content is not,
+and the line between them is recorded in `.timds/starter.json` rather than
+guessed. `init` writes the record for a fresh scaffold; an existing system
+opts in once with `timds starter sync`; every `upgrade` then re-syncs it.
+
+```bash
+npm run timds -- starter sync            # adopt once, on a feature branch
+npm run timds -- starter sync --force    # also replace customized stock files
+```
+
+Inside the boundary the sync touches three kinds of things. The stock
+`scripts/build.mjs`, `check.mjs`, `dev.mjs`, `viewer.mjs`,
+`src/styles/canvas.css`, and `src/styles/viewer.css` are replaced while they
+still match a hash the toolkit wrote. `src/site.json` and `src/formats.json`
+are merged three ways against the recorded stock baseline: views, pages, and
+formats the system lacks are appended (pages as `planned`, so a new primitive
+is there to author), fields still equal to the baseline advance to the new
+scaffold, and anything the client changed is kept and reported; nothing is
+removed, reordered, or retitled, and a format whose page the system does not
+declare is skipped. The Digital, Social, and Print overview fragments are
+written when the sync adds or authors their page and refreshed while
+unmodified. `src/layout.html` only gains a missing stock stylesheet link.
+Everything else, other fragments, `tokens.json`, `system.css`, `timds.json`,
+stays the client's. Customized files are reported and never replaced without
+`--force`. The sync ends with `check` and rolls back every file it wrote when
+that check fails, so a system is never left between two structures. The
+report is a per-file status table (`created`, `updated`, `current`,
+`customized`, `skipped`) and the catalog changes it merged.
+
 ### The derived layer is the contract consumers read
 
 Together `index.json`, `tokens.json`, `brand.json`, `llms.txt`, and, for a
@@ -1131,11 +1163,13 @@ npm run timds -- doctor
 npm run timds -- check
 ```
 
-`upgrade` removes the legacy `.timds/cli` tree when present and synchronizes
-both managed skills. It refuses locally modified managed files unless `--force`
-is explicitly supplied and never
-rewrites `timds.json`, tokens, media records, authored source, framework config,
-documentation, or artifacts.
+`upgrade` removes the legacy `.timds/cli` tree when present, synchronizes
+both managed skills, and re-syncs the starter of an adopted system (see "The
+starter stays current through upgrade"); a system that has not adopted it is
+told to run `timds starter sync`. It refuses locally modified managed files
+unless `--force` is explicitly supplied and never rewrites `timds.json`,
+tokens, media records, authored source outside the recorded starter boundary,
+framework config, documentation, or artifacts.
 
 ### One dependency selection
 

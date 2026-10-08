@@ -64,6 +64,28 @@ Never extend upgrades to authored source, `timds.json`, tokens, `media.json`,
 framework configuration, documentation, or generated artifacts without an
 explicit contract change and migration plan.
 
+The starter scaffold has its own recorded boundary, kept by `src/starter.mjs`
+and `.timds/starter.json` in the client repository. A fresh `init` records it;
+an existing starter-based system opts in once with `timds starter sync`, and
+every `upgrade` syncs an adopted system from then on. Inside that boundary the
+toolkit may touch exactly three kinds of things: the starter plumbing
+(`scripts/build.mjs`, `check.mjs`, `dev.mjs`, `viewer.mjs`,
+`src/styles/canvas.css`, `src/styles/viewer.css`), replaced only while the
+file matches a hash the toolkit wrote; the structure catalogs `src/site.json`
+and `src/formats.json`, merged three ways against the recorded stock baseline
+so entries the client lacks are appended (pages as `planned`), fields still
+equal to the baseline advance, and anything the client changed is kept and
+reported, with nothing removed, reordered, or retitled; and the overview
+fragments the starter mirrors from the golden system
+(`starterManagedFragments`), written when the sync adds or authors their page
+and refreshed only while unmodified. `src/layout.html` only gains a missing
+stock stylesheet link. Every other fragment, `tokens.json`, `system.css`, and
+the rest of authored source stay outside the boundary. Customized files are
+reported and never replaced without `--force`, and a sync whose `check` fails
+is rolled back whole. A structural change to `templates/starter` therefore
+reaches existing systems through this sync; do not add another one-shot
+migration for it.
+
 `timds defaults --apply` is the explicit migration for shared publishing defaults.
 It updates only `publishing.targets` and `publishing.targetDefaults` and records
 the supplied values and persistent override paths in `.timds/defaults.json`.
@@ -147,9 +169,13 @@ When mirroring a golden change:
 3. Keep the scaffolded `templates/design-system-AGENTS.md`,
    `design-system-README.md`, the edit skill, and this repository's
    `CLAUDE.md` describing the new structure.
-4. If `scripts/viewer.mjs` or `scripts/build.mjs` changed, add the previous
-   stock file's sha256 to `legacyStarterScriptHashes` in `src/core.mjs` so
-   `designs init` still recognizes systems scaffolded from earlier releases.
+4. A changed plumbing file or managed fragment needs no hash bookkeeping:
+   an adopted system's `.timds/starter.json` records what the toolkit last
+   wrote, and `starter sync` advances it. `legacyStarterFileHashes` in
+   `src/starter.mjs` only recognizes systems scaffolded before the record
+   existed and stays as it is. A new authored page under a mirrored view goes
+   in `starterManagedFragments`; a new stylesheet the layout must link goes
+   in the plumbing table and the layout link list.
 5. Update the starter assertions in `src/core.test.mjs` (page ids, page
    counts, rendered tables) and `src/mcp.test.mjs` (the stylesheet list),
    then run `npm test` and `npm run pack:check`. Rerun the drift script
