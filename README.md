@@ -532,7 +532,7 @@ opts in once with `timds starter sync`; every `upgrade` then re-syncs it.
 
 ```bash
 npm run timds -- starter sync            # adopt once, on a feature branch
-npm run timds -- starter sync --force    # also replace customized stock scripts and stylesheets (never a fragment)
+npm run timds -- starter sync --force scripts/viewer.mjs   # also replace the named customized stock script or stylesheet (never a fragment)
 ```
 
 Inside the boundary the sync touches three kinds of things. The stock
@@ -551,10 +551,12 @@ that differs is the system's own page and is never replaced. `src/layout.html`
 only gains a missing stock stylesheet link. Everything else, other fragments,
 `tokens.json`, `system.css`, `timds.json`, stays the client's. Customized
 scripts and stylesheets are reported and replaced only by `starter sync
---force`; `upgrade --force` never reaches them. The sync ends with `check` and
-rolls back every file it wrote when that check fails, so a system is never
-left between two structures, and `upgrade` runs it before touching its own
-managed files so a failed sync aborts the upgrade cleanly. The
+--force` naming each file; `upgrade --force` never reaches them. The sync
+refuses to run over uncommitted changes to the files it writes, so its diff
+is always reviewable on its own. It ends with `check` and rolls back every
+file it wrote when that check fails, so a system is never left between two
+structures, and `upgrade` runs it before touching its own managed files so a
+failed sync aborts the upgrade cleanly. The
 report is a per-file status table (`created`, `updated`, `current`,
 `customized`, `skipped`) and the catalog changes it merged.
 
@@ -1172,7 +1174,7 @@ both managed skills, and re-syncs the starter of an adopted system (see "The
 starter stays current through upgrade"); a system that has not adopted it is
 told to run `timds starter sync`. It refuses locally modified managed files
 unless `--force` is explicitly supplied (that flag never extends to starter
-files; `starter sync --force` is the only way to replace those) and never
+files; `starter sync --force <path>` is the only way to replace those) and never
 rewrites `timds.json`,
 tokens, media records, authored source outside the recorded starter boundary,
 framework config, documentation, or artifacts.

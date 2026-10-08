@@ -82,10 +82,12 @@ fragments the starter mirrors from the golden system
 and refreshed only while unmodified. `src/layout.html` only gains a missing
 stock stylesheet link. Every other fragment, `tokens.json`, `system.css`, and
 the rest of authored source stay outside the boundary. Customized plumbing
-is reported and replaced only by an explicit `timds starter sync --force`;
-`upgrade --force` covers the managed boundary and never reaches starter
-files, and a customized overview fragment is the system's own page, never
-replaced. A sync whose `check` fails is rolled back whole, and `upgrade` runs
+is reported and replaced only by an explicit `timds starter sync --force
+<path>` that names each file; `upgrade --force` covers the managed boundary
+and never reaches starter files, and a customized overview fragment is the
+system's own page, never replaced. The sync refuses to run over uncommitted
+changes to the files it writes. A sync whose `check` fails is rolled back
+whole, and `upgrade` runs
 it before touching managed files so a failed sync aborts the upgrade with the
 repository as it was. A structural change to `templates/starter` therefore
 reaches existing systems through this sync; do not add another one-shot

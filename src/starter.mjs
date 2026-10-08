@@ -9,7 +9,8 @@
 //   and check scripts, and the viewer and canvas stylesheets. The stock hash
 //   of each file is recorded when it is written. A file that still matches is
 //   refreshed; a changed one is reported as customized and replaced only by
-//   `timds starter sync --force`, never by `upgrade`. The record keeps the
+//   `timds starter sync --force <path>`, which names each file it gives up,
+//   never by `upgrade`. The record keeps the
 //   hash the toolkit last wrote for a customized file, so reverting to that
 //   version is recognized again.
 // - Structure catalogs the client extends: the views and pages in
@@ -27,6 +28,10 @@
 //   replaced, --force included. Every other fragment, tokens.json, the
 //   system stylesheet, and the layout shell are the client's; the layout
 //   only gains a missing stylesheet link.
+//
+// The sync rewrites the catalogs and the layout whole, so a CLI refuses to
+// run it over uncommitted changes to the files it writes (`starterSyncPaths`)
+// and the sync's own diff stays reviewable on its own.
 //
 // A system scaffolded before the record existed is bootstrapped from the stock
 // versions earlier releases shipped: `legacyStarterFileHashes` below and the
@@ -68,6 +73,16 @@ export const starterManagedFragments = Object.freeze([
   ["src/pages/digital/index.html", "starter/src/pages/digital/index.html"],
   ["src/pages/print/index.html", "starter/src/pages/print/index.html"],
   ["src/pages/social/index.html", "starter/src/pages/social/index.html"],
+]);
+
+/** Every file the sync may write, for a clean-tree guard before it runs. */
+export const starterSyncPaths = Object.freeze([
+  ...starterPlumbingFiles.map(([relative]) => relative),
+  ...starterManagedFragments.map(([relative]) => relative),
+  STARTER_SITE_FILE,
+  STARTER_FORMATS_FILE,
+  STARTER_LAYOUT_FILE,
+  STARTER_RECORD_FILE,
 ]);
 
 /** The stylesheet links the sync adds to a layout that lacks them. */
@@ -495,7 +510,7 @@ export async function isStarterSystem(designSystemRoot) {
   return (await readOptional(path.join(designSystemRoot, STARTER_SITE_FILE))) !== null;
 }
 
-/** The customized files in a sync report that `starter sync --force` would replace: plumbing only, never a fragment. */
+/** The customized files in a sync report that `starter sync --force <path>` would replace: plumbing only, never a fragment. */
 export function forceReplaceable(report) {
   const plumbing = new Set(starterPlumbingFiles.map(([relative]) => relative));
   return report.files.filter((file) => file.status === "customized" && plumbing.has(file.path)).map((file) => file.path);
@@ -506,11 +521,12 @@ export function forceReplaceable(report) {
  * Plans every change first, writes them together, records what it wrote, and
  * runs `check`; if the check fails, every file is restored and the error says
  * what failed, so the system is never left between two structures. `force`
- * replaces customized plumbing; it never reaches a fragment, which is the
- * system's own page once it differs. A caller that already read the record
- * passes it as `record` (null for none); otherwise the sync reads it.
+ * lists the plumbing files to replace even though they are customized; it
+ * never reaches a fragment, which is the system's own page once it differs.
+ * A caller that already read the record passes it as `record` (null for
+ * none); otherwise the sync reads it.
  */
-export async function syncStarter({ designSystemRoot, version, check = null, force = false, record = undefined }) {
+export async function syncStarter({ designSystemRoot, version, check = null, force = [], record = undefined }) {
   const resolve = (relative) => path.join(designSystemRoot, ...relative.split("/"));
   const siteText = await readOptional(resolve(STARTER_SITE_FILE));
   if (siteText === null) {
@@ -536,7 +552,7 @@ export async function syncStarter({ designSystemRoot, version, check = null, for
   // 1. Plumbing, by hash.
   for (const [relative] of starterPlumbingFiles) {
     const desired = stock.texts[relative];
-    const planned = await planStockFile(resolve(relative), desired, { force, knownHashes: knownStarterHashes(relative, record) });
+    const planned = await planStockFile(resolve(relative), desired, { force: force.includes(relative), knownHashes: knownStarterHashes(relative, record) });
     recordFile(relative, planned);
     plan(relative, planned.status, planned.write ? desired : null, planned.current, planned.forced ? "replaced with --force" : undefined);
   }
@@ -658,7 +674,7 @@ export async function syncStarter({ designSystemRoot, version, check = null, for
       else await fs.writeFile(recordPath, previousRecordText, "utf8");
       const customized = forceReplaceable({ files });
       throw new Error(`Starter sync was rolled back because the workspace check failed afterwards: ${caught.message}${customized.length
-        ? `\nCustomized files were kept (${customized.join(", ")}); the new pages may need their stock versions. Port your changes, or run timds starter sync --force to replace them.`
+        ? `\nCustomized files were kept (${customized.join(", ")}); the new pages may need their stock versions. Port your changes, or run timds starter sync --force ${customized.join(" ")} to replace them.`
         : ""}`);
     }
   }
