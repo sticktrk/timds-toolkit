@@ -135,9 +135,11 @@ and a missing stock stylesheet link is added to `src/layout.html`. In a
 system scaffolded by `init` (`"plumbing": "toolkit"` in the record) a local
 change to a stock script or stylesheet is replaced on the next upgrade and
 reported, so never make one there. In an adopted system (`"recorded"`) a
-file changed locally is reported as customized and kept; `starter sync --force
-<path>` replaces the named stock script or stylesheet only with explicit
-authorization, and `upgrade --force` never reaches starter files. An overview
+file changed locally is reported as customized and kept; a person running
+the sync in a terminal is asked about each such file, and non-interactively
+`starter sync --force <path>` replaces the named stock script or stylesheet
+only with explicit authorization. `upgrade --force` never reaches starter
+files. An overview
 fragment this system wrote itself is never replaced. Commit before syncing:
 the sync refuses to run over uncommitted changes to the files it writes. A
 system scaffolded before the record

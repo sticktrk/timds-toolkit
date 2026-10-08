@@ -85,8 +85,9 @@ fragments the starter mirrors from the golden system
 and refreshed only while unmodified. `src/layout.html` only gains a missing
 stock stylesheet link. Every other fragment, `tokens.json`, `system.css`, and
 the rest of authored source stay outside the boundary. Recorded plumbing
-that was customized is reported and replaced only by an explicit `timds
-starter sync --force <path>` that names each file; `upgrade --force` covers the managed boundary
+that was customized is asked about file by file when the sync or upgrade runs
+in a terminal, and otherwise reported and replaced only by an explicit
+`timds starter sync --force <path>` that names each file; `upgrade --force` covers the managed boundary
 and never reaches starter files, and a customized overview fragment is the
 system's own page, never replaced. The sync refuses to run over uncommitted
 changes to the files it writes. A sync whose `check` fails is rolled back

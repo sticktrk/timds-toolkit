@@ -9,6 +9,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
   checkWorkspace,
+  createPlumbingPrompt,
   createPreviewServer,
   initializeDesigns,
   initializeRepository,
@@ -1179,6 +1180,25 @@ test("starter sync reports customized files, rolls back when they break the chec
   await fs.writeFile(path.join(repoRoot, "src/pages/print/index.html"), ownOverview);
   await assert.rejects(syncStarterWorkspace(repoRoot, { force: ["src/pages/print/index.html"] }), /--force replaces only the starter's stock scripts and stylesheets, named one by one: scripts\/build\.mjs, .*\. Not src\/pages\/print\/index\.html;/);
   await assert.rejects(syncStarterWorkspace(repoRoot, { force: ["scripts/viewer.mjs", "scripts/nope.mjs"] }), /Not scripts\/nope\.mjs;/);
+  // In a terminal the sync asks about each customized file instead; the answers decide, and a diff can be shown first.
+  const asked = [];
+  const diffed = [];
+  const prompt = createPlumbingPrompt({
+    ask: async (question) => { asked.push(question); return asked.length === 1 ? "d" : asked.length === 2 ? "nonsense" : "k"; },
+    showDiff: async (file) => { diffed.push([file.path, file.templatePath.endsWith("templates/starter/scripts/dev.mjs")]); },
+  });
+  const decisions = [];
+  const answered = await syncStarterWorkspace(repoRoot, { decideCustomized: async (file) => {
+    decisions.push(file.path);
+    return file.path === "scripts/dev.mjs" ? prompt(file) : "replace";
+  } });
+  assert.deepEqual(decisions, ["scripts/dev.mjs", "scripts/viewer.mjs"]);
+  assert.deepEqual([asked.length, diffed], [3, [["scripts/dev.mjs", true]]], "the diff was shown once and an unknown answer was asked again");
+  assert.deepEqual(answered.files.find((file) => file.path === "scripts/dev.mjs"), { note: "kept at the prompt", path: "scripts/dev.mjs", status: "customized" });
+  assert.deepEqual(answered.files.find((file) => file.path === "scripts/viewer.mjs"), { note: "replaced at the prompt", path: "scripts/viewer.mjs", status: "updated" });
+  assert.doesNotMatch(await read("scripts/viewer.mjs"), /client change/);
+  assert.equal(answered.check.machine.warnings.length, 2);
+  await fs.writeFile(path.join(repoRoot, "scripts/viewer.mjs"), customizedViewer);
   const forced = await syncStarterWorkspace(repoRoot, { force: ["scripts/viewer.mjs"] });
   assert.deepEqual(forced.files.find((file) => file.path === "scripts/viewer.mjs"), { note: "replaced with --force", path: "scripts/viewer.mjs", status: "updated" });
   assert.deepEqual(forced.files.find((file) => file.path === "scripts/dev.mjs"), { path: "scripts/dev.mjs", status: "customized" }, "a customized file not named stays customized");

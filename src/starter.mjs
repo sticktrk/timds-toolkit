@@ -144,6 +144,13 @@ export async function template(name) {
   return fs.readFile(path.join(templatesRoot, name), "utf8");
 }
 
+/** The absolute path of the stock template behind a plumbing or fragment file, for a diff against it. */
+export function stockTemplatePath(relative) {
+  const entry = [...starterPlumbingFiles, ...starterManagedFragments].find(([candidate]) => candidate === relative);
+  if (!entry) throw new Error(`${relative} is not a starter file the toolkit writes`);
+  return path.join(templatesRoot, entry[1]);
+}
+
 async function readOptional(file) {
   try {
     return await fs.readFile(file, "utf8");
@@ -536,10 +543,13 @@ export function forceReplaceable(report) {
  * lists the plumbing files to replace even though they are customized (moot
  * when the record's plumbing mode is "toolkit", which replaces them all); it
  * never reaches a fragment, which is the system's own page once it differs.
- * A caller that already read the record passes it as `record` (null for
- * none); otherwise the sync reads it.
+ * `decideCustomized`, when given, is asked about each remaining customized
+ * plumbing file with `{ path, file, current, desired, templatePath }` and answers
+ * "replace" or "keep", which is how an interactive CLI lets a person choose
+ * without knowing the file names up front. A caller that already read the
+ * record passes it as `record` (null for none); otherwise the sync reads it.
  */
-export async function syncStarter({ designSystemRoot, version, check = null, force = [], record = undefined }) {
+export async function syncStarter({ designSystemRoot, version, check = null, decideCustomized = null, force = [], record = undefined }) {
   const resolve = (relative) => path.join(designSystemRoot, ...relative.split("/"));
   const siteText = await readOptional(resolve(STARTER_SITE_FILE));
   if (siteText === null) {
@@ -566,9 +576,18 @@ export async function syncStarter({ designSystemRoot, version, check = null, for
   const plumbingMode = record?.plumbing ?? "recorded";
   for (const [relative] of starterPlumbingFiles) {
     const desired = stock.texts[relative];
-    const planned = await planStockFile(resolve(relative), desired, { force: plumbingMode === "toolkit" || force.includes(relative), knownHashes: knownStarterHashes(relative, record) });
+    let planned = await planStockFile(resolve(relative), desired, { force: plumbingMode === "toolkit" || force.includes(relative), knownHashes: knownStarterHashes(relative, record) });
+    let note = planned.forced ? (plumbingMode === "toolkit" ? "the toolkit's in this system; a local change was replaced" : "replaced with --force") : undefined;
+    if (planned.status === "customized" && decideCustomized) {
+      const choice = await decideCustomized({ current: planned.current, desired, file: resolve(relative), path: relative, templatePath: stockTemplatePath(relative) });
+      if (choice === "replace") {
+        planned = { ...planned, forced: true, status: "updated", write: true };
+        note = "replaced at the prompt";
+      } else {
+        note = "kept at the prompt";
+      }
+    }
     recordFile(relative, planned);
-    const note = planned.forced ? (plumbingMode === "toolkit" ? "the toolkit's in this system; a local change was replaced" : "replaced with --force") : undefined;
     plan(relative, planned.status, planned.write ? desired : null, planned.current, note);
   }
 

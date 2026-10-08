@@ -531,8 +531,8 @@ guessed. `init` writes the record for a fresh scaffold; an existing system
 opts in once with `timds starter sync`; every `upgrade` then re-syncs it.
 
 ```bash
-npm run timds -- starter sync            # adopt once, on a feature branch
-npm run timds -- starter sync --force scripts/viewer.mjs   # also replace the named customized stock script or stylesheet (never a fragment)
+npm run timds -- starter sync            # adopt once, on a feature branch; in a terminal it asks about each customized stock file
+npm run timds -- starter sync --force scripts/viewer.mjs   # non-interactive: replace the named customized stock script or stylesheet (never a fragment)
 ```
 
 Inside the boundary the sync touches three kinds of things. The stock
@@ -543,7 +543,9 @@ system scaffolded by `init` is `"toolkit"`: every upgrade brings the six
 files to stock, replacing a local change and saying so, without halting and
 without naming files. A system adopted later with `starter sync` is
 `"recorded"`: a file is replaced while it still matches a hash the toolkit
-wrote, and a customized one is kept. Edit the field to switch. `src/site.json` and `src/formats.json`
+wrote, and a customized one is kept unless the person running the sync in a
+terminal chooses to replace it when asked (keep, replace, or diff first,
+file by file). Edit the field to switch. `src/site.json` and `src/formats.json`
 are merged three ways against the recorded stock baseline: views, pages, and
 formats the system lacks are appended (pages as `planned`, so a new primitive
 is there to author), fields still equal to the baseline advance to the new
@@ -555,9 +557,9 @@ when the sync adds or authors their page and refreshed while unmodified; one
 that differs is the system's own page and is never replaced. `src/layout.html`
 only gains a missing stock stylesheet link. Everything else, other fragments,
 `tokens.json`, `system.css`, `timds.json`, stays the client's. In the
-recorded mode, customized scripts and stylesheets are reported and replaced
-only by `starter sync --force` naming each file; `upgrade --force` never
-reaches them. The sync
+recorded mode, customized scripts and stylesheets are asked about in a
+terminal and otherwise reported and replaced only by `starter sync --force`
+naming each file; `upgrade --force` never reaches them. The sync
 refuses to run over uncommitted changes to the files it writes, so its diff
 is always reviewable on its own. It ends with `check` and rolls back every
 file it wrote when that check fails, so a system is never left between two
