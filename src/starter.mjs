@@ -8,21 +8,25 @@
 // - Plumbing the toolkit owns while it is unmodified: the viewer, build, dev,
 //   and check scripts, and the viewer and canvas stylesheets. The stock hash
 //   of each file is recorded when it is written. A file that still matches is
-//   refreshed; a changed one is reported as customized and never replaced
-//   without --force.
+//   refreshed; a changed one is reported as customized and replaced only by
+//   `timds starter sync --force`, never by `upgrade`. The record keeps the
+//   hash the toolkit last wrote for a customized file, so reverting to that
+//   version is recognized again.
 // - Structure catalogs the client extends: the views and pages in
 //   src/site.json and the asset formats in src/formats.json. The record keeps
 //   the stock catalogs the system was last synced against, and each sync is a
 //   three-way merge against them: entries the client lacks are appended
 //   (pages as planned), entries still equal to the old baseline advance to
-//   the new one, and anything the client changed is kept and reported.
-//   Nothing is removed, reordered, or retitled.
+//   the new one, and anything the client changed is kept. A kept edit is
+//   reported when the stock value is news (it differs from every baseline),
+//   not on every sync. Nothing is removed, reordered, or retitled.
 // - Authored fragments the starter mirrors from the golden system (the
 //   Digital, Social, and Print overviews) are written when the sync adds
 //   their page and refreshed only while they still match what the toolkit
-//   wrote. Every other fragment, tokens.json, the system stylesheet, and the
-//   layout shell are the client's; the layout only gains a missing
-//   stylesheet link.
+//   wrote. A fragment that differs is this system's own page and is never
+//   replaced, --force included. Every other fragment, tokens.json, the
+//   system stylesheet, and the layout shell are the client's; the layout
+//   only gains a missing stylesheet link.
 //
 // A system scaffolded before the record existed is bootstrapped from the stock
 // versions earlier releases shipped: `legacyStarterFileHashes` below and the
@@ -107,6 +111,12 @@ const sha256 = (text) => createHash("sha256").update(text).digest("hex");
 const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const pageId = (view, slug) => (slug ? `${view}/${slug}` : view);
 
+/** Every hash at which `relative` is still the toolkit's: the legacy table plus what the record says was last written. */
+export function knownStarterHashes(relative, record) {
+  const recorded = record?.files?.[relative];
+  return [...(legacyStarterFileHashes.get(relative) ?? []), ...(typeof recorded === "string" ? [recorded] : [])];
+}
+
 export async function template(name) {
   return fs.readFile(path.join(templatesRoot, name), "utf8");
 }
@@ -155,27 +165,39 @@ function assign(target, field, value) {
 }
 
 /**
+ * Advance `target[field]` to `stock` when it still equals a baseline; keep it
+ * otherwise. A kept edit is reported only when the stock value is news, that
+ * is, no baseline already had it: an edit the client made against a stock
+ * value that has not moved was reported when it first diverged and would
+ * otherwise be repeated on every sync. An entry no baseline knows (a view or
+ * format the client declared before the scaffold did) is reported in full
+ * once; the next record then holds it.
+ */
+function advanceOrKeep(changes, target, field, stock, candidates, label) {
+  if (isDeepStrictEqual(target[field], stock)) return;
+  const pick = (candidate) => candidate?.[field];
+  if (unchanged(target[field], candidates, pick)) {
+    assign(target, field, stock);
+    changes.advanced.push(label);
+    return;
+  }
+  if (!unchanged(stock, candidates, pick)) changes.kept.push({ current: target[field], path: label, stock });
+}
+
+/**
  * Merge the stock site model into the client's. Views the client lacks are
  * appended with every page planned unless its fragment exists; pages a
  * declared view lacks are inserted after the last of their stock predecessors
- * the view has, planned the same way, so the client's own order never moves. A label, blurb, title, group, or summary
- * still equal to a baseline advances to the stock value; one the client
- * changed is kept and reported. `planned` is never changed on a declared page
- * except for the ids in `authoredPages`, whose fragments the caller writes.
+ * the view has, planned the same way, so the client's own order never moves.
+ * A label, blurb, title, group, or summary still equal to a baseline advances
+ * to the stock value; one the client changed is kept, and reported when the
+ * stock value moved. `planned` is never changed on a declared page except for
+ * the ids in `authoredPages`, whose fragments the caller writes.
  */
 export function mergeSiteModel(current, next, baselines, { fragmentExists = () => false, authoredPages = new Set() } = {}) {
   const site = isObject(current) ? structuredClone(current) : {};
   if (!Array.isArray(site.views)) site.views = [];
   const changes = { addedPages: [], addedViews: [], advanced: [], kept: [] };
-  const advanceOrKeep = (target, field, stock, candidates, label) => {
-    if (isDeepStrictEqual(target[field], stock)) return;
-    if (unchanged(target[field], candidates, (candidate) => candidate[field])) {
-      assign(target, field, stock);
-      changes.advanced.push(label);
-    } else {
-      changes.kept.push({ current: target[field], path: label, stock });
-    }
-  };
   const plannedCopy = (view, page) => {
     const copy = structuredClone(page);
     const id = pageId(view, page.slug ?? "");
@@ -191,7 +213,7 @@ export function mergeSiteModel(current, next, baselines, { fragmentExists = () =
       continue;
     }
     const baseViews = baselines.map((baseline) => baseline?.views?.find((candidate) => candidate?.id === nextView.id)).filter(Boolean);
-    for (const field of ["label", "blurb"]) advanceOrKeep(view, field, nextView[field], baseViews, `${nextView.id}.${field}`);
+    for (const field of ["label", "blurb"]) advanceOrKeep(changes, view, field, nextView[field], baseViews, `${nextView.id}.${field}`);
     if (!Array.isArray(view.pages)) view.pages = [];
     let anchor = -1;
     for (const nextPage of nextView.pages) {
@@ -207,7 +229,7 @@ export function mergeSiteModel(current, next, baselines, { fragmentExists = () =
       anchor = Math.max(anchor, index);
       const page = view.pages[index];
       const basePages = baseViews.map((baseView) => baseView.pages?.find((candidate) => (candidate?.slug ?? "") === slug)).filter(Boolean);
-      for (const field of ["title", "group", "summary"]) advanceOrKeep(page, field, nextPage[field], basePages, `${id}.${field}`);
+      for (const field of ["title", "group", "summary"]) advanceOrKeep(changes, page, field, nextPage[field], basePages, `${id}.${field}`);
       if (authoredPages.has(id) && page.planned === true) {
         delete page.planned;
         changes.advanced.push(`${id}.planned`);
@@ -229,7 +251,8 @@ export function declaredPageIds(site) {
 /**
  * Merge the stock format catalog into the client's. A format is added only
  * when its page is declared and its id is unused, since the viewer rejects
- * both; a field still equal to a baseline advances, a changed one is kept.
+ * both; a field still equal to a baseline advances, a changed one is kept
+ * and reported when the stock value moved.
  */
 export function mergeFormatCatalog(current, next, baselines, declaredPages) {
   const catalog = isObject(current) ? structuredClone(current) : {};
@@ -239,15 +262,6 @@ export function mergeFormatCatalog(current, next, baselines, declaredPages) {
     if (group.startsWith("$") || !isObject(entry)) continue;
     for (const id of Object.keys(isObject(entry.formats) ? entry.formats : {})) owners.set(id, group);
   }
-  const advanceOrKeep = (target, field, stock, candidates, label) => {
-    if (isDeepStrictEqual(target[field], stock)) return;
-    if (unchanged(target[field], candidates, (candidate) => candidate?.[field])) {
-      assign(target, field, stock);
-      changes.advanced.push(label);
-    } else {
-      changes.kept.push({ current: target[field], path: label, stock });
-    }
-  };
   const admit = (group, id, format) => {
     if (!declaredPages.has(format?.page)) {
       changes.skipped.push({ id: `${group}.${id}`, reason: `its page ${JSON.stringify(format?.page)} is not declared in ${STARTER_SITE_FILE}` });
@@ -265,7 +279,7 @@ export function mergeFormatCatalog(current, next, baselines, declaredPages) {
       // A catalog the sync creates starts with the stock notes; an existing
       // one keeps or advances them like any other field.
       if (!isObject(current)) catalog[group] = structuredClone(stock);
-      else advanceOrKeep(catalog, group, stock, baselines, group);
+      else advanceOrKeep(changes, catalog, group, stock, baselines, group);
       continue;
     }
     const entry = catalog[group];
@@ -288,7 +302,7 @@ export function mergeFormatCatalog(current, next, baselines, declaredPages) {
     }
     for (const field of Object.keys(stock)) {
       if (field === "formats") continue;
-      advanceOrKeep(entry, field, stock[field], baseGroups, `${group}.${field}`);
+      advanceOrKeep(changes, entry, field, stock[field], baseGroups, `${group}.${field}`);
     }
     if (!isObject(entry.formats)) entry.formats = {};
     for (const [id, format] of Object.entries(isObject(stock.formats) ? stock.formats : {})) {
@@ -303,7 +317,7 @@ export function mergeFormatCatalog(current, next, baselines, declaredPages) {
       const baseFormats = baseGroups.map((baseGroup) => baseGroup.formats?.[id]).filter(isObject);
       for (const field of Object.keys(format)) {
         if (field === "page" && !declaredPages.has(format.page)) continue;
-        advanceOrKeep(existing, field, format[field], baseFormats, `${group}.${id}.${field}`);
+        advanceOrKeep(changes, existing, field, format[field], baseFormats, `${group}.${id}.${field}`);
       }
     }
   }
@@ -318,7 +332,10 @@ export function mergeFormatCatalog(current, next, baselines, declaredPages) {
 export function insertStylesheetLinks(layout, templateLayout, hrefs = starterLayoutStylesheets) {
   const linkPattern = /<link\b[^>]*\brel="stylesheet"[^>]*\bhref="([^"]+)"[^>]*>/g;
   const stock = [...templateLayout.matchAll(linkPattern)].map((match) => ({ href: match[1], tag: match[0] }));
-  const has = (lines, href) => lines.findIndex((line) => line.includes(`href="${href}"`));
+  // A link counts whatever its quoting or cache-busting query, so a layout
+  // that links /styles/viewer.css?v=3 is not given a second viewer link.
+  const linked = (href) => new RegExp(`href=["']${href.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:[?#][^"']*)?["']`);
+  const has = (lines, href) => lines.findIndex((line) => linked(href).test(line));
   const lines = layout.split("\n");
   const inserted = [];
   const unplaced = [];
@@ -431,16 +448,19 @@ async function writeStarterRecord(designSystemRoot, record) {
   return file;
 }
 
-/** The stock catalogs and file hashes of the installed toolkit's starter. */
+/** The stock catalogs, managed file texts, and their hashes of the installed toolkit's starter, each template read once. */
 async function stockStarter() {
   const files = {};
+  const texts = {};
   for (const [relative, templateName] of [...starterPlumbingFiles, ...starterManagedFragments]) {
-    files[relative] = sha256(await template(templateName));
+    texts[relative] = await template(templateName);
+    files[relative] = sha256(texts[relative]);
   }
   return {
     files,
     formats: parseJson(await template("starter/src/formats.json"), "the starter formats template"),
     site: parseJson(await template("starter/src/site.json"), "the starter site template"),
+    texts,
   };
 }
 
@@ -459,49 +479,79 @@ export async function recordFreshStarter(designSystemRoot, version) {
   });
 }
 
+/**
+ * Note files another command wrote at their stock text (`designs init`
+ * replacing the build and viewer scripts) in an existing record, so the next
+ * sync recognizes them as the toolkit's rather than as customized.
+ */
+export async function recordStarterFiles(designSystemRoot, record, writtenTexts) {
+  const files = { ...record.files };
+  for (const [relative, text] of Object.entries(writtenTexts)) files[relative] = sha256(text);
+  return writeStarterRecord(designSystemRoot, { ...record, files });
+}
+
 /** Whether this Design System is starter-based at all: it has the starter's site model. */
 export async function isStarterSystem(designSystemRoot) {
   return (await readOptional(path.join(designSystemRoot, STARTER_SITE_FILE))) !== null;
+}
+
+/** The customized files in a sync report that `starter sync --force` would replace: plumbing only, never a fragment. */
+export function forceReplaceable(report) {
+  const plumbing = new Set(starterPlumbingFiles.map(([relative]) => relative));
+  return report.files.filter((file) => file.status === "customized" && plumbing.has(file.path)).map((file) => file.path);
 }
 
 /**
  * Bring a starter-based Design System up to the installed toolkit's scaffold.
  * Plans every change first, writes them together, records what it wrote, and
  * runs `check`; if the check fails, every file is restored and the error says
- * what failed, so the system is never left between two structures.
+ * what failed, so the system is never left between two structures. `force`
+ * replaces customized plumbing; it never reaches a fragment, which is the
+ * system's own page once it differs. A caller that already read the record
+ * passes it as `record` (null for none); otherwise the sync reads it.
  */
-export async function syncStarter({ designSystemRoot, version, check = null, force = false }) {
+export async function syncStarter({ designSystemRoot, version, check = null, force = false, record = undefined }) {
   const resolve = (relative) => path.join(designSystemRoot, ...relative.split("/"));
   const siteText = await readOptional(resolve(STARTER_SITE_FILE));
   if (siteText === null) {
     throw new Error(`${designSystemRoot} has no ${STARTER_SITE_FILE}, so it is not a starter-based Design System; starter sync only applies to systems scaffolded by timds init`);
   }
-  const record = await readStarterRecord(designSystemRoot);
+  if (record === undefined) record = await readStarterRecord(designSystemRoot);
   const stock = await stockStarter();
   const files = [];
   const writes = [];
   const recordedFiles = {};
-  const knownHashes = (relative) => [...(legacyStarterFileHashes.get(relative) ?? []), ...(record?.files?.[relative] ? [record.files[relative]] : [])];
   const plan = (relative, status, content, current, note) => {
     files.push(note ? { note, path: relative, status } : { path: relative, status });
     if (content !== null && content !== undefined && content !== current) writes.push({ content, current, file: resolve(relative), relative });
   };
+  // A file the toolkit wrote is recorded at the stock hash; a customized one
+  // keeps the hash last written for it, so a revert to that version is still
+  // recognized as stock instead of staying customized until --force.
+  const recordFile = (relative, planned) => {
+    if (planned.status !== "customized") recordedFiles[relative] = stock.files[relative];
+    else if (typeof record?.files?.[relative] === "string") recordedFiles[relative] = record.files[relative];
+  };
 
   // 1. Plumbing, by hash.
-  for (const [relative, templateName] of starterPlumbingFiles) {
-    const desired = await template(templateName);
-    const planned = await planStockFile(resolve(relative), desired, { force, knownHashes: knownHashes(relative) });
-    if (planned.status !== "customized") recordedFiles[relative] = stock.files[relative];
+  for (const [relative] of starterPlumbingFiles) {
+    const desired = stock.texts[relative];
+    const planned = await planStockFile(resolve(relative), desired, { force, knownHashes: knownStarterHashes(relative, record) });
+    recordFile(relative, planned);
     plan(relative, planned.status, planned.write ? desired : null, planned.current, planned.forced ? "replaced with --force" : undefined);
   }
 
   // 2. The catalogs. The site model is merged first because formats and
-  //    fragments both refer to its pages.
+  //    fragments both refer to its pages. A system without a record is
+  //    merged against the catalogs earlier releases scaffolded; the current
+  //    stock is never a baseline, since a field equal to it needs no merge
+  //    and a kept edit is only news when the stock moved away from what the
+  //    client could have synced from.
   const currentSite = parseJson(siteText, STARTER_SITE_FILE);
-  const siteBaselines = record ? [record.baseline.site] : [stock.site, ...await Promise.all(historicalSiteSnapshots.map(async (name) => parseJson(await template(name), name)))];
-  const fragmentPages = new Map(starterManagedFragments.map(([relative, templateName]) => {
+  const siteBaselines = record ? [record.baseline.site] : await Promise.all(historicalSiteSnapshots.map(async (name) => parseJson(await template(name), name)));
+  const fragmentPages = new Map(starterManagedFragments.map(([relative]) => {
     const [, view, name] = relative.match(/^src\/pages\/([^/]+)\/([^/]+)\.html$/);
-    return [pageId(view, name === "index" ? "" : name), { relative, templateName }];
+    return [pageId(view, name === "index" ? "" : name), { relative }];
   }));
   const declaredBefore = declaredPageIds(currentSite);
   const findPage = (site, id) => {
@@ -514,9 +564,9 @@ export async function syncStarter({ designSystemRoot, version, check = null, for
   const fragmentsToWrite = new Set();
   const authoredPages = new Set();
   const fragmentPlans = new Map();
-  for (const [id, { relative, templateName }] of fragmentPages) {
-    const desired = await template(templateName);
-    const planned = await planStockFile(resolve(relative), desired, { force, knownHashes: knownHashes(relative) });
+  for (const [id, { relative }] of fragmentPages) {
+    const desired = stock.texts[relative];
+    const planned = await planStockFile(resolve(relative), desired, { knownHashes: knownStarterHashes(relative, record) });
     if (planned.status !== "created") {
       fragmentPlans.set(relative, { desired, planned });
       continue;
@@ -548,17 +598,18 @@ export async function syncStarter({ designSystemRoot, version, check = null, for
 
   const formatsText = await readOptional(resolve(STARTER_FORMATS_FILE));
   const currentFormats = formatsText === null ? null : parseJson(formatsText, STARTER_FORMATS_FILE);
-  const formatBaselines = record ? [record.baseline.formats] : [stock.formats];
+  const formatBaselines = record ? [record.baseline.formats] : [];
   const mergedFormats = mergeFormatCatalog(currentFormats, stock.formats, formatBaselines, declaredPageIds(merged.site));
   const formatsChanged = currentFormats === null || !isDeepStrictEqual(mergedFormats.catalog, currentFormats);
   plan(STARTER_FORMATS_FILE, currentFormats === null ? "created" : formatsChanged ? "updated" : "current", formatsChanged ? formatFormatsJson(mergedFormats.catalog) : null, formatsText);
 
-  // 3. Fragments, now that the site model says which pages exist.
+  // 3. Fragments, now that the site model says which pages exist. A
+  //    customized fragment is this system's own page: kept, --force or not.
   for (const [relative, { desired, planned }] of fragmentPlans) {
-    if (planned.status !== "customized" && planned.status !== "skipped") recordedFiles[relative] = stock.files[relative];
+    if (planned.status !== "skipped") recordFile(relative, planned);
     const note = planned.status === "skipped"
       ? "its page is declared as authored by this system; copy the stock fragment by hand if wanted"
-      : planned.forced ? "replaced with --force" : undefined;
+      : planned.status === "customized" ? "this system's own page; never replaced, --force included" : undefined;
     plan(relative, planned.status, planned.write ? desired : null, planned.current, note);
   }
 
@@ -585,6 +636,7 @@ export async function syncStarter({ designSystemRoot, version, check = null, for
     files,
     formats: mergedFormats.changes,
     record: recordPath,
+    recordWritten: recordChanged,
     site: merged.changes,
     written: writes.map((write) => write.relative),
   };
@@ -604,9 +656,9 @@ export async function syncStarter({ designSystemRoot, version, check = null, for
       }
       if (previousRecordText === null) await fs.rm(recordPath, { force: true });
       else await fs.writeFile(recordPath, previousRecordText, "utf8");
-      const customized = files.filter((file) => file.status === "customized").map((file) => file.path);
+      const customized = forceReplaceable({ files });
       throw new Error(`Starter sync was rolled back because the workspace check failed afterwards: ${caught.message}${customized.length
-        ? `\nCustomized files were kept (${customized.join(", ")}); the new pages may need their stock versions. Port your changes, or rerun with --force to replace them.`
+        ? `\nCustomized files were kept (${customized.join(", ")}); the new pages may need their stock versions. Port your changes, or run timds starter sync --force to replace them.`
         : ""}`);
     }
   }
@@ -624,14 +676,15 @@ export function describeStarterSync(report) {
   if (site.addedViews.length) lines.push(`Added views: ${site.addedViews.join(", ")} (every page planned until it is authored).`);
   if (site.addedPages.length) lines.push(`Added planned pages: ${site.addedPages.join(", ")}.`);
   if (site.advanced.length) lines.push(`Advanced unchanged stock fields: ${site.advanced.join(", ")}.`);
-  for (const kept of site.kept) lines.push(`Kept ${kept.path} as ${JSON.stringify(kept.current)}; the scaffold now says ${JSON.stringify(kept.stock)}.`);
+  const keptAs = (kept) => (kept.current === undefined ? "undeclared" : `as ${JSON.stringify(kept.current)}`);
+  for (const kept of site.kept) lines.push(`Kept ${kept.path} ${keptAs(kept)}; the scaffold now says ${JSON.stringify(kept.stock)}.`);
   if (formats.addedGroups.length) lines.push(`Added format groups: ${formats.addedGroups.join(", ")}.`);
   if (formats.addedFormats.length) {
     const groups = [...new Set(formats.addedFormats.map((id) => id.split(".")[0]))];
     lines.push(`Added formats: ${formats.addedFormats.length} in ${groups.join(", ")}.`);
   }
   if (formats.advanced.length) lines.push(`Advanced unchanged stock format fields: ${formats.advanced.join(", ")}.`);
-  for (const kept of formats.kept) lines.push(`Kept format field ${kept.path} as ${JSON.stringify(kept.current)}; the scaffold now says ${JSON.stringify(kept.stock)}.`);
+  for (const kept of formats.kept) lines.push(`Kept format field ${kept.path} ${keptAs(kept)}; the scaffold now says ${JSON.stringify(kept.stock)}.`);
   for (const skipped of formats.skipped) lines.push(`Skipped format ${skipped.id}: ${skipped.reason}.`);
   if (report.check) {
     const warnings = report.check.machine?.warnings ?? [];

@@ -132,8 +132,10 @@ toolkit wrote. Every `upgrade` re-syncs an adopted system: unmodified
 plumbing is refreshed, new views, planned pages, and formats are appended
 without removing, reordering, or retitling anything the system declares,
 and a missing stock stylesheet link is added to `src/layout.html`. A file
-changed locally is reported as customized and kept; `--force` replaces it
-only with explicit authorization. A system scaffolded before the record
+changed locally is reported as customized and kept; `starter sync --force`
+replaces a stock script or stylesheet only with explicit authorization, and
+`upgrade --force` never reaches starter files. An overview fragment this
+system wrote itself is never replaced. A system scaffolded before the record
 existed opts in once with `npm run timds -- starter sync` on a feature
 branch, then reviews the diff and runs `check`. Treat planned pages that
 appear after an upgrade as primitives to author. When a change needs a stock

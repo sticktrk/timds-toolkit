@@ -26,7 +26,7 @@ import { migrateVideoComponents } from "./video-migration.mjs";
 import { acceptsToolkitReleaseRange, assertVideoContractRuntime, runtimeIdentity, toolkitReleaseRange } from "./runtime.mjs";
 import { publishExtractedIndex } from "./artifact.mjs";
 import { DESIGNS_SOURCE_DIRECTORY, buildDesigns, checkDesigns, declaredClasses, readDesignCatalog, renderDesigns } from "./designs.mjs";
-import { STARTER_RECORD_FILE, describeStarterSync, isStarterSystem, legacyStarterFileHashes, planStockFile, readStarterRecord, recordFreshStarter, syncStarter } from "./starter.mjs";
+import { STARTER_RECORD_FILE, describeStarterSync, forceReplaceable, isStarterSystem, knownStarterHashes, planStockFile, readStarterRecord, recordFreshStarter, recordStarterFiles, syncStarter } from "./starter.mjs";
 import { extractArtifact, normalizeMachineConfig } from "./extract.mjs";
 import { normalizeBrandGuidance } from "./brand.mjs";
 import { describeBrandKit, readDerivedLayer, summarizeBrandKit } from "./derived.mjs";
@@ -76,9 +76,10 @@ const dependencyAutomationFiles = Object.freeze([
 // is never mistaken for a customized one.
 // The starter scripts `designs init` may replace: [design-system path,
 // template name]. A script is replaced only when it is byte-identical to a
-// stock version (the toolkit's `legacyStarterFileHashes` and the starter
-// record in src/starter.mjs) or to the current one; a customized script is
-// reported, never overwritten. `starter sync` keeps the whole plumbing set.
+// stock version (`knownStarterHashes` in src/starter.mjs: the legacy table
+// plus the starter record) or to the current one; a customized script is
+// reported, never overwritten. What is written is noted in an existing record.
+// `starter sync` keeps the whole plumbing set.
 const starterScriptFiles = Object.freeze([
   ["scripts/build.mjs", "starter/scripts/build.mjs"],
   ["scripts/viewer.mjs", "starter/scripts/viewer.mjs"],
@@ -753,10 +754,13 @@ async function planReleaseAutomationFile(repoRoot, relativePath, templateName, {
   return { destination, desired, needsUpdate: true, relativePath };
 }
 
-async function migrateStandaloneReleaseAutomation(repoRoot, { force = false, managedHashes = {} } = {}) {
-  const planned = [];
+// The migration is planned before anything is written so that every refusal
+// (a customized file without --force) happens while the repository is still
+// untouched; `applyStandaloneReleaseAutomation` then writes the plan.
+async function planStandaloneReleaseAutomation(repoRoot, { force = false, managedHashes = {} } = {}) {
+  const files = [];
   for (const [relativePath, templateName] of standaloneReleaseAutomationFiles) {
-    planned.push(await planReleaseAutomationFile(repoRoot, relativePath, templateName, {
+    files.push(await planReleaseAutomationFile(repoRoot, relativePath, templateName, {
       force,
       legacyHashes: legacyStandaloneAutomationHashes.get(relativePath) ?? [],
       managedHash: managedHashes[relativePath],
@@ -770,15 +774,19 @@ async function migrateStandaloneReleaseAutomation(repoRoot, { force = false, man
   if (currentTestScript && currentTestScript !== expectedTestScript && !force) {
     throw new Error(`package.json scripts.test:release is already ${JSON.stringify(currentTestScript)}; rerun with --auto-release --force to replace it`);
   }
+  return { expectedTestScript, files, packageJson, packagePath, testScriptChanged: currentTestScript !== expectedTestScript };
+}
+
+async function applyStandaloneReleaseAutomation(plan) {
   const changed = [];
-  for (const file of planned.filter(({ needsUpdate }) => needsUpdate)) {
+  for (const file of plan.files.filter(({ needsUpdate }) => needsUpdate)) {
     await fs.mkdir(path.dirname(file.destination), { recursive: true });
     await fs.writeFile(file.destination, file.desired, "utf8");
     changed.push(file.relativePath);
   }
-  if (currentTestScript !== expectedTestScript) {
-    packageJson.scripts = { ...(packageJson.scripts || {}), "test:release": expectedTestScript };
-    await fs.writeFile(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`, "utf8");
+  if (plan.testScriptChanged) {
+    plan.packageJson.scripts = { ...(plan.packageJson.scripts || {}), "test:release": plan.expectedTestScript };
+    await fs.writeFile(plan.packagePath, `${JSON.stringify(plan.packageJson, null, 2)}\n`, "utf8");
     changed.push("package.json");
   }
   return changed;
@@ -964,9 +972,23 @@ export async function upgradeRepository(repoRootInput, { autoRelease = false, de
   const dependencyPlan = dependencyPrs || previousInstallation.dependencyAutomation
     ? await planReleaseAutomationFile(workspace.repoRoot, dependencyWorkflow, dependencyTemplate, {force, managedHash: previousInstallation.managedFiles?.[dependencyWorkflow]})
     : null;
-  const releaseAutomationChanges = autoRelease || previousInstallation.releaseAutomation
-    ? await migrateStandaloneReleaseAutomation(workspace.repoRoot, { force, managedHashes: previousInstallation.managedFiles || {} })
-    : [];
+  const releaseAutomationPlan = autoRelease || previousInstallation.releaseAutomation
+    ? await planStandaloneReleaseAutomation(workspace.repoRoot, { force, managedHashes: previousInstallation.managedFiles || {} })
+    : null;
+  // An adopted starter is synced on every upgrade, the way the managed
+  // boundary is; a system that has not opted in is only told how to. The
+  // sync runs first, after every plan that can refuse and before any write:
+  // it rolls itself back when the check fails, so a failed sync aborts the
+  // upgrade with the repository as it was, rather than leaving the managed
+  // files replaced and the next plain `upgrade` refusing on them. `--force`
+  // stays with the managed boundary; a customized starter file is replaced
+  // only by an explicit `timds starter sync --force`.
+  const starterRecord = await readStarterRecord(workspace.designSystemRoot);
+  const starter = starterRecord
+    ? await syncStarter({ check: () => checkWorkspace(workspace.repoRoot), designSystemRoot: workspace.designSystemRoot, record: starterRecord, version: identity.version })
+    : null;
+  const starterAvailable = !starterRecord && await isStarterSystem(workspace.designSystemRoot);
+  const releaseAutomationChanges = releaseAutomationPlan ? await applyStandaloneReleaseAutomation(releaseAutomationPlan) : [];
   if (dependencyPlan?.needsUpdate) {
     await fs.mkdir(path.dirname(dependencyPlan.destination), {recursive: true});
     await fs.writeFile(dependencyPlan.destination, dependencyPlan.desired);
@@ -979,13 +1001,6 @@ export async function upgradeRepository(repoRootInput, { autoRelease = false, de
     repoRoot: workspace.repoRoot,
     replace: true,
   });
-  // An adopted starter is synced on every upgrade, the way the managed
-  // boundary is; a system that has not opted in is only told how to.
-  const starterAdopted = (await readStarterRecord(workspace.designSystemRoot)) !== null;
-  const starter = starterAdopted
-    ? await syncStarter({ check: () => checkWorkspace(workspace.repoRoot), designSystemRoot: workspace.designSystemRoot, force, version: identity.version })
-    : null;
-  const starterAvailable = !starterAdopted && await isStarterSystem(workspace.designSystemRoot);
   return { ...workspace, ...installed, previousVersion, releaseAutomationChanges, starter, starterAvailable };
 }
 
@@ -1022,18 +1037,24 @@ export async function initializeDesigns(repoRootInput, { force = false } = {}) {
   await copyDirectory(source, destination, { created, overwrite: force });
   const scripts = [];
   const starterRecord = await readStarterRecord(designSystemRoot);
+  const written = {};
   for (const [relative, templateName] of starterScriptFiles) {
     const target = path.join(designSystemRoot, relative);
     const desired = await template(templateName);
-    const knownHashes = [...(legacyStarterFileHashes.get(relative) ?? []), ...(starterRecord?.files?.[relative] ? [starterRecord.files[relative]] : [])];
-    const planned = await planStockFile(target, desired, { force, knownHashes });
+    const planned = await planStockFile(target, desired, { force, knownHashes: knownStarterHashes(relative, starterRecord) });
     if (planned.status === "created") {
       scripts.push({ path: relative, status: "absent" });
       continue;
     }
-    if (planned.write) await fs.writeFile(target, desired, "utf8");
+    if (planned.write) {
+      await fs.writeFile(target, desired, "utf8");
+      written[relative] = desired;
+    }
     scripts.push({ path: relative, status: planned.status });
   }
+  // An adopted starter's record learns what was written here, so a later
+  // release's sync still recognizes these scripts as stock.
+  if (starterRecord && Object.keys(written).length) await recordStarterFiles(designSystemRoot, starterRecord, written);
   // The sample uses the starter's classes; a system that renamed them learns
   // which to add or change before `check` says the same thing.
   const declared = new Set();
@@ -1400,8 +1421,9 @@ export async function runCli(argv) {
     const result = await syncStarterWorkspace(root, { force: options.force });
     output(`${result.adopted ? "Starter adopted" : "Starter synced"}: ${result.designSystemRoot}`);
     for (const line of describeStarterSync(result)) output(line);
-    if (result.files.some((file) => file.status === "customized")) output("Customized files were left alone; rerun with --force to replace them with the stock versions.");
-    output(result.written.length
+    const replaceable = forceReplaceable(result);
+    if (replaceable.length) output(`Customized files were left alone (${replaceable.join(", ")}); rerun with --force to replace them with the stock versions.`);
+    output(result.written.length || result.recordWritten
       ? `Record: ${path.relative(result.designSystemRoot, result.record)}. Review the diff, then commit; every timds upgrade keeps this starter current from now on.`
       : "Nothing to change; this starter is current.");
     return result;
@@ -1536,6 +1558,8 @@ export async function runCli(argv) {
     if (result.starter) {
       output(result.starter.written.length ? `Starter: ${result.starter.written.length} file${result.starter.written.length === 1 ? "" : "s"} synced with the ${result.package.version} scaffold.` : "Starter: current.");
       for (const line of describeStarterSync(result.starter)) output(line);
+      const replaceable = forceReplaceable(result.starter);
+      if (replaceable.length) output(`Customized starter files were left alone (${replaceable.join(", ")}); upgrade never replaces them. Run timds starter sync --force to replace them with the stock versions.`);
     } else if (result.starterAvailable) {
       output("Starter: not adopted. Run timds starter sync once to opt in; every upgrade then keeps the starter's scripts, catalogs, and views current.");
     }

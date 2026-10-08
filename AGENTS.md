@@ -74,15 +74,20 @@ toolkit may touch exactly three kinds of things: the starter plumbing
 file matches a hash the toolkit wrote; the structure catalogs `src/site.json`
 and `src/formats.json`, merged three ways against the recorded stock baseline
 so entries the client lacks are appended (pages as `planned`), fields still
-equal to the baseline advance, and anything the client changed is kept and
-reported, with nothing removed, reordered, or retitled; and the overview
+equal to the baseline advance, and anything the client changed is kept (and
+reported when the stock value moved, not on every sync), with nothing
+removed, reordered, or retitled; and the overview
 fragments the starter mirrors from the golden system
 (`starterManagedFragments`), written when the sync adds or authors their page
 and refreshed only while unmodified. `src/layout.html` only gains a missing
 stock stylesheet link. Every other fragment, `tokens.json`, `system.css`, and
-the rest of authored source stay outside the boundary. Customized files are
-reported and never replaced without `--force`, and a sync whose `check` fails
-is rolled back whole. A structural change to `templates/starter` therefore
+the rest of authored source stay outside the boundary. Customized plumbing
+is reported and replaced only by an explicit `timds starter sync --force`;
+`upgrade --force` covers the managed boundary and never reaches starter
+files, and a customized overview fragment is the system's own page, never
+replaced. A sync whose `check` fails is rolled back whole, and `upgrade` runs
+it before touching managed files so a failed sync aborts the upgrade with the
+repository as it was. A structural change to `templates/starter` therefore
 reaches existing systems through this sync; do not add another one-shot
 migration for it.
 

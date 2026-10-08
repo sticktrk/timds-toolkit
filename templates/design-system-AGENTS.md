@@ -165,8 +165,10 @@ reordering, or retitling anything declared here; writes the Digital, Social,
 and Print overview fragments when it adds or authors their page; and adds a
 missing stock stylesheet link to `src/layout.html`. It never touches other
 fragments, `tokens.json`, `system.css`, or `timds.json`. A file changed here
-is reported as customized and kept; a sync that would fail `check` is rolled
-back. So: edit `system.css` and the pages freely, but leave the stock scripts
+is reported as customized and kept (`upgrade --force` does not replace it;
+only an explicit `__TIMDS_CLI__ starter sync --force` does, and never an
+overview fragment); a sync that would fail `check` is rolled back. So: edit
+`system.css` and the pages freely, but leave the stock scripts
 and `viewer.css` alone unless the change is meant to stay local, and expect
 new planned pages after an upgrade, which are primitives to author, not
 mistakes to delete.
