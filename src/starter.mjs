@@ -5,14 +5,19 @@
 // The starter has two layers, and the line between them is recorded in
 // .timds/starter.json rather than guessed:
 //
-// - Plumbing the toolkit owns while it is unmodified: the viewer, build, dev,
-//   and check scripts, and the viewer and canvas stylesheets. The stock hash
-//   of each file is recorded when it is written. A file that still matches is
-//   refreshed; a changed one is reported as customized and replaced only by
-//   `timds starter sync --force <path>`, which names each file it gives up,
-//   never by `upgrade`. The record keeps the
-//   hash the toolkit last wrote for a customized file, so reverting to that
-//   version is recognized again.
+// - Plumbing: the viewer, build, dev, and check scripts, and the viewer and
+//   canvas stylesheets. Who owns a local change to them is the record's
+//   `plumbing` mode. A system scaffolded by `init` is `"toolkit"`: the
+//   plumbing is the toolkit's outright, so every sync brings it to stock,
+//   replacing a local change and saying so, without halting and without
+//   anyone naming files. A system adopted later with `starter sync` is
+//   `"recorded"`: the stock hash of each file is recorded when it is
+//   written, a file that still matches is refreshed, and a changed one is
+//   reported as customized and replaced only by `timds starter sync --force
+//   <path>`, which names each file it gives up, never by `upgrade`. The
+//   record keeps the hash the toolkit last wrote for a customized file, so
+//   reverting to that version is recognized again. Either mode is switched
+//   by editing `plumbing` in the record.
 // - Structure catalogs the client extends: the views and pages in
 //   src/site.json and the asset formats in src/formats.json. The record keeps
 //   the stock catalogs the system was last synced against, and each sync is a
@@ -52,6 +57,9 @@ export const STARTER_RECORD_FILE = ".timds/starter.json";
 export const STARTER_SITE_FILE = "src/site.json";
 export const STARTER_FORMATS_FILE = "src/formats.json";
 export const STARTER_LAYOUT_FILE = "src/layout.html";
+
+/** The record's `plumbing` modes: who a local change to a stock script or stylesheet belongs to. */
+export const STARTER_PLUMBING_MODES = Object.freeze(["toolkit", "recorded"]);
 
 /** Plumbing the sync replaces by hash: [design-system path, template name]. */
 export const starterPlumbingFiles = Object.freeze([
@@ -453,6 +461,9 @@ export async function readStarterRecord(designSystemRoot) {
   if (!isObject(record) || !isObject(record.files) || !isObject(record.baseline)) {
     throw new Error(`${STARTER_RECORD_FILE} is not a TimDS starter record; restore it from git or delete it and rerun timds starter sync`);
   }
+  if (record.plumbing !== undefined && !STARTER_PLUMBING_MODES.includes(record.plumbing)) {
+    throw new Error(`${STARTER_RECORD_FILE} has plumbing ${JSON.stringify(record.plumbing)}; it must be ${STARTER_PLUMBING_MODES.map((mode) => JSON.stringify(mode)).join(" or ")}`);
+  }
   return record;
 }
 
@@ -482,13 +493,14 @@ async function stockStarter() {
 /**
  * Record a fresh scaffold as adopted: every managed file at its stock hash and
  * the stock catalogs as the baseline, so the first `upgrade` already knows
- * what the toolkit wrote.
+ * what the toolkit wrote, with the plumbing the toolkit's outright.
  */
 export async function recordFreshStarter(designSystemRoot, version) {
   const stock = await stockStarter();
   return writeStarterRecord(designSystemRoot, {
     baseline: { formats: stock.formats, site: stock.site },
     files: stock.files,
+    plumbing: "toolkit",
     schemaVersion: 1,
     version,
   });
@@ -521,7 +533,8 @@ export function forceReplaceable(report) {
  * Plans every change first, writes them together, records what it wrote, and
  * runs `check`; if the check fails, every file is restored and the error says
  * what failed, so the system is never left between two structures. `force`
- * lists the plumbing files to replace even though they are customized; it
+ * lists the plumbing files to replace even though they are customized (moot
+ * when the record's plumbing mode is "toolkit", which replaces them all); it
  * never reaches a fragment, which is the system's own page once it differs.
  * A caller that already read the record passes it as `record` (null for
  * none); otherwise the sync reads it.
@@ -549,12 +562,14 @@ export async function syncStarter({ designSystemRoot, version, check = null, for
     else if (typeof record?.files?.[relative] === "string") recordedFiles[relative] = record.files[relative];
   };
 
-  // 1. Plumbing, by hash.
+  // 1. Plumbing, by hash; or outright when the toolkit owns it.
+  const plumbingMode = record?.plumbing ?? "recorded";
   for (const [relative] of starterPlumbingFiles) {
     const desired = stock.texts[relative];
-    const planned = await planStockFile(resolve(relative), desired, { force: force.includes(relative), knownHashes: knownStarterHashes(relative, record) });
+    const planned = await planStockFile(resolve(relative), desired, { force: plumbingMode === "toolkit" || force.includes(relative), knownHashes: knownStarterHashes(relative, record) });
     recordFile(relative, planned);
-    plan(relative, planned.status, planned.write ? desired : null, planned.current, planned.forced ? "replaced with --force" : undefined);
+    const note = planned.forced ? (plumbingMode === "toolkit" ? "the toolkit's in this system; a local change was replaced" : "replaced with --force") : undefined;
+    plan(relative, planned.status, planned.write ? desired : null, planned.current, note);
   }
 
   // 2. The catalogs. The site model is merged first because formats and
@@ -641,7 +656,7 @@ export async function syncStarter({ designSystemRoot, version, check = null, for
   }
 
   // 5. Write, record, check; roll everything back when the check fails.
-  const nextRecord = { baseline: { formats: stock.formats, site: stock.site }, files: recordedFiles, schemaVersion: 1, version };
+  const nextRecord = { baseline: { formats: stock.formats, site: stock.site }, files: recordedFiles, ...(record?.plumbing ? { plumbing: record.plumbing } : {}), schemaVersion: 1, version };
   const recordPath = resolve(STARTER_RECORD_FILE);
   const previousRecordText = await readOptional(recordPath);
   const recordChanged = previousRecordText !== `${JSON.stringify(nextRecord, null, 2)}\n`;
@@ -651,6 +666,7 @@ export async function syncStarter({ designSystemRoot, version, check = null, for
     designSystemRoot,
     files,
     formats: mergedFormats.changes,
+    plumbing: plumbingMode,
     record: recordPath,
     recordWritten: recordChanged,
     site: merged.changes,

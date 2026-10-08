@@ -1135,12 +1135,22 @@ test("starter sync reports customized files, rolls back when they break the chec
   const read = (relative) => fs.readFile(path.join(repoRoot, relative), "utf8");
   // A fresh scaffold is recorded as adopted, so its first sync is a no-op.
   const fresh = await syncStarterWorkspace(repoRoot);
-  assert.deepEqual([fresh.adopted, fresh.written, fresh.recordWritten], [false, [], false]);
-  // A scaffold already at stock but without the record is adopted by writing the record alone, and says so.
+  assert.deepEqual([fresh.adopted, fresh.written, fresh.recordWritten, fresh.plumbing], [false, [], false, "toolkit"]);
+  // A fresh scaffold's plumbing is the toolkit's outright: a local change is brought back to stock, reported, and nothing halts or needs --force.
+  assert.equal(JSON.parse(await read(".timds/starter.json")).plumbing, "toolkit");
+  await fs.appendFile(path.join(repoRoot, "scripts/dev.mjs"), "\n// client change\n");
+  const owned = await syncStarterWorkspace(repoRoot);
+  assert.deepEqual(owned.files.find((file) => file.path === "scripts/dev.mjs"), { note: "the toolkit's in this system; a local change was replaced", path: "scripts/dev.mjs", status: "updated" });
+  assert.deepEqual([owned.written, forceReplaceable(owned)], [["scripts/dev.mjs"], []]);
+  assert.equal(await read("scripts/dev.mjs"), await fs.readFile(path.join(templatesRoot, "starter/scripts/dev.mjs"), "utf8"));
+  assert.equal(JSON.parse(await read(".timds/starter.json")).plumbing, "toolkit", "the mode survives a sync");
+  await writeJson(path.join(repoRoot, ".timds/starter.json"), { ...JSON.parse(await read(".timds/starter.json")), plumbing: "mine" });
+  await assert.rejects(syncStarterWorkspace(repoRoot), /plumbing "mine"; it must be "toolkit" or "recorded"/);
+  // A scaffold already at stock but without the record is adopted by writing the record alone, and says so; an adopted system's plumbing is recorded, not owned.
   await fs.rm(path.join(repoRoot, ".timds/starter.json"));
   const recordOnly = await syncStarterWorkspace(repoRoot);
-  assert.deepEqual([recordOnly.adopted, recordOnly.written, recordOnly.recordWritten, recordOnly.check], [true, [], true, null]);
-  await fs.access(path.join(repoRoot, ".timds/starter.json"));
+  assert.deepEqual([recordOnly.adopted, recordOnly.written, recordOnly.recordWritten, recordOnly.check, recordOnly.plumbing], [true, [], true, null, "recorded"]);
+  assert.equal(JSON.parse(await read(".timds/starter.json")).plumbing, undefined);
 
   await rewindStarter(repoRoot);
   await fs.appendFile(path.join(repoRoot, "scripts/dev.mjs"), "\n// client change\n");
@@ -1275,9 +1285,10 @@ test("a later scaffold advances starter fields the client never changed and keep
   assert.deepEqual([web(synced).label, web(synced).blurb, web(synced).pages.map((page) => page.slug)], ["Web DS", "Our interfaces", ["spacing", "photography", "components", "layout", "email", "email-templates"]]);
   assert.equal(result.check.machine.warnings.length, 2);
 
-  // A customized file keeps the hash the toolkit last wrote for it, so reverting to that version is recognized as stock again instead of needing --force.
+  // In the recorded mode a customized file keeps the hash the toolkit last wrote for it, so reverting to that version is recognized as stock again instead of needing --force.
   const olderHash = createHash("sha256").update(olderCheck).digest("hex");
   const synchronizedRecord = JSON.parse(await read(".timds/starter.json"));
+  synchronizedRecord.plumbing = "recorded";
   synchronizedRecord.files["scripts/check.mjs"] = olderHash;
   await writeJson(path.join(repoRoot, ".timds/starter.json"), synchronizedRecord);
   await fs.writeFile(path.join(repoRoot, "scripts/check.mjs"), `${olderCheck}// client change\n`);

@@ -156,20 +156,23 @@ clean.
 The scaffold's plumbing and structure are kept current by TimDS, the way its
 skills are: `.timds/starter.json` records what the toolkit wrote, and every
 `__TIMDS_CLI__ upgrade` re-syncs it (a system scaffolded before the record
-existed opts in once with `__TIMDS_CLI__ starter sync`). The sync refreshes
+existed opts in once with `__TIMDS_CLI__ starter sync`). The sync brings
 the stock `scripts/build.mjs`, `check.mjs`, `dev.mjs`, `viewer.mjs`,
-`src/styles/canvas.css`, and `src/styles/viewer.css` while they are
-unmodified; appends views, planned pages, and asset formats a newer scaffold
+`src/styles/canvas.css`, and `src/styles/viewer.css` to the installed
+release: in a system scaffolded by `init` they are the toolkit's outright
+(`"plumbing": "toolkit"` in the record), so a local change to them is
+replaced on the next upgrade and reported, never kept; a system adopted
+later keeps a changed file as customized (`"recorded"`). It appends views, planned pages, and asset formats a newer scaffold
 declares to `src/site.json` and `src/formats.json` without removing,
 reordering, or retitling anything declared here; writes the Digital, Social,
 and Print overview fragments when it adds or authors their page; and adds a
 missing stock stylesheet link to `src/layout.html`. It never touches other
-fragments, `tokens.json`, `system.css`, or `timds.json`. A file changed here
-is reported as customized and kept (`upgrade --force` does not replace it;
-only an explicit `__TIMDS_CLI__ starter sync --force <path>` naming the file
-does, and never an overview fragment); the sync refuses to run over
-uncommitted changes to the files it writes, and one that would fail `check`
-is rolled back. So: edit
+fragments, `tokens.json`, `system.css`, or `timds.json`. In the recorded
+mode a file changed here is reported as customized and kept (`upgrade
+--force` does not replace it; only an explicit `__TIMDS_CLI__ starter sync
+--force <path>` naming the file does, and never an overview fragment); the
+sync refuses to run over uncommitted changes to the files it writes, and one
+that would fail `check` is rolled back. So: edit
 `system.css` and the pages freely, but leave the stock scripts
 and `viewer.css` alone unless the change is meant to stay local, and expect
 new planned pages after an upgrade, which are primitives to author, not

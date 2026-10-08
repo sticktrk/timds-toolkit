@@ -64,8 +64,10 @@ to replace; a system scaffolded before designs existed adopts them with
 
 The scaffold itself stays current: `.timds/starter.json` records the starter
 scripts, viewer stylesheets, views, and asset formats TimDS wrote, and every
-`__TIMDS_CLI__ upgrade` refreshes what is unmodified and appends new views,
-planned pages, and formats without touching what this system declares. A
+`__TIMDS_CLI__ upgrade` brings the stock scripts and viewer stylesheets to
+the installed release (they are TimDS's in a fresh scaffold; a local change
+to them is replaced and reported) and appends new views, planned pages, and
+formats without touching what this system declares. A
 system scaffolded before the record existed opts in once with
 `__TIMDS_CLI__ starter sync`.
 

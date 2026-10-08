@@ -537,8 +537,13 @@ npm run timds -- starter sync --force scripts/viewer.mjs   # also replace the na
 
 Inside the boundary the sync touches three kinds of things. The stock
 `scripts/build.mjs`, `check.mjs`, `dev.mjs`, `viewer.mjs`,
-`src/styles/canvas.css`, and `src/styles/viewer.css` are replaced while they
-still match a hash the toolkit wrote. `src/site.json` and `src/formats.json`
+`src/styles/canvas.css`, and `src/styles/viewer.css` are plumbing, and the
+record's `plumbing` mode says who a local change to them belongs to. A
+system scaffolded by `init` is `"toolkit"`: every upgrade brings the six
+files to stock, replacing a local change and saying so, without halting and
+without naming files. A system adopted later with `starter sync` is
+`"recorded"`: a file is replaced while it still matches a hash the toolkit
+wrote, and a customized one is kept. Edit the field to switch. `src/site.json` and `src/formats.json`
 are merged three ways against the recorded stock baseline: views, pages, and
 formats the system lacks are appended (pages as `planned`, so a new primitive
 is there to author), fields still equal to the baseline advance to the new
@@ -549,9 +554,10 @@ is skipped. The Digital, Social, and Print overview fragments are written
 when the sync adds or authors their page and refreshed while unmodified; one
 that differs is the system's own page and is never replaced. `src/layout.html`
 only gains a missing stock stylesheet link. Everything else, other fragments,
-`tokens.json`, `system.css`, `timds.json`, stays the client's. Customized
-scripts and stylesheets are reported and replaced only by `starter sync
---force` naming each file; `upgrade --force` never reaches them. The sync
+`tokens.json`, `system.css`, `timds.json`, stays the client's. In the
+recorded mode, customized scripts and stylesheets are reported and replaced
+only by `starter sync --force` naming each file; `upgrade --force` never
+reaches them. The sync
 refuses to run over uncommitted changes to the files it writes, so its diff
 is always reviewable on its own. It ends with `check` and rolls back every
 file it wrote when that check fails, so a system is never left between two

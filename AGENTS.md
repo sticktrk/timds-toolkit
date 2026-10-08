@@ -70,8 +70,11 @@ an existing starter-based system opts in once with `timds starter sync`, and
 every `upgrade` syncs an adopted system from then on. Inside that boundary the
 toolkit may touch exactly three kinds of things: the starter plumbing
 (`scripts/build.mjs`, `check.mjs`, `dev.mjs`, `viewer.mjs`,
-`src/styles/canvas.css`, `src/styles/viewer.css`), replaced only while the
-file matches a hash the toolkit wrote; the structure catalogs `src/site.json`
+`src/styles/canvas.css`, `src/styles/viewer.css`), which a fresh `init`
+records as the toolkit's outright (`plumbing: "toolkit"`: every sync brings
+it to stock, replacing a local change and reporting it, never halting) and an
+adopted system records by hash (`"recorded"`: replaced only while the file
+matches a hash the toolkit wrote); the structure catalogs `src/site.json`
 and `src/formats.json`, merged three ways against the recorded stock baseline
 so entries the client lacks are appended (pages as `planned`), fields still
 equal to the baseline advance, and anything the client changed is kept (and
@@ -81,9 +84,9 @@ fragments the starter mirrors from the golden system
 (`starterManagedFragments`), written when the sync adds or authors their page
 and refreshed only while unmodified. `src/layout.html` only gains a missing
 stock stylesheet link. Every other fragment, `tokens.json`, `system.css`, and
-the rest of authored source stay outside the boundary. Customized plumbing
-is reported and replaced only by an explicit `timds starter sync --force
-<path>` that names each file; `upgrade --force` covers the managed boundary
+the rest of authored source stay outside the boundary. Recorded plumbing
+that was customized is reported and replaced only by an explicit `timds
+starter sync --force <path>` that names each file; `upgrade --force` covers the managed boundary
 and never reaches starter files, and a customized overview fragment is the
 system's own page, never replaced. The sync refuses to run over uncommitted
 changes to the files it writes. A sync whose `check` fails is rolled back

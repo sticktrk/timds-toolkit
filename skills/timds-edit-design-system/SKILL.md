@@ -128,11 +128,14 @@ the reference the port must match, never the production site itself.
 `check.mjs`, `dev.mjs`, `viewer.mjs`, `src/styles/canvas.css`,
 `src/styles/viewer.css`), the views in `src/site.json`, the formats in
 `src/formats.json`, and the Digital, Social, and Print overview fragments the
-toolkit wrote. Every `upgrade` re-syncs an adopted system: unmodified
-plumbing is refreshed, new views, planned pages, and formats are appended
+toolkit wrote. Every `upgrade` re-syncs an adopted system: the plumbing is
+brought to stock, new views, planned pages, and formats are appended
 without removing, reordering, or retitling anything the system declares,
-and a missing stock stylesheet link is added to `src/layout.html`. A file
-changed locally is reported as customized and kept; `starter sync --force
+and a missing stock stylesheet link is added to `src/layout.html`. In a
+system scaffolded by `init` (`"plumbing": "toolkit"` in the record) a local
+change to a stock script or stylesheet is replaced on the next upgrade and
+reported, so never make one there. In an adopted system (`"recorded"`) a
+file changed locally is reported as customized and kept; `starter sync --force
 <path>` replaces the named stock script or stylesheet only with explicit
 authorization, and `upgrade --force` never reaches starter files. An overview
 fragment this system wrote itself is never replaced. Commit before syncing:

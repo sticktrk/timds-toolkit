@@ -1611,7 +1611,7 @@ export async function runCli(argv) {
     const designCatalog = await readDesignCatalog(workspace.designSystemRoot);
     output(`Designs: ${designCatalog.exists ? `${designCatalog.designs.length} design${designCatalog.designs.length === 1 ? "" : "s"}, ${designCatalog.designs.reduce((sum, design) => sum + design.pages.length, 0)} pages` : "not set up (timds designs init)"}`);
     const starterRecord = await readStarterRecord(workspace.designSystemRoot);
-    output(`Starter: ${starterRecord ? `synced with ${starterRecord.version}` : await isStarterSystem(workspace.designSystemRoot) ? "not adopted (timds starter sync)" : "not a starter system"}`);
+    output(`Starter: ${starterRecord ? `synced with ${starterRecord.version}; plumbing ${starterRecord.plumbing === "toolkit" ? "is the toolkit's (every upgrade brings it to stock)" : "is recorded (a customized file is kept until starter sync --force names it)"}` : await isStarterSystem(workspace.designSystemRoot) ? "not adopted (timds starter sync)" : "not a starter system"}`);
     output(`Video: ${workspace.manifest.video ? "enabled" : "disabled"}`);
     if (workspace.manifest.consumer) {
       output(`Consumer: ${workspace.manifest.consumer.repository}@${workspace.manifest.consumer.branch}:${workspace.manifest.consumer.path}`);
