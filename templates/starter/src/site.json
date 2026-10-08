@@ -15,13 +15,73 @@
     },
     {
       "id": "web",
-      "label": "Web",
-      "blurb": "Interface system",
+      "label": "Web DS",
+      "blurb": "Web & email system",
       "pages": [
         { "slug": "spacing", "title": "Spacing & shape", "group": "Tokens", "summary": "The spacing scale, radii, layout constants, and motion durations." },
         { "slug": "photography", "title": "Photography", "group": "Imagery", "summary": "Subjects, treatment, crops, and the approved image library.", "planned": true },
         { "slug": "components", "title": "Components", "group": "Library", "summary": "Buttons and form fields, each with a live preview, its rules, and its markup." },
-        { "slug": "layout", "title": "Layout", "summary": "Grid, section rhythm, breakpoints, and how long content wraps.", "planned": true }
+        { "slug": "layout", "title": "Layout", "summary": "Grid, section rhythm, breakpoints, and how long content wraps.", "planned": true },
+        { "slug": "email", "title": "Email principles", "group": "Email", "summary": "How inbox-grade HTML email is built on the system: structure, type, color, and what clients strip.", "planned": true },
+        { "slug": "email-templates", "title": "Email templates", "summary": "Ready-to-send templates for the messages the brand sends most, each with its rules and markup.", "planned": true }
+      ]
+    },
+    {
+      "id": "digital",
+      "label": "Digital DS",
+      "blurb": "Ads & campaign assets",
+      "pages": [
+        { "slug": "", "title": "Overview", "group": "Foundations", "summary": "Paid ads, event banners, and promotional graphics for screens: the format catalog, delivery rules, and how a preview is built." },
+        { "slug": "display-ads", "title": "Google Display Ads", "group": "Advertising", "summary": "The standard display units in Minimal, Accent, and Bold, with the platform's weight limit and border rule.", "planned": true },
+        { "slug": "responsive-ads", "title": "Responsive & PMax", "summary": "Image and text assets for responsive and Performance Max campaigns, within the platform's text limits.", "planned": true },
+        { "slug": "webinar-banners", "title": "Webinar Banners", "group": "Events", "summary": "The page hero, registration banner, and title slide for an online event.", "planned": true },
+        { "slug": "virtual-backgrounds", "title": "Virtual Backgrounds", "summary": "Video-call backgrounds that keep the speaker clear and the brand in the corner.", "planned": true },
+        { "slug": "email-banners", "title": "Email Headers & Signatures", "group": "Owned Channels", "summary": "The header image for campaigns and the banner under every signature.", "planned": true },
+        { "slug": "web-promos", "title": "Website Promos", "summary": "The promotional hero and strip the website shows during a campaign.", "planned": true },
+        { "slug": "business-profile", "title": "Google Business Profile", "summary": "Post images and the button names the profile allows.", "planned": true }
+      ]
+    },
+    {
+      "id": "social",
+      "label": "Social DS",
+      "blurb": "Social system",
+      "pages": [
+        { "slug": "", "title": "Overview", "group": "Foundations", "summary": "How the brand behaves on fixed-canvas, mobile-first channels: principles, the canvas catalog, and how the view is organized." },
+        { "slug": "foundations", "title": "Brand on Social", "summary": "The logo, type, and color on a fixed canvas: minimum sizes, safe areas, and the one treatment per surface.", "planned": true },
+        { "slug": "voice", "title": "Voice & Tone", "summary": "How the brand voice shortens for captions, comments, and replies.", "planned": true },
+        { "slug": "pipeline", "title": "Video Pipeline", "group": "Production", "summary": "How a video goes from brief to published cut, and who approves each step.", "planned": true },
+        { "slug": "video-lab", "title": "Video Lab", "summary": "The authoring contract and boards a drafted video is built from.", "planned": true },
+        { "slug": "b-roll", "title": "B-Roll Library", "summary": "The approved footage, how it is tagged, and which chains cut together.", "planned": true },
+        { "slug": "linkedin", "title": "LinkedIn specs", "group": "LinkedIn", "summary": "Image, video, and document specs and character limits.", "planned": true },
+        { "slug": "linkedin-templates", "title": "LinkedIn templates", "summary": "Post, carousel, and article-cover templates.", "planned": true },
+        { "slug": "youtube", "title": "YouTube specs", "group": "YouTube", "summary": "Channel art, video, and end-screen specs.", "planned": true },
+        { "slug": "youtube-templates", "title": "YouTube templates", "summary": "Overlay, lower-third, and bumper templates.", "planned": true },
+        { "slug": "thumbnails", "title": "Thumbnails", "summary": "Thumbnail layouts that read at phone size, with the one treatment per series.", "planned": true },
+        { "slug": "video-assets", "title": "Video Assets", "summary": "Intro, outro, lower thirds, and captions styles shared by every cut.", "planned": true },
+        { "slug": "shorts", "title": "Shorts", "group": "Shorts · Vertical", "summary": "Vertical video: safe areas under platform chrome, hook timing, and captions.", "planned": true },
+        { "slug": "event-templates", "title": "Eventbrite, Facebook & Webinars", "group": "Events", "summary": "Event listing images, event covers, and webinar promo posts and stories in Minimal, Accent, and Bold.", "planned": true },
+        { "slug": "facebook-posts", "title": "Facebook", "group": "Post Templates", "summary": "Square, link, and story templates with caption rules.", "planned": true },
+        { "slug": "instagram-posts", "title": "Instagram", "summary": "Square, portrait, story, and carousel templates with caption rules.", "planned": true },
+        { "slug": "paid-social", "title": "Paid Social Ads", "group": "Advertising", "summary": "Meta feed and portrait ads and LinkedIn sponsored content, with the text around each image.", "planned": true },
+        { "slug": "content", "title": "Pillars & Cadence", "group": "Content & Compliance", "summary": "Content pillars, posting cadence, and the mix between them.", "planned": true },
+        { "slug": "compliance", "title": "Compliance & A11y", "summary": "The legal and accessibility guardrails every post and ad passes before it goes out.", "planned": true }
+      ]
+    },
+    {
+      "id": "print",
+      "label": "Print DS",
+      "blurb": "Print system",
+      "pages": [
+        { "slug": "", "title": "Overview", "group": "Foundations", "summary": "How the brand meets paper, vinyl, and board: the template scale, principles, the format catalog, and the printer handoff." },
+        { "slug": "letterheads", "title": "Letterheads", "group": "Stationery", "summary": "First and second sheets, the letter grid, and what prints in the office.", "planned": true },
+        { "slug": "business-cards", "title": "Business Cards", "summary": "Front and back in each step of the scale, with the contact line sizes.", "planned": true },
+        { "slug": "brochures", "title": "Brochures", "group": "Collateral", "summary": "The tri-fold panel order, copy per panel, and the fold.", "planned": true },
+        { "slug": "booklets", "title": "Booklets", "summary": "Cover wraps, chapter openers, interior spreads, and the booklet style guide.", "planned": true },
+        { "slug": "worksheets", "title": "Worksheets", "summary": "Fill-in sheets that print on any office printer and take pen.", "planned": true },
+        { "slug": "calendars", "title": "Calendar", "group": "Desk & Office", "summary": "The year at a glance and the month page, dates computed from the year.", "planned": true },
+        { "slug": "notepads", "title": "Notepads", "summary": "Tear-off pads with handwriting ruling: the brand at the head and foot, room to write between.", "planned": true },
+        { "slug": "conference-banners", "title": "Conference Banners", "group": "Events & Display", "summary": "Pull-up and hanging banners sized to read across a room.", "planned": true },
+        { "slug": "posters", "title": "Posters", "summary": "Event posters in four sizes, from tabloid to one-sheet.", "planned": true }
       ]
     }
   ]

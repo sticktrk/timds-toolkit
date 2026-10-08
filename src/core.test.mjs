@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import http from "node:http";
 import os from "node:os";
@@ -8,15 +9,18 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
   checkWorkspace,
+  createPlumbingPrompt,
   createPreviewServer,
   initializeDesigns,
   initializeRepository,
   loadWorkspace,
   submitWorkspace,
+  syncStarterWorkspace,
   upgradeRepository,
   validateArtifact,
   validateManifest,
 } from "./core.mjs";
+import { describeStarterSync, forceReplaceable, starterManagedFragments, starterPlumbingFiles } from "./starter.mjs";
 import {
   addMediaFile,
   backfillMediaMetadata,
@@ -34,6 +38,28 @@ const VIDEO_METADATA = { codec: "h264", durationSeconds: 5.042, frameRate: 24, h
 const toolkitVersion = JSON.parse(
   await fs.readFile(new URL("../package.json", import.meta.url), "utf8"),
 ).version;
+
+const templatesRoot = fileURLToPath(new URL("../templates/", import.meta.url));
+const starterFixtureRoot = fileURLToPath(new URL("./fixtures/starter-before-formats/", import.meta.url));
+
+function gitInit(repoRoot) {
+  execFileSync("git", ["init", "-q", "-b", "main"], { cwd: repoRoot });
+  execFileSync("git", ["config", "user.email", "timds-test@example.com"], { cwd: repoRoot });
+  execFileSync("git", ["config", "user.name", "TimDS Test"], { cwd: repoRoot });
+}
+
+function commitAll(repoRoot, message) {
+  execFileSync("git", ["add", "--all"], { cwd: repoRoot });
+  execFileSync("git", ["commit", "-q", "-m", message], { cwd: repoRoot, stdio: "ignore" });
+}
+
+/** Rewind a fresh standalone scaffold to the shape `init` produced before the asset views and format catalog existed. */
+async function rewindStarter(repoRoot) {
+  await fs.cp(starterFixtureRoot, repoRoot, { force: true, recursive: true });
+  for (const relative of ["src/formats.json", "src/styles/canvas.css", "src/pages/digital", "src/pages/print", "src/pages/social", ".timds/starter.json"]) {
+    await fs.rm(path.join(repoRoot, relative), { force: true, recursive: true });
+  }
+}
 
 async function temporaryDirectory(t) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "timds-cli-"));
@@ -855,10 +881,16 @@ test("the starter viewer renders its site model, and its build guards pages, pla
   assert.match(color, /<a href="\/brand\/color\/" aria-current="page">Color<\/a>/);
   assert.match(color, /<td><code>color\.accent<\/code><\/td><td><code>--color-accent<\/code><\/td>/, "token tables come from tokens.json");
   assert.match(color, /class="pagenav"[\s\S]*← Typography[\s\S]*Spacing &amp; shape →/, "previous and next follow the site model");
+  // Format tables and previews come from src/formats.json; a format's planned page is named, never linked.
+  const digital = await read("dist/digital/index.html");
+  assert.match(digital, /<td><strong>Medium rectangle<\/strong><\/td><td><span style="white-space:nowrap">300 × 250 px<\/span><\/td><td>12 px<\/td><td>PNG or JPG<\/td><td>150 KB<\/td><td>Google Display Ads <span class="tag">Planned<\/span><\/td>/);
+  assert.match(digital, /<div class="canvas-frame canvas-frame--actual" style="--cw:728;--ch:90;--safe:8;--bleed:0;--ui-t:0;--ui-b:0;--ui-l:0;--ui-r:0;--clear-l:0;--clear-r:0">/);
+  assert.match(await read("dist/print/index.html"), /<td><strong>Letterhead · US Letter<\/strong><\/td><td><span style="white-space:nowrap">8\.5″ × 11″<\/span><\/td><td>0\.125″<\/td><td>0\.5″<\/td>/);
+  assert.match(await read("dist/social/index.html"), /style="--cw:1080;--ch:1920;--safe:64;--bleed:0;--ui-t:250;--ui-b:340;/, "platform bands reach the preview");
 
   // The derived layer carries only authored guidance, so the brand kit still reports what the client has not supplied.
   const { designs, machine } = await checkWorkspace(repoRoot);
-  assert.deepEqual(machine.pages.map((page) => page.id), ["brand/color", "brand/typography", "index", "web/components", "web/spacing"], "design pages are not guidance");
+  assert.deepEqual(machine.pages.map((page) => page.id), ["brand/color", "brand/typography", "digital", "index", "print", "social", "web/components", "web/spacing"], "design pages are not guidance");
   assert.equal(machine.counts.untyped, 0);
   assert.deepEqual(machine.warnings.map((warning) => warning.split(":")[0]), ["guidance group voice is empty", 'no asset is annotated data-timds-role="logo"; the brand kit has no logo']);
   assert.deepEqual(designs, { enabled: true, designCount: 1, pageCount: 2, stateCount: 3 });
@@ -888,7 +920,7 @@ test("the starter viewer renders its site model, and its build guards pages, pla
   const voice = site.views[0].pages.find((page) => page.slug === "voice");
   delete voice.planned;
   await writeJson(path.join(repoRoot, "src/site.json"), site);
-  assert.match(run("build"), /6 pages/);
+  assert.match(run("build"), /9 pages/);
   assert.match(await read("dist/brand/voice/index.html"), /Lead with the answer/);
   await fs.rm(path.join(repoRoot, "src/pages/brand/voice.html"));
   fails("build", /src\/pages\/brand\/voice\.html is missing/);
@@ -905,6 +937,24 @@ test("the starter viewer renders its site model, and its build guards pages, pla
   await fs.writeFile(path.join(repoRoot, "src/pages/brand/color.html"), colorSource.replace("{{tokens:color}}", "{{palette}}"));
   fails("check", /unknown placeholder \{\{palette\}\}/);
   await fs.writeFile(path.join(repoRoot, "src/pages/brand/color.html"), colorSource);
+
+  // A format names a declared page, ids are unique across groups, and a page previews only a declared format.
+  const formats = JSON.parse(await read("src/formats.json"));
+  formats.print.formats.letterhead.page = "print/stationery";
+  await writeJson(path.join(repoRoot, "src/formats.json"), formats);
+  fails("check", /format print\.letterhead names the page "print\/stationery", which src\/site\.json does not declare/);
+  formats.print.formats.letterhead.page = "print/letterheads";
+  formats.social.formats.letterhead = { ...formats.print.formats.letterhead };
+  await writeJson(path.join(repoRoot, "src/formats.json"), formats);
+  fails("check", /declares the format letterhead twice/);
+  delete formats.social.formats.letterhead;
+  await writeJson(path.join(repoRoot, "src/formats.json"), formats);
+  const digitalSource = await read("src/pages/digital/index.html");
+  await fs.writeFile(path.join(repoRoot, "src/pages/digital/index.html"), digitalSource.replace("{{canvas:gdn-728x90}}", "{{canvas:gdn-728x91}}"));
+  fails("check", /uses \{\{canvas:gdn-728x91\}\}, but src\/formats\.json declares no format gdn-728x91/);
+  await fs.writeFile(path.join(repoRoot, "src/pages/digital/index.html"), digitalSource.replace("{{formats:digital}}", "{{formats:screen}}"));
+  fails("check", /src\/formats\.json has no screen group/);
+  await fs.writeFile(path.join(repoRoot, "src/pages/digital/index.html"), digitalSource);
 
   await fs.appendFile(path.join(repoRoot, "src/styles/system.css"), "\n#facade { color: var(--color-ink); }\n.button--danger { background: #b00020; }\n");
   fails("check", /Color literals belong in tokens\.json.*\(src\/styles\/system\.css:\d+\)/);
@@ -946,10 +996,15 @@ test("designs init adopts website designs in a system scaffolded without them", 
   assert.deepEqual(renamed.missingClasses, ["form", "hero", "notice", "section", "site-footer", "site-header", "site-header__brand", "site-nav", "wrap"]);
   assert.equal(await read("src/styles/system.css"), stripped);
 
-  // --force rewrites the sample and the customized script.
+  // --force rewrites the sample and the customized script, and the starter record learns the hash it wrote.
+  const staleRecord = JSON.parse(await read(".timds/starter.json"));
+  staleRecord.files["scripts/build.mjs"] = "stale";
+  await writeJson(path.join(repoRoot, ".timds/starter.json"), staleRecord);
   const forced = await initializeDesigns(repoRoot, { force: true });
   assert.deepEqual(forced.scripts.map((script) => script.status), ["updated", "current"]);
   assert.doesNotMatch(await read("scripts/build.mjs"), /client change/);
+  const stockBuild = await fs.readFile(path.join(templatesRoot, "starter/scripts/build.mjs"), "utf8");
+  assert.equal(JSON.parse(await read(".timds/starter.json")).files["scripts/build.mjs"], createHash("sha256").update(stockBuild).digest("hex"));
 });
 
 test("standalone init accepts explicit immutable identity and JSON-safe text", async (t) => {
@@ -986,4 +1041,282 @@ test("standalone publication treats a GitHub bootstrap commit as an initial cont
   execFileSync("git", ["add", "timds.json"], { cwd: root });
   execFileSync("git", ["commit", "-m", "Initial contract"], { cwd: root, stdio: "ignore" });
   assert.equal(evaluate(execFileSync("git", ["rev-parse", "HEAD"], { cwd: root }).toString().trim()), "bump");
+});
+
+
+test("starter sync adopts a scaffold from before the asset views, and upgrade keeps it current afterwards", async (t) => {
+  const repoRoot = await temporaryDirectory(t);
+  gitInit(repoRoot);
+  await initializeRepository(repoRoot, { standalone: true, name: "Client & Co" });
+  await rewindStarter(repoRoot);
+  commitAll(repoRoot, "Scaffold before asset views");
+  const read = (relative) => fs.readFile(path.join(repoRoot, relative), "utf8");
+  // The rewound scaffold is a working system of the earlier shape.
+  const before = await checkWorkspace(repoRoot);
+  assert.deepEqual(before.machine.pages.map((page) => page.id), ["brand/color", "brand/typography", "index", "web/components", "web/spacing"]);
+
+  // The sync rewrites the catalogs and layout whole, so it refuses to run over uncommitted changes to the files it writes.
+  await fs.appendFile(path.join(repoRoot, "src/layout.html"), "\n");
+  await assert.rejects(syncStarterWorkspace(repoRoot), /Starter sync refuses to run over uncommitted changes to the files it writes:\n\s*M src\/layout\.html\nCommit or stash them first/);
+  execFileSync("git", ["checkout", "--", "src/layout.html"], { cwd: repoRoot, stdio: "ignore" });
+
+  const result = await syncStarterWorkspace(repoRoot);
+  assert.equal(result.adopted, true);
+  assert.deepEqual(result.files.map((file) => [file.path, file.status]), [
+    ["scripts/build.mjs", "current"],
+    ["scripts/check.mjs", "updated"],
+    ["scripts/dev.mjs", "current"],
+    ["scripts/viewer.mjs", "updated"],
+    ["src/styles/canvas.css", "created"],
+    ["src/styles/viewer.css", "current"],
+    ["src/site.json", "updated"],
+    ["src/formats.json", "created"],
+    ["src/pages/digital/index.html", "created"],
+    ["src/pages/print/index.html", "created"],
+    ["src/pages/social/index.html", "created"],
+    ["src/layout.html", "updated"],
+  ]);
+  assert.deepEqual(result.site, { addedPages: ["web/email", "web/email-templates"], addedViews: ["digital", "social", "print"], advanced: ["web.label", "web.blurb"], kept: [] });
+  assert.deepEqual([result.formats.addedGroups, result.formats.addedFormats.length, result.formats.kept, result.formats.skipped], [["print", "digital", "social"], 48, [], []]);
+  // Nothing here was customized, so the merged catalogs and refreshed files equal the stock scaffold's byte for byte.
+  for (const relative of ["src/site.json", "src/formats.json", "src/layout.html", "scripts/viewer.mjs", "scripts/check.mjs", "src/styles/canvas.css", "src/pages/print/index.html"]) {
+    assert.equal(await read(relative), await fs.readFile(path.join(templatesRoot, "starter", relative), "utf8"), relative);
+  }
+  assert.doesNotMatch(await read("src/pages/index.html"), /Digital DS/, "the client's own overview fragment is never rewritten");
+  assert.deepEqual(result.check.machine.warnings.map((warning) => warning.split(":")[0]), ["guidance group voice is empty", 'no asset is annotated data-timds-role="logo"; the brand kit has no logo']);
+  const record = JSON.parse(await read(".timds/starter.json"));
+  assert.equal(record.version, toolkitVersion);
+  assert.deepEqual(Object.keys(record.files).sort(), [...starterPlumbingFiles, ...starterManagedFragments].map(([relative]) => relative).sort());
+  assert.deepEqual(record.baseline.site, JSON.parse(await fs.readFile(path.join(templatesRoot, "starter/src/site.json"), "utf8")));
+
+  // A second sync has nothing to do and runs no check.
+  commitAll(repoRoot, "Adopt the starter sync");
+  const again = await syncStarterWorkspace(repoRoot);
+  assert.deepEqual([again.adopted, again.written, again.check], [false, [], null]);
+  assert.ok(again.files.every((file) => file.status === "current"), JSON.stringify(again.files));
+
+  // From now on every upgrade syncs the starter, under the same clean-tree rule; a system without the record is only told how to opt in.
+  await fs.appendFile(path.join(repoRoot, "src/site.json"), "\n");
+  await assert.rejects(upgradeRepository(repoRoot), /Starter sync refuses to run over uncommitted changes to the files it writes:\n\s*M src\/site\.json/);
+  execFileSync("git", ["checkout", "--", "src/site.json"], { cwd: repoRoot, stdio: "ignore" });
+  const upgraded = await upgradeRepository(repoRoot);
+  assert.deepEqual([upgraded.starterAvailable, upgraded.starter.written], [false, []]);
+
+  // upgrade --force stays with the managed boundary: a customized starter file is reported and kept, never replaced by upgrade.
+  await fs.appendFile(path.join(repoRoot, "scripts/dev.mjs"), "\n// client change\n");
+  commitAll(repoRoot, "Customize dev.mjs");
+  const forcedUpgrade = await upgradeRepository(repoRoot, { force: true });
+  assert.deepEqual(forcedUpgrade.starter.files.find((file) => file.path === "scripts/dev.mjs"), { path: "scripts/dev.mjs", status: "customized" });
+  assert.deepEqual(forceReplaceable(forcedUpgrade.starter), ["scripts/dev.mjs"]);
+  assert.match(await read("scripts/dev.mjs"), /client change/);
+
+  // A sync that fails its check runs before the managed files are touched, so the upgrade aborts with the repository as it was and a plain rerun is not refused.
+  const stockViewer = await read("scripts/viewer.mjs");
+  await fs.writeFile(path.join(repoRoot, "scripts/viewer.mjs"), `${stockViewer}\nthrow new Error("client change broke the viewer");\n`);
+  await fs.rm(path.join(repoRoot, "src/styles/canvas.css"));
+  await fs.rm(path.join(repoRoot, ".agents/skills/timds-edit-design-system"), { recursive: true });
+  commitAll(repoRoot, "Break the viewer and drop the managed skill");
+  for (const attempt of [1, 2]) {
+    await assert.rejects(upgradeRepository(repoRoot), /Starter sync was rolled back because the workspace check failed afterwards/, `attempt ${attempt}`);
+    await assert.rejects(fs.access(path.join(repoRoot, ".agents/skills/timds-edit-design-system")), /ENOENT/, "the managed skill was not reinstalled by the aborted upgrade");
+    await assert.rejects(fs.access(path.join(repoRoot, "src/styles/canvas.css")), /ENOENT/);
+    assert.equal(execFileSync("git", ["status", "--porcelain", "--untracked-files=all"], { cwd: repoRoot, encoding: "utf8" }).trim(), "", "nothing is left behind");
+  }
+  execFileSync("git", ["checkout", "HEAD~1", "--", "scripts/viewer.mjs", "src/styles/canvas.css", ".agents/skills/timds-edit-design-system"], { cwd: repoRoot, stdio: "ignore" });
+  commitAll(repoRoot, "Restore the viewer");
+  await fs.rm(path.join(repoRoot, ".timds/starter.json"));
+  commitAll(repoRoot, "Drop the record");
+  const unadopted = await upgradeRepository(repoRoot);
+  assert.deepEqual([unadopted.starter, unadopted.starterAvailable], [null, true]);
+});
+
+test("starter sync reports customized files, rolls back when they break the check, and replaces them only with --force", async (t) => {
+  const repoRoot = await temporaryDirectory(t);
+  await initializeRepository(repoRoot, { standalone: true });
+  const read = (relative) => fs.readFile(path.join(repoRoot, relative), "utf8");
+  // A fresh scaffold is recorded as adopted, so its first sync is a no-op.
+  const fresh = await syncStarterWorkspace(repoRoot);
+  assert.deepEqual([fresh.adopted, fresh.written, fresh.recordWritten, fresh.plumbing], [false, [], false, "toolkit"]);
+  // A fresh scaffold's plumbing is the toolkit's outright: a local change is brought back to stock, reported, and nothing halts or needs --force.
+  assert.equal(JSON.parse(await read(".timds/starter.json")).plumbing, "toolkit");
+  await fs.appendFile(path.join(repoRoot, "scripts/dev.mjs"), "\n// client change\n");
+  const owned = await syncStarterWorkspace(repoRoot);
+  assert.deepEqual(owned.files.find((file) => file.path === "scripts/dev.mjs"), { note: "the toolkit's in this system; a local change was replaced", path: "scripts/dev.mjs", status: "updated" });
+  assert.deepEqual([owned.written, forceReplaceable(owned)], [["scripts/dev.mjs"], []]);
+  assert.equal(await read("scripts/dev.mjs"), await fs.readFile(path.join(templatesRoot, "starter/scripts/dev.mjs"), "utf8"));
+  assert.equal(JSON.parse(await read(".timds/starter.json")).plumbing, "toolkit", "the mode survives a sync");
+  await writeJson(path.join(repoRoot, ".timds/starter.json"), { ...JSON.parse(await read(".timds/starter.json")), plumbing: "mine" });
+  await assert.rejects(syncStarterWorkspace(repoRoot), /plumbing "mine"; it must be "toolkit" or "recorded"/);
+  // A scaffold already at stock but without the record is adopted by writing the record alone, and says so; an adopted system's plumbing is recorded, not owned.
+  await fs.rm(path.join(repoRoot, ".timds/starter.json"));
+  const recordOnly = await syncStarterWorkspace(repoRoot);
+  assert.deepEqual([recordOnly.adopted, recordOnly.written, recordOnly.recordWritten, recordOnly.check, recordOnly.plumbing], [true, [], true, null, "recorded"]);
+  assert.equal(JSON.parse(await read(".timds/starter.json")).plumbing, undefined);
+
+  await rewindStarter(repoRoot);
+  await fs.appendFile(path.join(repoRoot, "scripts/dev.mjs"), "\n// client change\n");
+  const devOnly = await syncStarterWorkspace(repoRoot);
+  assert.deepEqual(devOnly.files.find((file) => file.path === "scripts/dev.mjs"), { path: "scripts/dev.mjs", status: "customized" });
+  assert.match(await read("scripts/dev.mjs"), /client change/, "a customized script the check does not need is reported and kept");
+  assert.equal(await read("scripts/viewer.mjs"), await fs.readFile(path.join(templatesRoot, "starter/scripts/viewer.mjs"), "utf8"));
+  assert.equal(devOnly.check.machine.warnings.length, 2);
+  const record = JSON.parse(await read(".timds/starter.json"));
+  assert.equal(record.files["scripts/dev.mjs"], undefined, "a customized file is not recorded as toolkit-written");
+
+  // A customized viewer cannot render the new overviews, so the sync is rolled back and says why.
+  await rewindStarter(repoRoot);
+  const customizedViewer = `${await read("scripts/viewer.mjs")}\n// client change\n`;
+  await fs.writeFile(path.join(repoRoot, "scripts/viewer.mjs"), customizedViewer);
+  await assert.rejects(syncStarterWorkspace(repoRoot), (error) => /Starter sync was rolled back because the workspace check failed afterwards: node scripts\/build\.mjs failed/.test(error.message)
+    && /Customized files were kept \(scripts\/dev\.mjs, scripts\/viewer\.mjs\); .* run timds starter sync --force scripts\/dev\.mjs scripts\/viewer\.mjs to replace them/.test(error.message));
+  assert.equal(await read("scripts/viewer.mjs"), customizedViewer);
+  await assert.rejects(fs.access(path.join(repoRoot, "src/formats.json")), /ENOENT/);
+  await assert.rejects(fs.access(path.join(repoRoot, ".timds/starter.json")), /ENOENT/);
+  assert.equal(await read("src/site.json"), await fs.readFile(path.join(starterFixtureRoot, "src/site.json"), "utf8"));
+
+  // --force names each customized plumbing file it replaces and nothing else; an overview fragment this system wrote itself is its own page and survives.
+  const ownOverview = '<span class="eyebrow">Print</span>\n<h1 class="page-title">Our print</h1>\n<section class="block" id="rules"><h2 class="h2">Rules</h2><p>Paper first.</p></section>\n';
+  await fs.mkdir(path.join(repoRoot, "src/pages/print"), { recursive: true });
+  await fs.writeFile(path.join(repoRoot, "src/pages/print/index.html"), ownOverview);
+  await assert.rejects(syncStarterWorkspace(repoRoot, { force: ["src/pages/print/index.html"] }), /--force replaces only the starter's stock scripts and stylesheets, named one by one: scripts\/build\.mjs, .*\. Not src\/pages\/print\/index\.html;/);
+  await assert.rejects(syncStarterWorkspace(repoRoot, { force: ["scripts/viewer.mjs", "scripts/nope.mjs"] }), /Not scripts\/nope\.mjs;/);
+  // In a terminal the sync asks about each customized file instead; the answers decide, and a diff can be shown first.
+  const asked = [];
+  const diffed = [];
+  const prompt = createPlumbingPrompt({
+    ask: async (question) => { asked.push(question); return asked.length === 1 ? "d" : asked.length === 2 ? "nonsense" : "k"; },
+    showDiff: async (file) => { diffed.push([file.path, file.templatePath.endsWith("templates/starter/scripts/dev.mjs")]); },
+  });
+  const decisions = [];
+  const answered = await syncStarterWorkspace(repoRoot, { decideCustomized: async (file) => {
+    decisions.push(file.path);
+    return file.path === "scripts/dev.mjs" ? prompt(file) : "replace";
+  } });
+  assert.deepEqual(decisions, ["scripts/dev.mjs", "scripts/viewer.mjs"]);
+  assert.deepEqual([asked.length, diffed], [3, [["scripts/dev.mjs", true]]], "the diff was shown once and an unknown answer was asked again");
+  assert.deepEqual(answered.files.find((file) => file.path === "scripts/dev.mjs"), { note: "kept at the prompt", path: "scripts/dev.mjs", status: "customized" });
+  assert.deepEqual(answered.files.find((file) => file.path === "scripts/viewer.mjs"), { note: "replaced at the prompt", path: "scripts/viewer.mjs", status: "updated" });
+  assert.doesNotMatch(await read("scripts/viewer.mjs"), /client change/);
+  assert.equal(answered.check.machine.warnings.length, 2);
+  await fs.writeFile(path.join(repoRoot, "scripts/viewer.mjs"), customizedViewer);
+  const forced = await syncStarterWorkspace(repoRoot, { force: ["scripts/viewer.mjs"] });
+  assert.deepEqual(forced.files.find((file) => file.path === "scripts/viewer.mjs"), { note: "replaced with --force", path: "scripts/viewer.mjs", status: "updated" });
+  assert.deepEqual(forced.files.find((file) => file.path === "scripts/dev.mjs"), { path: "scripts/dev.mjs", status: "customized" }, "a customized file not named stays customized");
+  assert.deepEqual(forceReplaceable(forced), ["scripts/dev.mjs"]);
+  assert.match(await read("scripts/dev.mjs"), /client change/);
+  assert.doesNotMatch(await read("scripts/viewer.mjs"), /client change/);
+  assert.deepEqual(forced.files.find((file) => file.path === "src/pages/print/index.html"), { note: "this system's own page; never replaced, --force included", path: "src/pages/print/index.html", status: "customized" });
+  assert.equal(await read("src/pages/print/index.html"), ownOverview);
+  assert.ok(!forceReplaceable(forced).includes("src/pages/print/index.html"), "a kept fragment is not something --force would replace");
+  const printView = JSON.parse(await read("src/site.json")).views.find((view) => view.id === "print");
+  assert.equal(printView.pages[0].planned, undefined, "the overview is authored because its fragment exists");
+  assert.match(await read("dist/print/index.html"), /Paper first/);
+  assert.equal(forced.check.machine.warnings.length, 2);
+});
+
+test("starter sync merges around a view the client already declared", async (t) => {
+  const repoRoot = await temporaryDirectory(t);
+  await initializeRepository(repoRoot, { standalone: true });
+  await rewindStarter(repoRoot);
+  const read = (relative) => fs.readFile(path.join(repoRoot, relative), "utf8");
+  const site = JSON.parse(await read("src/site.json"));
+  const ownPrint = { id: "print", label: "Printed matter", blurb: "Paper", pages: [
+    { slug: "letterheads", title: "Letterhead", summary: "Ours." },
+    { slug: "swag", title: "Swag", planned: true },
+  ] };
+  site.views.push(ownPrint);
+  await writeJson(path.join(repoRoot, "src/site.json"), site);
+  await fs.mkdir(path.join(repoRoot, "src/pages/print"), { recursive: true });
+  await fs.writeFile(path.join(repoRoot, "src/pages/print/letterheads.html"), '<span class="eyebrow">Print</span>\n<h1 class="page-title">Letterhead</h1>\n<section class="block" id="rules"><h2 class="h2">Rules</h2><p>Lead with the answer.</p></section>\n');
+  await checkWorkspace(repoRoot);
+
+  const result = await syncStarterWorkspace(repoRoot);
+  const merged = JSON.parse(await read("src/site.json"));
+  assert.deepEqual(merged.views.map((view) => view.id), ["brand", "web", "print", "digital", "social"], "the client's view keeps its place; new views follow");
+  const print = merged.views[2];
+  assert.deepEqual([print.label, print.blurb], ["Printed matter", "Paper"]);
+  assert.deepEqual(print.pages.map((page) => [page.slug, page.planned === true]), [
+    ["", false],
+    ["letterheads", false],
+    ["business-cards", true], ["brochures", true], ["booklets", true], ["worksheets", true], ["calendars", true], ["notepads", true], ["conference-banners", true], ["posters", true],
+    ["swag", true],
+  ], "stock pages are added as planned after their predecessors; the client's own page stays");
+  assert.deepEqual(print.pages[1], { slug: "letterheads", title: "Letterhead", summary: "Ours." }, "a page the client declared keeps every field");
+  assert.deepEqual(result.site.addedViews, ["digital", "social"]);
+  assert.deepEqual(result.site.addedPages.filter((id) => id.startsWith("print")), ["print", "print/business-cards", "print/brochures", "print/booklets", "print/worksheets", "print/calendars", "print/notepads", "print/conference-banners", "print/posters"]);
+  assert.deepEqual(result.site.kept.map((kept) => [kept.path, kept.current]), [["print.label", "Printed matter"], ["print.blurb", "Paper"], ["print/letterheads.title", "Letterhead"], ["print/letterheads.group", undefined], ["print/letterheads.summary", "Ours."]]);
+  assert.ok(describeStarterSync(result).includes('Kept print/letterheads.group undeclared; the scaffold now says "Stationery".'), describeStarterSync(result).join("\n"));
+  // The next sync knows the view and has nothing new to say about it.
+  const quiet = await syncStarterWorkspace(repoRoot);
+  assert.deepEqual([quiet.written, quiet.site.kept, quiet.formats.kept], [[], [], []]);
+  assert.equal(result.files.find((file) => file.path === "src/pages/print/index.html").status, "created", "the overview fragment is written because the sync added its page");
+  assert.deepEqual(result.formats.skipped, []);
+  assert.equal(result.check.machine.warnings.length, 2);
+  assert.match(await read("dist/print/index.html"), /Letterhead · US Letter/);
+  assert.match(await read("dist/print/letterheads/index.html"), /Lead with the answer/);
+
+  // A planned overview the client declared has nothing to lose: it receives the stock fragment and becomes authored under the client's title.
+  await rewindStarter(repoRoot);
+  const declaredOverview = JSON.parse(await fs.readFile(path.join(starterFixtureRoot, "src/site.json"), "utf8"));
+  declaredOverview.views.push({ id: "social", label: "Social", pages: [{ slug: "", title: "Social", planned: true }] });
+  await writeJson(path.join(repoRoot, "src/site.json"), declaredOverview);
+  const plannedOverview = await syncStarterWorkspace(repoRoot);
+  assert.deepEqual(plannedOverview.files.find((file) => file.path === "src/pages/social/index.html"), { path: "src/pages/social/index.html", status: "created" });
+  const social = JSON.parse(await read("src/site.json")).views.find((view) => view.id === "social");
+  assert.deepEqual([social.label, social.pages[0]], ["Social", { slug: "", title: "Social" }]);
+  assert.ok(plannedOverview.site.advanced.includes("social.planned"));
+  assert.deepEqual(plannedOverview.site.kept.map((kept) => kept.path), ["social.label", "social.blurb", "social.title", "social.group", "social.summary"]);
+  assert.match(await read("dist/social/index.html"), /<h1 class="page-title">/);
+  assert.equal(plannedOverview.check.machine.warnings.length, 2);
+});
+
+test("a later scaffold advances starter fields the client never changed and keeps the ones they did", async (t) => {
+  const repoRoot = await temporaryDirectory(t);
+  await initializeRepository(repoRoot, { standalone: true });
+  const read = (relative) => fs.readFile(path.join(repoRoot, relative), "utf8");
+  // Stand in for a system synced against an earlier scaffold: move the record's baseline and the client's files back together.
+  const record = JSON.parse(await read(".timds/starter.json"));
+  const site = JSON.parse(await read("src/site.json"));
+  const formats = JSON.parse(await read("src/formats.json"));
+  const web = (model) => model.views.find((view) => view.id === "web");
+  web(record.baseline.site).label = "Web";
+  web(site).label = "Web";
+  web(record.baseline.site).blurb = "Interface system";
+  web(site).blurb = "Our interfaces";
+  web(record.baseline.site).pages = web(record.baseline.site).pages.filter((page) => page.slug !== "email-templates");
+  web(site).pages = web(site).pages.filter((page) => page.slug !== "email-templates");
+  record.baseline.formats.print.formats.letterhead.stock = "Older stock note.";
+  formats.print.formats.letterhead.stock = "Older stock note.";
+  record.baseline.formats.print.formats.letterhead.safe = 0.75;
+  formats.print.formats.letterhead.safe = 1;
+  const olderCheck = "// an older stock check script\n";
+  await fs.writeFile(path.join(repoRoot, "scripts/check.mjs"), olderCheck);
+  record.files["scripts/check.mjs"] = createHash("sha256").update(olderCheck).digest("hex");
+  await writeJson(path.join(repoRoot, ".timds/starter.json"), record);
+  await writeJson(path.join(repoRoot, "src/site.json"), site);
+  await writeJson(path.join(repoRoot, "src/formats.json"), formats);
+
+  const result = await syncStarterWorkspace(repoRoot);
+  assert.deepEqual(result.site, { addedPages: ["web/email-templates"], addedViews: [], advanced: ["web.label"], kept: [{ current: "Our interfaces", path: "web.blurb", stock: "Web & email system" }] });
+  assert.deepEqual([result.formats.advanced, result.formats.kept], [["print.letterhead.stock"], [{ current: 1, path: "print.letterhead.safe", stock: 0.5 }]]);
+  assert.equal(result.files.find((file) => file.path === "scripts/check.mjs").status, "updated", "a file at the hash the toolkit last wrote is stock, whatever release wrote it");
+  assert.equal(await read("scripts/check.mjs"), await fs.readFile(path.join(templatesRoot, "starter/scripts/check.mjs"), "utf8"));
+  const synced = JSON.parse(await read("src/site.json"));
+  assert.deepEqual([web(synced).label, web(synced).blurb, web(synced).pages.map((page) => page.slug)], ["Web DS", "Our interfaces", ["spacing", "photography", "components", "layout", "email", "email-templates"]]);
+  assert.equal(result.check.machine.warnings.length, 2);
+
+  // In the recorded mode a customized file keeps the hash the toolkit last wrote for it, so reverting to that version is recognized as stock again instead of needing --force.
+  const olderHash = createHash("sha256").update(olderCheck).digest("hex");
+  const synchronizedRecord = JSON.parse(await read(".timds/starter.json"));
+  synchronizedRecord.plumbing = "recorded";
+  synchronizedRecord.files["scripts/check.mjs"] = olderHash;
+  await writeJson(path.join(repoRoot, ".timds/starter.json"), synchronizedRecord);
+  await fs.writeFile(path.join(repoRoot, "scripts/check.mjs"), `${olderCheck}// client change\n`);
+  const customized = await syncStarterWorkspace(repoRoot);
+  assert.equal(customized.files.find((file) => file.path === "scripts/check.mjs").status, "customized");
+  assert.equal(JSON.parse(await read(".timds/starter.json")).files["scripts/check.mjs"], olderHash);
+  await fs.writeFile(path.join(repoRoot, "scripts/check.mjs"), olderCheck);
+  const reverted = await syncStarterWorkspace(repoRoot);
+  assert.equal(reverted.files.find((file) => file.path === "scripts/check.mjs").status, "updated");
+  assert.equal(await read("scripts/check.mjs"), await fs.readFile(path.join(templatesRoot, "starter/scripts/check.mjs"), "utf8"));
 });

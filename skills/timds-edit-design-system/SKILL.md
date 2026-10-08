@@ -49,6 +49,9 @@ system is ordinary design work:
    fragments under `src/pages/` for the client, then author the planned ones:
    create `src/pages/<view>/<slug>.html` and remove the flag. Remove planned
    pages the system will not have and add the pages and views it needs.
+   Every print sheet and screen canvas is sized from `src/formats.json`;
+   add a format there, naming its page, before a template page previews it
+   with `{{canvas:ID}}`.
 4. Add the logo under `src/assets/` and write the `brand/logo`, `brand/voice`,
    and other guidance pages, shaped as described in the next section. A
    fragment holds only the content of `<main>`; `src/layout.html` supplies the
@@ -118,6 +121,33 @@ the reference the port must match, never the production site itself.
   starter scripts, and appends the starter's layout pieces to the system
   stylesheet when the system still uses the starter's token names; otherwise
   it names the classes the sample needs.
+
+## The starter is synced by upgrade
+
+`.timds/starter.json` records the starter plumbing (`scripts/build.mjs`,
+`check.mjs`, `dev.mjs`, `viewer.mjs`, `src/styles/canvas.css`,
+`src/styles/viewer.css`), the views in `src/site.json`, the formats in
+`src/formats.json`, and the Digital, Social, and Print overview fragments the
+toolkit wrote. Every `upgrade` re-syncs an adopted system: the plumbing is
+brought to stock, new views, planned pages, and formats are appended
+without removing, reordering, or retitling anything the system declares,
+and a missing stock stylesheet link is added to `src/layout.html`. In a
+system scaffolded by `init` (`"plumbing": "toolkit"` in the record) a local
+change to a stock script or stylesheet is replaced on the next upgrade and
+reported, so never make one there. In an adopted system (`"recorded"`) a
+file changed locally is reported as customized and kept; a person running
+the sync in a terminal is asked about each such file, and non-interactively
+`starter sync --force <path>` replaces the named stock script or stylesheet
+only with explicit authorization. `upgrade --force` never reaches starter
+files. An overview
+fragment this system wrote itself is never replaced. Commit before syncing:
+the sync refuses to run over uncommitted changes to the files it writes. A
+system scaffolded before the record
+existed opts in once with `npm run timds -- starter sync` on a feature
+branch, then reviews the diff and runs `check`. Treat planned pages that
+appear after an upgrade as primitives to author. When a change needs a stock
+script, prefer `tokens.json`, `system.css`, and the pages; a local script
+change leaves that file behind on every later upgrade.
 
 ## Upgrade protected tooling only when requested
 
