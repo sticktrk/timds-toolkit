@@ -6,9 +6,12 @@ import {
   buildTokensDocument,
   classifyToken,
   derivedTokensPath,
+  fontFormatFromUrl,
   importReferences,
   normalizeBrandRoles,
   parseCssTokens,
+  parseFontFaces,
+  primaryFontFamily,
   resolveBrandRoles,
   resolveTokens,
   stylesheetReferences,
@@ -136,8 +139,42 @@ test("finds the stylesheets a page loads and a stylesheet's local imports", () =
   const references = stylesheetReferences(html);
   assert.deepEqual(references.links, ["/_astro/site.css", "../local.css?v=2"]);
   assert.deepEqual(references.inline, [":root{--inline:1}"]);
+  // External stylesheets hold no tokens but are how a consumer gets a font service's families.
+  assert.deepEqual(references.external, ["https://fonts.googleapis.com/css2?family=Inter"]);
   assert.deepEqual(importReferences(CSS), ["base.css", "ramps.css"]);
   assert.deepEqual(importReferences('@import url(https://cdn.example.com/x.css);@import "./y.css" screen;'), ["./y.css"]);
+});
+
+test("parses @font-face rules into faces with their source files, skipping data URIs and local() names", () => {
+  const faces = parseFontFaces(`
+    ${CSS}
+    @font-face {
+      font-family: 'Cormorant Garamond';
+      font-style: italic;
+      font-weight: 500 700;
+      font-display: swap;
+      src: local("Cormorant Garamond Italic"), url("../fonts/cormorant-italic.woff2") format("woff2"), url(../fonts/cormorant-italic.ttf);
+    }
+    @media print { @font-face { font-family: "Print Face"; src: url(data:font/woff2;base64,AAAA); } }
+    @font-face { font-family: "No Source"; }
+  `, { source: "/_astro/site.css" });
+  assert.deepEqual(faces, [
+    { family: "Newsreader", weight: "400", style: "normal", sources: [{ url: "/fonts/newsreader.woff2", format: "woff2" }], source: "/_astro/site.css" },
+    {
+      family: "Cormorant Garamond",
+      weight: "500 700",
+      style: "italic",
+      sources: [{ url: "../fonts/cormorant-italic.woff2", format: "woff2" }, { url: "../fonts/cormorant-italic.ttf", format: "truetype" }],
+      source: "/_astro/site.css",
+    },
+  ]);
+  // Keeping every declaration for the faces must not leak ordinary properties into the tokens.
+  assert.ok(!records.some((record) => !record.name.startsWith("--")));
+  assert.equal(fontFormatFromUrl("/fonts/a.WOFF?v=1"), "woff");
+  assert.equal(fontFormatFromUrl("/fonts/a.css"), null);
+  assert.equal(primaryFontFamily("'Cormorant Garamond', Georgia, serif"), "Cormorant Garamond");
+  assert.equal(primaryFontFamily("system-ui, sans-serif"), null);
+  assert.equal(primaryFontFamily(""), null);
 });
 
 test("builds a stamped document with scope and kind summaries", () => {

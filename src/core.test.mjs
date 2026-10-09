@@ -223,7 +223,9 @@ test("init --json emits one parseable result and sends build progress to stderr"
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   execFileSync("git", ["init", "-b", "main"], { cwd: root, stdio: "ignore" });
   const cli = fileURLToPath(new URL("../bin/timds.mjs", import.meta.url));
-  const stdout = execFileSync(process.execPath, [cli, "init", "--standalone", "--root", root, "--name", 'JSON "system"', "--system-id", "test/json-output", "--description", "Worker contract", "--json"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  // The result includes the validated artifact's file buffers; the richer
+  // derived layer exceeds execFileSync's default 1 MiB output limit.
+  const stdout = execFileSync(process.execPath, [cli, "init", "--standalone", "--root", root, "--name", 'JSON "system"', "--system-id", "test/json-output", "--description", "Worker contract", "--json"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 8 * 1024 * 1024 });
   const result = JSON.parse(stdout);
   assert.equal(result.manifest.systemId, "test/json-output");
   assert.equal(result.manifest.name, 'JSON "system"');
@@ -660,7 +662,7 @@ test("loads and validates a standalone repository contract", async (t) => {
   const checked = await checkWorkspace(repoRoot, { skipBuild: true });
   assert.deepEqual(
     checked.artifact.files.map((file) => file.path).sort(),
-    ["brand.json", "index.html", "index.json", "index.md", "llms.txt", "tokens.json"],
+    ["brand.json", "index.html", "index.json", "index.md", "llms-full.txt", "llms.txt", "tokens.json"],
   );
   assert.equal(checked.machine.counts.blocks, 1);
   assert.equal(checked.machine.counts.tokens, 0);
@@ -893,6 +895,8 @@ test("the starter viewer renders its site model, and its build guards pages, pla
   assert.deepEqual(machine.pages.map((page) => page.id), ["brand/color", "brand/typography", "digital", "index", "print", "social", "web/components", "web/spacing"], "design pages are not guidance");
   assert.equal(machine.counts.untyped, 0);
   assert.deepEqual(machine.warnings.map((warning) => warning.split(":")[0]), ["guidance group voice is empty", 'no asset is annotated data-timds-role="logo"; the brand kit has no logo']);
+  assert.equal(machine.formats.count, 48);
+  assert.ok(machine.formats.groups.flatMap((group) => group.formats).every((format) => format.planned === true && !format.pageUrl));
   assert.deepEqual(designs, { enabled: true, designCount: 1, pageCount: 2, stateCount: 3 });
   assert.deepEqual(machine.index.designs, { url: "/designs.json", count: 1, pages: 2, states: 3 });
   const designsDocument = JSON.parse(await read("dist/designs.json"));

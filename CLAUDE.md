@@ -83,8 +83,12 @@ and viewer scripts through the same hash check `starter sync` uses.
 `extract.mjs` harvests the built HTML in `dist/` (using the tolerant parser in
 `html.mjs`, which exists so the package needs no HTML dependency) and writes
 `index.json`, `tokens.json` (`tokens.mjs`, CSS custom properties resolved by
-scope plus brand roles), `brand.json` (`brand.mjs`, from `data-timds-role`
-annotations), `llms.txt`, per-page `index.md`, and `designs.json` (the
+scope plus brand roles; it also parses `@font-face` and the external
+stylesheets pages link), `brand.json` (`brand.mjs`, from `data-timds-role`
+annotations, each font role with the files or font service that provide its
+family), `formats.json` (`formats.mjs`, from the optional `src/formats.json`
+catalog), `llms.txt` (opens with the brand essentials: colors, fonts, logos,
+formats), `llms-full.txt`, per-page `index.md`, and `designs.json` (the
 designs output directory is skipped by the page walk). `derived.mjs` is the
 read side: `readDerivedLayer` (local) and `fetchDerivedLayer` (published URL)
 return the same shape. `artifact.mjs` publishes that layer to the portal CDN

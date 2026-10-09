@@ -43,6 +43,30 @@ export type BrandRole = {
   source: "manifest" | "convention";
 };
 
+/** One `@font-face` source file for a font role's family. */
+export type FontFile = MediaRecord & {
+  /** `woff2`, `woff`, `truetype`, `opentype`, … from the `format()` hint or the file extension. */
+  format?: string;
+  /** The `font-weight` descriptor, e.g. `400` or `300 700`. */
+  weight: string;
+  /** The `font-style` descriptor, e.g. `normal` or `italic`. */
+  style: string;
+};
+
+/** A font role in the brand kit: the role plus where a consumer obtains the family. */
+export type BrandFontRole = BrandRole & {
+  /** The first family of the stack, unquoted; absent when the stack opens with a generic family. */
+  family?: string;
+  /** The `@font-face` files the loaded stylesheets declare for the family, artifact-local or absolute. */
+  files?: FontFile[];
+  /** External stylesheets the pages link that serve the family (a font service). */
+  stylesheets?: string[];
+  /** The page to download the family by hand, when a known service serves it. */
+  specimen?: string;
+  /** True for a conventional system stack; rendering may use a platform fallback. */
+  system?: true;
+};
+
 export type TokensDocument = {
   schemaVersion: 1;
   system: SystemStamp;
@@ -86,6 +110,8 @@ export type BrandAsset = BrandAnnotation & {
   id: string;
   name: string;
   notes?: string[];
+  /** The file format the media URL implies (`svg`, `png`, `webp`, …), when the extension says. */
+  format?: string;
   media: MediaRecord;
   page: string;
   block: string;
@@ -100,7 +126,8 @@ export type GuidanceGroup = { source: "manifest" | "convention"; blocks: Guidanc
 export type BrandKit = {
   schemaVersion: 1;
   system: SystemStamp;
-  roles: Partial<Record<BrandRoleName, BrandRole>>;
+  /** Font roles carry their family and sources; see `BrandFontRole`. */
+  roles: Partial<Record<BrandRoleName, BrandRole | BrandFontRole>>;
   missingRoles?: BrandRoleName[];
   logos: BrandAsset[];
   imagery: BrandAsset[];
@@ -121,7 +148,7 @@ export type IndexBlock = {
   prose?: Array<{ id: string; text: string }>;
 };
 
-export type IndexPage = { id: string; url: string; view: string; eyebrow: string; title: string; lede: string; blocks: IndexBlock[] };
+export type IndexPage = { id: string; url: string; markdownUrl?: string; view: string; eyebrow: string; title: string; lede: string; blocks: IndexBlock[] };
 
 export type IndexDocument = {
   schemaVersion: 1;
@@ -129,10 +156,50 @@ export type IndexDocument = {
   pageCount: number;
   tokens: { url: string; count: number; stylesheets: number; roles: number };
   brand: { url: string; logos: number; imagery: number; guidance: number };
+  /** Present when the system keeps an asset format catalog: where formats.json sits and how much it holds. */
+  formats?: { url: string; groups: number; count: number };
   /** Present when the system holds website designs: where designs.json sits and how much it holds. */
   designs?: { url: string; count: number; pages: number; states: number };
   video?: {runtime?: RuntimeRequirements | null; engine?: RuntimeIdentity; boards?: VideoBoardCatalogSummary};
   pages: IndexPage[];
+};
+
+/* ── formats.json ────────────────────────────────────────────────────────── */
+
+export type AssetFormat = {
+  id: string;
+  name: string;
+  width: number;
+  height: number;
+  /** `in` for print sheets, `px` for screen canvases. */
+  unit: "in" | "px";
+  bleed?: number;
+  safe: number;
+  /** Platform chrome that covers the edges, per side. */
+  ui?: Partial<Record<"top" | "bottom" | "left" | "right", number>>;
+  /** The region to keep clear, per side. */
+  keepClear?: Partial<Record<"top" | "bottom" | "left" | "right", number>>;
+  maxKB?: number;
+  stock?: string;
+  file?: string;
+  note?: string;
+  /** The page id that shows the format. */
+  page: string;
+  /** The page's Markdown mirror URL, when the built artifact has the page. */
+  pageUrl?: string;
+  /** The guidance page is explicitly planned in src/site.json and has not been built. */
+  planned?: true;
+};
+
+export type AssetFormatGroup = { id: string; unit: "in" | "px"; formats: AssetFormat[] };
+
+export type FormatsDocument = {
+  schemaVersion: 1;
+  system: SystemStamp;
+  url: string;
+  groupCount: number;
+  count: number;
+  groups: AssetFormatGroup[];
 };
 
 /* ── designs.json ────────────────────────────────────────────────────────── */
@@ -188,11 +255,13 @@ export type DerivedLayer = {
   tokens: TokensDocument | null;
   brand: BrandKit | null;
   llms: string | null;
+  /** Null for a system without an asset format catalog. */
+  formats: FormatsDocument | null;
   /** Null for a system that designs no pages. */
   designs: DesignsDocument | null;
 };
 
-export type DerivedFileName = "index" | "tokens" | "brand" | "llms" | "designs";
+export type DerivedFileName = "index" | "tokens" | "brand" | "llms" | "llmsFull" | "formats" | "designs";
 
 export type BrandKitSummary = {
   version: string | null;

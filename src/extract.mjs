@@ -7,8 +7,13 @@
 //
 //   <entry-dir>/index.json     structured tree, assets joined to media records
 //   <entry-dir>/tokens.json    every CSS custom property the pages load, resolved
-//   <entry-dir>/brand.json     the brand kit: role colors and fonts, logos, imagery
-//   <entry-dir>/llms.txt       page index in the llms.txt convention
+//   <entry-dir>/brand.json     the brand kit: role colors and fonts (with the
+//                              files or font service that serve them), logos, imagery
+//   <entry-dir>/formats.json   the asset format catalog, when the system keeps one
+//   <entry-dir>/llms.txt       the brand essentials and the page index, in the
+//                              llms.txt convention: one URL a person pastes into
+//                              any AI tool to produce something on-brand
+//   <entry-dir>/llms-full.txt  every page's Markdown in one file
 //   <page>/index.md            a Markdown mirror of every page
 //
 // Extraction keys on HTML semantics (main, section, h1/h2, table, figure, pre)
@@ -35,7 +40,8 @@ import {
 } from "./html.mjs";
 import { annotationFor, buildBrandKit } from "./brand.mjs";
 import { designsDocument } from "./designs.mjs";
-import { buildTokensDocument, importReferences, parseCssTokens, stylesheetReferences } from "./tokens.mjs";
+import { describeFormatSize, formatsDocument } from "./formats.mjs";
+import { buildTokensDocument, importReferences, parseCssTokens, parseFontFaces, stylesheetReferences } from "./tokens.mjs";
 
 export const EXTRACT_SCHEMA_VERSION = 1;
 
@@ -340,22 +346,119 @@ export function pageToMarkdown(page) {
   return `${lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd()}\n`;
 }
 
-export function buildLlmsText(manifest, pages, indexUrl, tokensUrl = null, brandUrl = null, designsUrl = null) {
+const ROLE_LABELS = Object.freeze({
+  "color.background": "Background",
+  "color.panel": "Panel",
+  "color.accent": "Accent",
+  "color.text": "Text",
+  "color.muted": "Muted text",
+  "font.display": "Display (headlines)",
+  "font.body": "Body",
+  "font.ui": "UI",
+});
+const roleLabel = (role) => ROLE_LABELS[role] ?? role.replace(/^(color|font)\./, "").replace(/-/g, " ");
+
+/**
+ * The brand essentials as Markdown: what a person with nothing but this file
+ * needs to make something on-brand. Colors as hex, fonts with the files or
+ * service that provide them, logos by variant with their URLs, and the
+ * asset formats with their sizes. Every URL is site-absolute here and
+ * rewritten to the CDN on publish, like the page links.
+ */
+function llmsEssentials(kit, formats) {
+  const lines = [];
+  const roles = Object.entries(kit?.roles ?? {});
+  const colors = roles.filter(([, role]) => role.kind === "color");
+  const fonts = roles.filter(([, role]) => role.kind === "font-family");
+  if (colors.length) {
+    lines.push("## Colors", "");
+    for (const [name, role] of colors) lines.push(`- ${roleLabel(name)} (\`${name}\`): \`${role.value}\` — CSS \`var(${role.token})\``);
+    lines.push("");
+  }
+  if (fonts.length) {
+    lines.push("## Fonts", "");
+    for (const [name, role] of fonts) {
+      const where = [
+        ...(role.specimen ? [`download: ${role.specimen}`] : []),
+        ...(role.stylesheets ?? []).map((url) => `stylesheet: ${url}`),
+        ...(role.files ?? []).map((file) => `${file.weight} ${file.style}${file.format ? ` ${file.format}` : ""}: ${file.url}`),
+      ];
+      const standing = role.system ? " — a system font stack; rendering may use a platform fallback" : where.length ? "" : " — no font file or service is published for this family";
+      lines.push(`- ${roleLabel(name)} (\`${name}\`): **${role.family ?? role.value}** — CSS \`${role.value}\`${standing}`);
+      for (const entry of where) lines.push(`  - ${entry}`);
+    }
+    lines.push("");
+  }
+  const logos = kit?.logos ?? [];
+  if (logos.length) {
+    lines.push("## Logos", "");
+    for (const logo of logos) {
+      const qualifiers = [logo.primary ? "primary" : null, logo.variant, logo.lockup, logo.on ? `on ${logo.on}` : null, logo.format].filter(Boolean).join(", ");
+      lines.push(`- ${logo.name}${qualifiers ? ` (${qualifiers})` : ""}: ${logo.media.url}`);
+    }
+    lines.push("", "Use a logo file as published; never redraw, recolor, or stretch a mark.", "");
+  }
+  if (formats?.groups?.length) {
+    lines.push("## Asset formats", "");
+    for (const group of formats.groups) {
+      lines.push(`### ${group.id}`, "");
+      for (const format of group.formats) {
+        const detail = [
+          describeFormatSize(format),
+          format.bleed ? `bleed ${format.bleed} ${format.unit}` : null,
+          `safe ${format.safe} ${format.unit}`,
+          format.maxKB ? `max ${format.maxKB} KB` : null,
+          format.file ?? null,
+          format.stock ?? null,
+          format.note ?? null,
+          format.planned ? "guidance page planned" : null,
+        ].filter(Boolean).join(" · ");
+        lines.push(`- ${format.pageUrl ? `[${format.name}](${format.pageUrl})` : format.name} (\`${format.id}\`): ${detail}`);
+      }
+      lines.push("");
+    }
+  }
+  return lines;
+}
+
+/**
+ * llms.txt: the one URL a person or an agent needs. It opens with how to use
+ * the file, the brand essentials, and then the page directory, so a chat tool
+ * given nothing else can still find the logo, the colors, the fonts, and the
+ * business card's size, and follow a link only for the detail.
+ */
+export function buildLlmsText(manifest, pages, { indexUrl, tokensUrl = null, brandUrl = null, designsUrl = null, formatsUrl = null, fullUrl = null, kit = null, formats = null } = {}) {
   const lines = [`# ${manifest.name}`, ""];
   if (manifest.description) lines.push(`> ${manifest.description}`, "");
-  lines.push(`Machine-readable index: ${indexUrl} — every page below also exists as \`index.md\`.`);
+  lines.push(
+    `This file is the entry point to the ${manifest.name}${manifest.version ? ` (version ${manifest.version})` : ""} for people and AI tools. Everything a piece of on-brand work needs is here or one link away: the colors, the fonts and where to get them, the logo files, the asset formats, and the guidance pages. Take every color, font, logo, and image from this system; when it lacks something, say so rather than inventing it.`,
+    "",
+  );
+  lines.push(`Machine-readable index: ${indexUrl} — every page below links to its Markdown mirror.`);
+  if (fullUrl) lines.push(`Full text: ${fullUrl} — every page's Markdown in one file.`);
   if (tokensUrl) lines.push(`Design tokens: ${tokensUrl} — every CSS custom property the pages load, resolved by scope.`);
   if (brandUrl) lines.push(`Brand kit: ${brandUrl} — role colors and fonts, logos, and imagery for on-brand production.`);
+  if (formatsUrl) lines.push(`Asset formats: ${formatsUrl} — every print sheet and screen canvas with its size, bleed, and safe margin.`);
   if (designsUrl) lines.push(`Website designs: ${designsUrl} — whole pages as HTML with JavaScript on the system's stylesheets, the reference a product port must match.`);
   lines.push("");
+  lines.push(...llmsEssentials(kit, formats));
   for (const view of [...new Set(pages.map((page) => page.view))]) {
     lines.push(`## ${view || "pages"}`, "");
     for (const page of pages.filter((page) => page.view === view)) {
       const summary = page.lede.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").slice(0, 200);
-      lines.push(`- [${page.title}](${page.url}/index.md)${summary ? `: ${summary}` : ""}`);
+      lines.push(`- [${page.title}](${page.markdownUrl ?? `${page.url.replace(/\/+$/, "")}/index.md`})${summary ? `: ${summary}` : ""}`);
     }
     lines.push("");
   }
+  return `${lines.join("\n").trimEnd()}\n`;
+}
+
+/** llms-full.txt: every page's Markdown mirror in one file, in page order, each marked with its source. */
+export function buildLlmsFullText(manifest, pages) {
+  const lines = [`# ${manifest.name}`, ""];
+  if (manifest.description) lines.push(`> ${manifest.description}`, "");
+  lines.push(`Every page of the system${manifest.version ? ` at version ${manifest.version}` : ""}, in one file. Each page begins with its title and names its source URL.`, "");
+  for (const page of pages) lines.push("---", "", pageToMarkdown(page).trimEnd(), "");
   return `${lines.join("\n").trimEnd()}\n`;
 }
 
@@ -381,14 +484,29 @@ function resolveArtifactReference(reference, fromRelative, artifactRoot) {
 }
 
 /**
+ * A `@font-face` source as the artifact serves it: a site-absolute path for a
+ * file inside the artifact, the URL as written for one outside it, or null
+ * for a reference that resolves nowhere.
+ */
+function fontSourceUrl(url, fromRelative, artifactRoot) {
+  if (/^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(url)) return url;
+  const target = resolveArtifactReference(url, fromRelative, artifactRoot);
+  return target ? `/${target.relative}` : null;
+}
+
+/**
  * Every stylesheet the pages load — linked files (following `@import`) and
- * inline `<style>` blocks — parsed into scoped custom-property records.
+ * inline `<style>` blocks — parsed into scoped custom-property records, plus
+ * the `@font-face` faces they declare and the external stylesheets the pages
+ * link, which together say where each font role's family comes from.
  * A linked file is read once however many pages name it; a file the artifact
  * lacks is skipped here and reported by artifact validation.
  */
 async function harvestStylesheets(pageFiles, baseDirectory, artifactRoot) {
   const stylesheets = [];
   const records = [];
+  const faces = [];
+  const external = new Set();
   const queue = [];
   const queued = new Set();
   const enqueue = (reference, fromRelative) => {
@@ -397,15 +515,23 @@ async function harvestStylesheets(pageFiles, baseDirectory, artifactRoot) {
     queued.add(target.relative);
     queue.push(target);
   };
+  const collectFaces = (css, source, fromRelative) => {
+    for (const face of parseFontFaces(css, { source })) {
+      const sources = face.sources.map((entry) => ({ ...entry, url: fontSourceUrl(entry.url, fromRelative, artifactRoot) })).filter((entry) => entry.url);
+      if (sources.length) faces.push({ ...face, sources });
+    }
+  };
 
   for (const file of pageFiles) {
     const pageRelative = path.relative(artifactRoot, file).split(path.sep).join("/");
-    const { links, inline } = stylesheetReferences(await fs.readFile(file, "utf8"));
-    for (const href of links) enqueue(href, pageRelative);
+    const references = stylesheetReferences(await fs.readFile(file, "utf8"));
+    for (const href of references.links) enqueue(href, pageRelative);
+    for (const href of references.external) external.add(href);
     // An inline block is a source only when it declares a token; page chrome
     // styles would otherwise list one empty entry per page.
-    inline.forEach((css, position) => {
+    references.inline.forEach((css, position) => {
       const source = `/${pageRelative}#style-${position + 1}`;
+      collectFaces(css, source, pageRelative);
       const found = parseCssTokens(css, { source });
       if (!found.length) return;
       stylesheets.push({ path: source, bytes: Buffer.byteLength(css), sha256: sha256Of(css), inline: true });
@@ -424,6 +550,7 @@ async function harvestStylesheets(pageFiles, baseDirectory, artifactRoot) {
     const source = `/${target.relative}`;
     stylesheets.push({ path: source, bytes: Buffer.byteLength(css), sha256: sha256Of(css) });
     for (const reference of importReferences(css)) enqueue(reference, target.relative);
+    collectFaces(css, source, target.relative);
     records.push(...parseCssTokens(css, { source }));
   }
 
@@ -438,7 +565,12 @@ async function harvestStylesheets(pageFiles, baseDirectory, artifactRoot) {
     .map((record, index) => ({ record, index }))
     .sort((left, right) => position.get(left.record.source) - position.get(right.record.source) || left.index - right.index)
     .map(({ record }) => record);
-  return { stylesheets: ordered, records: orderedRecords };
+  // Faces in stylesheet order like the records; external links sorted so the kit is stable across builds.
+  const orderedFaces = faces
+    .map((face, index) => ({ face, index }))
+    .sort((left, right) => (position.get(left.face.source) ?? Number.MAX_SAFE_INTEGER) - (position.get(right.face.source) ?? Number.MAX_SAFE_INTEGER) || left.index - right.index)
+    .map(({ face }) => face);
+  return { stylesheets: ordered, records: orderedRecords, fonts: { faces: orderedFaces, stylesheets: [...external].sort() } };
 }
 
 /* ── artifact walk ──────────────────────────────────────────────────────── */
@@ -483,9 +615,12 @@ export async function deriveTokensFromArtifact({ artifactRoot, manifest }) {
  * Returns the index plus counts, and writes nothing when `machine.enabled` is false.
  * `designs` is the rendered design set from designs.mjs, or null when the
  * system designs no pages; its output directory is not guidance and is
- * skipped by the page walk.
+ * skipped by the page walk. `formats` is the validated format catalog from
+ * formats.mjs, or null when the system keeps none.
+ * `plannedPages` names the unbuilt guidance pages explicitly planned in
+ * src/site.json; their formats remain in the catalog without gap warnings.
  */
-export async function extractArtifact({ artifactRoot, manifest, mediaCatalog = { assets: [] }, video = null, designs = null, write = true }) {
+export async function extractArtifact({ artifactRoot, manifest, mediaCatalog = { assets: [] }, video = null, designs = null, formats = null, plannedPages = [], write = true }) {
   const config = normalizeMachineConfig(manifest.machine);
   if (!config.enabled) return { enabled: false, pages: [], written: [] };
 
@@ -522,12 +657,13 @@ export async function extractArtifact({ artifactRoot, manifest, mediaCatalog = {
 
     const page = extractPage(await fs.readFile(file, "utf8"), { pageId, url, config, joinMedia });
     if (!page.title) continue;
+    const markdownPath = name === "index"
+      ? path.join(path.dirname(file), "index.md")
+      : path.join(path.dirname(file), `${name}.md`);
+    page.markdownUrl = `/${path.relative(artifactRoot, markdownPath).split(path.sep).join("/")}`;
     pages.push(page);
 
     if (write) {
-      const markdownPath = name === "index"
-        ? path.join(path.dirname(file), "index.md")
-        : path.join(path.dirname(file), `${name}.md`);
       await fs.writeFile(markdownPath, pageToMarkdown(page));
       written.push(markdownPath);
     }
@@ -537,10 +673,14 @@ export async function extractArtifact({ artifactRoot, manifest, mediaCatalog = {
   const harvested = await harvestStylesheets(pageFiles, baseDirectory, artifactRoot);
   const tokens = buildTokensDocument({ manifest, stylesheets: harvested.stylesheets, records: harvested.records });
   const tokensUrl = `${basePrefix}/tokens.json`;
-  const { kit: brand, warnings: brandWarnings } = buildBrandKit({ manifest, tokens, pages, renderBlock: blockToMarkdown });
+  const { kit: brand, warnings: brandWarnings } = buildBrandKit({ manifest, tokens, pages, renderBlock: blockToMarkdown, fonts: harvested.fonts });
   const brandUrl = `${basePrefix}/brand.json`;
   const designsUrl = designs ? `${basePrefix}/designs.json` : null;
   const designsDoc = designs ? designsDocument(designs, manifest) : null;
+  const formatsUrl = formats ? `${basePrefix}/formats.json` : null;
+  const formatsResult = formats ? formatsDocument(formats, manifest, { pages, plannedPages, basePrefix }) : null;
+  const formatsDoc = formatsResult?.document ?? null;
+  const fullUrl = `${basePrefix}/llms-full.txt`;
 
   const index = {
     schemaVersion: EXTRACT_SCHEMA_VERSION,
@@ -548,6 +688,8 @@ export async function extractArtifact({ artifactRoot, manifest, mediaCatalog = {
     pageCount: pages.length,
     tokens: { url: tokensUrl, count: tokens.count, stylesheets: tokens.stylesheets.length, roles: Object.keys(tokens.roles).length },
     brand: { url: brandUrl, logos: brand.logos.length, imagery: brand.imagery.length, guidance: Object.keys(brand.guidance).length },
+    // The asset format catalog, when the system keeps one: where it sits and how much it holds.
+    ...(formatsDoc ? { formats: { url: formatsUrl, groups: formatsDoc.groupCount, count: formatsDoc.count } } : {}),
     // The website designs, when the system has any: where the document sits and how much it holds.
     ...(designsDoc ? { designs: { url: designsUrl, count: designsDoc.designCount, pages: designsDoc.pageCount, states: designsDoc.stateCount } } : {}),
     // The video board catalog summary (kinds, guidance, budgets, cadence) when the system has one.
@@ -560,12 +702,21 @@ export async function extractArtifact({ artifactRoot, manifest, mediaCatalog = {
     const tokensPath = path.join(baseDirectory, "tokens.json");
     const brandPath = path.join(baseDirectory, "brand.json");
     const llmsPath = path.join(baseDirectory, "llms.txt");
+    const llmsFullPath = path.join(baseDirectory, "llms-full.txt");
     // Markdown carries inline emphasis; JSON stays plain so consumers can match on it.
     await fs.writeFile(indexPath, `${JSON.stringify(index, (key, value) => (key === "markdown" ? undefined : value), 2)}\n`);
     await fs.writeFile(tokensPath, `${JSON.stringify(tokens, null, 2)}\n`);
     await fs.writeFile(brandPath, `${JSON.stringify(brand, null, 2)}\n`);
-    await fs.writeFile(llmsPath, buildLlmsText(manifest, pages, `${basePrefix}/index.json`, tokensUrl, brandUrl, designsUrl));
-    written.push(indexPath, tokensPath, brandPath, llmsPath);
+    await fs.writeFile(llmsPath, buildLlmsText(manifest, pages, { indexUrl: `${basePrefix}/index.json`, tokensUrl, brandUrl, designsUrl, formatsUrl, fullUrl, kit: brand, formats: formatsDoc }));
+    await fs.writeFile(llmsFullPath, buildLlmsFullText(manifest, pages));
+    written.push(indexPath, tokensPath, brandPath, llmsPath, llmsFullPath);
+    if (formatsDoc) {
+      const formatsPath = path.join(baseDirectory, "formats.json");
+      await fs.writeFile(formatsPath, `${JSON.stringify(formatsDoc, null, 2)}\n`);
+      written.push(formatsPath);
+    } else {
+      await fs.rm(path.join(baseDirectory, "formats.json"), { force: true });
+    }
     if (designsDoc) {
       const designsPath = path.join(baseDirectory, "designs.json");
       await fs.writeFile(designsPath, `${JSON.stringify(designsDoc, null, 2)}\n`);
@@ -594,11 +745,13 @@ export async function extractArtifact({ artifactRoot, manifest, mediaCatalog = {
   counts.logos = brand.logos.length;
   counts.imagery = brand.imagery.length;
   counts.guidance = Object.keys(brand.guidance).length;
+  counts.formats = formatsDoc?.count ?? 0;
   const warnings = [
     ...(tokens.missingRoles ?? []).map((role) =>
       `brand role ${role} is not filled: no loaded stylesheet declares a conventional token on :root; map it in timds.json brand.roles`),
     ...brandWarnings,
+    ...(formatsResult?.warnings ?? []),
   ];
 
-  return { enabled: true, brand, counts, designs: designsDoc, index, pages, tokens, warnings, written };
+  return { enabled: true, brand, counts, designs: designsDoc, formats: formatsDoc, index, pages, tokens, warnings, written };
 }

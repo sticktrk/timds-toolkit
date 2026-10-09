@@ -21,8 +21,15 @@
 // Guidance groups (voice, compliance, …) point at page blocks the same way
 // the video authoring contract already does, and carry each block's Markdown
 // so the kit answers "how does this brand speak" on its own.
+//
+// A font role is only usable outside the browser when the face can be
+// obtained, so each `font.*` role also carries the family's `@font-face`
+// files the stylesheets declare and the external stylesheets (a font
+// service) the pages load for it. A role with neither is reported: the
+// pages render it, but nobody making a business card can.
 
 import { attr } from "./html.mjs";
+import { isSystemFontFamily, primaryFontFamily } from "./tokens.mjs";
 
 export const BRAND_KIT_SCHEMA_VERSION = 1;
 
@@ -73,13 +80,74 @@ export function annotationFor(node, parents) {
   return null;
 }
 
+const FILE_FORMATS = Object.freeze({ ".svg": "svg", ".png": "png", ".jpg": "jpg", ".jpeg": "jpg", ".webp": "webp", ".gif": "gif", ".avif": "avif", ".pdf": "pdf", ".mp4": "mp4", ".webm": "webm", ".mp3": "mp3" });
+
+/** The file format a media URL implies (`svg`, `png`, …), or null when the extension says nothing. */
+export function mediaFormat(url) {
+  const clean = String(url ?? "").split(/[?#]/, 1)[0].toLowerCase();
+  return FILE_FORMATS[clean.slice(clean.lastIndexOf("."))] ?? null;
+}
+
+const familyKey = (family) => String(family ?? "").trim().toLowerCase();
+
+/** Whether an external stylesheet URL (a font service) loads the family: `family=Cormorant+Garamond` or an encoded form. */
+function stylesheetServesFamily(url, family) {
+  try {
+    const parsed = new URL(url, "https://fonts.invalid");
+    const needle = familyKey(family);
+    const families = parsed.searchParams.getAll("family").flatMap((value) => value.split("|"));
+    if (families.some((value) => familyKey(value.split(":", 1)[0]) === needle)) return true;
+    const slug = needle.replace(/\s+/g, "-");
+    return decodeURIComponent(parsed.pathname).toLowerCase().split("/").some((part) => part.replace(/\.css$/, "") === slug);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Where a consumer obtains each font role's family: the `@font-face` files
+ * the loaded stylesheets declare for it, and the external stylesheets the
+ * pages load that serve it. Google Fonts also gets its specimen page, the
+ * place a person downloads the family by hand. Conventional system stacks
+ * are marked `system` and may use a platform fallback.
+ */
+export function resolveFontSources(roles, { faces = [], stylesheets = [] } = {}) {
+  const resolved = {};
+  const unsourced = [];
+  for (const [role, entry] of Object.entries(roles ?? {})) {
+    if (entry.kind !== "font-family") continue;
+    const family = primaryFontFamily(entry.value);
+    if (!family) {
+      resolved[role] = { system: true };
+      continue;
+    }
+    const files = faces
+      .filter((face) => familyKey(face.family) === familyKey(family))
+      .flatMap((face) => face.sources.map((source) => ({ url: source.url, ...(source.format ? { format: source.format } : {}), weight: face.weight, style: face.style })));
+    const external = stylesheets.filter((url) => stylesheetServesFamily(url, family));
+    const google = external.find((url) => /fonts\.googleapis\.com/i.test(url));
+    const system = !files.length && !external.length && isSystemFontFamily(family);
+    resolved[role] = {
+      family,
+      ...(files.length ? { files } : {}),
+      ...(external.length ? { stylesheets: external } : {}),
+      ...(google ? { specimen: `https://fonts.google.com/specimen/${family.trim().replace(/\s+/g, "+")}` } : {}),
+      ...(system ? { system: true } : {}),
+    };
+    if (!files.length && !external.length && !system) unsourced.push({ role, family });
+  }
+  return { resolved, unsourced };
+}
+
 /**
  * The brand kit: role colors and fonts plus every annotated logo and image,
  * each with its media record and the page block that presents it. An asset
  * shown on several pages appears once, under the first annotation found in
- * page order; a `primary` flag anywhere promotes it.
+ * page order; a `primary` flag anywhere promotes it. `fonts` is what the
+ * stylesheet harvest found: the `@font-face` faces and the external
+ * stylesheets the pages load, which fill each font role's sources.
  */
-export function buildBrandKit({ manifest, tokens, pages, renderBlock }) {
+export function buildBrandKit({ manifest, tokens, pages, renderBlock, fonts = {} }) {
   const resolvedGuidance = resolveGuidance(pages, manifest.brand?.guidance ?? {}, renderBlock);
   if (resolvedGuidance.errors.length) throw new Error(`timds.json brand.guidance does not match the built pages:\n${resolvedGuidance.errors.map((error) => `- ${error}`).join("\n")}`);
   const logos = [];
@@ -96,12 +164,15 @@ export function buildBrandKit({ manifest, tokens, pages, renderBlock }) {
           existing.citations.push(asset.id);
           continue;
         }
+        const format = mediaFormat(asset.media?.url);
         const entry = {
           id: asset.id,
           // Caption names keep inline Markdown for the page mirror; the kit wants plain text.
           name: String(asset.name).replace(/\*\*|__|(?<!\\)[*_`]/g, "").trim(),
           ...asset.brand,
           ...(asset.lines?.length ? { notes: asset.lines } : {}),
+          // The file format, so a consumer can pick the SVG for print and the PNG for a tool that takes no vectors.
+          ...(format ? { format } : {}),
           media: asset.media,
           page: page.id,
           block: block.id,
@@ -121,7 +192,11 @@ export function buildBrandKit({ manifest, tokens, pages, renderBlock }) {
   if (!logos.length) warnings.push('no asset is annotated data-timds-role="logo"; the brand kit has no logo');
 
   const roles = {};
-  for (const [role, entry] of Object.entries(tokens.roles ?? {})) roles[role] = { ...entry };
+  const fontSources = resolveFontSources(tokens.roles ?? {}, fonts);
+  for (const [role, entry] of Object.entries(tokens.roles ?? {})) roles[role] = { ...entry, ...(fontSources.resolved[role] ?? {}) };
+  for (const { role, family } of fontSources.unsourced) {
+    warnings.push(`font role ${role} (${family}) has no source: no loaded stylesheet declares an @font-face for it and no page links an external stylesheet that serves it, so a consumer cannot obtain the font`);
+  }
 
   return {
     kit: {
@@ -194,7 +269,8 @@ export function resolveGuidance(pages, mapping = {}, renderBlock = () => undefin
   return { guidance, errors, warnings };
 }
 
-/** Every media record in a kit, for publish-time URL rewriting. */
+/** Every media record in a kit — logos, imagery, and each font role's files — for publish-time URL rewriting. */
 export function eachBrandKitMedia(kit, visit) {
   for (const entry of [...(kit.logos ?? []), ...(kit.imagery ?? [])]) if (entry?.media) visit(entry.media);
+  for (const role of Object.values(kit.roles ?? {})) for (const file of role?.files ?? []) visit(file);
 }

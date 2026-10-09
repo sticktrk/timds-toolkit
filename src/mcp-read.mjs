@@ -75,9 +75,15 @@ pages, and the media catalog. Nothing here is editable; use it to be on-brand.
 ## Logos, imagery, and media
 
 - \`get_brand\` returns the logos and imagery the system presents, each with
-  its role, variant, the background it is meant for (\`on\`), and a stable URL
-  with integrity. Take the primary logo unless the context calls for a
-  variant. Never draw, recolor, or stretch a mark.
+  its role, variant, the background it is meant for (\`on\`), its file format,
+  and a stable URL with integrity. Take the primary logo unless the context
+  calls for a variant. Never draw, recolor, or stretch a mark.
+- Each font role in \`get_brand\` names its \`family\` and where to obtain it:
+  \`files\` (the \`@font-face\` files the system publishes, by weight and
+  style), \`stylesheets\` (a font service the pages load), and \`specimen\`
+  (the page to download the family by hand). A \`system\` role uses the
+  device's fonts and may render with a platform fallback; a named font role
+  with no source and no \`system\` flag is a gap.
 - \`list_media\` lists the published media catalog by tag or kind: reviewed
   photography, B-roll, and audio with stable public URLs. Reference assets by
   their stable URL or key; never paste an expiring or private URL.
@@ -94,6 +100,14 @@ pages, and the media catalog. Nothing here is editable; use it to be on-brand.
   context. \`list_pages\` is the directory.
 - Compliance guidance is binding. When copy you are asked to produce
   conflicts with it, say so instead of complying silently.
+
+## Asset formats
+
+- \`list_formats\` is the catalog of every print sheet and screen canvas the
+  system produces: a business card, letterhead, poster, display ad, or
+  social post with its exact size, bleed, safe margin, and stock or file
+  notes, and the page that shows it. Produce to the format's numbers; a
+  size the catalog lacks is a gap, not a guess.
 
 ## Website designs
 
@@ -401,7 +415,7 @@ export function registerDesignSystemReadTools(server, { resolveSystem, listSyste
   tool("describe_system", {
     title: "Describe a Design System",
     annotations: READ_ONLY,
-    description: "Describe a Design System at the served version: name, versions (served, pinned, published), page directory, token and role counts, brand kit summary, guidance groups, media catalog size, the website designs it holds, and the video board kinds it offers.",
+    description: "Describe a Design System at the served version: name, versions (served, pinned, published), page directory, token and role counts, brand kit summary, guidance groups, media catalog size, the asset format catalog, the website designs it holds, and the video board kinds it offers.",
   }, async (args) => {
     const resolved = await systemFor(args);
     const { layer } = resolved;
@@ -416,9 +430,31 @@ export function registerDesignSystemReadTools(server, { resolveSystem, listSyste
       tokens: tokens ? { count: tokens.count, kinds: tokens.kinds, roles: Object.keys(tokens.roles ?? {}), missingRoles: tokens.missingRoles ?? [], scopes: tokens.scopes?.length ?? 0 } : null,
       brand: kit ? { summary: summarizeBrandKit(kit), guidance: guidanceSummary(kit) } : null,
       media: { catalog: Boolean(resolved.media), assets: resolved.media?.assets?.length ?? 0 },
+      formats: layer.formats ? { count: layer.formats.count ?? 0, groups: (layer.formats.groups ?? []).map((group) => ({ id: group.id, unit: group.unit, count: group.formats?.length ?? 0 })) } : null,
       designs: layer.designs ? { count: layer.designs.designCount ?? 0, pages: layer.designs.pageCount ?? 0, states: layer.designs.stateCount ?? 0, designs: designsDirectory(layer.designs).map(({ id, title, pageCount }) => ({ id, title, pageCount })) } : null,
       video: index?.video?.boards ? { boards: index.video.boards.kinds ?? [], cadence: index.video.boards.cadence ?? null, formats: index.video.boards.formats ?? null } : null,
       llms: layer.llms ?? null,
+    };
+  });
+
+  tool("list_formats", {
+    title: "List asset formats",
+    annotations: READ_ONLY,
+    description: "The asset format catalog: every print sheet (inches) and screen canvas (pixels) the system produces, with size, bleed, safe margin, stock or file notes, and the page that shows it. Ask for the business card, a poster, or a social post by its id or name.",
+    inputSchema: {
+      group: z.string().min(1).max(50).optional().describe("Only one group, e.g. print, digital, or social"),
+    },
+  }, async (args) => {
+    const resolved = await systemFor(args);
+    const document = resolved.layer.formats;
+    const group = args.group?.trim().toLowerCase() || null;
+    const groups = (document?.groups ?? []).filter((entry) => !group || entry.id === group);
+    if (group && document && !groups.length) throw new Error(`No format group ${group}; groups: ${(document.groups ?? []).map((entry) => entry.id).join(", ") || "none"}`);
+    return {
+      system: systemStamp(resolved),
+      total: groups.reduce((sum, entry) => sum + (entry.formats?.length ?? 0), 0),
+      groups,
+      ...(document ? {} : { note: "This system publishes no asset format catalog" }),
     };
   });
 
@@ -674,7 +710,8 @@ export function registerDesignSystemReadTools(server, { resolveSystem, listSyste
     ["brand.json", "brand", "application/json", "The brand kit: roles, logos, imagery, and guidance groups."],
     ["tokens.json", "tokens", "application/json", "Every resolved CSS custom property with its scope and the roles it fills."],
     ["index.json", "index", "application/json", "Every page as structured blocks with assets joined to media."],
-    ["llms.txt", "llms", "text/plain", "The page directory in the llms.txt convention."],
+    ["llms.txt", "llms", "text/plain", "The brand essentials and the page directory in the llms.txt convention."],
+    ["formats.json", "formats", "application/json", "The asset format catalog: print sheets and screen canvases with their sizes."],
   ];
   for (const [suffix, name, mimeType, description] of documents) {
     const read = async (uri, variables) => {
