@@ -214,14 +214,18 @@ the form the first consumers adopted; `consumer check` verifies it is pinned
 and checked out, and CI checks it out with a deploy key. `timds consumer
 migrate` moves a product from the submodule to a published pin in one
 reviewable change: it reads the version the checked-out submodule declares
-(or takes `--version`), confirms that version is published, removes the
-submodule (deinit, gitlink, `.git/modules`, the `.gitmodules` section, the
-checkout), pins the version, runs init's planning so `postinstall`,
-`.gitignore`, and the managed skill follow, syncs the bundle, and warns about
+(or takes `--version`), downloads and verifies that version's bundle, plans
+the installation without writing, then removes the submodule (deinit,
+gitlink, `.git/modules`, the `.gitmodules` section, the checkout), pins the
+version, applies init's plan so `postinstall`, `.gitignore`, and the managed
+skill follow, installs the verified bundle, and warns about
 any tracked symlink into the directory the bundle leaves dangling. It edits
 no product-owned file: a deploy script or hook that still mentions the
 submodule is listed at the end for a developer. The working tree must be
-clean.
+clean, including modified, staged, or untracked work in the submodule.
+`--force` replaces customized managed files while preserving the manifest's
+app settings. A failed migration write restores the original checkout,
+submodule registration, index, and files, so the migration can be retried.
 
 ```json
 {
