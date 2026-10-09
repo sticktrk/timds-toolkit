@@ -1,7 +1,11 @@
 name: Update Design System consumer
 
-# Called only after the exact Design System commit has been published. The
-# consumer pins that commit directly; a Git tag is neither created nor required.
+# Called only after the exact Design System commit has been published. A
+# consumer that pins a published version (designSystem.version in
+# timds.consumer.json) is moved to this release with its own toolkit, which
+# fetches and verifies the published bundle; a consumer that still carries the
+# Design System as a git submodule gets its gitlink advanced to the exact
+# commit. A Git tag is neither created nor required.
 on:
   workflow_call:
     inputs:
@@ -30,7 +34,7 @@ on:
         default: main
         type: string
       path:
-        description: Submodule path in the consumer repository
+        description: Design System path in the consumer repository (the submodule path, when it still has one)
         required: true
         default: design-system
         type: string
@@ -58,7 +62,7 @@ env:
   UPDATE_BRANCH: automation/update-design-system
 
 jobs:
-  update-submodule:
+  update-consumer:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -109,7 +113,11 @@ jobs:
           token: ${{ secrets.TIMDS_CONSUMER_TOKEN }}
           path: consumer
 
-      - name: Update pinned Design System commit
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Update the Design System pin
         id: update
         working-directory: consumer
         env:
@@ -118,38 +126,63 @@ jobs:
           SUBMODULE_PATH: ${{ inputs.path }}
         run: |
           set -euo pipefail
-          current_mode="$(git ls-files --stage -- "$SUBMODULE_PATH" | awk '{print $1}')"
-          [[ "$current_mode" == "160000" ]] \
-            || { echo "$SUBMODULE_PATH is not a tracked git submodule."; exit 1; }
-          current_sha="$(git ls-tree HEAD -- "$SUBMODULE_PATH" | awk '{print $3}')"
-          if [[ "$current_sha" == "$DESIGN_SYSTEM_SHA" ]]; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git switch --create "$UPDATE_BRANCH"
-          git update-index --cacheinfo "160000,$DESIGN_SYSTEM_SHA,$SUBMODULE_PATH"
-          git commit -m "chore: update design system to ${DESIGN_SYSTEM_VERSION}"
+          pinned="$(node -p "try { require('./timds.consumer.json').designSystem.version || '' } catch { '' }")"
+          if [[ -n "$pinned" ]]; then
+            # A published pin. "current" follows every release on its own.
+            if [[ "$pinned" == "current" || "$pinned" == "$DESIGN_SYSTEM_VERSION" ]]; then
+              echo "changed=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            npm ci --ignore-scripts --no-audit --no-fund
+            # Moves designSystem.version and fetches that version's published
+            # bundle, verifying every digest, so the pin never names an
+            # unpublished release.
+            npm run --silent timds -- consumer update "$DESIGN_SYSTEM_VERSION"
+            git switch --create "$UPDATE_BRANCH"
+            git add -- timds.consumer.json
+            git commit -m "chore: update Design System to ${DESIGN_SYSTEM_VERSION}"
+            echo "mode=pin" >> "$GITHUB_OUTPUT"
+          else
+            current_mode="$(git ls-files --stage -- "$SUBMODULE_PATH" | awk '{print $1}')"
+            [[ "$current_mode" == "160000" ]] \
+              || { echo "$SUBMODULE_PATH is neither a published pin in timds.consumer.json nor a tracked git submodule."; exit 1; }
+            current_sha="$(git ls-tree HEAD -- "$SUBMODULE_PATH" | awk '{print $3}')"
+            if [[ "$current_sha" == "$DESIGN_SYSTEM_SHA" ]]; then
+              echo "changed=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            git switch --create "$UPDATE_BRANCH"
+            git update-index --cacheinfo "160000,$DESIGN_SYSTEM_SHA,$SUBMODULE_PATH"
+            git commit -m "chore: update design system to ${DESIGN_SYSTEM_VERSION}"
+            echo "mode=submodule" >> "$GITHUB_OUTPUT"
+          fi
           git fetch origin "$UPDATE_BRANCH:refs/remotes/origin/$UPDATE_BRANCH" || true
           git push --force-with-lease origin "HEAD:refs/heads/$UPDATE_BRANCH"
           echo "changed=true" >> "$GITHUB_OUTPUT"
 
-      - name: Open or refresh submodule update pull request
+      - name: Open or refresh the pin update pull request
         if: steps.update.outputs.changed == 'true'
         working-directory: consumer
         env:
           DESIGN_SYSTEM_SHA: ${{ steps.release.outputs.sha }}
           DESIGN_SYSTEM_VERSION: ${{ steps.release.outputs.version }}
+          UPDATE_MODE: ${{ steps.update.outputs.mode }}
           GH_TOKEN: ${{ secrets.TIMDS_CONSUMER_TOKEN }}
         run: |
           set -euo pipefail
           pr_number="$(gh pr list --repo "${{ inputs.repository }}" --base "${{ inputs.branch }}" --head "$UPDATE_BRANCH" --state open --json number --jq '.[0].number')"
           title="chore: update Design System to ${DESIGN_SYSTEM_VERSION}"
+          if [[ "$UPDATE_MODE" == "pin" ]]; then
+            summary="Moves the published Design System pin in \`timds.consumer.json\` to version \`${DESIGN_SYSTEM_VERSION}\` (${{ github.repository }}@${DESIGN_SYSTEM_SHA}); \`npm ci\` fetches that version's bundle."
+          else
+            summary="Advances the pinned \`${{ inputs.path }}\` submodule to version \`${DESIGN_SYSTEM_VERSION}\` (${{ github.repository }}@${DESIGN_SYSTEM_SHA})."
+          fi
           body="$(printf '%s\n' \
-            "Advances the pinned \`${{ inputs.path }}\` submodule to version \`${DESIGN_SYSTEM_VERSION}\` (${{ github.repository }}@${DESIGN_SYSTEM_SHA})." \
+            "$summary" \
             "" \
-            "The exact commit was published before this pull request was opened. Reviewing and deploying the consumer remain separate decisions.")"
+            "The release was published before this pull request was opened. Reviewing and deploying the consumer remain separate decisions.")"
           if [[ -n "$pr_number" ]]; then
             gh api --method PATCH "repos/${{ inputs.repository }}/pulls/${pr_number}" \
               -f title="$title" -f body="$body" --jq '.html_url'
