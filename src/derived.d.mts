@@ -160,6 +160,8 @@ export type IndexDocument = {
   formats?: { url: string; groups: number; count: number };
   /** Present when the system holds website designs: where designs.json sits and how much it holds. */
   designs?: { url: string; count: number; pages: number; states: number };
+  /** Present when the manifest declares a consumer bundle: where bundle.json sits and how much it holds. */
+  bundle?: { url: string; files: number; bytes: number };
   video?: {runtime?: RuntimeRequirements | null; engine?: RuntimeIdentity; boards?: VideoBoardCatalogSummary};
   pages: IndexPage[];
 };
@@ -230,6 +232,32 @@ export type DesignsDocument = {
   designs: Design[];
 };
 
+/* ── bundle.json ─────────────────────────────────────────────────────────── */
+
+export type BundleFile = {
+  /** The file's path relative to the Design System root, e.g. `src/styles/ds/brand.css`. */
+  path: string;
+  /** Where the file is served: under `directory`, site-absolute locally and absolute once published. */
+  url: string;
+  bytes: number;
+  sha256: string;
+};
+
+export type BundleDocument = {
+  schemaVersion: 1;
+  system: SystemStamp;
+  url: string;
+  /** The directory the files sit under; a website resolves `path` beneath it. */
+  directory: string;
+  /** The published prefix; null locally. */
+  base: string | null;
+  /** The immutable copy of this version's bundle; null locally. A website pins this. */
+  versioned: string | null;
+  fileCount: number;
+  bytes: number;
+  files: BundleFile[];
+};
+
 /* ── the layer ───────────────────────────────────────────────────────────── */
 
 export type Provenance = {
@@ -257,9 +285,11 @@ export type DerivedLayer = {
   formats: FormatsDocument | null;
   /** Null for a system that designs no pages. */
   designs: DesignsDocument | null;
+  /** Null for a system whose manifest declares no `bundle`. */
+  bundle: BundleDocument | null;
 };
 
-export type DerivedFileName = "index" | "tokens" | "brand" | "llms" | "llmsFull" | "formats" | "designs";
+export type DerivedFileName = "index" | "tokens" | "brand" | "llms" | "llmsFull" | "formats" | "designs" | "bundle";
 
 export type BrandKitSummary = {
   version: string | null;

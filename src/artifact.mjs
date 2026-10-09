@@ -64,6 +64,7 @@ export const artifactContentType = (file) =>
 const sha256Of = (data) => createHash("sha256").update(data).digest("hex");
 
 import { eachBrandKitMedia } from "./brand.mjs";
+import { bundleManifestPublishPaths, bundlePublishPaths, rewriteBundleForPublish } from "./bundle.mjs";
 import { eachDesignReference } from "./designs.mjs";
 import { PROVENANCE_FILE, derivedLayerPaths } from "./derived.mjs";
 
@@ -192,6 +193,30 @@ export async function collectDesignReferenceFiles(designs, artifactRoot, files =
   return files;
 }
 
+/**
+ * The consumer bundle's files, added to `files` twice: under the current
+ * prefix where `check` copied them, and under the immutable `v/<version>/`
+ * prefix a website pins. The same local file serves both keys; the portal
+ * skips a key whose digest is already current, so a republish of an
+ * unchanged version uploads nothing.
+ */
+export async function collectBundleFiles(bundle, artifactRoot, { entryDirectory, version }, files = new Map()) {
+  for (const entry of bundle.files ?? []) {
+    const { current, versioned } = bundlePublishPaths(entry.path, { entryDirectory, version });
+    const localPath = path.join(artifactRoot, ...current.split("/"));
+    let body;
+    try {
+      body = await fs.readFile(localPath);
+    } catch {
+      throw new Error(`bundle.json names ${entry.path} but the artifact has no ${current}; run timds check`);
+    }
+    const record = { bytes: body.length, contentType: artifactContentType(current), localPath, sha256: sha256Of(body) };
+    if (record.sha256 !== entry.sha256) throw new Error(`${current} does not match the digest bundle.json records; run timds check`);
+    for (const key of [current, versioned]) if (!files.has(key)) files.set(key, record);
+  }
+  return files;
+}
+
 /** The extract-written page mirrors and llms.txt, as artifact-relative paths. */
 export async function collectMachineDocFiles(artifactRoot, entryDirectory) {
   const baseDirectory = entryDirectory === "." ? artifactRoot : path.join(artifactRoot, ...entryDirectory.split("/"));
@@ -219,7 +244,7 @@ export function rewriteLlmsForPublish(text, publicBase) {
   const base = String(publicBase).replace(/\/+$/, "");
   return String(text)
     .replace(/\]\(\//g, `](${base}/`)
-    .replace(/^(Machine-readable index: |Full text: |Design tokens: |Brand kit: |Asset formats: |Website designs: )(\/\S+)/gm, (_match, label, target) => `${label}${base}${target}`)
+    .replace(/^(Machine-readable index: |Full text: |Design tokens: |Brand kit: |Asset formats: |Website designs: |Consumer bundle: )(\/\S+)/gm, (_match, label, target) => `${label}${base}${target}`)
     // Logo and font file lines in the essentials name site-absolute files after a colon.
     .replace(/^(\s*- .*?: )(\/\S+)$/gm, (_match, label, target) => `${label}${base}${target}`)
     .replace(/^(<!-- source: )(\/\S*)/gm, (_match, label, target) => `${label}${base}${target}`);
@@ -324,6 +349,13 @@ export async function publishExtractedIndex(workspace, options = {}) {
   const designsSource = await fs.readFile(path.join(artifactRoot, ...designsRelative.split("/")), "utf8").catch(() => null);
   const designs = designsSource === null ? null : JSON.parse(designsSource);
   if (designs) await collectDesignReferenceFiles(designs, artifactRoot, files);
+  // The consumer bundle publishes under the current prefix and an immutable
+  // versioned one; a system whose manifest declares no bundle has no file.
+  const bundleRelative = entryDirectory === "." ? "bundle.json" : `${entryDirectory}/bundle.json`;
+  const bundleSource = await fs.readFile(path.join(artifactRoot, ...bundleRelative.split("/")), "utf8").catch(() => null);
+  const bundle = bundleSource === null ? null : JSON.parse(bundleSource);
+  const version = workspace.manifest.version;
+  if (bundle) await collectBundleFiles(bundle, artifactRoot, { entryDirectory, version }, files);
   const docs = await collectMachineDocFiles(artifactRoot, entryDirectory);
   for (const relative of docs) {
     if (files.has(relative)) continue;
@@ -390,6 +422,13 @@ export async function publishExtractedIndex(workspace, options = {}) {
       ...(designs === null
         ? []
         : [{ body: Buffer.from(`${JSON.stringify({ ...designs, base: publicBase }, null, 2)}\n`), contentType: "application/json", path: designsRelative }]),
+      // bundle.json at the current prefix names the versioned copy; the copy's own manifest points at itself.
+      ...(bundle === null
+        ? []
+        : [
+          { body: Buffer.from(`${JSON.stringify(rewriteBundleForPublish(bundle, { publicBase, entryDirectory, version }), null, 2)}\n`), contentType: "application/json", path: bundleRelative },
+          { body: Buffer.from(`${JSON.stringify(rewriteBundleForPublish(bundle, { publicBase, entryDirectory, version, versioned: true }), null, 2)}\n`), contentType: "application/json", path: bundleManifestPublishPaths({ entryDirectory, version }).versioned },
+        ]),
       // The stamp is the one file a remote consumer must know: it names the
       // version, the commit, and where every derived file sits under this base.
       {
@@ -423,9 +462,13 @@ export async function publishExtractedIndex(workspace, options = {}) {
     await fs.rm(staging, { force: true, recursive: true });
   }
 
-  const total = files.size + 2 + [llmsSource, llmsFullSource, tokensSource, brandKit, formats, designs].filter((document) => document !== null).length;
+  const total = files.size + 2 + [llmsSource, llmsFullSource, tokensSource, brandKit, formats, designs, bundle, bundle].filter((document) => document !== null).length;
+  const publishedBundle = bundle === null ? null : rewriteBundleForPublish(bundle, { publicBase, entryDirectory, version });
   return {
     brandUrl: brandKit === null ? null : `${publicBase}/${brandRelative}`,
+    bundleUrl: publishedBundle?.url ?? null,
+    bundleVersionedUrl: publishedBundle?.versioned ?? null,
+    bundleFiles: publishedBundle?.fileCount ?? 0,
     designsUrl: designs === null ? null : `${publicBase}/${designsRelative}`,
     docCount: docs.length,
     formatsUrl: formats === null ? null : `${publicBase}/${formatsRelative}`,

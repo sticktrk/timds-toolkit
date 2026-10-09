@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -178,6 +179,13 @@ test("publishExtractedIndex uploads assets and mirrors first, then index, llms.t
       "dist/design-system/formats.json": JSON.stringify({ schemaVersion: 1, url: "/design-system/formats.json", count: 1, groups: [{ id: "print", unit: "in", formats: [{ id: "card", name: "Card", width: 3.5, height: 2, unit: "in", safe: 0.125, page: "social/video-assets", pageUrl: "/design-system/social/video-assets/index.md" }] }] }),
       "dist/design-system/llms.txt": "Machine-readable index: /design-system/index.json\nFull text: /design-system/llms-full.txt\nDesign tokens: /design-system/tokens.json\nBrand kit: /design-system/brand.json\nAsset formats: /design-system/formats.json\nWebsite designs: /design-system/designs.json — whole pages.\n\n## Fonts\n\n- Body (`font.body`): **Newsreader** — CSS `Newsreader, serif`\n  - 400 normal woff2: /design-system/fonts/newsreader.woff2\n\n## Logos\n\n- Mark (svg): /design-system/photos/elder-hands.webp\n\n- [Video assets](/design-system/social/video-assets/index.md)\n",
       "dist/design-system/llms-full.txt": "# Client System\n\n---\n\n# Video assets\n\n<!-- source: /design-system/social/video-assets · id: social/video-assets -->\n\nSee [photos](/design-system/photos/elder-hands.webp).\n",
+      // The consumer bundle: check copied the files under their source paths and recorded their digests.
+      "dist/design-system/bundle.json": JSON.stringify({ schemaVersion: 1, system: { id: "client/system", name: "Client System", version: "1.2.3" }, url: "/design-system/bundle.json", directory: "/design-system/bundle", base: null, versioned: null, fileCount: 2, bytes: 14, files: [
+        { path: "src/styles/ds/brand.css", url: "/design-system/bundle/src/styles/ds/brand.css", bytes: 8, sha256: createHash("sha256").update(".brand{}").digest("hex") },
+        { path: "public/ds.js", url: "/design-system/bundle/public/ds.js", bytes: 6, sha256: createHash("sha256").update("// ds;").digest("hex") },
+      ] }),
+      "dist/design-system/bundle/src/styles/ds/brand.css": ".brand{}",
+      "dist/design-system/bundle/public/ds.js": "// ds;",
       // The website designs carry their HTML and name the stylesheet they load, which publishes beside them.
       "dist/design-system/designs.json": JSON.stringify({ schemaVersion: 1, base: null, designs: [{ id: "site", pages: [{ route: "/", states: [{ name: "default", html: "<link rel=\"stylesheet\" href=\"/design-system/styles/site.css\">", references: ["/design-system/styles/site.css"] }] }] }] }),
       "dist/design-system/styles/site.css": ".wrap{}",
@@ -234,31 +242,55 @@ test("publishExtractedIndex uploads assets and mirrors first, then index, llms.t
     assert.equal(published.designsUrl, "https://cdn.example.com/clients/c/design-systems/s/artifact/design-system/designs.json");
     assert.equal(published.formatsUrl, "https://cdn.example.com/clients/c/design-systems/s/artifact/design-system/formats.json");
     assert.equal(published.llmsFullUrl, "https://cdn.example.com/clients/c/design-systems/s/artifact/design-system/llms-full.txt");
+    assert.equal(published.bundleUrl, "https://cdn.example.com/clients/c/design-systems/s/artifact/design-system/bundle.json");
+    assert.equal(published.bundleVersionedUrl, "https://cdn.example.com/clients/c/design-systems/s/artifact/v/1.2.3/bundle");
+    assert.equal(published.bundleFiles, 2);
     assert.equal(published.docCount, 1);
-    assert.equal(published.uploaded, 11);
+    assert.equal(published.uploaded, 17);
     assert.equal(published.skipped, 1);
-    assert.equal(published.total, 12);
+    assert.equal(published.total, 18);
 
     assert.equal(sessions.length, 2);
-    // Index assets, then the kit's font files, then design references, then the page mirrors.
+    // Index assets, then the kit's font files, then design references, then the
+    // bundle under its current and immutable versioned prefixes, then the page mirrors.
     assert.deepEqual(sessions[0].files.map((file) => file.path), [
       "design-system/photos/elder-hands.webp",
       "design-system/fonts/newsreader.woff2",
       "design-system/styles/site.css",
+      "design-system/bundle/src/styles/ds/brand.css",
+      "v/1.2.3/bundle/src/styles/ds/brand.css",
+      "design-system/bundle/public/ds.js",
+      "v/1.2.3/bundle/public/ds.js",
       "design-system/social/video-assets/index.md",
     ]);
+    const bundleUploads = sessions[0].files.filter((file) => file.path.endsWith("brand.css"));
+    assert.equal(bundleUploads[0].sha256, bundleUploads[1].sha256, "both copies are the same bytes");
+    assert.equal(bundleUploads[0].contentType, "text/css");
     assert.equal(sessions[0].systemId, "client/system");
     assert.equal(sessions[0].version, "1.2.3");
     assert.deepEqual(sessions[1].files.map((file) => file.path).sort(), [
       ".timds-artifact.json",
       "design-system/brand.json",
+      "design-system/bundle.json",
       "design-system/designs.json",
       "design-system/formats.json",
       "design-system/index.json",
       "design-system/llms-full.txt",
       "design-system/llms.txt",
       "design-system/tokens.json",
+      "v/1.2.3/bundle.json",
     ]);
+    // The current bundle manifest names the versioned copy; the versioned manifest points its files at itself.
+    const currentBundle = JSON.parse(puts.get("design-system/bundle.json"));
+    assert.equal(currentBundle.base, "https://cdn.example.com/clients/c/design-systems/s/artifact");
+    assert.equal(currentBundle.directory, "https://cdn.example.com/clients/c/design-systems/s/artifact/design-system/bundle");
+    assert.equal(currentBundle.versioned, "https://cdn.example.com/clients/c/design-systems/s/artifact/v/1.2.3/bundle");
+    assert.equal(currentBundle.files[0].url, "https://cdn.example.com/clients/c/design-systems/s/artifact/design-system/bundle/src/styles/ds/brand.css");
+    const versionedBundle = JSON.parse(puts.get("v/1.2.3/bundle.json"));
+    assert.equal(versionedBundle.url, "https://cdn.example.com/clients/c/design-systems/s/artifact/v/1.2.3/bundle.json");
+    assert.equal(versionedBundle.directory, versionedBundle.versioned);
+    assert.equal(versionedBundle.files[1].url, "https://cdn.example.com/clients/c/design-systems/s/artifact/v/1.2.3/bundle/public/ds.js");
+    assert.deepEqual(versionedBundle.files.map((file) => file.path), currentBundle.files.map((file) => file.path));
     // Font files resolve on the CDN with their integrity, like logos.
     const kitFont = JSON.parse(puts.get("design-system/brand.json")).roles["font.body"].files[0];
     assert.equal(kitFont.url, "https://cdn.example.com/clients/c/design-systems/s/artifact/design-system/fonts/newsreader.woff2");
@@ -312,7 +344,7 @@ test("publishExtractedIndex uploads assets and mirrors first, then index, llms.t
       version: "1.2.3",
       systemId: "client/system",
       entry: "design-system/index.html",
-      files: { index: "design-system/index.json", tokens: "design-system/tokens.json", brand: "design-system/brand.json", llms: "design-system/llms.txt", llmsFull: "design-system/llms-full.txt", formats: "design-system/formats.json", designs: "design-system/designs.json" },
+      files: { index: "design-system/index.json", tokens: "design-system/tokens.json", brand: "design-system/brand.json", llms: "design-system/llms.txt", llmsFull: "design-system/llms-full.txt", formats: "design-system/formats.json", designs: "design-system/designs.json", bundle: "design-system/bundle.json" },
     });
   } finally {
     await fs.rm(designSystemRoot, { force: true, recursive: true });

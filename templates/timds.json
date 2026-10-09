@@ -14,5 +14,8 @@
     "dev": ["node", "scripts/dev.mjs"],
     "build": ["node", "scripts/build.mjs"],
     "check": ["node", "scripts/check.mjs"]
+  },
+  "bundle": {
+    "include": ["dist/tokens.css", "dist/styles/system.css"]
   }
 }

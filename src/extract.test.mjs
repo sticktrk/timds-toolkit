@@ -195,6 +195,8 @@ test("extractArtifact derives tokens.json from the stylesheets the pages load", 
       "design-system/logo-white.svg": "<svg/>",
       "design-system/hero.webp": "webp",
       "design-system/missing-page.html": '<html><head><link rel="stylesheet" href="/nope.css"></head><body><main><h1>Orphan</h1></main></body></html>',
+      // A bundled file is a copy of source, never a guidance page, whatever it contains.
+      "design-system/bundle/public/email/template.html": "<html><body><main><h1>Email template</h1></main></body></html>",
       "_astro/site.css": '@import "ramps.css";@font-face{font-family:"Newsreader";font-weight:400;src:url(../design-system/fonts/newsreader.woff2) format("woff2")}:root{--navy:var(--navy-900);--space-1:4px;--accent:var(--navy);--font-display:"Cormorant Garamond",Georgia,serif;--font-body:Newsreader,Georgia,serif}',
       "_astro/ramps.css": ":root{--navy-900:#0a1729}",
       "_astro/unused.css": ":root{--never-loaded:1}",
@@ -211,7 +213,10 @@ test("extractArtifact derives tokens.json from the stylesheets the pages load", 
       { id: "business-card", name: "Business card", width: 3.5, height: 2, unit: "in", bleed: 0.125, safe: 0.125, stock: "16 pt cover.", page: "print/business-cards" },
     ] }];
 
-    const result = await extractArtifact({ artifactRoot, manifest, formats, write: true });
+    const bundle = { schemaVersion: 1, fileCount: 1, bytes: 60, files: [{ path: "public/email/template.html" }] };
+    const result = await extractArtifact({ artifactRoot, manifest, formats, bundle, write: true });
+    assert.ok(!result.pages.some((entry) => entry.title === "Email template"), "the bundle directory is not walked for pages");
+    assert.deepEqual(result.index.bundle, { url: "/design-system/bundle.json", files: 1, bytes: 60 });
     assert.equal(result.counts.tokens, 8);
     assert.equal(result.counts.stylesheets, 4);
     // color.text, color.accent, font.display, font.body, and font.ui (which --font-body fills by convention).
@@ -289,6 +294,7 @@ test("extractArtifact derives tokens.json from the stylesheets the pages load", 
     assert.ok(llms.includes("Brand kit: /design-system/brand.json"));
     assert.ok(llms.includes("Asset formats: /design-system/formats.json"));
     assert.ok(llms.includes("Full text: /design-system/llms-full.txt"));
+    assert.ok(llms.includes("Consumer bundle: /design-system/bundle.json"));
     assert.ok(llms.includes("- Body (`font.body`): **Newsreader** — CSS `Newsreader,Georgia,serif`\n  - 400 normal woff2: /design-system/fonts/newsreader.woff2"));
     assert.ok(llms.includes("- White logo (primary, on dark, svg): /design-system/logo-white.svg"));
     assert.ok(llms.includes("- [Logo sheet](/design-system/brand/logo/index.md) (`logo-sheet`): 8.5 × 11 in · bleed 0.125 in · safe 0.5 in"));

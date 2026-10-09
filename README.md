@@ -149,7 +149,8 @@ read-only apart from `report_gap`, and never sees authored source:
   system to produce on-brand work.
 - `list_design_systems`, `describe_system`: what is in scope, the served and
   published versions (the current published version is always the default;
-  `version` selects an earlier release), the page directory, and counts.
+  `version` selects an earlier release), the page directory, counts, and the
+  consumer bundle a website loads with the immutable copy to pin.
 - `resolve_role`: a brand role (`color.accent`, `font.display`, ...) to the
   token that fills it and its value; an unfilled role is a reported gap, never
   a guessed value.
@@ -167,8 +168,8 @@ read-only apart from `report_gap`, and never sees authored source:
   provides one; locally it reports that none exists.
 
 Resources `timds://brand.json`, `timds://tokens.json`, `timds://index.json`,
-`timds://llms.txt`, `timds://formats.json`, and `timds://guidance/{group}`
-serve the same documents.
+`timds://llms.txt`, `timds://formats.json`, `timds://bundle.json`, and
+`timds://guidance/{group}` serve the same documents.
 
 A host that serves consumers imports the tools from
 `@dtconcepts/timds/mcp/read`. `registerDesignSystemReadTools(server, {
@@ -535,6 +536,33 @@ page directory. `llms-full.txt` beside it is every page's Markdown in one
 file, for a tool that reads a single URL. Both are rewritten to absolute URLs
 on publish, so nothing in them depends on a viewer origin.
 
+### The consumer bundle
+
+A website needs a handful of what a Design System holds: its stylesheets, a
+behaviour script, the logos and small assets. `timds.json` names them with
+globs relative to the Design System root:
+
+```json
+"bundle": {
+  "include": ["src/styles/ds/**", "public/ds-marketing.js", "public/design-system/**"],
+  "exclude": ["public/design-system/brand/**"]
+}
+```
+
+`check` copies the matches into `<entry>/bundle/` under their source paths
+and writes `bundle.json` beside `brand.json`: every file with its size and
+digest, and where it sits. Paths mirror the source tree on purpose, so a
+developer who symlinks a website's bundle location to a Design System
+checkout serves the same paths live. A pattern under `dist/` is allowed, for
+a built file such as the starter's `tokens.css`; `node_modules/`, local
+media, and the bundle's own output are never bundled, a symbolic link is
+skipped with a warning, and a pattern that matches nothing fails `check`.
+`extract --publish` uploads the bundle under the current prefix and again
+under an immutable `v/<version>/` prefix; `bundle.json` names that copy as
+`versioned`, and a website pins it, so a release can never change what a
+pinned site loads. `@dtconcepts/timds/bundle` exports the builder and the
+validator.
+
 ### Website designs
 
 A Design System is designer-owned down to the pages. Under
@@ -560,8 +588,8 @@ existed adopts them with `timds designs init`.
 ### The derived layer is the contract consumers read
 
 Together `index.json`, `tokens.json`, `brand.json`, `llms.txt`,
-`llms-full.txt`, and, when the system keeps them, `formats.json` and
-`designs.json` are the
+`llms-full.txt`, and, when the system keeps them, `formats.json`,
+`designs.json`, and `bundle.json` are the
 **derived layer**: generated on every `check`, published on every
 `extract --publish`, and the only thing a consumer — an MCP server, a render
 host, a pipeline, another agent — needs. Nothing in it is authored by hand,

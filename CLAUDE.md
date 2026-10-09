@@ -87,7 +87,11 @@ annotations, each font role with the files or font service that provide its
 family), `formats.json` (`formats.mjs`, from the optional `src/formats.json`
 catalog), `llms.txt` (opens with the brand essentials: colors, fonts, logos,
 formats), `llms-full.txt`, per-page `index.md`, and `designs.json` (the
-designs output directory is skipped by the page walk). `derived.mjs` is the
+designs output directory is skipped by the page walk). `bundle.mjs` builds
+the consumer bundle: the files `timds.json` `bundle.include` globs name,
+copied into `<entry>/bundle/` under their source paths with a `bundle.json`
+of digests, published under the current prefix and an immutable
+`v/<version>/` prefix a website pins. `derived.mjs` is the
 read side: `readDerivedLayer` (local) and `fetchDerivedLayer` (published URL)
 return the same shape. `artifact.mjs` publishes that layer to the portal CDN
 via `extract --publish`. Everything downstream (MCP read server, video brand

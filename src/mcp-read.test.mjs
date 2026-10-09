@@ -99,6 +99,10 @@ test("the local read server describes, resolves roles, lists tokens and pages, a
   assert.ok(typeof described.llms === "string");
   assert.equal(described.video, null, "a system without a board catalog lists no boards");
   assert.equal(described.formats, null, "the starter keeps no asset format catalog");
+  // The scaffold's manifest bundles what a website loads: the built tokens and the system stylesheet.
+  assert.deepEqual(described.bundle.paths, ["dist/styles/system.css", "dist/tokens.css"]);
+  assert.equal(described.bundle.versioned, null, "nothing is published locally");
+  assert.equal(described.bundle.directory, "/bundle");
   assert.deepEqual(described.designs, { count: 1, pages: 2, states: 3, designs: [{ id: "website", title: "Marketing site", pageCount: 2 }] });
 
   // A system without a catalog answers list_formats with an empty, explained result rather than an error.
