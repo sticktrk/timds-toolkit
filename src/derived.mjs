@@ -14,7 +14,7 @@
 //                 one URL
 //   formats.json  the asset format catalog: print sheets in inches, screen
 //                 canvases in pixels, each tied to the page that shows it
-//   designs.json  the website designs: every page state as plain HTML on the
+//   designs.json  the website designs: every page state as HTML with JavaScript on the
 //                 system's stylesheets, the reference a product port matches
 //   bundle.json   the consumer bundle: the stylesheets, scripts, and assets a
 //                 website loads, each with its digest, and the immutable
@@ -76,12 +76,13 @@ async function readOptional(filePath, parse) {
  * version other than the manifest's, so a consumer knows to rerun `check`.
  */
 export async function readDerivedLayer(designSystemRoot, manifest) {
+  const indexPromise = readOptional(derivedFilePath(designSystemRoot, manifest, "index"), JSON.parse);
   const [index, tokens, brand, llms, formats, designs, bundle] = await Promise.all([
-    readOptional(derivedFilePath(designSystemRoot, manifest, "index"), JSON.parse),
+    indexPromise,
     readOptional(derivedFilePath(designSystemRoot, manifest, "tokens"), JSON.parse),
     readOptional(derivedFilePath(designSystemRoot, manifest, "brand"), JSON.parse),
     readOptional(derivedFilePath(designSystemRoot, manifest, "llms"), String),
-    readOptional(derivedFilePath(designSystemRoot, manifest, "formats"), JSON.parse),
+    indexPromise.then((index) => (index && !index.formats) ? null : readOptional(derivedFilePath(designSystemRoot, manifest, "formats"), JSON.parse)),
     readOptional(derivedFilePath(designSystemRoot, manifest, "designs"), JSON.parse),
     readOptional(derivedFilePath(designSystemRoot, manifest, "bundle"), JSON.parse),
   ]);
@@ -128,14 +129,19 @@ export async function fetchDerivedLayer(publicBase, { fetchImpl = fetch } = {}) 
   // A stamp written before designs existed names no designs file; it then
   // sits where the entry says, and is simply absent for an older publish.
   const paths = { ...derivedLayerPaths(provenance.entry), ...(provenance.files ?? {}) };
+  const indexPromise = get(paths.index, JSON.parse);
   const [index, tokens, brand, llms, formats, designs, bundle] = await Promise.all([
-    get(paths.index, JSON.parse),
+    indexPromise,
     get(paths.tokens, JSON.parse),
     get(paths.brand, JSON.parse),
     get(paths.llms, String),
-    get(paths.formats, JSON.parse),
+    // A removed catalog may still exist at its old CDN key; the index owns
+    // whether this release offers it, so do not read that obsolete object.
+    indexPromise.then((index) => (index && !index.formats) ? null : get(paths.formats, JSON.parse)),
     get(paths.designs, JSON.parse),
-    get(paths.bundle, JSON.parse),
+    // The CDN may retain an older bundle after the system disables it. The
+    // current index declares whether this release publishes a bundle.
+    indexPromise.then((index) => (index && !index.bundle) ? null : get(paths.bundle, JSON.parse)),
   ]);
   const system = index?.system ?? tokens?.system ?? brand?.system ?? { id: null, name: null, version: provenance.version ?? null };
   return {

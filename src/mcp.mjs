@@ -104,15 +104,21 @@ change. Work only in the Design System the user gave you.
   \`scripts/prepare-merge-release.test.mjs\`), and any symbolic link. The
   TimDS release line, lockfile, installation record, agent skills, workspace
   commands, release automation, and workflows change only when the operator
-  updates TimDS. The build, dev, and check scripts stay editable. When a change needs a protected file, say so in your hand-off
+  updates TimDS. The build, dev, and check scripts stay editable, but they,
+  \`scripts/viewer.mjs\`, \`src/styles/viewer.css\`, and
+  \`src/styles/canvas.css\` are stock starter plumbing that \`upgrade\`
+  refreshes while unmodified; a local change leaves that file behind on later
+  upgrades, so prefer \`tokens.json\`, \`system.css\`, and the pages. When a change needs a protected file, say so in your hand-off
   instead of working around it.
 - Edit authored tokens, source, documentation, components, navigation, and
   lightweight assets. Preserve the framework and visual language unless the
   user asks for a migration or redesign.
-- Website designs live under \`src/designs/<design>/\`: whole pages in plain
-  HTML on the system's stylesheets, one file per route and state
+- Website designs live under \`src/designs/<design>/\`: whole pages in HTML
+  with system stylesheets and optional JavaScript, one file per route and state
   (\`pages/contact.html\`, \`pages/contact.sent.html\`), with an optional
-  \`layout.html\` shell. \`run_check\` refuses scripts, inline styles,
+  \`layout.html\` shell. JavaScript interactions, script elements, and event
+  handlers are allowed. Put shared scripts in \`src/assets/\` and link them
+  by site-absolute path. \`run_check\` refuses inline styles,
   classes the linked stylesheets do not declare, and relative references,
   so a design uses only what the system defines. When a design needs a
   style the system lacks, add it to the system's stylesheet and document

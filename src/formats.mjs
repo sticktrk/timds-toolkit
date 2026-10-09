@@ -11,7 +11,7 @@
 //
 // The catalog is optional: a system without `src/formats.json` derives no
 // formats document and nothing else changes. A catalog that names a page the
-// built artifact lacks is a warning, since the page may be planned.
+// built artifact lacks is a warning unless src/site.json declares it planned.
 
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -105,17 +105,19 @@ export async function readFormatCatalog(designSystemRoot) {
 /**
  * The `formats.json` document for a catalog, stamped with the system version.
  * Each format carries the URL of the page that shows it when the extracted
- * index has that page; `warnings` names the formats whose page is not built.
+ * index has that page; known planned pages are marked without a link, and
+ * `warnings` names unbuilt pages that have not been declared planned.
  */
-export function formatsDocument(groups, manifest, { pages = [], basePrefix = "" } = {}) {
+export function formatsDocument(groups, manifest, { pages = [], plannedPages = [], basePrefix = "" } = {}) {
   const byId = new Map(pages.map((page) => [page.id, page]));
+  const planned = new Set(plannedPages);
   const warnings = [];
   const resolved = groups.map((group) => ({
     ...group,
     formats: group.formats.map((format) => {
       const page = byId.get(format.page);
-      if (!page) warnings.push(`format ${format.id} (${format.name}) names the page ${format.page}, which the built artifact does not contain; it is listed without a page link`);
-      return { ...format, ...(page ? { pageUrl: `${page.url}/index.md` } : {}) };
+      if (!page && !planned.has(format.page)) warnings.push(`format ${format.id} (${format.name}) names the page ${format.page}, which the built artifact does not contain; it is listed without a page link`);
+      return { ...format, ...(page ? { pageUrl: page.markdownUrl ?? `${page.url.replace(/\/+$/, "")}/index.md` } : planned.has(format.page) ? { planned: true } : {}) };
     }),
   }));
   const count = resolved.reduce((sum, group) => sum + group.formats.length, 0);

@@ -28,8 +28,9 @@ holds `timds.json`. Run `__TIMDS_CLI__` commands from the repository root.
 | --- | --- | --- |
 | `tokens.json` | Authored design tokens | Edit |
 | `src/site.json` | The views and every page in them; the one place that declares which pages exist | Edit |
+| `src/formats.json` | Every print sheet and screen canvas the system produces, each tied to the page that shows it; previews and spec tables read it | Edit |
 | `src/pages/` | One content fragment per authored page | Edit |
-| `src/designs/` | Website designs: whole pages in plain HTML on the system's stylesheets, one directory per design | Edit |
+| `src/designs/` | Website designs: whole pages in HTML with JavaScript on the system's stylesheets, one directory per design | Edit |
 | `src/layout.html` | The shell every page shares: app bar, page navigation, content slot | Edit |
 | `src/styles/`, `src/assets/` | The system's styles, the viewer chrome, and small optimized assets | Edit |
 | `scripts/build.mjs`, `dev.mjs`, `check.mjs`, `viewer.mjs` | The `workspace` commands that `timds.json` runs and the renderer they share | Edit only when the viewer needs it |
@@ -48,7 +49,8 @@ immediately. Its colors, fonts, and copy are neutral placeholders, not brand
 guidance. Its structure is the part to keep: views, a shared shell, and pages
 built from the same few blocks.
 
-- `src/site.json` lists the views (Brand, Web) and the pages in each, in
+- `src/site.json` lists the views (Brand, Web DS, Digital DS, Social DS,
+  Print DS) and the pages in each, in
   navigation order. A page is `{ "slug", "title", "summary" }` plus an
   optional `group` heading for the sidebar. The page `<view>/<slug>` is
   authored in `src/pages/<view>/<slug>.html` and built to
@@ -59,6 +61,14 @@ built from the same few blocks.
   the derived layer never carries placeholder guidance. To author it, create
   the fragment and remove the flag. The build fails when the two disagree, and
   when a fragment exists that `site.json` does not declare.
+- `src/formats.json` is the catalog of asset formats: `print` in inches,
+  `digital` and `social` in pixels, each format with its safe area, limits,
+  and the page that shows it. `{{formats:GROUP}}` renders a group's table and
+  `{{canvas:ID}}` fills a preview's `style` attribute, so a page never
+  restates a size and a format without a declared page fails the build.
+  A preview is a `.canvas-frame` holding a `.canvas` composed from the
+  pieces in `src/styles/canvas.css`, written in design units (`--u`, or
+  `--t` for type) so one rule set fits every size without a script.
 - A fragment holds only what goes inside `<main>`: an eyebrow, one
   `<h1 class="page-title">`, a `<p class="lede">`, then one
   `<section class="block" id="...">` per topic. `src/layout.html` supplies the
@@ -96,7 +106,7 @@ framework's layout.
 ## Website designs
 
 The system is designer-owned down to the pages themselves. A whole website,
-or any set of screens, is designed here in plain HTML on the system's own
+or any set of screens, is designed here in HTML with JavaScript on the system's own
 stylesheets, and a backend engineer ports it to whatever runs production:
 EmDash, WordPress, a static host, anything. The design is the reference the
 port must match. It is never the production site itself, however simple the
@@ -113,12 +123,13 @@ clean.
   route segments. Link between pages by their eventual site route
   (`href="/contact"`); the build points those links at the design's place
   in the artifact and leaves every other reference as written.
-- A state is a file beside its page, never a script. `contact.sent.html` is
+- A named reference state is a file beside its page. `contact.sent.html` is
   `/contact` after the form is sent; `index.signed-in.html`,
   `orders.empty.html`, and `checkout.error.html` work the same way. Every
-  state a port must handle is a file a port can see.
-- A design uses only what the system defines. `check` refuses `<script>`,
-  inline event handlers, `<style>`, `style` attributes, a class no linked
+  named state is a file a port can inspect. JavaScript may also implement
+  interactive states, animations, navigation, and form demonstrations.
+- A design uses only what the system defines. JavaScript is allowed.
+  `check` refuses `<style>`, `style` attributes, a class no linked
   stylesheet declares, and a relative reference. When a page needs a style
   the system lacks, add it to `src/styles/system.css` and document it on
   `web/components`; never add it to the page.
@@ -126,6 +137,11 @@ clean.
   `/styles/system.css`) and never `viewer.css`, which is documentation
   chrome a product does not have. Reference imagery by site-absolute path
   or a published media URL.
+- Inline scripts, linked scripts (including modules), and event handlers are
+  allowed. Put shared scripts in `src/assets/` so they reach the artifact,
+  and link them by site-absolute path. Build script dependencies into the
+  artifact; TimDS does not bundle imports or execute JavaScript during checks.
+  Preview scripts run under the hosting sandbox and content policy.
 - Design the pages, not the content. A blog is its archive page and one
   sample post, not forty posts.
 - TimDS builds the designs to `dist/designs/<design>/<route>/index.html`
@@ -140,6 +156,35 @@ clean.
   remove `src/designs/` entirely; `check` ignores a system without it. A
   system scaffolded before designs existed adopts them with
   `__TIMDS_CLI__ designs init`.
+
+## The starter stays current through upgrade
+
+The scaffold's plumbing and structure are kept current by TimDS, the way its
+skills are: `.timds/starter.json` records what the toolkit wrote, and every
+`__TIMDS_CLI__ upgrade` re-syncs it (a system scaffolded before the record
+existed opts in once with `__TIMDS_CLI__ starter sync`). The sync brings
+the stock `scripts/build.mjs`, `check.mjs`, `dev.mjs`, `viewer.mjs`,
+`src/styles/canvas.css`, and `src/styles/viewer.css` to the installed
+release: in a system scaffolded by `init` they are the toolkit's outright
+(`"plumbing": "toolkit"` in the record), so a local change to them is
+replaced on the next upgrade and reported, never kept; a system adopted
+later keeps a changed file as customized (`"recorded"`). It appends views, planned pages, and asset formats a newer scaffold
+declares to `src/site.json` and `src/formats.json` without removing,
+reordering, or retitling anything declared here; writes the Digital, Social,
+and Print overview fragments when it adds or authors their page; and adds a
+missing stock stylesheet link to `src/layout.html`. It never touches other
+fragments, `tokens.json`, `system.css`, or `timds.json`. In the recorded
+mode a file changed here is reported as customized and kept unless the
+person running the sync in a terminal chooses to replace it when asked
+(`upgrade --force` does not replace it; non-interactively only an explicit
+`__TIMDS_CLI__ starter sync --force <path>` naming the file does, and never
+an overview fragment); the
+sync refuses to run over uncommitted changes to the files it writes, and one
+that would fail `check` is rolled back. So: edit
+`system.css` and the pages freely, but leave the stock scripts
+and `viewer.css` alone unless the change is meant to stay local, and expect
+new planned pages after an upgrade, which are primitives to author, not
+mistakes to delete.
 
 ## Write pages the derived layer can read
 
@@ -158,6 +203,9 @@ them, logos, asset formats), so what reaches the kit reaches every tool.
 - Keep `src/formats.json` current: it is the catalog of every print sheet and
   screen canvas, and `formats.json` is derived from it so a consumer gets the
   business card's exact size rather than a page to scrape.
+  Explicitly planned pages in `src/site.json` keep their formats in the
+  derived catalog without a page link or warning; an unbuilt page that is
+  not planned is reported as a gap.
 - `timds.json` `bundle.include` names the files a website loads from this
   system (the built `tokens.css` and the system stylesheet in a fresh
   scaffold). `check` copies them into `bundle/` under their source paths and
@@ -209,15 +257,18 @@ them, logos, asset formats), so what reaches the kit reaches every tool.
 2. Replace the starter values in `tokens.json`. Keep role-friendly token names
    or map the roles in `timds.json`.
 3. Rewrite the authored pages (`brand/color`, `brand/typography`,
-   `web/spacing`, `web/components`) for the client: their copy, their rules,
-   and the components in `src/styles/system.css`.
+   `web/spacing`, `web/components`, and the `digital`, `social`, and `print`
+   overviews) for the client: their copy, their rules, and the components in
+   `src/styles/system.css`.
 4. Author the planned pages, starting with the Brand view. Add small
    optimized logo files under `src/assets/`, then write `brand/logo` showing
    each one by site-absolute path with its annotation. Write `brand/voice`
    and `brand/foundation`.
-5. Shape the rest of `src/site.json` to the client: remove a planned page the
-   system will not have, and add pages or whole views (email, social, print,
-   video) it needs.
+5. Shape `src/site.json` to the client: remove a planned page, or a whole
+   view, the system will not have, and add the pages it needs. Keep every
+   template's size in `src/formats.json`; when a template page is authored,
+   its formats' rows link to it. Templates ship in the three steps of the
+   scale the Print overview defines.
 6. Replace the sample website design under `src/designs/website/` with the
    client's pages, each state as its own file, using only the system's
    classes. Add a layout piece or component to `src/styles/system.css` and
@@ -259,6 +310,7 @@ __TIMDS_CLI__ check     # build, validate the artifact, derive the machine layer
 __TIMDS_CLI__ brand     # the derived brand kit and a fix for every gap
 __TIMDS_CLI__ preview   # serve the exact built artifact; designs under /designs/
 __TIMDS_CLI__ designs init   # adopt website designs in a system scaffolded without them
+__TIMDS_CLI__ starter sync   # bring the starter's scripts, views, and format catalog up to the installed release (every upgrade repeats it)
 __TIMDS_CLI__ diff      # design-system changes against the default branch (--base REF)
 ```
 

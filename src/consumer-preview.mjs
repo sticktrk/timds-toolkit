@@ -47,13 +47,16 @@ import { MAX_MAP_ELEMENTS, launchBrowser as launchChrome } from "./consumer-brow
 import { diffPngs, pngSize } from "./consumer-png.mjs";
 import {
   CONSUMER_MANIFEST_FILE,
+  consumerPinMode,
   consumerPreviewMode,
   loadConsumer,
   matchesGlob,
   parseDesignReference,
+  publishedBaseUrl,
   resolveConsumerApp,
   validateConsumerManifest,
 } from "./consumer.mjs";
+import { syncConsumerBundle } from "./consumer-sync.mjs";
 import { createPreviewServer, execute, loadWorkspace } from "./core.mjs";
 import { buildDesigns } from "./designs.mjs";
 import { portalEndpoint } from "./media.mjs";
@@ -763,7 +766,7 @@ async function captureHeadRoutes(browser, origin, preview, cells, outputDir, { b
  */
 async function prepareDesignReference(consumer, { commandEnv, install, output }) {
   const { designSystem } = consumer;
-  if (designSystem.mode === "published") {
+  if (designSystem.mode === "published" && !designSystem.linked) {
     return { status: "unavailable", reason: `${designSystem.path} is a published bundle, not a Design System checkout; designs are shown beside routes only from a checkout.` };
   }
   if (!designSystem.present) {
@@ -895,7 +898,7 @@ async function changedFilesSince(repoRoot, mergeBase, ignoredPrefix) {
  * `{ discovered, routes }`, or `{ reason }` when the base cannot be shown;
  * the worktree is always removed and the port verified free.
  */
-async function captureBaseSide({ app, captureTimeoutMs, cells, commandEnv, compareRef, consumer, guard, launchBrowser, mergeBase, output, preview, readyTimeoutMs, scratch }) {
+async function captureBaseSide({ app, captureTimeoutMs, cells, commandEnv, compareRef, consumer, fetchImpl, guard, launchBrowser, mergeBase, output, preview, readyTimeoutMs, scratch }) {
   const repoRoot = consumer.repoRoot;
   const where = `${compareRef} (${shortCommit(mergeBase)})`;
   const shown = await gitRun(["show", `${mergeBase}:${CONSUMER_MANIFEST_FILE}`], repoRoot);
@@ -936,13 +939,22 @@ async function captureBaseSide({ app, captureTimeoutMs, cells, commandEnv, compa
     if (worktree.code !== 0) return { reason: `git could not check out ${where}: ${firstLine(worktree.stderr)}` };
     added = true;
     const designSystemPath = manifest.designSystem.path;
-    if (consumer.designSystem?.mode === "published") {
-      // The base needs the bundle too. A designer change rarely moves the pin,
-      // so the synced copy is almost always the base's version as well, and
-      // copying it needs no network; the base install's postinstall resyncs
-      // when the pin differs.
-      const synced = consumer.designSystem.root;
-      if (existsSync(synced)) await fs.cp(synced, path.join(checkout, designSystemPath), { recursive: true }).catch((error) => output(`Warning: could not copy ${designSystemPath} into the base checkout (${firstLine(error.message)}); building the base without it`));
+    if (consumerPinMode(manifest.designSystem) === "published") {
+      // App installs can run below the repository root and need not invoke
+      // its postinstall. Resolve the base pin here, before running the app.
+      const head = consumer.designSystem;
+      const samePin = head?.mode === "published" && !head.linked && head.record
+        && head.systemId === manifest.designSystem.systemId
+        && head.version === manifest.designSystem.version
+        && head.url === publishedBaseUrl(manifest.designSystem)
+        && head.record.systemId === head.systemId
+        && (head.version === "current" || head.record.version === head.version);
+      try {
+        if (samePin) await fs.cp(head.root, path.join(checkout, designSystemPath), { recursive: true });
+        else await syncConsumerBundle(checkout, { fetchImpl, output });
+      } catch (error) {
+        return { reason: `The Design System could not be prepared at ${where}: ${firstLine(error.message)}` };
+      }
     } else {
       // A designer change rarely moves the pin, so the commit the base needs is
       // usually already in the checked-out submodule. Linking a worktree of it
@@ -1379,7 +1391,7 @@ export async function buildConsumerPreview(consumer, app, options = {}) {
         compare.reason = "Only previews that crawl routes are compared; this app's preview is its static build.";
       } else {
         const result = await captureBaseSide({
-          app, captureTimeoutMs, cells, commandEnv, compareRef, consumer, guard, launchBrowser, mergeBase, output, preview, readyTimeoutMs, scratch,
+          app, captureTimeoutMs, cells, commandEnv, compareRef, consumer, fetchImpl: options.fetchImpl, guard, launchBrowser, mergeBase, output, preview, readyTimeoutMs, scratch,
         });
         if (result.reason) compare.reason = result.reason;
         else {

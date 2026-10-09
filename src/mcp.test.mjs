@@ -167,7 +167,7 @@ test("writes, reads, lists, and deletes authored files and reports each change t
   assert.ok(listed.files.some((file) => file.path === "src/drafts/about.html"));
   assert.ok(listed.files.every((file) => file.path.startsWith("src/")));
   const css = await ok(client, "list_files", { glob: "**/*.css" });
-  assert.deepEqual(css.files.map((file) => file.path), ["src/styles/system.css", "src/styles/viewer.css"]);
+  assert.deepEqual(css.files.map((file) => file.path), ["src/styles/canvas.css", "src/styles/system.css", "src/styles/viewer.css"]);
   const everything = await ok(client, "list_files", {});
   for (const file of everything.files) assert.equal(isProtectedPath(await loadWorkspace(repoRoot), file.path), false, file.path);
   assert.ok(!everything.files.some((file) => /^(dist|node_modules|\.timds|\.agents|\.github)\//.test(file.path)));

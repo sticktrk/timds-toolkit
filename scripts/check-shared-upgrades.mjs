@@ -73,6 +73,10 @@ try {
       await writeJson(path.join(root, "package.json"), existing);
     }
     await command(root, "npm", ["install", "--no-audit", "--no-fund"]);
+    // The scaffold is committed the way init asks for, since the starter sync
+    // inside upgrade refuses to run over uncommitted starter files.
+    await command(root, "git", ["add", "--all"]);
+    await command(root, "git", ["commit", "-q", "-m", "Scaffold the fixture"]);
     await command(root, "npm", ["run", "timds", "--", "upgrade", "--force"]);
     if (id === "lake") {
       await command(root, "git", ["add", "--all"]);

@@ -386,7 +386,7 @@ function llmsEssentials(kit, formats) {
         ...(role.stylesheets ?? []).map((url) => `stylesheet: ${url}`),
         ...(role.files ?? []).map((file) => `${file.weight} ${file.style}${file.format ? ` ${file.format}` : ""}: ${file.url}`),
       ];
-      const standing = role.system ? " — a system font, installed on every device" : where.length ? "" : " — no font file or service is published for this family";
+      const standing = role.system ? " — a system font stack; rendering may use a platform fallback" : where.length ? "" : " — no font file or service is published for this family";
       lines.push(`- ${roleLabel(name)} (\`${name}\`): **${role.family ?? role.value}** — CSS \`${role.value}\`${standing}`);
       for (const entry of where) lines.push(`  - ${entry}`);
     }
@@ -414,6 +414,7 @@ function llmsEssentials(kit, formats) {
           format.file ?? null,
           format.stock ?? null,
           format.note ?? null,
+          format.planned ? "guidance page planned" : null,
         ].filter(Boolean).join(" · ");
         lines.push(`- ${format.pageUrl ? `[${format.name}](${format.pageUrl})` : format.name} (\`${format.id}\`): ${detail}`);
       }
@@ -436,12 +437,12 @@ export function buildLlmsText(manifest, pages, { indexUrl, tokensUrl = null, bra
     `This file is the entry point to the ${manifest.name}${manifest.version ? ` (version ${manifest.version})` : ""} for people and AI tools. Everything a piece of on-brand work needs is here or one link away: the colors, the fonts and where to get them, the logo files, the asset formats, and the guidance pages. Take every color, font, logo, and image from this system; when it lacks something, say so rather than inventing it.`,
     "",
   );
-  lines.push(`Machine-readable index: ${indexUrl} — every page below also exists as \`index.md\`.`);
+  lines.push(`Machine-readable index: ${indexUrl} — every page below links to its Markdown mirror.`);
   if (fullUrl) lines.push(`Full text: ${fullUrl} — every page's Markdown in one file.`);
   if (tokensUrl) lines.push(`Design tokens: ${tokensUrl} — every CSS custom property the pages load, resolved by scope.`);
   if (brandUrl) lines.push(`Brand kit: ${brandUrl} — role colors and fonts, logos, and imagery for on-brand production.`);
   if (formatsUrl) lines.push(`Asset formats: ${formatsUrl} — every print sheet and screen canvas with its size, bleed, and safe margin.`);
-  if (designsUrl) lines.push(`Website designs: ${designsUrl} — whole pages as plain HTML on the system's stylesheets, the reference a product port must match.`);
+  if (designsUrl) lines.push(`Website designs: ${designsUrl} — whole pages as HTML with JavaScript on the system's stylesheets, the reference a product port must match.`);
   if (bundleUrl) lines.push(`Consumer bundle: ${bundleUrl} — the stylesheets, scripts, and assets a website loads from this system, each with its digest; a website pins the immutable copy it names under \`versioned\`.`);
   lines.push("");
   lines.push(...llmsEssentials(kit, formats));
@@ -449,7 +450,7 @@ export function buildLlmsText(manifest, pages, { indexUrl, tokensUrl = null, bra
     lines.push(`## ${view || "pages"}`, "");
     for (const page of pages.filter((page) => page.view === view)) {
       const summary = page.lede.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").slice(0, 200);
-      lines.push(`- [${page.title}](${page.url}/index.md)${summary ? `: ${summary}` : ""}`);
+      lines.push(`- [${page.title}](${page.markdownUrl ?? `${page.url.replace(/\/+$/, "")}/index.md`})${summary ? `: ${summary}` : ""}`);
     }
     lines.push("");
   }
@@ -622,8 +623,10 @@ export async function deriveTokensFromArtifact({ artifactRoot, manifest }) {
  * formats.mjs, or null when the system keeps none. `bundle` is the bundle
  * document bundle.mjs wrote, or null; its output directory holds copies of
  * source files, not pages, and is skipped by the walk as well.
+ * `plannedPages` names the unbuilt guidance pages explicitly planned in
+ * src/site.json; their formats remain in the catalog without gap warnings.
  */
-export async function extractArtifact({ artifactRoot, manifest, mediaCatalog = { assets: [] }, video = null, designs = null, formats = null, bundle = null, write = true }) {
+export async function extractArtifact({ artifactRoot, manifest, mediaCatalog = { assets: [] }, video = null, designs = null, formats = null, bundle = null, plannedPages = [], write = true }) {
   const config = normalizeMachineConfig(manifest.machine);
   if (!config.enabled) return { enabled: false, pages: [], written: [] };
 
@@ -665,12 +668,13 @@ export async function extractArtifact({ artifactRoot, manifest, mediaCatalog = {
 
     const page = extractPage(await fs.readFile(file, "utf8"), { pageId, url, config, joinMedia });
     if (!page.title) continue;
+    const markdownPath = name === "index"
+      ? path.join(path.dirname(file), "index.md")
+      : path.join(path.dirname(file), `${name}.md`);
+    page.markdownUrl = `/${path.relative(artifactRoot, markdownPath).split(path.sep).join("/")}`;
     pages.push(page);
 
     if (write) {
-      const markdownPath = name === "index"
-        ? path.join(path.dirname(file), "index.md")
-        : path.join(path.dirname(file), `${name}.md`);
       await fs.writeFile(markdownPath, pageToMarkdown(page));
       written.push(markdownPath);
     }
@@ -685,7 +689,7 @@ export async function extractArtifact({ artifactRoot, manifest, mediaCatalog = {
   const designsUrl = designs ? `${basePrefix}/designs.json` : null;
   const designsDoc = designs ? designsDocument(designs, manifest) : null;
   const formatsUrl = formats ? `${basePrefix}/formats.json` : null;
-  const formatsResult = formats ? formatsDocument(formats, manifest, { pages, basePrefix }) : null;
+  const formatsResult = formats ? formatsDocument(formats, manifest, { pages, plannedPages, basePrefix }) : null;
   const formatsDoc = formatsResult?.document ?? null;
   const fullUrl = `${basePrefix}/llms-full.txt`;
   const bundleUrl = bundle ? `${basePrefix}/bundle.json` : null;
@@ -724,6 +728,8 @@ export async function extractArtifact({ artifactRoot, manifest, mediaCatalog = {
       const formatsPath = path.join(baseDirectory, "formats.json");
       await fs.writeFile(formatsPath, `${JSON.stringify(formatsDoc, null, 2)}\n`);
       written.push(formatsPath);
+    } else {
+      await fs.rm(path.join(baseDirectory, "formats.json"), { force: true });
     }
     if (designsDoc) {
       const designsPath = path.join(baseDirectory, "designs.json");

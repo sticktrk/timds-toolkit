@@ -81,8 +81,9 @@ pages, and the media catalog. Nothing here is editable; use it to be on-brand.
 - Each font role in \`get_brand\` names its \`family\` and where to obtain it:
   \`files\` (the \`@font-face\` files the system publishes, by weight and
   style), \`stylesheets\` (a font service the pages load), and \`specimen\`
-  (the page to download the family by hand). A font role with none of these
-  is a gap: the pages render it, but a consumer cannot.
+  (the page to download the family by hand). A \`system\` role uses the
+  device's fonts and may render with a platform fallback; a named font role
+  with no source and no \`system\` flag is a gap.
 - \`list_media\` lists the published media catalog by tag or kind: reviewed
   photography, B-roll, and audio with stable public URLs. Reference assets by
   their stable URL or key; never paste an expiring or private URL.
@@ -122,10 +123,10 @@ pages, and the media catalog. Nothing here is editable; use it to be on-brand.
 - \`list_designs\` lists the whole pages the designer has designed in the
   system: each design, its routes, and the states each route has (a sent
   form, an empty list, an error). \`read_design\` returns one page state as
-  the plain HTML the designer authored on the system's stylesheets, with
-  the stylesheets and media it loads.
+  the authored HTML and JavaScript, with the system stylesheets, scripts,
+  and media it loads.
 - A design is the reference a product route must match. Port its markup
-  onto the product's stack and the system's stylesheets; never copy the HTML
+  and interactions onto the product's stack and the system's stylesheets; never copy the HTML
   file into the product as a page, and never restyle it. When the product
   cannot express a state the design shows, say so.
 - Site-absolute references in a design resolve under the document's
@@ -597,7 +598,7 @@ export function registerDesignSystemReadTools(server, { resolveSystem, listSyste
   tool("read_design", {
     title: "Read a design page",
     annotations: READ_ONLY,
-    description: "One page of a website design as the plain HTML the designer authored on the system's stylesheets, with the stylesheets and media it loads. Address it by design id and route (/, /about); pass a state name for a route's other states (list_designs names them).",
+    description: "One page of a website design as the HTML and JavaScript the designer authored on the system's stylesheets, with the stylesheets, scripts, and media it loads. Address it by design id and route (/, /about); pass a state name for a route's other states (list_designs names them).",
     inputSchema: {
       design: z.string().min(1).max(100).describe("Design id from list_designs"),
       route: z.string().min(1).max(300).describe("The page route, such as / or /contact"),

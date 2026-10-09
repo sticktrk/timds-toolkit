@@ -1,0 +1,87 @@
+<span class="eyebrow">Print DS · Foundations</span>
+<h1 class="page-title">The print design system</h1>
+<p class="lede">How the brand meets paper, vinyl, and board: stationery, collateral, desk and office pieces, and event display. It uses the Brand view's mark, type, and palette, and adds what the screen never needs: trim, bleed, safe areas, stock, and ink.</p>
+<div class="rule"></div>
+
+<section class="block" id="scale">
+  <div class="block__head">
+    <h2 class="h2">The template scale</h2>
+    <p>Every template in Print, Digital, and Social ships in three steps on the same grid. Choose the step that fits the setting: a letter is Minimal, a seminar handout is Accent, and a booth in a busy hall is Bold. Do not mix steps inside one piece. A set, such as a card and its matching letterhead, may use different steps.</p>
+  </div>
+  <table class="spec">
+    <thead><tr><th>Step</th><th>Surface</th><th>Accent</th><th>Mark</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Minimal</strong></td><td>Quiet and correspondence-grade. White or natural stock and ink-colored type; the paper does the work.</td><td>One hairline or rule. No accent fills.</td><td>The full mark in color.</td></tr>
+      <tr><td><strong>Accent</strong></td><td>Recognizable at arm's length. A band of ink or accent frames the content.</td><td>Eyebrows and one rule. The accent never fills more than about a tenth of the face.</td><td>The full mark: color on paper, reversed inside the band.</td></tr>
+      <tr><td><strong>Bold</strong></td><td>A full-bleed ink flood, or full-bleed photography where the format has room. For rooms, not envelopes.</td><td>Display type and keylines in the accent.</td><td>The full mark reversed.</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section class="block" id="principles">
+  <div class="block__head">
+    <h2 class="h2">Principles</h2>
+  </div>
+  <table class="spec">
+    <thead><tr><th>Principle</th><th>What it means in practice</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Brand owns the identity.</strong></td><td>Mark files, type families, and colors come from the Brand view. Print never adds a typeface or a color; it only defines how those assets meet ink and stock.</td></tr>
+      <tr><td><strong>Paper is a surface.</strong></td><td>Prefer natural or ivory stock to a printed tint. A tint across a whole sheet muddies type and shows banding on digital presses.</td></tr>
+      <tr><td><strong>Readable at arm's length, then across a room.</strong></td><td>Body text on letters, brochures, and worksheets is at least 12 pt with generous line spacing, fill-in items are 15 pt, and running text is upright. Only supporting lines go smaller: contact lines, running heads, pad footers, and fine print, and nothing below 7.5 pt. Banner headlines read from about 12 m (40 ft).</td></tr>
+      <tr><td><strong>Write on paper, never on ink.</strong></td><td>Anything a reader fills in, ticks, circles, or signs sits on white or ivory: write-in lines, tick boxes, notes, calendar dates, date fields, signature lines. Bands and floods carry only printed type. Ballpoint and pencil vanish on ink.</td></tr>
+      <tr><td><strong>Compliant by default.</strong></td><td>Advertising pieces carry the brand's name and address and follow the claim rules of its field, the same as on <a href="/social/">social</a>. When in doubt, send it for review.</td></tr>
+    </tbody>
+  </table>
+  <div class="note"><b>Ink.</b> Record the press build of each color token here once it is proofed: CMYK, the nearest spot color, and where each is used. Keep floods at or below 300% total ink, and never set small type in a rich build.</div>
+</section>
+
+<section class="block" id="formats">
+  <div class="block__head">
+    <h2 class="h2">Formats</h2>
+    <p>Every template page sizes its previews from the <code>print</code> group in <code>src/formats.json</code>. Bleed extends past the trim line; live type and the mark stay inside the safe area.</p>
+  </div>
+  {{formats:print}}
+</section>
+
+<section class="block" id="previews">
+  <div class="block__head">
+    <h2 class="h2">Previews</h2>
+    <p>A sheet is a print canvas (<code>canvas--print</code>) sized from the catalog, so one preview unit is one inch and type is set in points. It is composed from the same pieces as a screen canvas, in <code>src/styles/canvas.css</code>. Turn on the guides to see the safe area.</p>
+  </div>
+  <figure class="demo">
+    <label class="canvas-guides"><input type="checkbox"> Show guides</label>
+    <div class="canvas-frame" style="{{canvas:letterhead}};max-width:20rem">
+      <div class="canvas canvas--print">
+        <div class="canvas-safe">
+          <div>
+            <span class="canvas-mark" style="font-size:calc(var(--t) * 18)">{{name}}</span>
+            <div class="canvas-rule" style="margin-top:calc(var(--t) * 8)"></div>
+          </div>
+          <div class="canvas-foot"><span>Street address · City</span><span>Phone · example.com</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="canvas-frame" style="{{canvas:business-card}};max-width:16rem">
+      <div class="canvas canvas--print canvas--ink">
+        <div class="canvas-safe" style="justify-content:center;align-items:center">
+          <span class="canvas-mark" style="font-size:calc(var(--t) * 14)">{{name}}</span>
+        </div>
+      </div>
+    </div>
+  </figure>
+</section>
+
+<section class="block" id="handoff">
+  <div class="block__head">
+    <h2 class="h2">Handing off to a printer</h2>
+  </div>
+  <table class="spec">
+    <thead><tr><th>Item</th><th>Requirement</th></tr></thead>
+    <tbody>
+      <tr><td><strong>File</strong></td><td>PDF/X-4, CMYK (or CMYK plus a spot for foil), fonts embedded, crop marks offset beyond the bleed.</td></tr>
+      <tr><td><strong>Images</strong></td><td>300 ppi at final size for sheet goods; 100 to 150 ppi at final size for banners and posters 24″ and up.</td></tr>
+      <tr><td><strong>Mark</strong></td><td>Vector files only, from the Brand view. Never place a screenshot or a raster export.</td></tr>
+      <tr><td><strong>Proof</strong></td><td>A hard proof on the chosen stock for every first run and every new stock.</td></tr>
+    </tbody>
+  </table>
+</section>

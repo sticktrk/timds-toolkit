@@ -1,0 +1,77 @@
+/* Format previews: a print sheet or screen canvas at true proportion, sized
+   from src/formats.json. {{canvas:ID}} fills a .canvas-frame's style
+   attribute with the format's custom properties (--cw, --ch, --safe, --bleed,
+   --ui-*, --clear-*) in the format's own unit: inches for print, pixels for
+   screens. The frame is a size container, so --u is one design unit at
+   whatever width the frame gets, and everything inside is written in --u.
+   A 320 × 50 banner and a 24″ × 36″ poster share one rule set and nothing
+   scales by script. Type is set in --t: a design pixel on a screen canvas,
+   a point (--pt) on a print sheet.
+
+   A preview is a figure, so its sample copy stays out of the derived rules,
+   and it reads the system's tokens like everything else. Every template page
+   is built from these pieces; add a piece here before a template needs it. */
+
+.canvas-frame { container-type: inline-size; width: 100%; }
+.canvas-frame--actual { width: calc(var(--cw) * 1px); max-width: 100%; }
+
+.canvas {
+  --u: calc(100cqw / var(--cw));
+  --pt: calc(var(--u) / 72);
+  --t: var(--u);
+  position: relative;
+  overflow: hidden;
+  aspect-ratio: var(--cw) / var(--ch);
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: calc(var(--t) * 16);
+  line-height: 1.3;
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--color-ink) 16%, transparent);
+}
+.canvas--print { --t: var(--pt); font-size: calc(var(--t) * 10); line-height: 1.45; }
+.canvas--ink { background: var(--color-ink); color: var(--color-surface); }
+.canvas *, .canvas *::before, .canvas *::after { box-sizing: border-box; }
+.canvas img { display: block; max-width: none; }
+
+/* ---- the pieces a template is composed from ---- */
+.canvas-safe { position: absolute; inset: calc(var(--safe) * var(--u)); display: flex; flex-direction: column; justify-content: space-between; gap: calc(var(--t) * 8); }
+.canvas-safe--row { flex-direction: row; align-items: center; }
+.canvas-safe--row .canvas-button { align-self: center; }
+.canvas-eyebrow { font-size: calc(var(--t) * 10); font-weight: 800; letter-spacing: 0.16em; text-transform: uppercase; color: var(--color-accent); }
+.canvas--ink .canvas-eyebrow { color: var(--color-accent-soft); }
+.canvas-display { margin: 0; font-family: var(--font-serif); font-size: calc(var(--t) * 28); font-weight: 500; letter-spacing: -0.02em; line-height: 1.05; text-wrap: balance; }
+.canvas-display em { font-style: italic; color: var(--color-accent); }
+.canvas--ink .canvas-display em { color: var(--color-accent-soft); }
+.canvas-body { margin: 0; font-size: calc(var(--t) * 12); color: var(--color-muted); }
+.canvas--ink .canvas-body { color: var(--color-line); }
+.canvas-rule { width: calc(var(--t) * 40); height: calc(var(--t) * 2); background: var(--color-accent); }
+.canvas-mark { font-family: var(--font-serif); font-size: calc(var(--t) * 14); font-weight: 700; }
+.canvas-button { display: inline-block; align-self: start; padding: calc(var(--t) * 6) calc(var(--t) * 14); border-radius: calc(var(--t) * 3); background: var(--color-accent); color: var(--color-surface); font-size: calc(var(--t) * 11); font-weight: 700; }
+.canvas--ink .canvas-button { background: var(--color-surface); color: var(--color-ink); }
+.canvas-foot { display: flex; justify-content: space-between; gap: calc(var(--t) * 8); font-size: calc(var(--t) * 8); color: var(--color-muted); }
+
+/* ---- guides: the safe area dashed, platform bands and keep-clear regions
+   hatched, shown while the block's "Show guides" box is checked ---- */
+.canvas-guides { display: inline-flex; align-items: center; gap: var(--space-2); margin: 0; color: var(--color-muted); font-size: var(--type-small); cursor: pointer; }
+.canvas::after { content: ""; position: absolute; inset: calc(var(--safe) * var(--u)); z-index: 2; border: 1px dashed transparent; pointer-events: none; }
+.canvas-ui, .canvas-keep-clear { display: none; }
+.block:has(.canvas-guides input:checked) .canvas { outline: 1px solid var(--color-accent); outline-offset: -1px; }
+.block:has(.canvas-guides input:checked) .canvas::after { border-color: var(--color-accent); }
+.block:has(.canvas-guides input:checked) .canvas-ui,
+.block:has(.canvas-guides input:checked) .canvas-keep-clear {
+  --hatch: repeating-linear-gradient(135deg, color-mix(in srgb, var(--color-accent) 22%, transparent) 0 6px, transparent 6px 12px);
+  display: block;
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+.block:has(.canvas-guides input:checked) .canvas-ui {
+  background:
+    var(--hatch) top / 100% calc(var(--ui-t) * var(--u)) no-repeat,
+    var(--hatch) bottom / 100% calc(var(--ui-b) * var(--u)) no-repeat,
+    var(--hatch) left / calc(var(--ui-l) * var(--u)) 100% no-repeat,
+    var(--hatch) right / calc(var(--ui-r) * var(--u)) 100% no-repeat;
+}
+.block:has(.canvas-guides input:checked) .canvas-keep-clear { left: calc(var(--clear-l) * var(--u)); right: calc(var(--clear-r) * var(--u)); background: var(--hatch); }
