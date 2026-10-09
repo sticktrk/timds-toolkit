@@ -63,6 +63,7 @@ const CONSUMER_HELP = `Usage:
   timds consumer check [--root PATH] [--app NAME] [--base REF] [--json]
   timds consumer sync [--root PATH]
   timds consumer update [VERSION] [--root PATH]
+  timds consumer migrate [--version VERSION] [--url URL] [--root PATH] [--force] [--skip-sync]
   timds consumer preview --app NAME [--root PATH] [--output DIR] [--base REF] [--publish] [--pull-request N]
   timds consumer init [--root PATH] [--system ID] [--version VERSION] [--url URL] [--force] [--skip-install] [--portal-url URL]
   timds consumer scaffold emdash --root PATH --design-system GIT_URL [--stylesheet PATH]... [--site-url URL] [--portal-url URL] [--skip-install]
@@ -336,16 +337,21 @@ async function findConsumerRoot(start) {
   return result.code === 0 && result.stdout.trim() ? path.resolve(result.stdout.trim()) : resolved;
 }
 
+/**
+ * The gitlink commit the index pins at `designSystemPath`, or null. The
+ * index is what the next commit will pin, so a submodule staged for removal
+ * (`consumer migrate`) is already gone here; HEAD is consulted only when the
+ * index cannot be read.
+ */
 async function gitlinkCommit(repoRoot, designSystemPath) {
-  const tree = await git(["ls-tree", "HEAD", "--", designSystemPath], repoRoot);
-  if (tree.code === 0) {
-    const match = tree.stdout.trim().match(/^160000\s+commit\s+([0-9a-f]{7,64})\t/m);
-    if (match) return match[1];
-  }
-  // No commit yet (or not a gitlink in HEAD): fall back to the index.
   const staged = await git(["ls-files", "--stage", "--", designSystemPath], repoRoot);
   if (staged.code === 0) {
     const match = staged.stdout.trim().match(/^160000\s+([0-9a-f]{7,64})\s+\d\t/m);
+    return match ? match[1] : null;
+  }
+  const tree = await git(["ls-tree", "HEAD", "--", designSystemPath], repoRoot);
+  if (tree.code === 0) {
+    const match = tree.stdout.trim().match(/^160000\s+commit\s+([0-9a-f]{7,64})\t/m);
     if (match) return match[1];
   }
   return null;
@@ -762,6 +768,10 @@ export async function runConsumerCli(args = [], { env = process.env, output = de
   if (subcommand === "sync" || subcommand === "update") {
     const { runConsumerSync, runConsumerUpdate } = await import("./consumer-sync.mjs");
     return subcommand === "sync" ? runConsumerSync(rest, { output }) : runConsumerUpdate(rest, { output });
+  }
+  if (subcommand === "migrate") {
+    const { runConsumerMigrate } = await import("./consumer-migrate.mjs");
+    return runConsumerMigrate(rest, { output });
   }
   if (subcommand === "preview") {
     const { runConsumerPreview } = await import("./consumer-preview.mjs");

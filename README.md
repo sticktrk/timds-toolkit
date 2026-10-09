@@ -211,7 +211,17 @@ same paths live.
 
 A **submodule pin** is the `design-system` git submodule at an exact commit,
 the form the first consumers adopted; `consumer check` verifies it is pinned
-and checked out, and CI checks it out with a deploy key.
+and checked out, and CI checks it out with a deploy key. `timds consumer
+migrate` moves a product from the submodule to a published pin in one
+reviewable change: it reads the version the checked-out submodule declares
+(or takes `--version`), confirms that version is published, removes the
+submodule (deinit, gitlink, `.git/modules`, the `.gitmodules` section, the
+checkout), pins the version, runs init's planning so `postinstall`,
+`.gitignore`, and the managed skill follow, syncs the bundle, and warns about
+any tracked symlink into the directory the bundle leaves dangling. It edits
+no product-owned file: a deploy script or hook that still mentions the
+submodule is listed at the end for a developer. The working tree must be
+clean.
 
 ```json
 {
