@@ -97,8 +97,15 @@ of digests, published under the current prefix and an immutable
 `consumer-sync.mjs` is `timds consumer sync|update`: a published pin
 (`designSystem.version` in `timds.consumer.json`) fetches that version's
 bundle into the gitignored `design-system/` directory from `postinstall`,
-verifying digests and leaving a symlink alone; `consumer.mjs` resolves either
-pin mode (published record or submodule gitlink) for `check`. `derived.mjs` is the
+verifying digests and leaving a symlink alone; `consumer-migrate.mjs` is
+`timds consumer migrate`, which removes the submodule and pins the version
+the checkout declared. It checks both working trees, preflights init's
+installation plan and the full bundle, then keeps the checkout, module store,
+Git state, and touched files for rollback until the writes succeed. Migration
+uses the supplied manifest with the shared installation planner in
+`consumer-init.mjs`, so `--force` replaces managed files without regenerating
+app settings; `consumer.mjs` resolves either pin mode (published
+record or submodule gitlink) for `check`. `derived.mjs` is the
 read side: `readDerivedLayer` (local) and `fetchDerivedLayer` (published URL)
 return the same shape. `artifact.mjs` publishes that layer to the portal CDN
 via `extract --publish`. Everything downstream (MCP read server, video brand

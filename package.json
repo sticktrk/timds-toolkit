@@ -51,6 +51,7 @@
     "src/consumer-scaffold.mjs",
     "src/consumer-notes.mjs",
     "src/consumer-sync.mjs",
+    "src/consumer-migrate.mjs",
     "src/consumer-preview.mjs",
     "src/consumer-browser.mjs",
     "src/consumer-png.mjs",
