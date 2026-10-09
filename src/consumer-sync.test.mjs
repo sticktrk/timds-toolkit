@@ -92,6 +92,29 @@ test("resolvePublishedBundle reads a pinned version directly and the current rel
   await assert.rejects(resolvePublishedBundle({ url: BASE, version: "9.9.9", fetchImpl }), /version 9\.9\.9's bundle is not published at .*v\/9\.9\.9\/bundle\.json/);
 });
 
+test("a manifest served from a public root names files by site-absolute path and resolves against that root", async () => {
+  const { fetchImpl, served } = publishedSystem();
+  // The portal serves the ref's manifest at the system's root: directory and
+  // file URLs are site-absolute, with no base or versioned prefix filled in.
+  const original = JSON.parse(served.get("v/1.2.0/bundle.json"));
+  const rootRelative = (value) => String(value).replace(BASE, "/acme/core/artifact");
+  served.set("v/1.2.0/bundle.json", JSON.stringify({
+    ...original,
+    url: rootRelative(original.url),
+    directory: rootRelative(original.directory),
+    base: null,
+    versioned: null,
+    files: original.files.map((file) => ({ ...file, url: rootRelative(file.url) })),
+  }));
+  const pinned = await resolvePublishedBundle({ url: BASE, version: "1.2.0", fetchImpl });
+  assert.deepEqual(pinned.files.map((file) => file.url), [`${BASE}/v/1.2.0/bundle/src/styles/ds/brand.css`, `${BASE}/v/1.2.0/bundle/public/ds.js`]);
+  assert.equal(pinned.directory, `${BASE}/v/1.2.0/bundle`);
+  assert.equal(pinned.versioned, null);
+  // An entry with no URL falls back to the directory; one that cannot resolve is refused.
+  served.set("v/1.2.0/bundle.json", JSON.stringify({ ...original, directory: null, files: original.files.map((file) => ({ ...file, url: "" })) }));
+  await assert.rejects(resolvePublishedBundle({ url: BASE, version: "1.2.0", fetchImpl }), /without a resolvable URL/);
+});
+
 test("current pins resolve immutable bytes and reject a missing or mismatched versioned bundle", async () => {
   const { fetchImpl, served, requests } = publishedSystem();
   // A CDN can still serve the previous release's mutable manifest while the
