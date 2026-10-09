@@ -109,6 +109,15 @@ pages, and the media catalog. Nothing here is editable; use it to be on-brand.
   notes, and the page that shows it. Produce to the format's numbers; a
   size the catalog lacks is a gap, not a guess.
 
+## What a website loads
+
+- \`describe_system\` reports the consumer bundle when the system publishes
+  one: the stylesheets, scripts, and small assets a website loads, each
+  under \`directory\`, and \`versioned\`, the immutable copy of this
+  version. A website pins \`versioned\`, never \`directory\`, so a release
+  cannot change it unseen; the \`bundle.json\` resource lists every file
+  with its digest.
+
 ## Website designs
 
 - \`list_designs\` lists the whole pages the designer has designed in the
@@ -415,7 +424,7 @@ export function registerDesignSystemReadTools(server, { resolveSystem, listSyste
   tool("describe_system", {
     title: "Describe a Design System",
     annotations: READ_ONLY,
-    description: "Describe a Design System at the served version: name, versions (served, pinned, published), page directory, token and role counts, brand kit summary, guidance groups, media catalog size, the asset format catalog, the website designs it holds, and the video board kinds it offers.",
+    description: "Describe a Design System at the served version: name, versions (served, pinned, published), page directory, token and role counts, brand kit summary, guidance groups, media catalog size, the asset format catalog, the consumer bundle a website loads (with the immutable copy to pin), the website designs it holds, and the video board kinds it offers.",
   }, async (args) => {
     const resolved = await systemFor(args);
     const { layer } = resolved;
@@ -431,6 +440,8 @@ export function registerDesignSystemReadTools(server, { resolveSystem, listSyste
       brand: kit ? { summary: summarizeBrandKit(kit), guidance: guidanceSummary(kit) } : null,
       media: { catalog: Boolean(resolved.media), assets: resolved.media?.assets?.length ?? 0 },
       formats: layer.formats ? { count: layer.formats.count ?? 0, groups: (layer.formats.groups ?? []).map((group) => ({ id: group.id, unit: group.unit, count: group.formats?.length ?? 0 })) } : null,
+      // What a website loads from the system, and the immutable copy it pins; null until the manifest declares a bundle.
+      bundle: layer.bundle ? { url: layer.bundle.url, directory: layer.bundle.directory, versioned: layer.bundle.versioned ?? null, files: layer.bundle.fileCount ?? 0, bytes: layer.bundle.bytes ?? 0, paths: (layer.bundle.files ?? []).map((file) => file.path) } : null,
       designs: layer.designs ? { count: layer.designs.designCount ?? 0, pages: layer.designs.pageCount ?? 0, states: layer.designs.stateCount ?? 0, designs: designsDirectory(layer.designs).map(({ id, title, pageCount }) => ({ id, title, pageCount })) } : null,
       video: index?.video?.boards ? { boards: index.video.boards.kinds ?? [], cadence: index.video.boards.cadence ?? null, formats: index.video.boards.formats ?? null } : null,
       llms: layer.llms ?? null,
@@ -712,6 +723,7 @@ export function registerDesignSystemReadTools(server, { resolveSystem, listSyste
     ["index.json", "index", "application/json", "Every page as structured blocks with assets joined to media."],
     ["llms.txt", "llms", "text/plain", "The brand essentials and the page directory in the llms.txt convention."],
     ["formats.json", "formats", "application/json", "The asset format catalog: print sheets and screen canvases with their sizes."],
+    ["bundle.json", "bundle", "application/json", "The consumer bundle: every file a website loads from the system, with its digest and the immutable copy to pin."],
   ];
   for (const [suffix, name, mimeType, description] of documents) {
     const read = async (uri, variables) => {

@@ -1,15 +1,20 @@
 // Consumer repositories: products that pin a TimDS Design System.
 //
-// A consumer repo is a product (a website, an app) that carries a TimDS
-// Design System as the `design-system` git submodule and declares, once, in
-// `timds.consumer.json` at its root: which apps it holds, how to preview each
-// one, and which paths a designer pull request may touch. This module reads
-// and validates that manifest, resolves the pinned Design System (gitlink
-// commit, presence of the checkout), and guards the design-surface scope of a
-// branch diff for `timds consumer check`. The scope is judged against the
-// manifest at the merge base, so a branch cannot widen its own surface. The
-// same diff names the apps worth previewing (`previewApps`), so the stock
-// workflow skips the preview on a pull request that cannot change a look.
+// A consumer repo is a product (a website, an app) that pins a TimDS Design
+// System and declares, once, in `timds.consumer.json` at its root: which apps
+// it holds, how to preview each one, and which paths a designer pull request
+// may touch. The pin takes one of two forms. In published mode
+// (`designSystem.version`) the product tracks only a version; `timds consumer
+// sync` (consumer-sync.mjs) fetches that version's published bundle into the
+// gitignored `designSystem.path`, and no Design System bytes enter the
+// repository. In submodule mode the same path is a git submodule at an exact
+// commit, the form the first consumers adopted. This module reads and
+// validates the manifest, resolves the pin either way (gitlink commit or the
+// sync record), and guards the design-surface scope of a branch diff for
+// `timds consumer check`. The scope is judged against the manifest at the
+// merge base, so a branch cannot widen its own surface. The same diff names
+// the apps worth previewing (`previewApps`), so the stock workflow skips the
+// preview on a pull request that cannot change a look.
 //
 // Boundary: nothing here knows the product's stack. TimDS never builds,
 // installs, or edits the product; the commands the manifest declares are run
@@ -23,6 +28,10 @@ import process from "node:process";
 import * as z from "zod/v4";
 
 export const CONSUMER_MANIFEST_FILE = "timds.consumer.json";
+/** The record `consumer sync` leaves in the bundle directory: which version is there and which files. */
+export const CONSUMER_BUNDLE_RECORD_FILE = ".timds-bundle.json";
+/** Where a published system sits unless `designSystem.url` says otherwise: `<base>/<systemId>/artifact`. */
+export const DEFAULT_PUBLISHED_BASE_URL = "https://design-systems.timds.com";
 export const CONSUMER_VIEWPORTS = Object.freeze(["desktop", "tablet", "phone"]);
 export const CONSUMER_SCHEMES = Object.freeze(["light", "dark"]);
 
@@ -52,8 +61,10 @@ export const CONSUMER_ALWAYS_ALLOWED = Object.freeze([
 
 const CONSUMER_HELP = `Usage:
   timds consumer check [--root PATH] [--app NAME] [--base REF] [--json]
+  timds consumer sync [--root PATH]
+  timds consumer update [VERSION] [--root PATH]
   timds consumer preview --app NAME [--root PATH] [--output DIR] [--base REF] [--publish] [--pull-request N]
-  timds consumer init [--root PATH] [--force] [--skip-install] [--portal-url URL]
+  timds consumer init [--root PATH] [--system ID] [--version VERSION] [--url URL] [--force] [--skip-install] [--portal-url URL]
   timds consumer scaffold emdash --root PATH --design-system GIT_URL [--stylesheet PATH]... [--site-url URL] [--portal-url URL] [--skip-install]
   timds consumer notes [--root PATH] [--app NAME] [--pull-request N] [--all] [--json] [--portal-url URL]
   timds consumer notes resolve ID [ID...] [--commit SHA] [--dismiss]`;
@@ -188,6 +199,15 @@ const appSchema = z.object({
 
 const APP_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 
+const publishedUrl = z.string().refine((value) => {
+  try {
+    const parsed = new URL(value);
+    return ["http:", "https:"].includes(parsed.protocol) && !parsed.username && !parsed.password && !parsed.search && !parsed.hash;
+  } catch {
+    return false;
+  }
+}, { message: "designSystem.url must be the HTTP or HTTPS prefix the Design System is published at, without a query or credentials" }).transform((value) => value.replace(/\/+$/, ""));
+
 const manifestSchema = z.object({
   $schema: z.string().optional(),
   schemaVersion: z.literal(1, { error: `${CONSUMER_MANIFEST_FILE} schemaVersion must be 1` }),
@@ -195,7 +215,16 @@ const manifestSchema = z.object({
     path: relativePath("designSystem.path").default("design-system"),
     systemId: z.string({ error: "designSystem.systemId is required (the Design System's systemId from its timds.json)" })
       .regex(/^[a-zA-Z0-9][a-zA-Z0-9._/-]{1,159}$/, "designSystem.systemId must use letters, numbers, dots, slashes, underscores, or hyphens"),
-  }, { error: "designSystem must be an object with path and systemId" }).strict(),
+    // Published mode: the version the product is built against (or `current`
+    // to follow every release at the next install) and, optionally, where the
+    // system is published. Absent, the path is a git submodule.
+    version: z.string().regex(/^(?:current|[A-Za-z0-9][A-Za-z0-9._-]{0,99})$/, 'designSystem.version must be a published version label such as "1.4.0", or "current"').optional(),
+    url: publishedUrl.optional(),
+  }, { error: "designSystem must be an object with path and systemId" }).strict().superRefine((designSystem, context) => {
+    if (designSystem.url && !designSystem.version) {
+      context.addIssue({ code: "custom", path: ["url"], message: "designSystem.url applies to a published pin; add designSystem.version" });
+    }
+  }),
   apps: z.record(z.string(), appSchema, { error: "apps must be an object keyed by app name" }).superRefine((apps, context) => {
     const names = Object.keys(apps);
     if (!names.length) context.addIssue({ code: "custom", message: "apps must declare at least one app" });
@@ -234,6 +263,16 @@ export function validateConsumerManifest(value) {
 /** "static" when the build output is the preview, "crawl" when routes are visited (serve, or build + routes). */
 export function consumerPreviewMode(preview) {
   return preview.serve || preview.routes ? "crawl" : "static";
+}
+
+/** `published` when the manifest pins a version, else `submodule`. */
+export function consumerPinMode(designSystem) {
+  return designSystem?.version ? "published" : "submodule";
+}
+
+/** The prefix a published system's derived layer and bundle sit under. */
+export function publishedBaseUrl(designSystem) {
+  return designSystem.url || `${DEFAULT_PUBLISHED_BASE_URL}/${designSystem.systemId}/artifact`;
 }
 
 // ---------------------------------------------------------------------------
@@ -318,9 +357,20 @@ async function checkoutCommit(root) {
   return head.code === 0 ? head.stdout.trim() || null : null;
 }
 
+async function readBundleRecord(root) {
+  try {
+    const parsed = JSON.parse(await fs.readFile(path.join(root, CONSUMER_BUNDLE_RECORD_FILE), "utf8"));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Load the consumer repo at or above `repoRootInput`: the validated manifest
- * and the pinned Design System (`root`, gitlink `commit` or null, `present`).
+ * and the pinned Design System (`root`, `mode`, gitlink `commit` or null, the
+ * sync `record` or null, `present`). In published mode `present` means the
+ * bundle has been synced; in submodule mode, that the checkout exists.
  */
 export async function loadConsumer(repoRootInput = process.cwd()) {
   const repoRoot = await findConsumerRoot(repoRootInput);
@@ -342,12 +392,20 @@ export async function loadConsumer(repoRootInput = process.cwd()) {
   }
   const manifest = validateConsumerManifest(parsed);
   const designSystemRoot = path.resolve(repoRoot, manifest.designSystem.path);
+  const mode = consumerPinMode(manifest.designSystem);
+  const linked = mode === "published" && await fs.lstat(designSystemRoot).then((info) => info.isSymbolicLink(), () => false);
+  const record = mode === "published" && !linked ? await readBundleRecord(designSystemRoot) : null;
   const designSystem = {
     path: manifest.designSystem.path,
     systemId: manifest.designSystem.systemId,
+    mode,
+    version: manifest.designSystem.version ?? null,
+    url: mode === "published" ? publishedBaseUrl(manifest.designSystem) : null,
     root: designSystemRoot,
     commit: await gitlinkCommit(repoRoot, manifest.designSystem.path),
-    present: existsSync(path.join(designSystemRoot, "timds.json")),
+    record,
+    linked,
+    present: mode === "published" && !linked ? record !== null : existsSync(path.join(designSystemRoot, "timds.json")),
   };
   return { repoRoot, manifestPath, manifest, apps: manifest.apps, designSystem };
 }
@@ -497,15 +555,43 @@ export async function checkConsumer(repoRootInput = process.cwd(), options = {})
   const { designSystem, manifest, repoRoot } = consumer;
   const selected = options.app ? [resolveConsumerApp(consumer, options.app).name] : Object.keys(manifest.apps);
 
-  if (!designSystem.commit) {
-    errors.push(`${designSystem.path} is not pinned as a git submodule. Add it with: git submodule add <design-system-repo-url> ${designSystem.path}`);
+  if (designSystem.mode === "published") {
+    // A published pin keeps no Design System bytes in git: the sync record says what was fetched.
+    if (designSystem.commit) {
+      errors.push(`${designSystem.path} is still a git submodule but ${CONSUMER_MANIFEST_FILE} pins a published version. Remove the submodule (git rm -r --cached ${designSystem.path}, drop it from .gitmodules) so npm install can fetch the bundle.`);
+    }
+    if (designSystem.linked) {
+      if (!designSystem.present) errors.push(`${designSystem.path} is a symbolic link but its target has no timds.json; point it at a Design System checkout.`);
+      else warnings.push(`${designSystem.path} is a local Design System checkout; checking the working copy instead of published pin ${designSystem.version}.`);
+    } else if (!designSystem.record) {
+      errors.push(`${designSystem.path} has no synced Design System bundle. Run: npm run timds -- consumer sync (npm install runs it from postinstall)`);
+    } else {
+      const record = designSystem.record;
+      if (designSystem.version !== "current" && record.version !== designSystem.version) {
+        errors.push(`${designSystem.path} holds Design System version ${record.version ?? "unknown"} but ${CONSUMER_MANIFEST_FILE} pins ${designSystem.version}. Run: npm run timds -- consumer sync`);
+      }
+      if (record.systemId && record.systemId !== designSystem.systemId) {
+        warnings.push(`${CONSUMER_MANIFEST_FILE} designSystem.systemId is ${designSystem.systemId} but the synced bundle belongs to ${record.systemId}`);
+      }
+      for (const file of Array.isArray(record.files) ? record.files : []) {
+        if (typeof file?.path !== "string" || file.path.split("/").some((segment) => !segment || segment === "..")) continue;
+        if (!existsSync(path.join(designSystem.root, ...file.path.split("/")))) {
+          errors.push(`${designSystem.path}/${file.path} is missing from the synced bundle. Run: npm run timds -- consumer sync`);
+          break;
+        }
+      }
+    }
+  } else if (!designSystem.commit) {
+    errors.push(`${designSystem.path} is not pinned as a git submodule. Add it with: git submodule add <design-system-repo-url> ${designSystem.path}, or pin a published version with designSystem.version in ${CONSUMER_MANIFEST_FILE} (timds consumer init --system)`);
   }
-  if (!designSystem.present) {
+  if (designSystem.mode === "submodule" && !designSystem.present) {
     errors.push(`${designSystem.path}/timds.json is missing. Check out the submodule with: git submodule update --init ${designSystem.path}`);
-  } else if (designSystem.commit) {
-    const checkedOut = await checkoutCommit(designSystem.root);
-    if (checkedOut && checkedOut !== designSystem.commit) {
-      warnings.push(`${designSystem.path} is checked out at ${checkedOut.slice(0, 12)} but the repository pins ${designSystem.commit.slice(0, 12)}. Run git submodule update ${designSystem.path}, or commit the new pin deliberately.`);
+  } else if ((designSystem.mode === "submodule" && designSystem.commit) || (designSystem.linked && designSystem.present)) {
+    if (designSystem.mode === "submodule") {
+      const checkedOut = await checkoutCommit(designSystem.root);
+      if (checkedOut && checkedOut !== designSystem.commit) {
+        warnings.push(`${designSystem.path} is checked out at ${checkedOut.slice(0, 12)} but the repository pins ${designSystem.commit.slice(0, 12)}. Run git submodule update ${designSystem.path}, or commit the new pin deliberately.`);
+      }
     }
     try {
       const dsManifest = JSON.parse(await fs.readFile(path.join(designSystem.root, "timds.json"), "utf8"));
@@ -520,13 +606,23 @@ export async function checkConsumer(repoRootInput = process.cwd(), options = {})
 
   // Design pairings are checked against the pin's own catalog, so a renamed
   // design or route fails here rather than silently leaving the preview bare.
+  // A published pin's catalog is the designs summary the sync recorded.
   let designCatalog = null;
   if (designSystem.present && selected.some((name) => manifest.apps[name].preview.designs)) {
-    const { readDesignCatalog } = await import("./designs.mjs");
-    try {
-      designCatalog = await readDesignCatalog(designSystem.root);
-    } catch (error) {
-      warnings.push(`${designSystem.path} website designs could not be read: ${error.message}`);
+    if (designSystem.mode === "published" && !designSystem.linked) {
+      const recorded = designSystem.record?.designs;
+      if (Array.isArray(recorded)) {
+        designCatalog = { exists: true, designs: recorded.map((design) => ({ id: design.id, pages: (design.routes ?? []).map((route) => ({ route })) })) };
+      } else {
+        warnings.push(`${designSystem.path} has no recorded website designs; republish the pinned release with the current toolkit and run npm run timds -- consumer sync to check the preview.designs pairings`);
+      }
+    } else {
+      const { readDesignCatalog } = await import("./designs.mjs");
+      try {
+        designCatalog = await readDesignCatalog(designSystem.root);
+      } catch (error) {
+        warnings.push(`${designSystem.path} website designs could not be read: ${error.message}`);
+      }
     }
   }
 
@@ -559,20 +655,27 @@ export async function checkConsumer(repoRootInput = process.cwd(), options = {})
     const paths = await changedPaths(repoRoot, options.base, designSystem.path);
     const atBase = await manifestAtBase(repoRoot, options.base);
     const scopeManifest = atBase.manifest || manifest;
+    const pinMoved = Boolean(atBase.manifest) && JSON.stringify(atBase.manifest.designSystem) !== JSON.stringify(manifest.designSystem);
     if (atBase.manifest && JSON.stringify(atBase.manifest) !== JSON.stringify(manifest)) {
       warnings.push(`${CONSUMER_MANIFEST_FILE} changed on this branch; the design surface is judged against the manifest at ${options.base}. Changing the manifest needs a developer.`);
     }
-    // A branch that adopts TimDS adds the submodule; afterwards the pin only moves by a developer decision.
+    // A branch that adopts TimDS adds the submodule, or the manifest with a
+    // published pin; afterwards the pin only moves by a developer decision.
+    // In published mode the pin is a manifest field, so a moved version shows
+    // as the manifest path with the pin status.
     const adoption = atBase.missing ? new Set([".gitmodules", designSystem.path]) : new Set();
     changes = paths.map((filePath) => {
       if (adoption.has(filePath)) return { path: filePath, status: "allowed", app: null };
       if (filePath === designSystem.path) return { path: filePath, status: "pin", app: null };
+      if (filePath === CONSUMER_MANIFEST_FILE && pinMoved) return { path: filePath, status: "pin", app: null };
       return { path: filePath, ...classifyConsumerPath(filePath, scopeManifest) };
     });
     const outside = changes.filter((change) => change.status === "outside");
     const guarded = changes.filter((change) => change.status === "protected");
     if (changes.some((change) => change.status === "pin")) {
-      errors.push(`The Design System pin at ${designSystem.path} changed. A design change never moves the pin; moving it is a separate developer decision.`);
+      errors.push(designSystem.mode === "published"
+        ? `The Design System pin (designSystem in ${CONSUMER_MANIFEST_FILE}) changed. A design change never moves the pin; moving it is a separate developer decision (timds consumer update).`
+        : `The Design System pin at ${designSystem.path} changed. A design change never moves the pin; moving it is a separate developer decision.`);
     }
     if (outside.length) {
       errors.push(`Changes outside the design surface declared in ${CONSUMER_MANIFEST_FILE}:\n${outside.map((change) => `- ${change.path}`).join("\n")}`);
@@ -640,7 +743,9 @@ function checkReport(result) {
   if (result.repoRoot) lines.push(`Consumer: ${result.repoRoot}`);
   if (result.designSystem) {
     const ds = result.designSystem;
-    lines.push(`Design System: ${ds.systemId} at ${ds.path} (${ds.commit ? `pinned ${ds.commit.slice(0, 12)}` : "not pinned"}${ds.present ? "" : ", not checked out"})`);
+    lines.push(ds.mode === "published"
+      ? `Design System: ${ds.systemId} at ${ds.path} (published, pinned ${ds.version}${ds.record?.version && ds.record.version !== ds.version ? `, synced ${ds.record.version}` : ""}${ds.present ? "" : ", not synced"})`
+      : `Design System: ${ds.systemId} at ${ds.path} (${ds.commit ? `pinned ${ds.commit.slice(0, 12)}` : "not pinned"}${ds.present ? "" : ", not checked out"})`);
   }
   for (const app of result.apps) lines.push(`App ${app.name}: ${app.cwd} (${app.mode} preview)${app.cwdExists ? "" : " — missing"}`);
   if (result.changes.length) {
@@ -654,12 +759,16 @@ function checkReport(result) {
   return lines.join("\n");
 }
 
-/** `timds consumer <check|preview|init|scaffold|notes> ...` */
+/** `timds consumer <check|sync|update|preview|init|scaffold|notes> ...` */
 export async function runConsumerCli(args = [], { env = process.env, output = defaultOutput } = {}) {
   const [subcommand = "help", ...rest] = args;
   if (["help", "--help", "-h"].includes(subcommand)) {
     output(CONSUMER_HELP);
     return;
+  }
+  if (subcommand === "sync" || subcommand === "update") {
+    const { runConsumerSync, runConsumerUpdate } = await import("./consumer-sync.mjs");
+    return subcommand === "sync" ? runConsumerSync(rest, { output }) : runConsumerUpdate(rest, { output });
   }
   if (subcommand === "preview") {
     const { runConsumerPreview } = await import("./consumer-preview.mjs");

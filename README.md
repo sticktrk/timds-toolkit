@@ -149,7 +149,8 @@ read-only apart from `report_gap`, and never sees authored source:
   system to produce on-brand work.
 - `list_design_systems`, `describe_system`: what is in scope, the served and
   published versions (the current published version is always the default;
-  `version` selects an earlier release), the page directory, and counts.
+  `version` selects an earlier release), the page directory, counts, and the
+  consumer bundle a website loads with the immutable copy to pin.
 - `resolve_role`: a brand role (`color.accent`, `font.display`, ...) to the
   token that fills it and its value; an unfilled role is a reported gap, never
   a guessed value.
@@ -167,8 +168,8 @@ read-only apart from `report_gap`, and never sees authored source:
   provides one; locally it reports that none exists.
 
 Resources `timds://brand.json`, `timds://tokens.json`, `timds://index.json`,
-`timds://llms.txt`, `timds://formats.json`, and `timds://guidance/{group}`
-serve the same documents.
+`timds://llms.txt`, `timds://formats.json`, `timds://bundle.json`, and
+`timds://guidance/{group}` serve the same documents.
 
 A host that serves consumers imports the tools from
 `@dtconcepts/timds/mcp/read`. `registerDesignSystemReadTools(server, {
@@ -181,16 +182,46 @@ reported gap.
 
 ## Consumer repositories
 
-A product that uses a Design System (a website, an app) pins it as the
-`design-system` git submodule and declares, once, in `timds.consumer.json` at
-its root, how to preview each app and which paths a designer pull request may
-touch. TimDS never builds the product itself; it runs the commands the
-manifest declares.
+A product that uses a Design System (a website, an app) pins it and
+declares, once, in `timds.consumer.json` at its root, how to preview each app
+and which paths a designer pull request may touch. TimDS never builds the
+product itself; it runs the commands the manifest declares.
+
+The pin takes one of two forms. A **published pin** names a version:
+
+```json
+"designSystem": { "path": "design-system", "systemId": "acme/core", "version": "1.4.0" }
+```
+
+No Design System bytes enter the repository. `timds consumer sync`, which
+`timds consumer init --system acme/core` wires into `postinstall`, fetches
+that version's bundle (the stylesheets, scripts, and small assets the system
+declares in its `bundle.include`) from the public prefix into the gitignored
+`design-system/` directory under the same paths the files have in the Design
+System tree, verifying every digest, and records what it fetched in
+`design-system/.timds-bundle.json`. A clone and `npm ci` is all a website or
+an agent needs; nobody needs access to the Design System repository.
+`timds consumer update [VERSION]` moves the pin to a version, or to the
+current published release, and syncs; a pin of `"current"` follows every
+release at the next install instead. `url` overrides the public prefix
+(default `https://design-systems.timds.com/<systemId>/artifact`). A developer
+working on both repositories symlinks `design-system/` to a Design System
+checkout; `sync` leaves a symbolic link alone, and the checkout serves the
+same paths live. `consumer check` validates that checkout and its design
+pairings, with a warning that the local working copy replaces the published
+pin. A named bundle carries its release's design-route summary, so pairing
+checks need no current-release metadata or provenance stamp. Older bundles
+without that summary remain installable and report that pairings could not
+be checked; republish the selected release with the current toolkit to add it.
+
+A **submodule pin** is the `design-system` git submodule at an exact commit,
+the form the first consumers adopted; `consumer check` verifies it is pinned
+and checked out, and CI checks it out with a deploy key.
 
 ```json
 {
   "schemaVersion": 1,
-  "designSystem": { "path": "design-system", "systemId": "acme/core" },
+  "designSystem": { "path": "design-system", "systemId": "acme/core", "version": "1.4.0" },
   "apps": {
     "web": {
       "cwd": "web",
@@ -233,11 +264,14 @@ path), skipping query strings, non-page files, and `exclude` URL path globs
 such as `"/admin/**"`, until `limit` routes (default 40, at most 200) are found.
 Declared `routes` always come first and always stay.
 
-- `timds consumer check [--app NAME] [--base REF]` validates the manifest,
-  that the submodule is pinned and checked out (warning when the checkout
-  drifts from the pin), and that every app's `cwd` exists. With `--base`, it
+- `timds consumer check [--app NAME] [--base REF]` validates the manifest and
+  the pin: for a published pin, that the synced bundle is present and at the
+  pinned version; for a submodule, that it is pinned and checked out (warning
+  when the checkout drifts from the pin). It also checks that every app's
+  `cwd` exists. With `--base`, it
   fails when the branch or working tree changes anything outside a declared
-  design surface or inside a protected path, or moves the Design System pin,
+  design surface or inside a protected path, or moves the Design System pin
+  (the gitlink, or `designSystem` in the manifest),
   listing those paths. The surface is read from the manifest at the merge
   base, so a branch cannot widen its own scope; a branch whose base has no
   manifest is an adoption and may add the submodule. When automatic previews
@@ -538,6 +572,37 @@ page directory. `llms-full.txt` beside it is every page's Markdown in one
 file, for a tool that reads a single URL. Both are rewritten to absolute URLs
 on publish, so nothing in them depends on a viewer origin.
 
+### The consumer bundle
+
+A website needs a handful of what a Design System holds: its stylesheets, a
+behaviour script, the logos and small assets. `timds.json` names them with
+globs relative to the Design System root:
+
+```json
+"bundle": {
+  "include": ["src/styles/ds/**", "public/ds-marketing.js", "public/design-system/**"],
+  "exclude": ["public/design-system/brand/**"]
+}
+```
+
+`check` copies the matches into `<entry>/bundle/` under their source paths
+and writes `bundle.json` beside `brand.json`: every file with its size and
+digest, and where it sits. Paths mirror the source tree on purpose, so a
+developer who symlinks a website's bundle location to a Design System
+checkout serves the same paths live. A pattern under `dist/` is allowed, for
+a built file such as the starter's `tokens.css`; `node_modules/`, local
+media, and the bundle's own output are never bundled, a symbolic link is
+skipped with a warning, and a pattern that matches nothing fails `check`.
+`extract --publish` uploads the bundle under the current prefix and again
+under an immutable `v/<version>/` prefix; `bundle.json` names that copy as
+`versioned`, and a website pins it, so a release can never change what a
+pinned site loads. Publishing checks the existing versioned manifest before
+uploading: changed bundle files or an existing design-route summary require
+a new Design System version, and a stale local bundle must be rebuilt.
+`current` pins read the provenance stamp, then fetch that version's immutable
+bundle rather than the mutable current copy. `@dtconcepts/timds/bundle` exports the builder and the
+validator.
+
 ### Website designs
 
 A Design System is designer-owned down to the pages. Under
@@ -619,8 +684,8 @@ report is a per-file status table (`created`, `updated`, `current`,
 ### The derived layer is the contract consumers read
 
 Together `index.json`, `tokens.json`, `brand.json`, `llms.txt`,
-`llms-full.txt`, and, when the system keeps them, `formats.json` and
-`designs.json` are the
+`llms-full.txt`, and, when the system keeps them, `formats.json`,
+`designs.json`, and `bundle.json` are the
 **derived layer**: generated on every `check`, published on every
 `extract --publish`, and the only thing a consumer — an MCP server, a render
 host, a pipeline, another agent — needs. Nothing in it is authored by hand,

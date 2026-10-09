@@ -109,6 +109,62 @@ test("refuses a repository without a design-system gitlink", async (t) => {
   await assert.rejects(fs.access(path.join(product, ".timds", "installation.json")));
 });
 
+test("pins a published Design System with --system: manifest version, postinstall sync, gitignore, and the published skill", async (t) => {
+  const product = await createConsumerRepo(t, { submodule: false });
+  const base = "https://cdn.test/acme/core/artifact";
+  const body = ".brand{}";
+  const served = {
+    ".timds-artifact.json": JSON.stringify({ schemaVersion: 1, sourceCommit: "a".repeat(40), version: "2.1.0", systemId: "acme/core", entry: "index.html" }),
+    "index.json": JSON.stringify({ schemaVersion: 1, system: { id: "acme/core", name: "Acme", version: "2.1.0" }, pageCount: 0, pages: [] }),
+    "bundle.json": JSON.stringify({ schemaVersion: 1, system: { id: "acme/core", name: "Acme", version: "2.1.0" }, url: `${base}/bundle.json`, directory: `${base}/bundle`, fileCount: 1, bytes: body.length, files: [{ path: "dist/tokens.css", url: `${base}/bundle/dist/tokens.css`, bytes: body.length, sha256: sha256(body) }] }),
+    "v/2.1.0/bundle.json": JSON.stringify({ schemaVersion: 1, system: { id: "acme/core", name: "Acme", version: "2.1.0" }, url: `${base}/v/2.1.0/bundle.json`, directory: `${base}/v/2.1.0/bundle`, fileCount: 1, bytes: body.length, files: [{ path: "dist/tokens.css", url: `${base}/v/2.1.0/bundle/dist/tokens.css`, bytes: body.length, sha256: sha256(body) }] }),
+    "v/2.1.0/bundle/dist/tokens.css": body,
+  };
+  const fetchImpl = async (url) => {
+    const relative = String(url).startsWith(`${base}/`) ? String(url).slice(base.length + 1) : "";
+    return served[relative] === undefined ? new Response("missing", { status: 404 }) : new Response(served[relative], { status: 200 });
+  };
+  await writeJson(path.join(product, "package.json"), { name: "product", private: true, scripts: { postinstall: "echo hi" } });
+  git(product, "add", "package.json");
+  git(product, "commit", "-m", "package");
+
+  const lines = [];
+  // The current published version is resolved through the stamp when none is named; init then syncs once.
+  const result = await initializeConsumer(product, { system: "acme/core", url: base, fetchImpl, skipInstall: true, output: (line) => lines.push(line) });
+  assert.deepEqual(result.published, { systemId: "acme/core", version: "2.1.0", url: base });
+  assert.equal(result.synced, null, "--skip-install skips the first sync");
+  const manifest = JSON.parse(await fs.readFile(path.join(product, "timds.consumer.json"), "utf8"));
+  assert.deepEqual(manifest.designSystem, { path: "design-system", systemId: "acme/core", version: "2.1.0", url: base });
+  const packageJson = JSON.parse(await fs.readFile(path.join(product, "package.json"), "utf8"));
+  assert.equal(packageJson.scripts.postinstall, "timds consumer sync && echo hi", "an existing postinstall keeps running after the sync");
+  assert.match(await fs.readFile(path.join(product, ".gitignore"), "utf8"), /^design-system\/$/m);
+  const skill = await fs.readFile(path.join(product, ".agents", "skills", "timds-consume-design-system", "SKILL.md"), "utf8");
+  assert.doesNotMatch(skill, /__[A-Z_]+__/);
+  assert.match(skill, /its `postinstall` fetches the pinned\n   Design System bundle \(version 2\.1\.0\) into `design-system\/`/);
+  assert.match(skill, /never change\n  `designSystem\.version`/);
+  assert.doesNotMatch(skill, /git submodule update/);
+  const output = lines.join("\n");
+  assert.match(output, /design-system\/ is the published bundle of acme\/core at version 2\.1\.0, fetched by npm install \(postinstall\) and ignored by git/);
+  assert.match(output, /Run npm install \(or npm run timds -- consumer sync\) to fetch the bundle/);
+  assert.doesNotMatch(output, /DESIGN_SYSTEM_DEPLOY_KEY/);
+
+  // A rerun keeps the manifest, stays in published mode without --system, and syncs when installs are not skipped.
+  const again = await initializeConsumer(product, { fetchImpl, skipInstall: false, output: quiet });
+  assert.equal(again.keptManifest, true);
+  assert.deepEqual([again.synced.status, again.synced.version], ["synced", "2.1.0"]);
+  assert.equal(await fs.readFile(path.join(product, "design-system", "dist", "tokens.css"), "utf8"), body);
+  const checked = await checkConsumer(product);
+  assert.equal(checked.status, "passed", checked.errors.join("\n"));
+
+  await assert.rejects(runConsumerInit(["--root", product, "--version", "1.0.0"], { output: quiet }), /--version and --url apply with --system/);
+  await assert.rejects(initializeConsumer(product, { system: "acme/core", version: "2.1.0", url: "https://cdn.test/nothing", fetchImpl, skipInstall: true, force: true, output: quiet }).then(() => initializeConsumer(product, { system: "acme/core", fetchImpl, url: "https://cdn.test/nothing", skipInstall: true, force: true, output: quiet })), /Could not read the current published version of acme\/core at https:\/\/cdn\.test\/nothing[\s\S]*Pass --version/);
+});
+
+test("refuses --system in a repository that still carries the submodule", async (t) => {
+  const product = await createConsumerRepo(t);
+  await assert.rejects(initializeConsumer(product, { system: "acme/core", version: "1.0.0", skipInstall: true, output: quiet }), /still carries design-system as a git submodule[\s\S]*git rm -r --cached design-system/);
+});
+
 test("discovers apps and writes the manifest with guessed defaults", async (t) => {
   const product = await createConsumerRepo(t);
   const lines = [];

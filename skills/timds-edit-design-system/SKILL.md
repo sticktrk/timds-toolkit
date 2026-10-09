@@ -230,7 +230,10 @@ components or production records to adopt publishing defaults.
    pages link; when `check` warns that a font role has no source, add one of
    those rather than naming a file anywhere else. `formats.json` derives from
    `src/formats.json`, so a new print sheet or screen canvas is a catalog
-   entry tied to the page that shows it.
+   entry tied to the page that shows it. `bundle.json` and the `bundle/`
+   copies come from `timds.json` `bundle.include`; when a website should
+   load a new stylesheet or script, say which pattern to add rather than
+   editing the protected manifest.
    A format whose page is explicitly planned in `src/site.json` stays in
    the catalog without a link or gap warning; other unbuilt pages are gaps.
 6. Keep `dist/` out of source pull requests when `artifact.publishRef` declares

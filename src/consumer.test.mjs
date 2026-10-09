@@ -88,6 +88,16 @@ function assertInvalid(manifest, pattern) {
   });
 }
 
+test("validateConsumerManifest accepts a published pin and rejects a url without a version", () => {
+  const published = validateConsumerManifest({ ...baseManifest(), designSystem: { systemId: "acme/core", version: "1.4.0", url: "https://cdn.example.com/acme/core/artifact/" } });
+  assert.deepEqual(published.designSystem, { path: "design-system", systemId: "acme/core", version: "1.4.0", url: "https://cdn.example.com/acme/core/artifact" });
+  assert.equal(validateConsumerManifest({ ...baseManifest(), designSystem: { systemId: "acme/core", version: "current" } }).designSystem.version, "current");
+  assertInvalid({ ...baseManifest(), designSystem: { systemId: "acme/core", url: "https://cdn.example.com/x" } }, /designSystem\.url applies to a published pin; add designSystem\.version/);
+  assertInvalid({ ...baseManifest(), designSystem: { systemId: "acme/core", version: "v 1" } }, /designSystem\.version must be a published version label/);
+  assertInvalid({ ...baseManifest(), designSystem: { systemId: "acme/core", version: "1.0.0", url: "ftp://cdn" } }, /designSystem\.url must be the HTTP or HTTPS prefix/);
+  assertInvalid({ ...baseManifest(), designSystem: { systemId: "acme/core", version: "1.0.0", url: "https://cdn.example.com/x?token=1" } }, /without a query or credentials/);
+});
+
 test("validateConsumerManifest applies defaults", () => {
   const manifest = validateConsumerManifest({
     schemaVersion: 1,

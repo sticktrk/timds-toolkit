@@ -36,7 +36,7 @@ holds `timds.json`. Run `__TIMDS_CLI__` commands from the repository root.
 | `scripts/build.mjs`, `dev.mjs`, `check.mjs`, `viewer.mjs` | The `workspace` commands that `timds.json` runs and the renderer they share | Edit only when the viewer needs it |
 | `CHANGELOG.md` | Designer-facing change notes | Add to `## Unreleased` |
 | `README.md`, `AGENTS.md` | This system's own documentation | Keep accurate as the system changes |
-| `timds.json` | Manifest: identity, version, artifact entry, workspace commands | Only `brand` and `machine` mappings; the rest is protected |
+| `timds.json` | Manifest: identity, version, artifact entry, workspace commands, the `bundle` globs naming what a website loads | Only `brand` and `machine` mappings; the rest is protected |
 | `media.json` | Published media catalog | Written by `assets` commands, never by hand |
 | `media-local/` | Ignored full-resolution originals | Stage files here |
 | `dist/` | Generated artifact and derived layer | Never edit |
@@ -206,6 +206,12 @@ them, logos, asset formats), so what reaches the kit reaches every tool.
   Explicitly planned pages in `src/site.json` keep their formats in the
   derived catalog without a page link or warning; an unbuilt page that is
   not planned is reported as a gap.
+- `timds.json` `bundle.include` names the files a website loads from this
+  system (the built `tokens.css` and the system stylesheet in a fresh
+  scaffold). `check` copies them into `bundle/` under their source paths and
+  publishes them under an immutable per-version prefix a website pins. A new
+  stylesheet or script a website should load is a `bundle.include` entry; a
+  pattern that matches nothing fails `check`.
 - A page needs one `<h1>`; a page without one is skipped. When the `<h1>` is
   a direct child of `<main>`, the element before it becomes the page eyebrow
   and the first `<p>` after it the page summary.

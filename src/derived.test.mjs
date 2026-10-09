@@ -19,9 +19,9 @@ const KIT = {
 test("derived file paths follow the artifact entry directory", () => {
   assert.deepEqual(derivedLayerPaths("design-system/index.html"), {
     index: "design-system/index.json", tokens: "design-system/tokens.json", brand: "design-system/brand.json", llms: "design-system/llms.txt",
-    llmsFull: "design-system/llms-full.txt", formats: "design-system/formats.json", designs: "design-system/designs.json",
+    llmsFull: "design-system/llms-full.txt", formats: "design-system/formats.json", designs: "design-system/designs.json", bundle: "design-system/bundle.json",
   });
-  assert.deepEqual(derivedLayerPaths(), { index: "index.json", tokens: "tokens.json", brand: "brand.json", llms: "llms.txt", llmsFull: "llms-full.txt", formats: "formats.json", designs: "designs.json" });
+  assert.deepEqual(derivedLayerPaths(), { index: "index.json", tokens: "tokens.json", brand: "brand.json", llms: "llms.txt", llmsFull: "llms-full.txt", formats: "formats.json", designs: "designs.json", bundle: "bundle.json" });
   assert.equal(derivedFilePath("/ds", { artifact: { entry: "design-system/index.html" } }, "brand"), "/ds/dist/design-system/brand.json");
   assert.throws(() => derivedFilePath("/ds", {}, "nope"), /unknown derived file/);
 });
@@ -33,7 +33,7 @@ test("reads the local derived layer, tolerating files check has not written and 
     const empty = await readDerivedLayer(root, manifest);
     assert.equal(empty.derived, false);
     assert.equal(empty.stale, false);
-    assert.deepEqual([empty.index, empty.tokens, empty.brand, empty.llms, empty.formats, empty.designs], [null, null, null, null, null, null]);
+    assert.deepEqual([empty.index, empty.tokens, empty.brand, empty.llms, empty.formats, empty.designs, empty.bundle], [null, null, null, null, null, null, null]);
     assert.deepEqual(empty.source, { kind: "local", root, artifactRoot: path.join(root, "dist") });
 
     await fs.mkdir(path.join(root, "dist", "design-system"), { recursive: true });
@@ -47,6 +47,9 @@ test("reads the local derived layer, tolerating files check has not written and 
     assert.equal(partial.llms, "# Client\n");
     assert.equal(partial.formats.groups[0].formats[0].id, "business-card");
     assert.equal(partial.tokens, null);
+    assert.equal(partial.bundle, null);
+    await fs.writeFile(path.join(root, "dist", "design-system", "bundle.json"), JSON.stringify({ schemaVersion: 1, fileCount: 1, files: [{ path: "src/styles/a.css" }] }));
+    assert.equal((await readDerivedLayer(root, manifest)).bundle.files[0].path, "src/styles/a.css");
 
     await fs.writeFile(path.join(root, "dist", "design-system", "index.json"), JSON.stringify({ system: KIT.system, pages: [] }));
     assert.equal((await readDerivedLayer(root, manifest)).formats, null, "the current index no longer advertises the former catalog");
@@ -59,6 +62,23 @@ test("reads the local derived layer, tolerating files check has not written and 
   } finally {
     await fs.rm(root, { force: true, recursive: true });
   }
+});
+
+test("a release without a bundle does not expose obsolete CDN bundle metadata", async () => {
+  const requested = [];
+  let enabled = true;
+  const fetchImpl = async (url) => {
+    requested.push(url);
+    if (url.endsWith("/.timds-artifact.json")) return Response.json({ version: "2.0.0", entry: "index.html" });
+    if (url.endsWith("/index.json")) return Response.json({ system: KIT.system, ...(enabled ? { bundle: { url: "/bundle.json" } } : {}) });
+    if (url.endsWith("/bundle.json")) return Response.json({ system: KIT.system, files: [] });
+    return new Response("missing", { status: 404 });
+  };
+  assert.ok((await fetchDerivedLayer("https://cdn.example.com/artifact", { fetchImpl })).bundle);
+  enabled = false;
+  requested.length = 0;
+  assert.equal((await fetchDerivedLayer("https://cdn.example.com/artifact", { fetchImpl })).bundle, null);
+  assert.ok(!requested.some((url) => url.endsWith("/bundle.json")));
 });
 
 test("fetches the published derived layer from the provenance stamp alone", async () => {
@@ -84,6 +104,7 @@ test("fetches the published derived layer from the provenance stamp alone", asyn
   assert.equal(layer.brand.roles["color.accent"].value, "#111");
   assert.equal(layer.tokens, null); // not published: null, exactly as locally
   assert.equal(layer.formats, null); // a system without a format catalog publishes none
+  assert.equal(layer.bundle, null); // a manifest without a bundle publishes none
   assert.equal(layer.designs, null); // a system without website designs publishes none
   assert.equal(layer.llms, "# Client\n");
   assert.equal(requested[0], "https://cdn.example.com/artifact/.timds-artifact.json");

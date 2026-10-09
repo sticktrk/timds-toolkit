@@ -66,6 +66,7 @@ export const artifactContentType = (file) =>
 const sha256Of = (data) => createHash("sha256").update(data).digest("hex");
 
 import { eachBrandKitMedia } from "./brand.mjs";
+import { bundleManifestPublishPaths, bundlePublishPaths, rewriteBundleForPublish } from "./bundle.mjs";
 import { eachDesignReference } from "./designs.mjs";
 import { PROVENANCE_FILE, derivedLayerPaths } from "./derived.mjs";
 
@@ -197,6 +198,30 @@ export async function collectDesignReferenceFiles(designs, artifactRoot, files =
   return files;
 }
 
+/**
+ * The consumer bundle's files, added to `files` twice: under the current
+ * prefix where `check` copied them, and under the immutable `v/<version>/`
+ * prefix a website pins. The same local file serves both keys; the portal
+ * skips a key whose digest is already current, so a republish of an
+ * unchanged version uploads nothing.
+ */
+export async function collectBundleFiles(bundle, artifactRoot, { entryDirectory, version }, files = new Map()) {
+  for (const entry of bundle.files ?? []) {
+    const { current, versioned } = bundlePublishPaths(entry.path, { entryDirectory, version });
+    const localPath = path.join(artifactRoot, ...current.split("/"));
+    let body;
+    try {
+      body = await fs.readFile(localPath);
+    } catch {
+      throw new Error(`bundle.json names ${entry.path} but the artifact has no ${current}; run timds check`);
+    }
+    const record = { bytes: body.length, contentType: artifactContentType(current), localPath, sha256: sha256Of(body) };
+    if (record.sha256 !== entry.sha256) throw new Error(`${current} does not match the digest bundle.json records; run timds check`);
+    for (const key of [current, versioned]) if (!files.has(key)) files.set(key, record);
+  }
+  return files;
+}
+
 /** The extract-written page mirrors and llms.txt, as artifact-relative paths. */
 export async function collectMachineDocFiles(artifactRoot, entryDirectory) {
   const baseDirectory = entryDirectory === "." ? artifactRoot : path.join(artifactRoot, ...entryDirectory.split("/"));
@@ -224,7 +249,7 @@ export function rewriteLlmsForPublish(text, publicBase) {
   const base = String(publicBase).replace(/\/+$/, "");
   return String(text)
     .replace(/\]\(\/(?!\/)/g, `](${base}/`)
-    .replace(/^(Machine-readable index: |Full text: |Design tokens: |Brand kit: |Asset formats: |Website designs: )(\/(?!\/)\S+)/gm, (_match, label, target) => `${label}${base}${target}`)
+    .replace(/^(Machine-readable index: |Full text: |Design tokens: |Brand kit: |Asset formats: |Website designs: |Consumer bundle: )(\/(?!\/)\S+)/gm, (_match, label, target) => `${label}${base}${target}`)
     // Logo and font file lines in the essentials name site-absolute files after a colon.
     .replace(/^(\s*- .*?: )(\/(?!\/)\S+)$/gm, (_match, label, target) => `${label}${base}${target}`)
     .replace(/^(<!-- source: )(\/(?!\/)\S*)/gm, (_match, label, target) => `${label}${base}${target}`);
@@ -273,6 +298,21 @@ async function performUpload(fetchImpl, portalUrl, upload, filePath, contentType
       }
     }
     throw caught;
+  }
+}
+
+/** Refuse changing the content of a version that consumers can already pin. */
+async function checkPublishedBundle(fetchImpl, publicBase, bundle, options) {
+  const relative = bundleManifestPublishPaths(options).versioned;
+  const response = await fetchImpl(`${publicBase}/${relative}`, { cache: "no-store" });
+  if (response.status === 404) return;
+  if (!response.ok) throw new Error(`Could not check published bundle ${relative}: responded ${response.status}`);
+  const published = await response.json();
+  const fileDigests = (document) => (document.files ?? []).map(({ path, sha256, bytes }) => ({ path, sha256, bytes })).sort((a, b) => a.path.localeCompare(b.path));
+  if (published.system?.id !== bundle.system.id || published.system?.version !== options.version
+    || JSON.stringify(fileDigests(published)) !== JSON.stringify(fileDigests(bundle))
+    || (published.designs !== undefined && JSON.stringify(published.designs) !== JSON.stringify(bundle.designs))) {
+    throw new Error(`Design System version ${options.version} already has a different published bundle. Bump the Design System version before publishing; ${relative} is immutable.`);
   }
 }
 
@@ -329,6 +369,21 @@ export async function publishExtractedIndex(workspace, options = {}) {
   const designsSource = await fs.readFile(path.join(artifactRoot, ...designsRelative.split("/")), "utf8").catch(() => null);
   const designs = designsSource === null ? null : JSON.parse(designsSource);
   if (designs) await collectDesignReferenceFiles(designs, artifactRoot, files);
+  // The consumer bundle publishes under the current prefix and an immutable
+  // versioned one; a system whose manifest declares no bundle has no file.
+  const bundleRelative = entryDirectory === "." ? "bundle.json" : `${entryDirectory}/bundle.json`;
+  const bundleSource = await fs.readFile(path.join(artifactRoot, ...bundleRelative.split("/")), "utf8").catch(() => null);
+  // Keep the pairing catalog with the bundle version, so a fixed pin never
+  // needs the current derived layer (or its provenance stamp) to check routes.
+  const bundle = bundleSource === null ? null : {
+    ...JSON.parse(bundleSource),
+    designs: (designs?.designs ?? []).map((design) => ({ id: design.id, routes: (design.pages ?? []).map((page) => page.route) })),
+  };
+  const version = workspace.manifest.version;
+  if (bundle && (bundle.system?.id !== workspace.manifest.systemId || bundle.system?.version !== version)) {
+    throw new Error(`Artifact bundle is stamped ${bundle.system?.id ?? "unknown"} ${bundle.system?.version ?? "unknown"} but timds.json declares ${workspace.manifest.systemId} ${version}; rebuild before publishing`);
+  }
+  if (bundle) await collectBundleFiles(bundle, artifactRoot, { entryDirectory, version }, files);
   const docs = await collectMachineDocFiles(artifactRoot, entryDirectory);
   for (const relative of docs) {
     if (files.has(relative)) continue;
@@ -351,6 +406,7 @@ export async function publishExtractedIndex(workspace, options = {}) {
   );
   const publicBase = String(assetSession.publicBase || "").replace(/\/+$/, "");
   if (!/^https:\/\/.+/.test(publicBase)) throw new Error("TimDS returned an invalid artifact publicBase");
+  if (bundle) await checkPublishedBundle(fetchImpl, publicBase, bundle, { entryDirectory, version });
 
   let uploaded = 0;
   for (const upload of assetSession.uploads ?? []) {
@@ -395,6 +451,13 @@ export async function publishExtractedIndex(workspace, options = {}) {
       ...(designs === null
         ? []
         : [{ body: Buffer.from(`${JSON.stringify({ ...designs, base: publicBase }, null, 2)}\n`), contentType: "application/json", path: designsRelative }]),
+      // bundle.json at the current prefix names the versioned copy; the copy's own manifest points at itself.
+      ...(bundle === null
+        ? []
+        : [
+          { body: Buffer.from(`${JSON.stringify(rewriteBundleForPublish(bundle, { publicBase, entryDirectory, version }), null, 2)}\n`), contentType: "application/json", path: bundleRelative },
+          { body: Buffer.from(`${JSON.stringify(rewriteBundleForPublish(bundle, { publicBase, entryDirectory, version, versioned: true }), null, 2)}\n`), contentType: "application/json", path: bundleManifestPublishPaths({ entryDirectory, version }).versioned },
+        ]),
       // The stamp is the one file a remote consumer must know: it names the
       // version, the commit, and where every derived file sits under this base.
       {
@@ -428,9 +491,13 @@ export async function publishExtractedIndex(workspace, options = {}) {
     await fs.rm(staging, { force: true, recursive: true });
   }
 
-  const total = files.size + 2 + [llmsSource, llmsFullSource, tokensSource, brandKit, formats, designs].filter((document) => document !== null).length;
+  const total = files.size + 2 + [llmsSource, llmsFullSource, tokensSource, brandKit, formats, designs, bundle, bundle].filter((document) => document !== null).length;
+  const publishedBundle = bundle === null ? null : rewriteBundleForPublish(bundle, { publicBase, entryDirectory, version });
   return {
     brandUrl: brandKit === null ? null : `${publicBase}/${brandRelative}`,
+    bundleUrl: publishedBundle?.url ?? null,
+    bundleVersionedUrl: publishedBundle?.versioned ?? null,
+    bundleFiles: publishedBundle?.fileCount ?? 0,
     designsUrl: designs === null ? null : `${publicBase}/${designsRelative}`,
     docCount: docs.length,
     formatsUrl: formats === null ? null : `${publicBase}/${formatsRelative}`,

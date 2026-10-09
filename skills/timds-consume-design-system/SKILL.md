@@ -1,6 +1,6 @@
 ---
 name: timds-consume-design-system
-description: Make design changes to a product that consumes a TimDS Design System through its pinned design-system/ submodule, on behalf of a designer who reviews the result rather than the code. Use for changing a product's styles, components, page layout, copy placement, or imagery within its declared design surface; running the product locally to look at a change; and opening a draft pull request with local review details or an enabled cloud preview.
+description: Make design changes to a product that consumes a TimDS Design System pinned at design-system/ (a published bundle fetched by npm install, or a git submodule), on behalf of a designer who reviews the result rather than the code. Use for changing a product's styles, components, page layout, copy placement, or imagery within its declared design surface; running the product locally to look at a change; and opening a draft pull request with local review details or an enabled cloud preview.
 ---
 
 # Use the TimDS Design System in this product
@@ -19,8 +19,7 @@ may touch. Work only in the repository the user supplied.
    they are stricter, they win.
 2. Run `git status --short` and preserve all pre-existing work. Create or use
    a non-default branch named for the change, such as `design/hero-spacing`.
-3. Run `git submodule update --init __DESIGN_SYSTEM_PATH__` so the checkout
-   matches the pin, then `npm ci` at repository root.
+3. __PIN_SETUP__
 4. Read the app's section under **This product** below before editing.
 5. When the branch has a pull request, read the designer's notes (below).
 
@@ -41,11 +40,7 @@ designer's request and pull-request comments instead.
 
 ## The Design System is pinned, not edited here
 
-- `__DESIGN_SYSTEM_PATH__/` is a git submodule at the exact commit this
-  product was reviewed against. Never `git pull`, switch, or commit inside it,
-  and never stage a new pin. Moving the pin is a separate developer decision.
-- Never copy Design System source, stylesheets, fonts, or images into the
-  product. Reference what the app already imports from the submodule.
+__PIN_RULES__
 - When the system lacks what the change needs (a token, a component, a role,
   guidance), say so. The fix belongs in the Design System repository through
   its own pull request, not in a product-side workaround.
@@ -54,23 +49,14 @@ designer's request and pull-request comments instead.
 
 Take every color, font, spacing value, logo, and image from the system:
 
-- After `npm --prefix __DESIGN_SYSTEM_PATH__ ci` and
-  `npm --prefix __DESIGN_SYSTEM_PATH__ run timds -- check`, the derived layer
-  sits beside the built entry page under `__DESIGN_SYSTEM_PATH__/dist/`
-  (usually `dist/design-system/`): `brand.json` (brand roles, each font
-  role with its family and the files or service that provide it, logos,
-  imagery), `tokens.json` (resolved CSS custom properties by scope),
-  `formats.json` (the asset format catalog, when the system keeps one),
-  `llms.txt` (the brand essentials and the page directory), `llms-full.txt`,
-  and a Markdown mirror of every guidance page. These are build output: read
-  them, never edit or commit them.
+__DERIVED_LAYER__
 - When the `timds-design-system-read` MCP tools are connected, prefer them:
   `describe_system`, then `resolve_role` for "what is the accent color" or
   "what font are headings" (`color.accent`, `color.text`, `font.display`,
   `font.body`, …), `get_tokens` for token names, `get_brand` and `list_media`
   for marks and imagery, `search_guidance` and `read_page` for voice and
   compliance. Note the version the tools serve; the product is built against
-  the pinned commit, which may trail it.
+  its pin, which may trail it.
 - Prefer brand roles over guessing from token names. In product CSS use the
   token's `name` (`var(--…)`), never its resolved literal.
 - When the system holds a website design for the route you are changing

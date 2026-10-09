@@ -5,7 +5,8 @@ name: TimDS consumer preview
 # TIMDS_PREVIEWS_ENABLED=true and a TIMDS_ACCESS_TOKEN. Otherwise this workflow
 # skips checkout, installation, validation, rendering, upload, and comments.
 # When enabled, each pull request has its manifest and Design System pin
-# validated. Only a pull request that can change how an
+# validated (a published pin is fetched by npm ci; a submodule pin is checked
+# out with the credentials below). Only a pull request that can change how an
 # app looks is previewed: each app whose design surface it changes, or every
 # app when it moves the Design System pin or changes timds.consumer.json. Such
 # an app is previewed (routes x viewports x schemes), published to the TimDS
@@ -97,6 +98,10 @@ jobs:
         run: |
           set -euo pipefail
           ds_path="$(node -p "require('./timds.consumer.json').designSystem?.path || 'design-system'")"
+          if ! git ls-tree HEAD -- "$ds_path" | grep -q '^160000 '; then
+            echo "The Design System is consumed as a published bundle; npm ci fetches the pinned version."
+            exit 0
+          fi
           if [[ -n "${SUBMODULE_TOKEN:-}" ]]; then
             git -c "url.https://x-access-token:${SUBMODULE_TOKEN}@github.com/.insteadOf=https://github.com/" \
               -c "url.https://x-access-token:${SUBMODULE_TOKEN}@github.com/.insteadOf=git@github.com:" \
@@ -174,6 +179,10 @@ jobs:
         run: |
           set -euo pipefail
           ds_path="$(node -p "require('./timds.consumer.json').designSystem?.path || 'design-system'")"
+          if ! git ls-tree HEAD -- "$ds_path" | grep -q '^160000 '; then
+            echo "The Design System is consumed as a published bundle; npm ci fetches the pinned version."
+            exit 0
+          fi
           if [[ -n "${SUBMODULE_TOKEN:-}" ]]; then
             git -c "url.https://x-access-token:${SUBMODULE_TOKEN}@github.com/.insteadOf=https://github.com/" \
               -c "url.https://x-access-token:${SUBMODULE_TOKEN}@github.com/.insteadOf=git@github.com:" \
