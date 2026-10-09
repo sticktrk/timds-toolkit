@@ -20,7 +20,7 @@ export type RenderedDesigns = {
   basePrefix: string;
   catalog: DesignCatalog;
   designs: RenderedDesign[];
-  /** Artifact-relative output path → HTML, the /designs/ directory page included. */
+  /** Artifact-relative output path → HTML or CSS, including the /designs/ directory and its stylesheet. */
   files: Map<string, string>;
   outputDirectory: string;
   pageCount: number;

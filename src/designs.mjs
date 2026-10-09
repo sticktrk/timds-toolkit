@@ -266,24 +266,33 @@ async function readManifestLike(designSystemRoot, manifest) {
 }
 
 function renderDirectory({ name, basePrefix, designs, stylesheets }) {
+  const pageCount = designs.reduce((count, design) => count + design.pages.length, 0);
   const sections = designs.map((design) => {
+    const landing = design.pages.find((page) => page.route === "/")?.url || design.pages[0].url;
     const rows = design.pages.map((page) => {
       const [defaultState, ...states] = page.states;
       const extra = states.length
-        ? states.map((state) => `<a href="${state.url}">${escapeHtml(state.name)}</a>`).join(", ")
-        : "";
-      return `        <tr><td><code>${escapeHtml(page.route)}</code></td><td><a href="${defaultState.url}">${escapeHtml(page.title)}</a></td><td>${extra}</td></tr>`;
+        ? `<div class="td-directory-states">${states.map((state) => `<a href="${state.url}">${escapeHtml(state.name)}</a>`).join("")}</div>`
+        : '<span class="td-directory-default">Default</span>';
+      return `        <tr><td><code>${escapeHtml(page.route)}</code></td><td><a class="td-directory-page" href="${defaultState.url}">${escapeHtml(page.title)}</a></td><td>${extra}</td></tr>`;
     });
     return [
-      `    <section id="${escapeHtml(design.id)}">`,
-      `      <h2><a href="${design.url}">${escapeHtml(design.title)}</a></h2>`,
-      design.summary ? `      <p>${escapeHtml(design.summary)}</p>` : "",
-      "      <table>",
-      "        <thead><tr><th>Route</th><th>Page</th><th>States</th></tr></thead>",
+      `    <section class="td-directory-section" aria-labelledby="design-${escapeHtml(design.id)}">`,
+      '      <div class="td-directory-section-head">',
+      '        <div>',
+      `          <h2 id="design-${escapeHtml(design.id)}"><a href="${landing}">${escapeHtml(design.title)}</a></h2>`,
+      design.summary ? `          <p class="td-directory-summary">${escapeHtml(design.summary)}</p>` : "",
+      '        </div>',
+      `        <a class="td-directory-open" href="${landing}" aria-label="Open ${escapeHtml(design.title)}">Open design <span aria-hidden="true">↗</span></a>`,
+      '      </div>',
+      '      <div class="td-directory-table-wrap">',
+      `      <table aria-labelledby="design-${escapeHtml(design.id)}">`,
+      '        <thead><tr><th scope="col">Route</th><th scope="col">Page</th><th scope="col">States</th></tr></thead>',
       "        <tbody>",
       ...rows,
       "        </tbody>",
       "      </table>",
+      '      </div>',
       "    </section>",
     ].filter(Boolean).join("\n");
   });
@@ -293,15 +302,22 @@ function renderDirectory({ name, basePrefix, designs, stylesheets }) {
     "  <head>",
     '    <meta charset="utf-8">',
     '    <meta name="viewport" content="width=device-width, initial-scale=1">',
-    `    <title>Designs · ${escapeHtml(name)}</title>`,
+    `    <title>Website designs · ${escapeHtml(name)}</title>`,
     ...stylesheets.map((href) => `    <link rel="stylesheet" href="${escapeHtml(href)}">`),
+    `    <link rel="stylesheet" href="${basePrefix}/${DESIGNS_OUTPUT_DIRECTORY}/_directory.css">`,
     "  </head>",
-    "  <body>",
-    "    <main>",
-    `      <p><a href="${basePrefix}/">${escapeHtml(name)}</a></p>`,
-    "      <h1>Designs</h1>",
-    "      <p>Whole pages designed with HTML, CSS, and JavaScript on this system's stylesheets. Each is the reference a production port must match. A page's other states are listed beside it.</p>",
-    ...sections,
+    '  <body class="timds-design-directory">',
+    '    <header class="td-directory-bar">',
+    `      <a class="td-directory-brand" href="${basePrefix}/">${escapeHtml(name)}</a>`,
+    `      <a class="td-directory-back" href="${basePrefix}/">← Back to design system</a>`,
+    '    </header>',
+    '    <main class="td-directory-main">',
+    '      <div class="td-directory-intro">',
+    `        <p class="td-directory-eyebrow">${designs.length} design${designs.length === 1 ? "" : "s"} · ${pageCount} page${pageCount === 1 ? "" : "s"}</p>`,
+    "        <h1>Website designs</h1>",
+    '        <p class="td-directory-lede">Browse complete page designs built with this system. Open a page to explore its layout and interactions, or choose an alternate state.</p>',
+    '      </div>',
+    ...(sections.length ? sections : ['      <p class="td-directory-empty">No website designs yet.</p>']),
     "    </main>",
     "  </body>",
     "</html>",
@@ -311,8 +327,8 @@ function renderDirectory({ name, basePrefix, designs, stylesheets }) {
 
 /**
  * Render every design in memory. Returns null when the system has no designs
- * directory. `files` maps artifact-relative output paths to HTML, the
- * directory page included.
+ * directory. `files` maps artifact-relative output paths to HTML and CSS, the
+ * directory page and its stylesheet included.
  */
 export async function renderDesigns({ designSystemRoot, manifest = null }) {
   const catalog = await readDesignCatalog(designSystemRoot);
@@ -365,7 +381,8 @@ export async function renderDesigns({ designSystemRoot, manifest = null }) {
   }
 
   const outputDirectory = [prefixDirectory, DESIGNS_OUTPUT_DIRECTORY].filter(Boolean).join("/");
-  files.set(`${outputDirectory}/index.html`, renderDirectory({ name: resolved.name || "Design System", basePrefix, designs, stylesheets: [...stylesheets].sort() }));
+  files.set(`${outputDirectory}/index.html`, renderDirectory({ name: resolved.name || "Design System", basePrefix, designs, stylesheets: [...stylesheets] }));
+  files.set(`${outputDirectory}/_directory.css`, await fs.readFile(new URL("../templates/designs-directory.css", import.meta.url), "utf8"));
   return {
     basePrefix,
     catalog,

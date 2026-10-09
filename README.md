@@ -511,6 +511,11 @@ route and state (`index.html` is `/`, `contact.html` is `/contact`,
 ports the design to whatever runs production; the design is the reference the
 port must match, never the production site itself.
 
+The `/designs/` directory has toolkit-owned, responsive navigation and page
+listings. Its scoped stylesheet uses the system's colors and fonts with neutral
+fallbacks, and is loaded only on the directory; authored page designs keep
+their own layout. Rebuilding with the updated toolkit refreshes the directory.
+
 `check` builds the designs to `/designs/` and refuses anything the system does
 not define: `<style>`, `style` attributes, a
 class no linked stylesheet declares, a relative reference. A design that
