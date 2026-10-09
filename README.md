@@ -182,16 +182,41 @@ reported gap.
 
 ## Consumer repositories
 
-A product that uses a Design System (a website, an app) pins it as the
-`design-system` git submodule and declares, once, in `timds.consumer.json` at
-its root, how to preview each app and which paths a designer pull request may
-touch. TimDS never builds the product itself; it runs the commands the
-manifest declares.
+A product that uses a Design System (a website, an app) pins it and
+declares, once, in `timds.consumer.json` at its root, how to preview each app
+and which paths a designer pull request may touch. TimDS never builds the
+product itself; it runs the commands the manifest declares.
+
+The pin takes one of two forms. A **published pin** names a version:
+
+```json
+"designSystem": { "path": "design-system", "systemId": "acme/core", "version": "1.4.0" }
+```
+
+No Design System bytes enter the repository. `timds consumer sync`, which
+`timds consumer init --system acme/core` wires into `postinstall`, fetches
+that version's bundle (the stylesheets, scripts, and small assets the system
+declares in its `bundle.include`) from the public prefix into the gitignored
+`design-system/` directory under the same paths the files have in the Design
+System tree, verifying every digest, and records what it fetched in
+`design-system/.timds-bundle.json`. A clone and `npm ci` is all a website or
+an agent needs; nobody needs access to the Design System repository.
+`timds consumer update [VERSION]` moves the pin to a version, or to the
+current published release, and syncs; a pin of `"current"` follows every
+release at the next install instead. `url` overrides the public prefix
+(default `https://design-systems.timds.com/<systemId>/artifact`). A developer
+working on both repositories symlinks `design-system/` to a Design System
+checkout; `sync` leaves a symbolic link alone, and the checkout serves the
+same paths live.
+
+A **submodule pin** is the `design-system` git submodule at an exact commit,
+the form the first consumers adopted; `consumer check` verifies it is pinned
+and checked out, and CI checks it out with a deploy key.
 
 ```json
 {
   "schemaVersion": 1,
-  "designSystem": { "path": "design-system", "systemId": "acme/core" },
+  "designSystem": { "path": "design-system", "systemId": "acme/core", "version": "1.4.0" },
   "apps": {
     "web": {
       "cwd": "web",
@@ -234,11 +259,14 @@ path), skipping query strings, non-page files, and `exclude` URL path globs
 such as `"/admin/**"`, until `limit` routes (default 40, at most 200) are found.
 Declared `routes` always come first and always stay.
 
-- `timds consumer check [--app NAME] [--base REF]` validates the manifest,
-  that the submodule is pinned and checked out (warning when the checkout
-  drifts from the pin), and that every app's `cwd` exists. With `--base`, it
+- `timds consumer check [--app NAME] [--base REF]` validates the manifest and
+  the pin: for a published pin, that the synced bundle is present and at the
+  pinned version; for a submodule, that it is pinned and checked out (warning
+  when the checkout drifts from the pin). It also checks that every app's
+  `cwd` exists. With `--base`, it
   fails when the branch or working tree changes anything outside a declared
-  design surface or inside a protected path, or moves the Design System pin,
+  design surface or inside a protected path, or moves the Design System pin
+  (the gitlink, or `designSystem` in the manifest),
   listing those paths. The surface is read from the manifest at the merge
   base, so a branch cannot widen its own scope; a branch whose base has no
   manifest is an adoption and may add the submodule. When automatic previews

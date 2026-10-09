@@ -230,6 +230,10 @@ jobs:
         run: |
           set -euo pipefail
           ds_path="$(node -p "require('./timds.consumer.json').designSystem?.path || 'design-system'")"
+          if ! git ls-tree HEAD -- "$ds_path" | grep -q '^160000 '; then
+            echo "The Design System is consumed as a published bundle; npm ci fetches the pinned version."
+            exit 0
+          fi
           if [[ -n "${SUBMODULE_TOKEN:-}" ]]; then
             git -c "url.https://x-access-token:${SUBMODULE_TOKEN}@github.com/.insteadOf=https://github.com/" \
               -c "url.https://x-access-token:${SUBMODULE_TOKEN}@github.com/.insteadOf=git@github.com:" \

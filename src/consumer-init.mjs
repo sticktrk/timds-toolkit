@@ -1,12 +1,16 @@
 // `timds consumer init`: adopt TimDS in a product repository.
 //
-// A consumer repo is a product that pins a TimDS Design System as its
-// `design-system` git submodule. Init writes the `timds.consumer.json`
-// skeleton (apps discovered one directory down, plus the repository root
-// when its package.json has a dev, start, preview, or build script, with
-// guessed install, serve, port, and design surface for a developer to
-// confirm), selects the toolkit in the root package.json, and installs the
-// consumer-managed files:
+// A consumer repo is a product that pins a TimDS Design System: as a
+// published version (`--system <id>`, the customer path: no repository
+// access needed, `npm install` fetches the bundle from the public prefix) or
+// as its `design-system` git submodule (the developer path, when the product
+// already carries one). Init writes the `timds.consumer.json` skeleton (apps
+// discovered one directory down, plus the repository root when its
+// package.json has a dev, start, preview, or build script, with guessed
+// install, serve, port, and design surface for a developer to confirm),
+// selects the toolkit in the root package.json (and, for a published pin,
+// `postinstall: timds consumer sync` so the bundle arrives with every
+// install), and installs the consumer-managed files:
 //
 //   .agents/skills/timds-consume-design-system/   the designer-facing skill,
 //                                                 product half rendered from
@@ -43,7 +47,8 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-import { CONSUMER_MANIFEST_FILE, validateConsumerManifest } from "./consumer.mjs";
+import { CONSUMER_MANIFEST_FILE, consumerPinMode, publishedBaseUrl, validateConsumerManifest } from "./consumer.mjs";
+import { resolvePublishedBundle, syncConsumerBundle } from "./consumer-sync.mjs";
 import { acceptsToolkitReleaseRange, runtimeIdentity, toolkitReleaseRange } from "./runtime.mjs";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -66,6 +71,7 @@ const SKIPPED_DIRECTORIES = new Set(["node_modules"]);
 
 const INIT_HELP = `Usage:
   timds consumer init [--root PATH] [--force] [--skip-install] [--portal-url URL]
+  timds consumer init --system ID [--version VERSION] [--url URL] [--root PATH] [--force] [--skip-install] [--portal-url URL]
 
 Writes timds.consumer.json (apps discovered from package.json files one
 directory down, and the root package.json when it has a dev, start, preview,
@@ -74,7 +80,17 @@ installs the consumer skill, the preview and designer-change workflows,
 .claude/launch.json entries, and the Design System read MCP server in
 .mcp.json (at --portal-url, default ${DEFAULT_PORTAL_URL}). An existing
 manifest is kept; --force regenerates it and replaces customized managed
-files.`;
+files.
+
+With --system, the product pins the published Design System ID at --version
+(default: the current published version; "current" follows every release)
+from --url (default: the public prefix for that system). No repository access
+is needed: package.json gets postinstall "timds consumer sync", which fetches
+the bundle into the gitignored design-system directory, and init runs it
+once unless --skip-install. Without --system, the product must already carry
+the Design System as the design-system git submodule.`;
+
+const DEFAULT_POSTINSTALL = "timds consumer sync";
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -281,17 +297,19 @@ async function designSystemId(repoRoot, designSystemPath) {
   return { systemId: `${slug(path.basename(repoRoot))}/core`, guessed: true };
 }
 
-async function buildConsumerManifest(repoRoot, designSystemPath) {
+async function buildConsumerManifest(repoRoot, designSystemPath, published = null) {
   const { apps, todos } = await discoverApps(repoRoot, designSystemPath);
   if (!Object.keys(apps).length) {
     throw new Error(`No apps found: timds consumer init looks for a package.json one directory below ${repoRoot} (skipping ${designSystemPath}, node_modules, and dot-folders) and for a root package.json with a dev, start, preview, or build script. Write ${CONSUMER_MANIFEST_FILE} by hand from the contract in the TimDS README, then rerun timds consumer init.`);
   }
-  const { systemId, guessed } = await designSystemId(repoRoot, designSystemPath);
+  const { systemId, guessed } = published ? { systemId: published.systemId, guessed: false } : await designSystemId(repoRoot, designSystemPath);
   const rendered = (await template("timds-consumer.json"))
     .replaceAll("__DESIGN_SYSTEM_PATH__", () => designSystemPath)
     .replaceAll("__SYSTEM_ID__", () => systemId)
     .replace("__APPS__", () => JSON.stringify(apps));
   const manifest = JSON.parse(rendered);
+  // A published pin is a manifest field: the version, and the prefix when it is not the default.
+  if (published) manifest.designSystem = { ...manifest.designSystem, version: published.version, ...(published.url ? { url: published.url } : {}) };
   validateConsumerManifest(manifest);
   const general = guessed
     ? [`designSystem.systemId is a guess (${systemId}); copy systemId from ${designSystemPath}/timds.json once the submodule is checked out`]
@@ -332,16 +350,37 @@ function appSection(name, app) {
   return lines.join("\n");
 }
 
+/** The skill paragraphs that differ by pin mode: how the system arrives and what must never be touched. */
+function pinSections(designSystem) {
+  const dsPath = designSystem.path;
+  if (consumerPinMode(designSystem) === "published") {
+    const pin = designSystem.version === "current" ? "the current published version" : `version ${designSystem.version}`;
+    return {
+      __PIN_SETUP__: `Run \`npm ci\` at repository root; its \`postinstall\` fetches the pinned\n   Design System bundle (${pin}) into \`${dsPath}/\`. If that directory is\n   empty, run \`npm run timds -- consumer sync\`.`,
+      __PIN_RULES__: `- \`${dsPath}/\` holds the published bundle of \`__SYSTEM_ID__\` at the version\n  \`timds.consumer.json\` pins, fetched by \`npm install\` and ignored by git.\n  Never edit, commit, or add files under it, and never change\n  \`designSystem.version\`. Moving the pin is a separate developer decision\n  (\`timds consumer update\`).\n- Never copy Design System stylesheets, fonts, or images into the product.\n  Reference what the app already loads from \`${dsPath}/\`.`,
+      __DERIVED_LAYER__: `- The published system is one URL away: the \`describe_system\` tool names\n  it, and \`${dsPath}/.timds-bundle.json\` records the version and files that\n  were fetched. Read \`llms.txt\` at the published prefix for the brand\n  essentials (colors, fonts and where to get them, logos, asset formats),\n  \`brand.json\` and \`tokens.json\` beside it for the details. These are\n  published output: read them, never edit them.`,
+    };
+  }
+  return {
+    __PIN_SETUP__: `Run \`git submodule update --init ${dsPath}\` so the checkout\n   matches the pin, then \`npm ci\` at repository root.`,
+    __PIN_RULES__: `- \`${dsPath}/\` is a git submodule at the exact commit this\n  product was reviewed against. Never \`git pull\`, switch, or commit inside it,\n  and never stage a new pin. Moving the pin is a separate developer decision.\n- Never copy Design System source, stylesheets, fonts, or images into the\n  product. Reference what the app already imports from the submodule.`,
+    __DERIVED_LAYER__: `- After \`npm --prefix ${dsPath} ci\` and\n  \`npm --prefix ${dsPath} run timds -- check\`, the derived layer\n  sits beside the built entry page under \`${dsPath}/dist/\`\n  (usually \`dist/design-system/\`): \`brand.json\` (brand roles, each font\n  role with its family and the files or service that provide it, logos,\n  imagery), \`tokens.json\` (resolved CSS custom properties by scope),\n  \`formats.json\` (the asset format catalog, when the system keeps one),\n  \`llms.txt\` (the brand essentials and the page directory), \`llms-full.txt\`,\n  and a Markdown mirror of every guidance page. These are build output: read\n  them, never edit or commit them.`,
+  };
+}
+
 /**
  * The managed SKILL.md for a consumer manifest. Generic guidance is static;
- * `__APPS__` becomes one section per app. `options.defaultBranch` names the
- * pull-request base (default `main`).
+ * the pin sections follow the manifest's mode (published bundle or git
+ * submodule), and `__APPS__` becomes one section per app.
+ * `options.defaultBranch` names the pull-request base (default `main`).
  */
 export async function renderConsumerSkill(manifest, options = {}) {
   const validated = validateConsumerManifest(manifest);
   const source = await fs.readFile(path.join(packageRoot, "skills", CONSUMER_SKILL_NAME, "SKILL.md"), "utf8");
   const apps = Object.entries(validated.apps).map(([name, app]) => appSection(name, app)).join("\n\n");
-  return source
+  let text = source;
+  for (const [placeholder, replacement] of Object.entries(pinSections(validated.designSystem))) text = text.replace(placeholder, () => replacement);
+  return text
     .replaceAll("__SYSTEM_ID__", () => validated.designSystem.systemId)
     .replaceAll("__DESIGN_SYSTEM_PATH__", () => validated.designSystem.path)
     .replaceAll("__DEFAULT_BRANCH__", () => options.defaultBranch || "main")
@@ -439,7 +478,7 @@ function refuseCustomizedFiles(conflicts, rerun) {
   throw new Error(`Refusing to replace customized TimDS consumer files:\n${conflicts.map((file) => `- ${file}`).join("\n")}\nReview them, or rerun ${rerun} with --force to replace them`);
 }
 
-async function planPackageJson(repoRoot, force) {
+async function planPackageJson(repoRoot, force, { published = false } = {}) {
   const packagePath = path.join(repoRoot, "package.json");
   const existing = await readJsonFile(packagePath, "package.json");
   const packageJson = existing ? structuredClone(existing) : { name: slug(path.basename(repoRoot)), private: true };
@@ -458,6 +497,13 @@ async function planPackageJson(repoRoot, force) {
   }
   const selected = current && acceptsToolkitReleaseRange(current, identity) ? current : releaseRange;
   packageJson.scripts = { ...(packageJson.scripts || {}), timds: "timds" };
+  if (published) {
+    // The bundle arrives with every install. An existing postinstall keeps
+    // running after the sync rather than being replaced.
+    const postinstall = String(packageJson.scripts.postinstall || "").trim();
+    if (!postinstall) packageJson.scripts.postinstall = DEFAULT_POSTINSTALL;
+    else if (!postinstall.includes(DEFAULT_POSTINSTALL)) packageJson.scripts.postinstall = `${DEFAULT_POSTINSTALL} && ${postinstall}`;
+  }
   packageJson.devDependencies = { ...(packageJson.devDependencies || {}), [identity.name]: selected };
   const content = toJson(packageJson);
   return { packagePath, content, changed: !existing || toJson(existing) !== content, created: !existing };
@@ -578,28 +624,54 @@ function consumerInstallationRecord(files, launchPlan, mcpPlan) {
 // Init
 
 /**
- * Initialize a consumer repository. Returns what was written; refuses (before
- * writing anything) without a design-system gitlink, on a conflicting toolkit
- * declaration, or on customized managed files unless `force`.
+ * The published pin init resolves from `--system`: the version named, or the
+ * current published version read from the prefix; `url` only when it is not
+ * the default for the system, so the manifest stays minimal.
  */
-export async function initializeConsumer(rootInput = process.cwd(), { force = false, skipInstall = false, portalUrl = DEFAULT_PORTAL_URL, output = () => {} } = {}) {
+async function resolvePublishedPin({ system, version, url, fetchImpl }) {
+  const systemId = String(system).trim();
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._/-]{1,159}$/.test(systemId)) throw new Error(`--system ${system} must be a Design System id such as client/core`);
+  const base = url ? String(url).replace(/\/+$/, "") : publishedBaseUrl({ systemId });
+  let pinned = version ? String(version).trim() : null;
+  if (!pinned) {
+    try {
+      pinned = (await resolvePublishedBundle({ url: base, version: "current", fetchImpl })).version;
+    } catch (error) {
+      throw new Error(`Could not read the current published version of ${systemId} at ${base}: ${error.message}\nPass --version to pin one explicitly.`);
+    }
+  }
+  return { systemId, version: pinned, url: url ? base : null };
+}
+
+/**
+ * Initialize a consumer repository. Returns what was written; refuses (before
+ * writing anything) without a design-system gitlink or a `--system` to pin,
+ * on a conflicting toolkit declaration, or on customized managed files
+ * unless `force`.
+ */
+export async function initializeConsumer(rootInput = process.cwd(), { force = false, skipInstall = false, portalUrl = DEFAULT_PORTAL_URL, system = null, version = null, url = null, fetchImpl = fetch, output = () => {} } = {}) {
   const repoRoot = await findGitRoot(rootInput);
   const manifestPath = path.join(repoRoot, CONSUMER_MANIFEST_FILE);
   const existingRaw = await readJsonFile(manifestPath, CONSUMER_MANIFEST_FILE);
   const keepManifest = Boolean(existingRaw) && !force;
-  if (keepManifest) validateConsumerManifest(existingRaw);
-  const designSystemPath = keepManifest
-    ? validateConsumerManifest(existingRaw).designSystem.path
-    : DEFAULT_DESIGN_SYSTEM_PATH;
+  const existing = keepManifest ? validateConsumerManifest(existingRaw) : null;
+  const designSystemPath = existing ? existing.designSystem.path : DEFAULT_DESIGN_SYSTEM_PATH;
 
-  if (!(await gitlinkCommit(repoRoot, designSystemPath))) {
-    throw new Error(`${repoRoot} has no ${designSystemPath} submodule. A TimDS consumer pins its Design System as a git submodule; add it first with:\n  git submodule add <design-system repository URL> ${designSystemPath}\nthen commit the pin and rerun timds consumer init.`);
+  // Published mode: asked for with --system, or already declared by the kept manifest.
+  const published = system
+    ? await resolvePublishedPin({ system, version, url, fetchImpl })
+    : existing && consumerPinMode(existing.designSystem) === "published" ? { systemId: existing.designSystem.systemId, version: existing.designSystem.version, url: existing.designSystem.url ?? null } : null;
+  if (!published && !(await gitlinkCommit(repoRoot, designSystemPath))) {
+    throw new Error(`${repoRoot} has no ${designSystemPath} submodule. A TimDS consumer pins its Design System either as a published version:\n  timds consumer init --system <system id>\nor as a git submodule:\n  git submodule add <design-system repository URL> ${designSystemPath}\nthen commit the pin and rerun timds consumer init.`);
+  }
+  if (published && (await gitlinkCommit(repoRoot, designSystemPath))) {
+    throw new Error(`${repoRoot} still carries ${designSystemPath} as a git submodule. Remove it before pinning a published version:\n  git rm -r --cached ${designSystemPath} && rm -rf ${designSystemPath} .git/modules/${designSystemPath}\nand drop its entry from .gitmodules.`);
   }
 
   let manifest = existingRaw;
   let todos = [];
   let general = [];
-  if (!keepManifest) ({ manifest, todos, general } = await buildConsumerManifest(repoRoot, designSystemPath));
+  if (!keepManifest) ({ manifest, todos, general } = await buildConsumerManifest(repoRoot, designSystemPath, published));
 
   const installationPath = path.join(repoRoot, CONSUMER_INSTALLATION_PATH);
   const installation = (await readJsonFile(installationPath, CONSUMER_INSTALLATION_PATH)) ?? {};
@@ -609,7 +681,7 @@ export async function initializeConsumer(rootInput = process.cwd(), { force = fa
   const { files, filePlan, launchPlan, mcpPlan } = await planConsumerManagedState(repoRoot, manifest, previous, { defaultBranch, force, portalUrl });
   refuseCustomizedFiles(filePlan.conflicts, "timds consumer init");
   const writes = filePlan.writes;
-  const packagePlan = await planPackageJson(repoRoot, force);
+  const packagePlan = await planPackageJson(repoRoot, force, { published: Boolean(published) });
 
   const written = [];
   if (!keepManifest) {
@@ -632,7 +704,8 @@ export async function initializeConsumer(rootInput = process.cwd(), { force = fa
     await writeFile(mcpPlan.mcpPath, mcpPlan.content);
     written.push(CONSUMER_MCP_PATH);
   }
-  if (await ensureGitignoreLines(repoRoot, ["node_modules/", ".timds/preview/"])) written.push(".gitignore");
+  // The fetched bundle never enters git; the ignore line goes in before the first sync.
+  if (await ensureGitignoreLines(repoRoot, ["node_modules/", ".timds/preview/", ...(published ? [`${designSystemPath}/`] : [])])) written.push(".gitignore");
 
   installation.consumer = consumerInstallationRecord(files, launchPlan, mcpPlan);
   await writeFile(installationPath, toJson(installation));
@@ -656,12 +729,24 @@ export async function initializeConsumer(rootInput = process.cwd(), { force = fa
       throw new Error(`npm install failed in ${repoRoot}:\n${(installed.stderr || installed.stdout).trim().split("\n").slice(-20).join("\n")}\nFix the error and run npm install; the TimDS files are already in place.`);
     }
   }
+  // The first sync happens here rather than through npm's postinstall, so a
+  // failure names the cause instead of surfacing as a failed install.
+  let synced = null;
+  if (published && !skipInstall) synced = await syncConsumerBundle(repoRoot, { fetchImpl, output });
 
   const checklist = [
     ...general,
     ...todos.flatMap(({ app, items }) => items.map((item) => `${app}: ${item}`)),
+    ...(published
+      ? [
+        `${designSystemPath}/ is the published bundle of ${published.systemId} at ${published.version === "current" ? "the current release" : `version ${published.version}`}, fetched by npm install (postinstall) and ignored by git; never commit it. Move the pin with npm run timds -- consumer update [VERSION]`,
+        ...(skipInstall ? [`Run npm install (or npm run timds -- consumer sync) to fetch the bundle into ${designSystemPath}/`] : []),
+      ]
+      : []),
     "Automatic previews are off by default; to enable them, set the TIMDS_PREVIEWS_ENABLED repository variable to true and add the TIMDS_ACCESS_TOKEN repository secret",
-    "For previews or designer changes: add DESIGN_SYSTEM_DEPLOY_KEY (read-only deploy key on the Design System repository) or TIMDS_CONSUMER_SUBMODULE_TOKEN (contents:read on it) so CI can check out the private submodule",
+    ...(published
+      ? []
+      : ["For previews or designer changes: add DESIGN_SYSTEM_DEPLOY_KEY (read-only deploy key on the Design System repository) or TIMDS_CONSUMER_SUBMODULE_TOKEN (contents:read on it) so CI can check out the private submodule"]),
     "For designer changes: add the OPENAI_API_KEY repository or organization secret so the designer-change workflow can run Codex through the OpenAI API",
     `For designer changes: create the ${CONSUMER_DESIGN_CHANGE_LABEL} label, set the TIMDS_DESIGNER_BOTS repository variable to the TimDS portal's GitHub App bot login (comma-separated if more than one), and allow GitHub Actions to create pull requests (Settings > Actions > General)`,
     `${CONSUMER_MCP_PATH} reads the Design System through the portal with TIMDS_ACCESS_TOKEN from the environment; export it locally to use the ${CONSUMER_MCP_SERVER_NAME} tools`,
@@ -683,6 +768,8 @@ export async function initializeConsumer(rootInput = process.cwd(), { force = fa
     keptLaunchConfigurations: launchPlan.kept,
     keptMcpServers: mcpPlan.kept,
     installation: installation.consumer,
+    published,
+    synced,
   };
 }
 
@@ -786,16 +873,17 @@ function parseInitArguments(argv) {
       options[name] = true;
       continue;
     }
-    if (name !== "root" && name !== "portalUrl") throw new Error(`Unknown option --${rawName}\n${INIT_HELP}`);
+    if (!["root", "portalUrl", "system", "version", "url"].includes(name)) throw new Error(`Unknown option --${rawName}\n${INIT_HELP}`);
     const next = inlineValue ?? argv[index + 1];
     if (next === undefined || String(next).startsWith("-")) throw new Error(`--${rawName} requires a value`);
     options[name] = next;
     if (inlineValue === undefined) index += 1;
   }
+  if ((options.version || options.url) && !options.system) throw new Error(`--version and --url apply with --system\n${INIT_HELP}`);
   return options;
 }
 
-/** `timds consumer init [--root PATH] [--force] [--skip-install] [--portal-url URL]` */
+/** `timds consumer init [--root PATH] [--system ID] [--version VERSION] [--url URL] [--force] [--skip-install] [--portal-url URL]` */
 export async function runConsumerInit(args = [], { output = (message = "") => process.stdout.write(`${message}\n`) } = {}) {
   const options = parseInitArguments(args);
   if (options.help) {
@@ -806,6 +894,9 @@ export async function runConsumerInit(args = [], { output = (message = "") => pr
     force: Boolean(options.force),
     skipInstall: Boolean(options.skipInstall),
     ...(options.portalUrl ? { portalUrl: options.portalUrl } : {}),
+    ...(options.system ? { system: options.system } : {}),
+    ...(options.version ? { version: options.version } : {}),
+    ...(options.url ? { url: options.url } : {}),
     output,
   });
 }

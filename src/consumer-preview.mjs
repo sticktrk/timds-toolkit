@@ -763,6 +763,9 @@ async function captureHeadRoutes(browser, origin, preview, cells, outputDir, { b
  */
 async function prepareDesignReference(consumer, { commandEnv, install, output }) {
   const { designSystem } = consumer;
+  if (designSystem.mode === "published") {
+    return { status: "unavailable", reason: `${designSystem.path} is a published bundle, not a Design System checkout; designs are shown beside routes only from a checkout.` };
+  }
   if (!designSystem.present) {
     return { status: "unavailable", reason: `${designSystem.path}/timds.json is not checked out; run git submodule update --init ${designSystem.path}.` };
   }
@@ -933,25 +936,34 @@ async function captureBaseSide({ app, captureTimeoutMs, cells, commandEnv, compa
     if (worktree.code !== 0) return { reason: `git could not check out ${where}: ${firstLine(worktree.stderr)}` };
     added = true;
     const designSystemPath = manifest.designSystem.path;
-    // A designer change rarely moves the pin, so the commit the base needs is
-    // usually already in the checked-out submodule. Linking a worktree of it
-    // needs no network and no credentials, which matters in CI where the
-    // submodule's credentials are scoped to the one checkout command.
-    const pinned = await gitRun(["ls-tree", mergeBase, "--", designSystemPath], repoRoot);
-    const basePin = /^160000 commit ([0-9a-f]{40,64})\t/m.exec(pinned.stdout)?.[1];
-    const headDesignSystem = consumer.designSystem?.root;
-    if (basePin && headDesignSystem && existsSync(path.join(headDesignSystem, ".git"))) {
-      const available = await gitRun(["cat-file", "-e", `${basePin}^{commit}`], headDesignSystem);
-      if (available.code === 0) {
-        const target = path.join(checkout, designSystemPath);
-        await fs.rm(target, { force: true, recursive: true });
-        const linked = await gitRun(["worktree", "add", "--detach", target, basePin], headDesignSystem);
-        if (linked.code === 0) linkedDesignSystem = { repository: headDesignSystem, target };
+    if (consumer.designSystem?.mode === "published") {
+      // The base needs the bundle too. A designer change rarely moves the pin,
+      // so the synced copy is almost always the base's version as well, and
+      // copying it needs no network; the base install's postinstall resyncs
+      // when the pin differs.
+      const synced = consumer.designSystem.root;
+      if (existsSync(synced)) await fs.cp(synced, path.join(checkout, designSystemPath), { recursive: true }).catch((error) => output(`Warning: could not copy ${designSystemPath} into the base checkout (${firstLine(error.message)}); building the base without it`));
+    } else {
+      // A designer change rarely moves the pin, so the commit the base needs is
+      // usually already in the checked-out submodule. Linking a worktree of it
+      // needs no network and no credentials, which matters in CI where the
+      // submodule's credentials are scoped to the one checkout command.
+      const pinned = await gitRun(["ls-tree", mergeBase, "--", designSystemPath], repoRoot);
+      const basePin = /^160000 commit ([0-9a-f]{40,64})\t/m.exec(pinned.stdout)?.[1];
+      const headDesignSystem = consumer.designSystem?.root;
+      if (basePin && headDesignSystem && existsSync(path.join(headDesignSystem, ".git"))) {
+        const available = await gitRun(["cat-file", "-e", `${basePin}^{commit}`], headDesignSystem);
+        if (available.code === 0) {
+          const target = path.join(checkout, designSystemPath);
+          await fs.rm(target, { force: true, recursive: true });
+          const linked = await gitRun(["worktree", "add", "--detach", target, basePin], headDesignSystem);
+          if (linked.code === 0) linkedDesignSystem = { repository: headDesignSystem, target };
+        }
       }
-    }
-    if (!linkedDesignSystem) {
-      const submodule = await gitRun(["submodule", "update", "--init", "--", designSystemPath], checkout);
-      if (submodule.code !== 0) output(`Warning: could not check out ${designSystemPath} at ${where} (${firstLine(submodule.stderr)}); building the base without it`);
+      if (!linkedDesignSystem) {
+        const submodule = await gitRun(["submodule", "update", "--init", "--", designSystemPath], checkout);
+        if (submodule.code !== 0) output(`Warning: could not check out ${designSystemPath} at ${where} (${firstLine(submodule.stderr)}); building the base without it`);
+      }
     }
     const baseCwd = path.resolve(checkout, baseApp.cwd);
     if (!existsSync(baseCwd)) return { reason: `App "${app.name}" folder ${baseApp.cwd} does not exist at ${where}.` };
@@ -1218,7 +1230,7 @@ export function renderPreviewGallery(preview) {
     ["Branch", preview.branch || "detached"],
     ["Pull request", preview.pullRequest ? `#${preview.pullRequest}` : "none"],
     ["Commit", shortCommit(preview.commit)],
-    ["Design System", `${preview.designSystem?.systemId || "unknown"} @ ${shortCommit(preview.designSystem?.commit)}`],
+    ["Design System", `${preview.designSystem?.systemId || "unknown"} @ ${preview.designSystem?.version || shortCommit(preview.designSystem?.commit)}`],
     ["Mode", preview.mode],
     ...(preview.compare ? [["Compared with", `${preview.compare.base} @ ${shortCommit(preview.compare.baseCommit)}`]] : []),
     ...(preview.designs ? [["Designs", preview.designs.status === "ready" ? `${preview.designs.pairedRoutes} route${preview.designs.pairedRoutes === 1 ? "" : "s"} shown beside the design` : `not shown: ${preview.designs.reason || "unknown reason"}`]] : []),
@@ -1472,7 +1484,7 @@ export async function buildConsumerPreview(consumer, app, options = {}) {
       branch: provenance.branch,
       commit: provenance.commit,
       pullRequest: resolvePullRequest(options.pullRequest, env),
-      designSystem: { systemId: consumer.designSystem.systemId, commit: consumer.designSystem.commit ?? null },
+      designSystem: { systemId: consumer.designSystem.systemId, commit: consumer.designSystem.commit ?? null, ...(consumer.designSystem.mode === "published" ? { version: consumer.designSystem.record?.version ?? consumer.designSystem.version } : {}) },
       mode,
       ...(site ? { site } : {}),
       compare,
