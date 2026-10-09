@@ -65,12 +65,6 @@ async function fetchJson(fetchImpl, url, what) {
   }
 }
 
-/** The routes each published website design has, for checking preview pairings offline. */
-function designsSummary(designs) {
-  if (!designs?.designs) return null;
-  return designs.designs.map((design) => ({ id: design.id, routes: (design.pages ?? []).map((page) => page.route) }));
-}
-
 /**
  * The bundle a pin resolves to. A named version reads the immutable copy
  * directly; `current` reads the provenance stamp at the base, which names the
@@ -83,7 +77,7 @@ export async function resolvePublishedBundle({ url, version, fetchImpl = fetch, 
   let document;
   let resolvedVersion = version;
   let layer = null;
-  if (version === "current" || withDesigns) {
+  if (version === "current") {
     layer = await fetchDerivedLayer(base, { fetchImpl });
   }
   if (version === "current") {
@@ -108,7 +102,7 @@ export async function resolvePublishedBundle({ url, version, fetchImpl = fetch, 
     directory: document.directory ?? null,
     versioned: document.versioned ?? null,
     files,
-    designs: withDesigns ? designsSummary(layer?.designs) : null,
+    designs: withDesigns && Array.isArray(document.designs) ? document.designs : null,
   };
 }
 
@@ -222,9 +216,11 @@ export async function syncConsumerBundle(rootInput = process.cwd(), { fetchImpl 
     versioned: resolved.versioned,
     syncedAt: new Date().toISOString(),
     files: resolved.files.map((file) => ({ path: file.path, bytes: file.bytes, sha256: file.sha256 })),
-    designs: resolved.designs ?? previous?.designs ?? null,
+    designs: resolved.designs,
   };
-  const same = previous && previous.version === record.version && downloaded === 0 && removed === 0
+  const same = previous && previous.systemId === record.systemId && previous.pin === record.pin
+    && previous.version === record.version && previous.url === record.url && previous.directory === record.directory
+    && downloaded === 0 && removed === 0
     && JSON.stringify(previous.files) === JSON.stringify(record.files) && JSON.stringify(previous.designs ?? null) === JSON.stringify(record.designs ?? null);
   await fs.mkdir(location, { recursive: true });
   if (!same) await fs.writeFile(path.join(location, CONSUMER_BUNDLE_RECORD_FILE), `${JSON.stringify(record, null, 2)}\n`);

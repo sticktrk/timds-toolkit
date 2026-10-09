@@ -291,6 +291,8 @@ test("publishExtractedIndex uploads assets and mirrors first, then index, llms.t
     assert.equal(versionedBundle.directory, versionedBundle.versioned);
     assert.equal(versionedBundle.files[1].url, "https://cdn.example.com/clients/c/design-systems/s/artifact/v/1.2.3/bundle/public/ds.js");
     assert.deepEqual(versionedBundle.files.map((file) => file.path), currentBundle.files.map((file) => file.path));
+    assert.deepEqual(versionedBundle.designs, [{ id: "site", routes: ["/"] }], "a named pin carries its own pairing catalog");
+    assert.deepEqual(currentBundle.designs, versionedBundle.designs);
     // Font files resolve on the CDN with their integrity, like logos.
     const kitFont = JSON.parse(puts.get("design-system/brand.json")).roles["font.body"].files[0];
     assert.equal(kitFont.url, "https://cdn.example.com/clients/c/design-systems/s/artifact/design-system/fonts/newsreader.woff2");

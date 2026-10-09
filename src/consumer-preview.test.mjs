@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, promises as fs } from "node:fs";
 import net from "node:net";
 import os from "node:os";
@@ -28,6 +29,7 @@ import {
   startAppServer,
 } from "./consumer-preview.mjs";
 import { loadConsumer, resolveConsumerApp } from "./consumer.mjs";
+import { syncConsumerBundle } from "./consumer-sync.mjs";
 import { initializeRepository } from "./core.mjs";
 
 const DESIGN_SYSTEM_COMMIT = "df31440aa1b2c3d4e5f60718293a4b5c6d7e8f90";
@@ -791,6 +793,77 @@ test("--base compares the merge base built in a temporary worktree with HEAD", a
   assert.ok(!existsSync(path.join(outputDir, "base", "captures", "root")));
   assert.ok(limited.routes.find((route) => route.path === "/about").captures.every((capture) => capture.base && capture.diff));
   assert.match(await fs.readFile(path.join(outputDir, "index.html"), "utf8"), /some images were left out/);
+});
+
+test("--base uses the base published pin for a nested app and reuses identical pins offline", async (t) => {
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "timds-published-compare-")));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await fs.mkdir(path.join(root, "web"));
+  git(root, "init", "-q", "-b", "main");
+  git(root, "config", "user.name", "Test");
+  git(root, "config", "user.email", "test@example.com");
+  git(root, "config", "commit.gpgsign", "false");
+  const url = "https://cdn.test/acme/core/artifact";
+  const manifest = {
+    schemaVersion: 1,
+    designSystem: { path: "design-system", systemId: "acme/core", version: "1.0.0", url },
+    apps: { web: {
+      cwd: "web", install: ["node", "-e", "require('fs').writeFileSync('installed.txt', 'yes')"],
+      preview: { build: ["node", "build.mjs"], output: "dist", routes: ["/"], viewports: ["phone"], schemes: ["light"] },
+      designSurface: ["src/**"],
+    } },
+  };
+  await fs.writeFile(path.join(root, "timds.consumer.json"), JSON.stringify(manifest));
+  await fs.writeFile(path.join(root, ".gitignore"), "design-system/\nweb/dist/\nweb/installed.txt\n.timds/preview/\n");
+  await fs.writeFile(path.join(root, "web/build.mjs"), "import fs from 'node:fs'; fs.mkdirSync('dist', {recursive:true}); fs.writeFileSync('dist/index.html', '<h1>' + fs.readFileSync('../design-system/theme.txt', 'utf8') + '</h1>');");
+  git(root, "add", ".");
+  git(root, "commit", "-q", "-m", "base pin");
+  git(root, "checkout", "-q", "-b", "update-pin");
+  manifest.designSystem.version = "2.0.0";
+  await fs.writeFile(path.join(root, "timds.consumer.json"), JSON.stringify(manifest));
+  git(root, "add", "timds.consumer.json");
+  git(root, "commit", "-q", "-m", "move pin");
+  const requests = [];
+  const fetchImpl = async (address) => {
+    requests.push(address);
+    const version = String(address).includes("/v/1.0.0/") ? "1.0.0" : "2.0.0";
+    const body = version === "1.0.0" ? "OLD" : "NEW";
+    const directory = `${url}/v/${version}/bundle`;
+    if (address === `${directory}/theme.txt`) return new Response(body);
+    if (address === `${url}/v/${version}/bundle.json`) return Response.json({
+      system: { id: "acme/core", version }, directory, files: [{ path: "theme.txt", url: `${directory}/theme.txt`, bytes: body.length, sha256: createHash("sha256").update(body).digest("hex") }],
+    });
+    throw new Error(`Unexpected fetch ${address}`);
+  };
+  await syncConsumerBundle(root, { fetchImpl });
+  requests.length = 0;
+  const consumer = await loadConsumer(root);
+  const app = resolveConsumerApp(consumer, "web");
+  const capturedHtml = [];
+  const browser = async () => {
+    const renderer = await renderingBrowser()();
+    return { ...renderer, async capture(options) {
+      const shot = await renderer.capture(options);
+      capturedHtml.push(shot.html);
+      return shot;
+    } };
+  };
+  const preview = await buildConsumerPreview(consumer, app, { base: "main", env: cleanEnv(), fetchImpl, launchBrowser: browser });
+  assert.equal(preview.compare.status, "ready", preview.compare.reason);
+  assert.equal(preview.changedRouteCount, 1, "a changed bundle must appear in the before/after comparison");
+  const output = path.join(root, ".timds/preview/web");
+  assert.match(capturedHtml[0], /<h1>OLD<\/h1>/);
+  assert.ok(existsSync(path.join(output, "base/captures/root/phone-light.png")));
+  assert.match(await fs.readFile(path.join(output, "pages/root/light.html"), "utf8"), /<h1>NEW<\/h1>/);
+  assert.deepEqual(requests, [`${url}/v/1.0.0/bundle.json`, `${url}/v/1.0.0/bundle/theme.txt`]);
+
+  const offline = await buildConsumerPreview(consumer, app, { base: "HEAD", env: cleanEnv(), fetchImpl: async () => { throw new Error("offline"); }, launchBrowser: renderingBrowser() });
+  assert.equal(offline.compare.status, "ready", offline.compare.reason);
+  assert.equal(offline.changedRouteCount, 0);
+
+  const unavailable = await buildConsumerPreview(consumer, app, { base: "main", env: cleanEnv(), fetchImpl: async () => { throw new Error("offline"); }, launchBrowser: renderingBrowser() });
+  assert.equal(unavailable.compare.status, "unavailable", "an unresolved base pin must not be shown using HEAD's bundle");
+  assert.match(unavailable.compare.reason, /Design System could not be prepared.*offline/);
 });
 
 test("--base records an unavailable comparison and still previews the head when the base cannot be shown", async () => {

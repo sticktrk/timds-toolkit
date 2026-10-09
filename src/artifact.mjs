@@ -353,7 +353,12 @@ export async function publishExtractedIndex(workspace, options = {}) {
   // versioned one; a system whose manifest declares no bundle has no file.
   const bundleRelative = entryDirectory === "." ? "bundle.json" : `${entryDirectory}/bundle.json`;
   const bundleSource = await fs.readFile(path.join(artifactRoot, ...bundleRelative.split("/")), "utf8").catch(() => null);
-  const bundle = bundleSource === null ? null : JSON.parse(bundleSource);
+  // Keep the pairing catalog with the bundle version, so a fixed pin never
+  // needs the current derived layer (or its provenance stamp) to check routes.
+  const bundle = bundleSource === null ? null : {
+    ...JSON.parse(bundleSource),
+    designs: (designs?.designs ?? []).map((design) => ({ id: design.id, routes: (design.pages ?? []).map((page) => page.route) })),
+  };
   const version = workspace.manifest.version;
   if (bundle) await collectBundleFiles(bundle, artifactRoot, { entryDirectory, version }, files);
   const docs = await collectMachineDocFiles(artifactRoot, entryDirectory);

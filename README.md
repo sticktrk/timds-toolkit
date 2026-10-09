@@ -207,7 +207,12 @@ release at the next install instead. `url` overrides the public prefix
 (default `https://design-systems.timds.com/<systemId>/artifact`). A developer
 working on both repositories symlinks `design-system/` to a Design System
 checkout; `sync` leaves a symbolic link alone, and the checkout serves the
-same paths live.
+same paths live. `consumer check` validates that checkout and its design
+pairings, with a warning that the local working copy replaces the published
+pin. A named bundle carries its release's design-route summary, so pairing
+checks need no current-release metadata or provenance stamp. Older bundles
+without that summary remain installable and report that pairings could not
+be checked; republish the selected release with the current toolkit to add it.
 
 A **submodule pin** is the `design-system` git submodule at an exact commit,
 the form the first consumers adopted; `consumer check` verifies it is pinned

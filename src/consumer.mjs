@@ -393,7 +393,8 @@ export async function loadConsumer(repoRootInput = process.cwd()) {
   const manifest = validateConsumerManifest(parsed);
   const designSystemRoot = path.resolve(repoRoot, manifest.designSystem.path);
   const mode = consumerPinMode(manifest.designSystem);
-  const record = mode === "published" ? await readBundleRecord(designSystemRoot) : null;
+  const linked = mode === "published" && await fs.lstat(designSystemRoot).then((info) => info.isSymbolicLink(), () => false);
+  const record = mode === "published" && !linked ? await readBundleRecord(designSystemRoot) : null;
   const designSystem = {
     path: manifest.designSystem.path,
     systemId: manifest.designSystem.systemId,
@@ -403,7 +404,8 @@ export async function loadConsumer(repoRootInput = process.cwd()) {
     root: designSystemRoot,
     commit: await gitlinkCommit(repoRoot, manifest.designSystem.path),
     record,
-    present: mode === "published" ? record !== null : existsSync(path.join(designSystemRoot, "timds.json")),
+    linked,
+    present: mode === "published" && !linked ? record !== null : existsSync(path.join(designSystemRoot, "timds.json")),
   };
   return { repoRoot, manifestPath, manifest, apps: manifest.apps, designSystem };
 }
@@ -558,7 +560,10 @@ export async function checkConsumer(repoRootInput = process.cwd(), options = {})
     if (designSystem.commit) {
       errors.push(`${designSystem.path} is still a git submodule but ${CONSUMER_MANIFEST_FILE} pins a published version. Remove the submodule (git rm -r --cached ${designSystem.path}, drop it from .gitmodules) so npm install can fetch the bundle.`);
     }
-    if (!designSystem.record) {
+    if (designSystem.linked) {
+      if (!designSystem.present) errors.push(`${designSystem.path} is a symbolic link but its target has no timds.json; point it at a Design System checkout.`);
+      else warnings.push(`${designSystem.path} is a local Design System checkout; checking the working copy instead of published pin ${designSystem.version}.`);
+    } else if (!designSystem.record) {
       errors.push(`${designSystem.path} has no synced Design System bundle. Run: npm run timds -- consumer sync (npm install runs it from postinstall)`);
     } else {
       const record = designSystem.record;
@@ -581,10 +586,12 @@ export async function checkConsumer(repoRootInput = process.cwd(), options = {})
   }
   if (designSystem.mode === "submodule" && !designSystem.present) {
     errors.push(`${designSystem.path}/timds.json is missing. Check out the submodule with: git submodule update --init ${designSystem.path}`);
-  } else if (designSystem.mode === "submodule" && designSystem.commit) {
-    const checkedOut = await checkoutCommit(designSystem.root);
-    if (checkedOut && checkedOut !== designSystem.commit) {
-      warnings.push(`${designSystem.path} is checked out at ${checkedOut.slice(0, 12)} but the repository pins ${designSystem.commit.slice(0, 12)}. Run git submodule update ${designSystem.path}, or commit the new pin deliberately.`);
+  } else if ((designSystem.mode === "submodule" && designSystem.commit) || (designSystem.linked && designSystem.present)) {
+    if (designSystem.mode === "submodule") {
+      const checkedOut = await checkoutCommit(designSystem.root);
+      if (checkedOut && checkedOut !== designSystem.commit) {
+        warnings.push(`${designSystem.path} is checked out at ${checkedOut.slice(0, 12)} but the repository pins ${designSystem.commit.slice(0, 12)}. Run git submodule update ${designSystem.path}, or commit the new pin deliberately.`);
+      }
     }
     try {
       const dsManifest = JSON.parse(await fs.readFile(path.join(designSystem.root, "timds.json"), "utf8"));
@@ -602,12 +609,12 @@ export async function checkConsumer(repoRootInput = process.cwd(), options = {})
   // A published pin's catalog is the designs summary the sync recorded.
   let designCatalog = null;
   if (designSystem.present && selected.some((name) => manifest.apps[name].preview.designs)) {
-    if (designSystem.mode === "published") {
+    if (designSystem.mode === "published" && !designSystem.linked) {
       const recorded = designSystem.record?.designs;
       if (Array.isArray(recorded)) {
         designCatalog = { exists: true, designs: recorded.map((design) => ({ id: design.id, pages: (design.routes ?? []).map((route) => ({ route })) })) };
       } else {
-        warnings.push(`${designSystem.path} has no recorded website designs; rerun npm run timds -- consumer sync to check the preview.designs pairings`);
+        warnings.push(`${designSystem.path} has no recorded website designs; republish the pinned release with the current toolkit and run npm run timds -- consumer sync to check the preview.designs pairings`);
       }
     } else {
       const { readDesignCatalog } = await import("./designs.mjs");

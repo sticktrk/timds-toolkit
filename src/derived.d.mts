@@ -256,6 +256,8 @@ export type BundleDocument = {
   fileCount: number;
   bytes: number;
   files: BundleFile[];
+  /** Routes of this release's website designs; absent in older bundles. */
+  designs?: Array<{ id: string; routes: string[] }>;
 };
 
 /* ── the layer ───────────────────────────────────────────────────────────── */

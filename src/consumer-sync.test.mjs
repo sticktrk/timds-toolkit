@@ -44,6 +44,7 @@ function publishedSystem() {
     fileCount: files.length,
     bytes: files.reduce((sum, [, body]) => sum + body.length, 0),
     files: files.map(([relative, body]) => ({ path: relative, url: `${directory}/${relative}`, bytes: body.length, sha256: sha256(body) })),
+    designs: [{ id: "website", routes: version === "1.2.0" ? ["/", "/about"] : ["/", "/contact"] }],
   });
   const served = new Map([
     [`v/1.2.0/bundle.json`, JSON.stringify(bundle("1.2.0", pinnedFiles, `${BASE}/v/1.2.0/bundle`))],
@@ -147,16 +148,64 @@ test("sync leaves a symbolic link alone and refuses a directory that is still a 
   const { fetchImpl } = publishedSystem();
   const checkout = await temporaryDirectory(t);
   await write(checkout, "src/styles/ds/brand.css", ".live{}");
+  await write(checkout, "timds.json", { systemId: "acme/core", version: "1.4.0" });
   await fs.symlink(checkout, path.join(product, "design-system"));
   const lines = [];
   const linked = await syncConsumerBundle(product, { fetchImpl, output: (line) => lines.push(line) });
   assert.deepEqual([linked.status, linked.target], ["linked", checkout]);
   assert.match(lines[0], /design-system is a symbolic link to .*; leaving it alone/);
   assert.equal(await fs.readFile(path.join(product, "design-system/src/styles/ds/brand.css"), "utf8"), ".live{}");
+  const checked = await checkConsumer(product);
+  assert.equal(checked.status, "passed", checked.errors.join("\n"));
+  assert.match(checked.warnings.join("\n"), /local Design System checkout/);
+  await fs.rm(path.join(checkout, "timds.json"));
+  assert.match((await checkConsumer(product)).errors.join("\n"), /target has no timds.json/);
 
   await fs.unlink(path.join(product, "design-system"));
   await fs.mkdir(path.join(product, "design-system/.git"), { recursive: true });
   await assert.rejects(syncConsumerBundle(product, { fetchImpl, output: () => {} }), /design-system is still a git submodule[\s\S]*git rm -r --cached design-system/);
+});
+
+test("a fixed pin checks its own design routes without reading current metadata or the provenance dotfile", async (t) => {
+  const product = await productRepo(t, undefined, {
+    web: { cwd: "web", preview: { build: ["npm", "run", "build"], output: "dist", routes: ["/"], designs: { "/": "website:/about" } }, designSurface: ["src/**"] },
+  });
+  const { fetchImpl, requests, served } = publishedSystem();
+  served.delete(".timds-artifact.json");
+  await syncConsumerBundle(product, { fetchImpl });
+  assert.ok(requests.every((url) => url.startsWith(`${BASE}/v/1.2.0/`)), requests.join("\n"));
+  assert.equal((await checkConsumer(product)).status, "passed");
+  const record = await readBundleRecord(path.join(product, "design-system"));
+  assert.deepEqual(record.designs, [{ id: "website", routes: ["/", "/about"] }]);
+
+  const manifest = JSON.parse(await fs.readFile(path.join(product, CONSUMER_MANIFEST_FILE), "utf8"));
+  manifest.apps.web.preview.designs["/"] = "website:/contact";
+  await write(product, CONSUMER_MANIFEST_FILE, manifest);
+  assert.match((await checkConsumer(product)).errors.join("\n"), /has no route \/contact/);
+
+  // An older bundle without a summary remains installable; the current
+  // release's routes must never fill the gap, nor may a previous sync do so.
+  const oldBundle = JSON.parse(served.get("v/1.2.0/bundle.json"));
+  delete oldBundle.designs;
+  served.set("v/1.2.0/bundle.json", JSON.stringify(oldBundle));
+  await syncConsumerBundle(product, { fetchImpl });
+  assert.equal((await readBundleRecord(path.join(product, "design-system"))).designs, null);
+  assert.match((await checkConsumer(product)).warnings.join("\n"), /no recorded website designs/);
+});
+
+test("a published pin symlink checks design pairings from its checkout", async (t) => {
+  const product = await productRepo(t, undefined, {
+    web: { cwd: "web", preview: { build: ["npm", "run", "build"], output: "dist", routes: ["/"], designs: { "/": "website:/live" } }, designSurface: ["src/**"] },
+  });
+  const checkout = await temporaryDirectory(t);
+  await write(checkout, "timds.json", { systemId: "acme/core" });
+  await write(checkout, "src/designs/website/design.json", { title: "Website" });
+  await write(checkout, "src/designs/website/pages/live.html", "<h1>Live</h1>");
+  await fs.symlink(checkout, path.join(product, "design-system"));
+  assert.equal((await checkConsumer(product)).status, "passed");
+  await fs.rm(path.join(checkout, "src/designs/website/pages/live.html"));
+  await write(checkout, "src/designs/website/pages/index.html", "<h1>Home</h1>");
+  assert.match((await checkConsumer(product)).errors.join("\n"), /has no route \/live/);
 });
 
 test("sync refuses a bundle whose bytes do not match its digest, a foreign system, or a submodule pin", async (t) => {
