@@ -37,7 +37,8 @@ When off, it reports a waiting candidate and a portal link for operator
 publication. Repeating an already live identical release is a no-op.
 `extract --publish` uploads CDN files separately. Managed release workflows
 extract, push the exact artifact, then request promotion before updating a
-linked consumer. Missing operator credentials fail publication.
+linked consumer. A missing operator token fails the run before the version
+advances.
 
 ## Starter viewer
 

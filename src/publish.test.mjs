@@ -26,8 +26,15 @@ async function fixture(t, embedded = false) {
   for (const file of input.sourceFiles) await write(file.path, file.content || "x".repeat(file.bytes));
   git("add", "--all"); git("commit", "-q", "-m", "Contract"); git("remote", "add", "origin", "git@github.com:example/design-system.git");
   for (const file of input.artifactFiles) await write(`dist/${file.path}`, file.content);
-  return { root, sourceRoot, git, write, workspace: await loadWorkspace(root) };
+  const head = () => git("rev-parse", "HEAD").trim();
+  return { root, sourceRoot, git, head, write, workspace: await loadWorkspace(root) };
 }
+
+// Runs the staging git commands for real and intercepts the push.
+const staging = (onPush) => (command, args, cwd) => {
+  if (args[0] === "push") return onPush(cwd, args);
+  return execFileSync(command, args, { cwd, stdio: "pipe" });
+};
 
 const resultFor = (stamp, overrides = {}) => ({ status: "published", unchanged: false, automaticUpdates: true, systemId: stamp.systemId, version: stamp.version, publicRoot: "https://example-ds.timds.com/", versionedUrls: { root: "https://example-ds.timds.com/v/1.2.3/", llmsTxt: "https://example-ds.timds.com/v/1.2.3/llms.txt", bundleJson: "https://example-ds.timds.com/v/1.2.3/bundle.json", artifact: "https://example-ds.timds.com/v/1.2.3/.timds-artifact.json" }, ...overrides });
 const json = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });
@@ -56,19 +63,47 @@ for (const embedded of [false, true]) test(`stamps local ${embedded ? "embedded"
 });
 
 test("artifact push stamps the ref and saves the local stamp only after push succeeds", async (t) => {
-  const f = await fixture(t); let stagedStamp;
-  await assert.rejects(publishArtifactRef(f.workspace, { repository: "example/design-system", run(command, args, cwd) {
-    if (args[0] === "push") throw new Error("push denied");
-  } }), /push denied/);
+  const f = await fixture(t); let stagedStamp; let staged;
+  const options = { repository: "example/design-system", remoteHead: f.head };
+  await assert.rejects(publishArtifactRef(f.workspace, { ...options, run: staging(() => { throw new Error("push denied"); }) }), /push denied/);
   await assert.rejects(fs.access(path.join(f.sourceRoot, PUBLICATION_STAMP)), /ENOENT/);
+  // Ignored build output is part of the stamped artifact and must be pushed.
+  await f.write("dist/.gitignore", "*.map\n");
+  await f.write("dist/viewer/app.js.map", "{}");
   const calls = [];
-  const stamp = await publishArtifactRef(f.workspace, { repository: "example/design-system", run(command, args, cwd) {
+  const stamp = await publishArtifactRef(f.workspace, { ...options, run(command, args, cwd) {
     calls.push(args);
-    if (args[0] === "push") stagedStamp = JSON.parse(execFileSync(process.execPath, ["-e", "process.stdout.write(require('fs').readFileSync('.timds-artifact.json'))"], { cwd, encoding: "utf8" }));
+    return staging((stage) => {
+      stagedStamp = JSON.parse(execFileSync(process.execPath, ["-e", "process.stdout.write(require('fs').readFileSync('.timds-artifact.json'))"], { cwd: stage, encoding: "utf8" }));
+      staged = execFileSync("git", ["ls-files"], { cwd: stage, encoding: "utf8" }).trim().split("\n").sort();
+    })(command, args, cwd);
   } });
   assert.deepEqual(stagedStamp, stamp);
   assert.deepEqual(JSON.parse(await fs.readFile(path.join(f.sourceRoot, PUBLICATION_STAMP), "utf8")), stamp);
-  assert.deepEqual(calls.at(-1), ["push", "--force", "origin", "HEAD:refs/heads/timds-published"]);
+  assert.deepEqual(staged, [".gitignore", ".timds-artifact.json", "bundle.json", "viewer/app.js.map", "viewer/index.html", "viewer/styles.css"]);
+  assert.deepEqual(calls.at(-1), ["push", "-q", "--force", "origin", "HEAD:refs/heads/timds-published"]);
+  assert.ok(calls.every((args) => !["init", "commit", "push"].includes(args[0]) || args.includes("-q")), "stdout stays parseable for --json");
+});
+
+test("artifact push refuses a checkout that is not the remote default-branch head", async (t) => {
+  const f = await fixture(t); const calls = [];
+  for (const head of ["0".repeat(40), null]) {
+    await assert.rejects(publishArtifactRef(f.workspace, { repository: "example/design-system", remoteHead: () => head, run: (command, args) => calls.push(args) }), /not the default-branch head of https:\/\/github\.com\/example\/design-system\.git/);
+  }
+  assert.deepEqual(calls, []);
+  await assert.rejects(fs.access(path.join(f.sourceRoot, PUBLICATION_STAMP)), /ENOENT/);
+});
+
+test("stamps committed blob bytes and sizes, not checkout-filtered files", async (t) => {
+  const f = await fixture(t);
+  const expected = publicationDigest(publicationFixture());
+  await f.write(".gitattributes", "docs/** text eol=crlf\n");
+  f.git("add", "--all"); f.git("commit", "-q", "-m", "Attributes");
+  await fs.rm(path.join(f.sourceRoot, "docs"), { recursive: true });
+  f.git("checkout", "--", "docs");
+  assert.match(await fs.readFile(path.join(f.sourceRoot, "docs/getting-started.md"), "utf8"), /\r\n/, "the checkout is CRLF");
+  assert.equal(f.git("status", "--porcelain"), "");
+  assert.equal((await createPublicationStamp(f.workspace)).contentDigest, expected);
 });
 
 test("ON and unchanged success verify the public stamp without sending the operator token", async (t) => {
@@ -111,6 +146,11 @@ test("publication rejection and stale public bytes fail the command", async (t) 
   const f = await fixture(t); const stamp = await writePublicationStamp(f.workspace);
   await assert.rejects(publishRelease(f.workspace, { token: "timds_test", fetchImpl: async () => json({ error: "candidate does not match" }, 409) }), /409: candidate does not match/);
   for (const status of [401, 403, 500]) await assert.rejects(publishRelease(f.workspace, { token: "timds_test", fetchImpl: async () => json({ error: "rejected" }, status) }), new RegExp(String(status)));
+  for (const field of ["root", "llmsTxt", "bundleJson", "artifact"]) {
+    const { [field]: omitted, ...versionedUrls } = resultFor(stamp).versionedUrls;
+    await assert.rejects(publishRelease(f.workspace, { token: "timds_test", fetchImpl: async () => json(resultFor(stamp, { versionedUrls })) }), /Invalid TimDS publication response/);
+  }
+  await assert.rejects(publishRelease(f.workspace, { token: "timds_test", fetchImpl: async () => json(resultFor(stamp, { publicRoot: "http://example-ds.timds.com/" })) }), /Invalid public root URL/);
   await assert.rejects(publishRelease(f.workspace, { token: "timds_test", fetchImpl: async (url) => json(url.endsWith("/publish") ? resultFor(stamp) : { ...stamp, contentDigest: "f".repeat(64) }) }), /public root does not serve/);
 });
 
@@ -130,7 +170,7 @@ test("CLI skip flags call the endpoint and print actionable OFF and verified ON 
     t.mock.method(globalThis, "fetch", async (url) => json(url.endsWith("/publish") ? result : stamp));
     const lines = [];
     await runWithOutputSink((line) => lines.push(line), () => runCli(["publish", "--root", f.root, "--skip-build", "--skip-push", "--token", "timds_test"]));
-    assert.match(lines.join("\n"), status === "published" ? /Verified public stamp/ : /awaiting operator publication.*\nOpen https:\/\/timds.com\/c\/client/);
+    assert.match(lines.join("\n"), status === "published" ? /Verified public stamp: https:\/\/example-ds\.timds\.com\/\.timds-artifact\.json/ : /awaiting operator publication.*\nOpen https:\/\/timds.com\/c\/client/);
     t.mock.restoreAll();
   }
 });
@@ -146,20 +186,28 @@ test("managed workflow finishes extraction and ref push before promotion", async
   assert.equal(publish, steps.length - 1);
   assert.match(steps[upload].run, /exit 1/);
   assert.equal(steps[publish].env.TIMDS_ACCESS_TOKEN, "${{ secrets.TIMDS_ACCESS_TOKEN }}");
+  // A missing operator token stops the release before the version commit lands.
+  const prepare = workflow.jobs["prepare-release"].steps;
+  assert.equal(prepare[0].env.TIMDS_ACCESS_TOKEN, "${{ secrets.TIMDS_ACCESS_TOKEN }}");
+  assert.match(prepare[0].run, /exit 1/);
+  assert.ok(prepare.findIndex((step) => step.id === "commit") > 0);
 });
 
-test("adopted stock automation advances to publication and remains repeatable", async (t) => {
+// Each released stock workflow, whether its hash was recorded in
+// installation.json or predates that record, advances to publication.
+for (const [fixtureName, recorded] of [["timds-standalone-before-publish.yml", true], ["timds-standalone-before-publish.yml", false], ["timds-standalone-locked-dependencies.yml", false]]) test(`adopted stock automation ${fixtureName} (${recorded ? "recorded" : "legacy"}) advances to publication and remains repeatable`, async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "timds-workflow-upgrade-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const git = (...args) => execFileSync("git", args, { cwd: root, stdio: "pipe" });
   git("init", "-q", "-b", "main"); git("config", "user.name", "TimDS Test"); git("config", "user.email", "test@example.com");
   await initializeRepository(root, { standalone: true });
-  const previous = await fs.readFile(new URL("fixtures/timds-standalone-before-publish.yml", import.meta.url), "utf8");
+  const previous = await fs.readFile(new URL(`fixtures/${fixtureName}`, import.meta.url), "utf8");
   const workflow = ".github/workflows/timds-design-system.yml";
   await fs.writeFile(path.join(root, workflow), previous);
   const recordPath = path.join(root, ".timds/installation.json");
   const record = JSON.parse(await fs.readFile(recordPath, "utf8"));
-  record.managedFiles[workflow] = createHash("sha256").update(previous).digest("hex");
+  if (recorded) record.managedFiles[workflow] = createHash("sha256").update(previous).digest("hex");
+  else delete record.managedFiles[workflow];
   await fs.writeFile(recordPath, JSON.stringify(record));
   git("add", "--all"); git("commit", "-q", "-m", "Previous stock automation");
   const upgraded = await upgradeRepository(root);
@@ -167,4 +215,18 @@ test("adopted stock automation advances to publication and remains repeatable", 
   assert.match(await fs.readFile(path.join(root, workflow), "utf8"), /publish --skip-build --skip-push/);
   git("add", "--all"); git("commit", "-q", "-m", "Publication automation");
   assert.deepEqual((await upgradeRepository(root)).releaseAutomationChanges, []);
+});
+
+test("upgrade reports the operator token the refreshed release workflow now requires", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "timds-workflow-upgrade-cli-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const git = (...args) => execFileSync("git", args, { cwd: root, stdio: "pipe" });
+  git("init", "-q", "-b", "main"); git("config", "user.name", "TimDS Test"); git("config", "user.email", "test@example.com");
+  await initializeRepository(root, { standalone: true });
+  const workflow = ".github/workflows/timds-design-system.yml";
+  await fs.writeFile(path.join(root, workflow), await fs.readFile(new URL("fixtures/timds-standalone-before-publish.yml", import.meta.url), "utf8"));
+  git("add", "--all"); git("commit", "-q", "-m", "Previous stock automation");
+  const lines = [];
+  await runWithOutputSink((line) => lines.push(line), () => runCli(["upgrade", "--root", root]));
+  assert.match(lines.join("\n"), /Managed automation: 1 files updated\nThe release workflow now requires the TIMDS_ACCESS_TOKEN repository secret/);
 });

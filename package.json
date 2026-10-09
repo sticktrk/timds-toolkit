@@ -93,6 +93,7 @@
     "src/video-migration.mjs",
     "src/video-component-loader.mjs",
     "src/publish.mjs",
+    "src/artifact-files.mjs",
     "src/publication-snapshot.mjs"
   ],
   "dependencies": {

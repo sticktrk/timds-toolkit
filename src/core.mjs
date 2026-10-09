@@ -25,7 +25,8 @@ import { checkRuntimeDependencies, upgradeConsumerToRelease, upgradeToRelease } 
 import { migrateVideoComponents } from "./video-migration.mjs";
 import { acceptsToolkitReleaseRange, assertVideoContractRuntime, runtimeIdentity, toolkitReleaseRange } from "./runtime.mjs";
 import { publishExtractedIndex } from "./artifact.mjs";
-import { publishArtifactRef, publishRelease } from "./publish.mjs";
+import { MAX_ARTIFACT_FILE_BYTES, collectArtifactFiles } from "./artifact-files.mjs";
+import { publicStampUrl, publishArtifactRef, publishRelease } from "./publish.mjs";
 import { buildBundle, describeBundle, normalizeBundleConfig } from "./bundle.mjs";
 import { DESIGNS_SOURCE_DIRECTORY, buildDesigns, checkDesigns, declaredClasses, readDesignCatalog, renderDesigns } from "./designs.mjs";
 import { STARTER_RECORD_FILE, describeStarterSync, forceReplaceable, isStarterSystem, knownStarterHashes, planStockFile, readStarterRecord, recordFreshStarter, recordStarterFiles, starterPlumbingFiles, starterSyncPaths, syncStarter } from "./starter.mjs";
@@ -50,11 +51,6 @@ import {
   voiceoverVideoWorkspace,
 } from "./video.mjs";
 
-const MAX_ARTIFACT_FILE_BYTES = 12_000_000;
-const MAX_ARTIFACT_FILES = 2_000;
-const MAX_ARTIFACT_TOTAL_BYTES = 80_000_000;
-const MAX_DIRECTORY_DEPTH = 20;
-const MAX_SCANNED_ENTRIES = 5_000;
 const supportedSchemaVersions = new Set([1, 2]);
 const workspaceCommandNames = ["install", "dev", "build", "check"];
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -92,6 +88,7 @@ const legacyStandaloneAutomationHashes = new Map([
     "44c91cf8fd9ae5c9712ff1bc69605d182470b54d76f14292af2c7a714eb8a95a",
     "203ba2218b7e9d9216166707d89707a8740c8e1835f0a1e3bd31e19768c34992",
     "3d27e370cc596307a73a71617f95e1314c24de0229716af4cb9d2384dee5ae32",
+    "4a65fa9b0b70ec8becf911f5691cee492e08a7f376c5dd577925d44799ea7abc",
   ]],
   [".github/workflows/update-consumer-submodule.yml", ["a93c345503d5c344b2ab7b3aa37ee901e71d48608ca94df5b145235f21a5ef6f"]],
   ["scripts/release.mjs", ["ba1b6ec7e4022a7104d7d0c7e2497fb61a839c37394395ea3bdaa979def1260a"]],
@@ -383,48 +380,6 @@ export async function loadWorkspace(repoRootInput = process.cwd()) {
   await readJsonObject(path.join(designSystemRoot, "tokens.json"), "tokens.json");
   const { catalog: mediaCatalog, catalogPath: mediaCatalogPath } = await readMediaCatalog(designSystemRoot);
   return { designSystemRoot, layout, manifest, manifestPath, mediaCatalog, mediaCatalogPath, repoRoot, scopePath };
-}
-
-async function collectArtifactFiles(root) {
-  const files = [];
-  let scannedEntries = 0;
-  let totalBytes = 0;
-  const walk = async (directory, depth) => {
-    if (depth > MAX_DIRECTORY_DEPTH) throw new Error("design-system/dist exceeds the directory depth limit");
-    const entries = (await fs.readdir(directory, { withFileTypes: true })).sort((left, right) => left.name.localeCompare(right.name));
-    for (const entry of entries) {
-      scannedEntries += 1;
-      if (scannedEntries > MAX_SCANNED_ENTRIES) throw new Error("design-system/dist contains too many entries");
-      const absolutePath = path.join(directory, entry.name);
-      const info = await fs.lstat(absolutePath);
-      if (info.isSymbolicLink()) throw new Error("design-system/dist cannot contain symbolic links");
-      if (info.isDirectory()) {
-        await walk(absolutePath, depth + 1);
-        continue;
-      }
-      if (!info.isFile()) continue;
-      if (info.size > MAX_ARTIFACT_FILE_BYTES) {
-        throw new Error(`${path.relative(root, absolutePath)} exceeds the ${MAX_ARTIFACT_FILE_BYTES}-byte artifact file limit`);
-      }
-      totalBytes += info.size;
-      if (totalBytes > MAX_ARTIFACT_TOTAL_BYTES) {
-        throw new Error(`design-system/dist exceeds the ${MAX_ARTIFACT_TOTAL_BYTES}-byte total limit`);
-      }
-      if (files.length >= MAX_ARTIFACT_FILES) {
-        throw new Error(`design-system/dist contains more than ${MAX_ARTIFACT_FILES} files`);
-      }
-      const content = await fs.readFile(absolutePath);
-      files.push({
-        absolutePath,
-        bytes: info.size,
-        content,
-        path: path.relative(root, absolutePath).split(path.sep).join("/"),
-        sha256: createHash("sha256").update(content).digest("hex"),
-      });
-    }
-  };
-  await walk(root, 0);
-  return { files, totalBytes };
 }
 
 function externalReference(value) {
@@ -1668,6 +1623,9 @@ export async function runCli(argv) {
     output(`Agent skill: ${result.skillDestination}`);
     if (result.releaseAutomationChanges.length) {
       output(`Managed automation: ${result.releaseAutomationChanges.length} files updated`);
+      if (result.releaseAutomationChanges.includes(".github/workflows/timds-design-system.yml")) {
+        output("The release workflow now requires the TIMDS_ACCESS_TOKEN repository secret (an unbound operator token); without it a main push fails before any version advance or publication.");
+      }
     }
     if (result.starter) {
       output(result.starter.written.length ? `Starter: ${result.starter.written.length} file${result.starter.written.length === 1 ? "" : "s"} synced with the ${result.package.version} scaffold.` : "Starter: current.");
@@ -1744,8 +1702,9 @@ export async function runCli(argv) {
   }
   if (command === "publish") {
     const workspace = options.skipBuild ? await loadWorkspace(root) : await checkWorkspace(root);
-    if (!options.skipPush) await publishArtifactRef(workspace);
-    const result = await publishRelease(workspace, { portalUrl: options.portalUrl, token: options.token });
+    // The ref push already stamped this exact build; promotion reuses that stamp.
+    const stamp = options.skipPush ? undefined : await publishArtifactRef(workspace);
+    const result = await publishRelease(workspace, { portalUrl: options.portalUrl, stamp, token: options.token });
     if (options.json) output(JSON.stringify(result, null, 2));
     else if (result.status === "awaiting-operator") {
       output(`Candidate ${result.candidate.version} (${result.candidate.contentDigest}) is awaiting operator publication; automatic updates is off.`);
@@ -1755,7 +1714,7 @@ export async function runCli(argv) {
       output(`Pinned release: ${result.versionedUrls.root}`);
       output(`Agent docs: ${result.versionedUrls.llmsTxt}`);
       output(`Consumer bundle (when supplied): ${result.versionedUrls.bundleJson}`);
-      output(`Verified public stamp: ${result.versionedUrls.artifact}`);
+      output(`Verified public stamp: ${publicStampUrl(result.publicRoot)}`);
     }
     return result;
   }
