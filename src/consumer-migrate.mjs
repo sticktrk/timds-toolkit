@@ -31,7 +31,7 @@ import process from "node:process";
 import { spawn } from "node:child_process";
 
 import { CONSUMER_MANIFEST_FILE, loadConsumer, publishedBaseUrl, validateConsumerManifest } from "./consumer.mjs";
-import { applyConsumerInstallation, planConsumerInstallation } from "./consumer-init.mjs";
+import { applyConsumerInstallation, planConsumerInstallation, prepareConsumerInstallation } from "./consumer-init.mjs";
 import { syncConsumerBundle } from "./consumer-sync.mjs";
 
 const MIGRATE_HELP = `Usage:
@@ -42,7 +42,8 @@ submodule, its .gitmodules entry, and the checkout; pins designSystem.version
 in ${CONSUMER_MANIFEST_FILE} (default: the version the checked-out submodule
 declares); adds the postinstall sync and the .gitignore line; re-renders the
 managed files for the published mode (--force replaces customized ones,
-preserving the manifest's app settings); and
+preserving the manifest's app settings); resolves a missing or older toolkit
+lock to the running release, keeping the bounded dependency range; and
 syncs the bundle. Product files that still mention the submodule are listed
 for a developer. The product and submodule working trees must be clean.
 The bundle and installation are validated before removal; a failed write
@@ -246,7 +247,7 @@ async function submoduleMentions(repoRoot, designSystemPath) {
  * manifest already pins a version, the tree is dirty, or no version can be
  * determined.
  */
-export async function migrateConsumerToPublished(rootInput = process.cwd(), { version = null, url = null, force = false, skipSync = false, fetchImpl = fetch, output = () => {} } = {}) {
+export async function migrateConsumerToPublished(rootInput = process.cwd(), { version = null, url = null, force = false, skipSync = false, fetchImpl = fetch, runNpm, output = () => {} } = {}) {
   const consumer = await loadConsumer(rootInput);
   const { designSystem, manifestPath, repoRoot } = consumer;
   if (designSystem.mode === "published") {
@@ -295,7 +296,9 @@ export async function migrateConsumerToPublished(rootInput = process.cwd(), { ve
         throw new Error(`Design System ${designSystem.systemId} version ${pinned} is not usable as a published pin: ${error.message}\nPublish that version (timds extract --publish in the Design System), pass --version, or pass --skip-sync to migrate without fetching.`, { cause: error });
       }
     }
-    // A download may take time; refuse work that appeared while it ran.
+    await requireCleanTree(repoRoot, designSystem);
+    await prepareConsumerInstallation(repoRoot, plan, { runNpm, output });
+    // Downloads and lock resolution may take time; refuse work that appeared while they ran.
     await requireCleanTree(repoRoot, designSystem);
     const backup = await migrationBackup(repoRoot, designSystem, [{ path: CONSUMER_MANIFEST_FILE }, ...plan.writes]);
     try {

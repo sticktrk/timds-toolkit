@@ -49,6 +49,7 @@
     "src/core.mjs",
     "src/consumer.mjs",
     "src/consumer-init.mjs",
+    "src/consumer-install.mjs",
     "src/consumer-scaffold.mjs",
     "src/consumer-notes.mjs",
     "src/consumer-sync.mjs",

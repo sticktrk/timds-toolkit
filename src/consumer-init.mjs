@@ -49,6 +49,7 @@ import { fileURLToPath } from "node:url";
 
 import { CONSUMER_MANIFEST_FILE, consumerPinMode, publishedBaseUrl, validateConsumerManifest } from "./consumer.mjs";
 import { resolvePublishedBundle, syncConsumerBundle } from "./consumer-sync.mjs";
+import { planConsumerToolkitLock, resolveConsumerToolkitLock, runConsumerNpm } from "./consumer-install.mjs";
 import { acceptsToolkitReleaseRange, runtimeIdentity, toolkitReleaseRange } from "./runtime.mjs";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -87,7 +88,10 @@ With --system, the product pins the published Design System ID at --version
 from --url (default: the public prefix for that system). No repository access
 is needed: package.json gets postinstall "timds consumer sync", which fetches
 the bundle into the gitignored design-system directory, and init runs it
-once unless --skip-install. Without --system, the product must already carry
+once unless --skip-install. A missing or older toolkit lock is resolved to
+the running release, keeping the bounded dependency range. --skip-install
+refuses an older lock; rerun without it to refresh the lock first.
+Without --system, the product must already carry
 the Design System as the design-system git submodule.`;
 
 const DEFAULT_POSTINSTALL = "timds consumer sync";
@@ -636,6 +640,7 @@ export async function planConsumerInstallation(repoRoot, manifest, { force = fal
   refuseCustomizedFiles(filePlan.conflicts, command);
   const published = consumerPinMode(validated.designSystem) === "published";
   const packagePlan = await planPackageJson(repoRoot, force, { published, command });
+  const toolkitLockPlan = published ? await planConsumerToolkitLock(repoRoot) : null;
   const gitignorePlan = await planGitignoreLines(repoRoot, ["node_modules/", ".timds/preview/", ...(published ? [`${validated.designSystem.path}/`] : [])]);
   installation.consumer = consumerInstallationRecord(files, launchPlan, mcpPlan);
   const writes = [
@@ -646,7 +651,17 @@ export async function planConsumerInstallation(repoRoot, manifest, { force = fal
     ...(gitignorePlan ? [gitignorePlan] : []),
     { path: CONSUMER_INSTALLATION_PATH, content: toJson(installation) },
   ];
-  return { writes, defaultBranch, launchPlan, mcpPlan, packagePlan, installation: installation.consumer };
+  return { writes, defaultBranch, launchPlan, mcpPlan, packagePlan, toolkitLockPlan, installation: installation.consumer };
+}
+
+/** Finish dependency preflight before writing a manifest or removing a submodule. */
+export async function prepareConsumerInstallation(repoRoot, plan, { skipInstall = false, runNpm = runConsumerNpm, output = () => {} } = {}) {
+  if (skipInstall && plan.toolkitLockPlan?.version && plan.toolkitLockPlan.refresh) {
+    throw new Error(`${plan.toolkitLockPlan.path} locks ${runtimeIdentity.name}@${plan.toolkitLockPlan.version}, older than the running toolkit ${runtimeIdentity.version}. It must be refreshed before adding the postinstall sync. Rerun timds consumer init without --skip-install using ${runtimeIdentity.name}@${runtimeIdentity.version} (keep any --system, --version, and --url options).`);
+  }
+  if (!skipInstall && plan.toolkitLockPlan?.refresh) {
+    plan.writes.push(await resolveConsumerToolkitLock(repoRoot, plan.packagePlan.content, { lockFile: plan.toolkitLockPlan.path, runNpm, output }));
+  }
 }
 
 /** Apply the already validated installation plan; never writes the manifest. */
@@ -684,7 +699,7 @@ async function resolvePublishedPin({ system, version, url, fetchImpl }) {
  * on a conflicting toolkit declaration, or on customized managed files
  * unless `force`.
  */
-export async function initializeConsumer(rootInput = process.cwd(), { force = false, skipInstall = false, portalUrl = DEFAULT_PORTAL_URL, system = null, version = null, url = null, fetchImpl = fetch, output = () => {} } = {}) {
+export async function initializeConsumer(rootInput = process.cwd(), { force = false, skipInstall = false, portalUrl = DEFAULT_PORTAL_URL, system = null, version = null, url = null, fetchImpl = fetch, runNpm = runConsumerNpm, output = () => {} } = {}) {
   const repoRoot = await findGitRoot(rootInput);
   const manifestPath = path.join(repoRoot, CONSUMER_MANIFEST_FILE);
   const existingRaw = await readJsonFile(manifestPath, CONSUMER_MANIFEST_FILE);
@@ -710,6 +725,7 @@ export async function initializeConsumer(rootInput = process.cwd(), { force = fa
 
   const plan = await planConsumerInstallation(repoRoot, manifest, { force, portalUrl });
   const { defaultBranch, launchPlan, mcpPlan, packagePlan } = plan;
+  await prepareConsumerInstallation(repoRoot, plan, { skipInstall, runNpm, output });
 
   const written = [];
   if (!keepManifest) {
@@ -729,15 +745,18 @@ export async function initializeConsumer(rootInput = process.cwd(), { force = fa
     output(`Kept the customized "${name}" server in ${CONSUMER_MCP_PATH}; rerun with --force to replace it.`);
   }
 
-  if (!skipInstall && packagePlan.changed) {
-    output("Running npm install to resolve @dtconcepts/timds into the lockfile...");
-    const installed = await run("npm", ["install"], repoRoot);
-    if (installed.code !== 0) {
-      throw new Error(`npm install failed in ${repoRoot}:\n${(installed.stderr || installed.stdout).trim().split("\n").slice(-20).join("\n")}\nFix the error and run npm install; the TimDS files are already in place.`);
+  if (!skipInstall && (packagePlan.changed || plan.toolkitLockPlan?.refresh)) {
+    // npm install may prefer the older node_modules resolution under the
+    // bounded range. Published consumers must install the lock we selected.
+    const installCommand = plan.toolkitLockPlan ? "ci" : "install";
+    output(`Running npm ${installCommand} to install @dtconcepts/timds from the lockfile...`);
+    try {
+      await runNpm("npm", [installCommand], { cwd: repoRoot, maxBuffer: 20_000_000 });
+    } catch (error) {
+      throw new Error(`npm ${installCommand} failed in ${repoRoot}:\n${(error.stderr || error.stdout || error.message).trim().split("\n").slice(-20).join("\n")}\nFix the error and run npm ${installCommand}; the TimDS files are already in place.`, { cause: error });
     }
   }
-  // The first sync happens here rather than through npm's postinstall, so a
-  // failure names the cause instead of surfacing as a failed install.
+  // Confirm the bundle even when no install was needed on a rerun.
   let synced = null;
   if (published && !skipInstall) synced = await syncConsumerBundle(repoRoot, { fetchImpl, output });
 

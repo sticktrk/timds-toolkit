@@ -336,3 +336,23 @@ test("the consumer CLI routes sync and update, and refuses unknown options", asy
   await runConsumerCli(["sync", "--help"], { output: (line) => lines.push(line) });
   assert.match(lines.join("\n"), /timds consumer update \[VERSION\]/);
 });
+
+test("check diagnoses a lock that predates published pins without rejecting the manifest", async (t) => {
+  const product = await productRepo(t);
+  const { fetchImpl } = publishedSystem();
+  await syncConsumerBundle(product, { fetchImpl });
+  const lock = { lockfileVersion: 3, packages: {
+    "": { devDependencies: { "@dtconcepts/timds": "0.1.x" } },
+    "node_modules/@dtconcepts/timds": { version: "0.1.451" },
+  } };
+  await write(product, "package-lock.json", lock);
+  const old = await checkConsumer(product);
+  assert.equal(old.status, "failed");
+  assert.match(old.errors.join("\n"), /locks @dtconcepts\/timds@0\.1\.451, which predates designSystem\.version\/url and consumer sync \(requires 0\.1\.452 or newer\)/);
+  assert.match(old.errors.join("\n"), /Run: npx --yes --package=@dtconcepts\/timds@\d+\.\d+\.\d+ timds consumer init/);
+  assert.doesNotMatch(old.errors.join("\n"), /manifest.*invalid|unknown fields/);
+  lock.packages["node_modules/@dtconcepts/timds"].version = "0.1.452";
+  await write(product, "package-lock.json", lock);
+  const compatible = await checkConsumer(product);
+  assert.equal(compatible.status, "passed", compatible.errors.join("\n"));
+});

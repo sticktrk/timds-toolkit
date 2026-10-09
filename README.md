@@ -201,6 +201,12 @@ declares in its `bundle.include`) from the public prefix into the gitignored
 System tree, verifying every digest, and records what it fetched in
 `design-system/.timds-bundle.json`. A clone and `npm ci` is all a website or
 an agent needs; nobody needs access to the Design System repository.
+Published-mode `consumer init` and `consumer migrate` resolve a missing or
+older toolkit lock to the running release while keeping the `0.1.x` requirement.
+Init installs that resolution with `npm ci` before postinstall runs. With
+`--skip-install`, init refuses an older lock before writing files; rerun
+without the flag to refresh it. `consumer check` reports locks older than the
+release that introduced published pins, with a command to repair them.
 `timds consumer update [VERSION]` moves the pin to a version, or to the
 current published release, and syncs; a pin of `"current"` follows every
 release at the next install instead. `url` overrides the public prefix

@@ -149,7 +149,16 @@ test("pins a published Design System with --system: manifest version, postinstal
   assert.doesNotMatch(output, /DESIGN_SYSTEM_DEPLOY_KEY/);
 
   // A rerun keeps the manifest, stays in published mode without --system, and syncs when installs are not skipped.
-  const again = await initializeConsumer(product, { fetchImpl, skipInstall: false, output: quiet });
+  const runNpm = async (_command, args, { cwd }) => {
+    if (!args.includes("--package-lock-only")) return;
+    const pkg = JSON.parse(await fs.readFile(path.join(cwd, "package.json"), "utf8"));
+    assert.equal(pkg.devDependencies[toolkitPackage.name], toolkitPackage.version);
+    await writeJson(path.join(cwd, "package-lock.json"), {
+      lockfileVersion: 3,
+      packages: { "": pkg, [`node_modules/${toolkitPackage.name}`]: { version: toolkitPackage.version } },
+    });
+  };
+  const again = await initializeConsumer(product, { fetchImpl, runNpm, skipInstall: false, output: quiet });
   assert.equal(again.keptManifest, true);
   assert.deepEqual([again.synced.status, again.synced.version], ["synced", "2.1.0"]);
   assert.equal(await fs.readFile(path.join(product, "design-system", "dist", "tokens.css"), "utf8"), body);
@@ -163,6 +172,30 @@ test("pins a published Design System with --system: manifest version, postinstal
 test("refuses --system in a repository that still carries the submodule", async (t) => {
   const product = await createConsumerRepo(t);
   await assert.rejects(initializeConsumer(product, { system: "acme/core", version: "1.0.0", skipInstall: true, output: quiet }), /still carries design-system as a git submodule[\s\S]*git rm -r --cached design-system/);
+});
+
+test("--system with --skip-install refuses an older lock before writing anything", async (t) => {
+  const product = await createConsumerRepo(t, { submodule: false, rootPackage: {
+    private: true, scripts: { timds: "timds" }, devDependencies: { [toolkitPackage.name]: releaseLine },
+  } });
+  const lockPath = path.join(product, "package-lock.json");
+  await writeJson(lockPath, { lockfileVersion: 3, packages: {
+    "": { devDependencies: { [toolkitPackage.name]: releaseLine } },
+    [`node_modules/${toolkitPackage.name}`]: { version: "0.1.451" },
+  } });
+  git(product, "add", ".");
+  git(product, "commit", "-m", "Older toolkit lock");
+  const packageBefore = await fs.readFile(path.join(product, "package.json"), "utf8");
+  const lockBefore = await fs.readFile(lockPath, "utf8");
+  await assert.rejects(initializeConsumer(product, {
+    system: "acme/core", version: "1.0.0", skipInstall: true,
+    runNpm: () => { throw new Error("Unexpected npm invocation"); },
+  }), /package-lock\.json locks @dtconcepts\/timds@0\.1\.451[\s\S]*without --skip-install/);
+  assert.equal(await fs.readFile(path.join(product, "package.json"), "utf8"), packageBefore);
+  assert.equal(await fs.readFile(lockPath, "utf8"), lockBefore);
+  assert.equal(git(product, "status", "--porcelain"), "");
+  await assert.rejects(fs.access(path.join(product, "timds.consumer.json")));
+  await assert.rejects(fs.access(path.join(product, ".agents")));
 });
 
 test("discovers apps and writes the manifest with guessed defaults", async (t) => {
