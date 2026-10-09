@@ -104,7 +104,12 @@ installation plan and the full bundle, then keeps the checkout, module store,
 Git state, and touched files for rollback until the writes succeed. Migration
 uses the supplied manifest with the shared installation planner in
 `consumer-init.mjs`, so `--force` replaces managed files without regenerating
-app settings; `consumer.mjs` resolves either pin mode (published
+app settings. `consumer-install.mjs` preflights missing or older toolkit locks
+to the running release without lifecycle scripts, restores the bounded root
+requirement, and includes the lock in the installation's writes and rollback.
+Published-mode init runs `npm ci` so the postinstall uses that resolution;
+`--skip-install` refuses older locks before writing. `consumer.mjs` reports a
+lock that predates published-pin support and resolves either pin mode (published
 record or submodule gitlink) for `check`. `derived.mjs` is the
 read side: `readDerivedLayer` (local) and `fetchDerivedLayer` (published URL)
 return the same shape. `artifact.mjs` publishes that layer to the portal CDN

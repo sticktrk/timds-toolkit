@@ -26,6 +26,7 @@ import { existsSync, promises as fs } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import * as z from "zod/v4";
+import { consumerToolkitLockRemedy, planConsumerToolkitLock, PUBLISHED_CONSUMER_MINIMUM_VERSION, toolkitVersionOlderThan } from "./consumer-install.mjs";
 
 export const CONSUMER_MANIFEST_FILE = "timds.consumer.json";
 /** The record `consumer sync` leaves in the bundle directory: which version is there and which files. */
@@ -562,6 +563,14 @@ export async function checkConsumer(repoRootInput = process.cwd(), options = {})
   const selected = options.app ? [resolveConsumerApp(consumer, options.app).name] : Object.keys(manifest.apps);
 
   if (designSystem.mode === "published") {
+    try {
+      const locked = await planConsumerToolkitLock(repoRoot);
+      if (locked.version && toolkitVersionOlderThan(locked.version, PUBLISHED_CONSUMER_MINIMUM_VERSION)) {
+        errors.push(`${locked.path} locks @dtconcepts/timds@${locked.version}, which predates designSystem.version/url and consumer sync (requires ${PUBLISHED_CONSUMER_MINIMUM_VERSION} or newer). Refresh the lock before npm ci runs postinstall. Run: ${consumerToolkitLockRemedy()}`);
+      }
+    } catch (error) {
+      errors.push(error.message);
+    }
     // A published pin keeps no Design System bytes in git: the sync record says what was fetched.
     if (designSystem.commit) {
       errors.push(`${designSystem.path} is still a git submodule but ${CONSUMER_MANIFEST_FILE} pins a published version. Remove the submodule (git rm -r --cached ${designSystem.path}, drop it from .gitmodules) so npm install can fetch the bundle.`);

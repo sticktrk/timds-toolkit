@@ -11,6 +11,7 @@ import { initializeConsumer, renderConsumerSkill } from "./consumer-init.mjs";
 import { migrateConsumerToPublished, removeGitmodulesSection } from "./consumer-migrate.mjs";
 
 const BASE = "https://cdn.test/acme/core/artifact";
+const toolkitPackage = JSON.parse(await fs.readFile(new URL("../package.json", import.meta.url), "utf8"));
 const sha256 = (content) => createHash("sha256").update(content).digest("hex");
 
 async function temporaryDirectory(t) {
@@ -65,6 +66,10 @@ async function submoduleProduct(t, { version = "1.3.0", designSystemPath = "desi
   initRepo(product);
   await write(product, CONSUMER_MANIFEST_FILE, { schemaVersion: 1, designSystem: { path: designSystemPath, systemId: "acme/core" }, apps: { web: { cwd: "web", preview: { build: ["npm", "run", "build"], output: "dist" }, designSurface: ["src/**"] } } });
   await write(product, "package.json", { name: "product", private: true, scripts: { timds: "timds" }, devDependencies: { "@dtconcepts/timds": "0.1.x" } });
+  await write(product, "package-lock.json", { lockfileVersion: 3, packages: {
+    "": { name: "product", devDependencies: { "@dtconcepts/timds": "0.1.x" } },
+    "node_modules/@dtconcepts/timds": { version: toolkitPackage.version },
+  } });
   await write(product, "web/package.json", { name: "web" });
   await write(product, "scripts/deploy.sh", "#!/bin/sh\ngit submodule update --init design-system\n");
   await write(product, ".gitignore", "node_modules/\n");
@@ -376,4 +381,38 @@ test("rolls back a bundle installation failure after managed files have been wri
   assert.deepEqual(await productState(product), before);
   assert.equal(existsSync(path.join(product, "design-system/.timds-bundle.json")), false);
   assert.equal(git(path.join(product, "design-system"), "rev-parse", "HEAD"), (await loadConsumer(product)).designSystem.commit);
+});
+
+test("preflights an older toolkit lock before removing the submodule and rolls the lock back with later writes", async (t) => {
+  const { product } = await submoduleProduct(t);
+  const lockPath = path.join(product, "package-lock.json");
+  const lock = JSON.parse(await fs.readFile(lockPath, "utf8"));
+  lock.packages["node_modules/@dtconcepts/timds"].version = "0.1.451";
+  await write(product, "package-lock.json", lock);
+  git(product, "add", ".");
+  git(product, "commit", "-qm", "Older toolkit lock");
+  const before = await productState(product);
+  await assert.rejects(migrateConsumerToPublished(product, { skipSync: true, runNpm: async () => {
+    assert.ok(existsSync(path.join(product, "design-system/.git")), "the submodule remains during lock preflight");
+    await fs.writeFile(lockPath, "partial lock");
+    throw new Error("registry unavailable");
+  } }), /Could not refresh the locked toolkit[\s\S]*registry unavailable/);
+  assert.deepEqual(await productState(product), before);
+
+  const runNpm = async (_command, args, { cwd }) => {
+    assert.deepEqual(args, ["install", "--package-lock-only", "--ignore-scripts"]);
+    const pkg = JSON.parse(await fs.readFile(path.join(cwd, "package.json"), "utf8"));
+    assert.equal(pkg.devDependencies[toolkitPackage.name], toolkitPackage.version);
+    const selected = structuredClone(lock);
+    selected.packages[""].devDependencies[toolkitPackage.name] = toolkitPackage.version;
+    selected.packages["node_modules/@dtconcepts/timds"].version = toolkitPackage.version;
+    await write(product, "package-lock.json", selected);
+  };
+  const originalCopy = fs.cp;
+  t.mock.method(fs, "cp", async (source, target, options) => {
+    await originalCopy(source, target, options);
+    if (target === path.join(product, "design-system")) throw new Error("bundle write failed");
+  });
+  await assert.rejects(migrateConsumerToPublished(product, { url: BASE, fetchImpl: publishedSystem(), runNpm }), /files were restored: bundle write failed/);
+  assert.deepEqual(await productState(product), before, "later failures restore the old lock with the checkout and managed files");
 });
