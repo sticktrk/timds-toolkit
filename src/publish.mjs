@@ -7,7 +7,8 @@
 // public root anonymously. Boundary rules: contract bytes come from Git blobs,
 // never the checkout (no eol/LFS filters); every dist file is pushed, ignore
 // rules notwithstanding; the ref is replaced only when the checkout is the
-// remote default-branch head; the operator bearer reaches the portal alone.
+// remote default-branch head and the target is a separate branch; the operator
+// bearer reaches the portal alone.
 import { execFileSync } from "node:child_process";
 import { promises as fs } from "node:fs";
 import os from "node:os";
@@ -108,9 +109,13 @@ export async function writePublicationStamp(workspace, stamp = null) {
   return stamp;
 }
 
-/** The commit the remote's default branch points at, or null when unreadable. */
+/** Resolve the remote default branch's full ref and commit together. */
 function remoteDefaultHead(root, remote) {
-  return /^([0-9a-f]{40})\tHEAD$/m.exec(git(root, ["ls-remote", remote, "HEAD"], { timeout: 60_000 }))?.[1] ?? null;
+  const output = git(root, ["ls-remote", "--symref", remote, "HEAD"], { timeout: 60_000 });
+  return {
+    ref: /^ref: (refs\/heads\/[^\s]+)\tHEAD$/m.exec(output)?.[1] ?? null,
+    sha: /^([0-9a-f]{40})\tHEAD$/m.exec(output)?.[1] ?? null,
+  };
 }
 
 /** Push the exact local build to the declared artifact ref. No portal write. */
@@ -127,8 +132,16 @@ export async function publishArtifactRef(workspace, { repository = process.env.G
   }
   const stamp = await createPublicationStamp(workspace);
   // The portal promotes a stamp only for the default-branch head, and the push
-  // below replaces the live ref. Refuse before destroying it.
-  const head = await remoteHead(workspace.repoRoot, remote);
+  // below replaces the live ref with an orphan commit. The artifact ref must
+  // never be the source branch, even when its commit matches the checkout.
+  const defaultBranch = await remoteHead(workspace.repoRoot, remote);
+  if (!defaultBranch?.ref?.startsWith("refs/heads/")) {
+    throw new Error(`Cannot resolve the remote default branch of ${remote}; refusing to replace an artifact ref`);
+  }
+  if (defaultBranch.ref === `refs/heads/${publishRef}`) {
+    throw new Error(`artifact.publishRef ${publishRef} is the remote default branch; choose a separate artifact branch (for example timds-published) before publishing`);
+  }
+  const head = defaultBranch.sha;
   if (head !== stamp.sourceCommit) {
     throw new Error(`Checkout ${stamp.sourceCommit.slice(0, 12)} is not the default-branch head of ${remote}${head ? ` (${head.slice(0, 12)})` : ""}; push the source commit to the default branch before publishing`);
   }

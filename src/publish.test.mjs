@@ -36,6 +36,17 @@ const staging = (onPush) => (command, args, cwd) => {
   return execFileSync(command, args, { cwd, stdio: "pipe" });
 };
 
+// The production ls-remote call resolves a real local remote through Git's
+// repository-local URL rewrite; no GitHub request or write is made.
+async function localRemote(t, f, branch = "main") {
+  const remote = await fs.mkdtemp(path.join(os.tmpdir(), "timds-publish-remote-"));
+  t.after(() => fs.rm(remote, { recursive: true, force: true }));
+  f.git("init", "--bare", "-q", "-b", branch, remote);
+  f.git("push", "-q", remote, `HEAD:refs/heads/${branch}`);
+  f.git("config", `url.${remote}.insteadOf`, "https://github.com/example/design-system.git");
+  return remote;
+}
+
 const resultFor = (stamp, overrides = {}) => ({ status: "published", unchanged: false, automaticUpdates: true, systemId: stamp.systemId, version: stamp.version, publicRoot: "https://example-ds.timds.com/", versionedUrls: { root: "https://example-ds.timds.com/v/1.2.3/", llmsTxt: "https://example-ds.timds.com/v/1.2.3/llms.txt", bundleJson: "https://example-ds.timds.com/v/1.2.3/bundle.json", artifact: "https://example-ds.timds.com/v/1.2.3/.timds-artifact.json" }, ...overrides });
 const json = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });
 
@@ -64,7 +75,8 @@ for (const embedded of [false, true]) test(`stamps local ${embedded ? "embedded"
 
 test("artifact push stamps the ref and saves the local stamp only after push succeeds", async (t) => {
   const f = await fixture(t); let stagedStamp; let staged;
-  const options = { repository: "example/design-system", remoteHead: f.head };
+  await localRemote(t, f);
+  const options = { repository: "example/design-system" };
   await assert.rejects(publishArtifactRef(f.workspace, { ...options, run: staging(() => { throw new Error("push denied"); }) }), /push denied/);
   await assert.rejects(fs.access(path.join(f.sourceRoot, PUBLICATION_STAMP)), /ENOENT/);
   // Ignored build output is part of the stamped artifact and must be pushed.
@@ -85,10 +97,41 @@ test("artifact push stamps the ref and saves the local stamp only after push suc
   assert.ok(calls.every((args) => !["init", "commit", "push"].includes(args[0]) || args.includes("-q")), "stdout stays parseable for --json");
 });
 
+for (const [branch, embedded] of [["main", false], ["master", true], ["release/source", false]]) test(`artifact push refuses to replace the remote default branch ${branch}`, async (t) => {
+  const f = await fixture(t, embedded);
+  if (branch !== "main") f.git("branch", "-m", branch);
+  const manifest = JSON.parse(await fs.readFile(f.workspace.manifestPath, "utf8"));
+  manifest.artifact.publishRef = branch;
+  await f.write("timds.json", JSON.stringify(manifest));
+  f.git("add", "--all"); f.git("commit", "-q", "-m", "Artifact ref equals source branch");
+  const remote = await localRemote(t, f, branch);
+  const sourceHead = f.head();
+  const calls = [];
+  await assert.rejects(publishArtifactRef(await loadWorkspace(f.root), {
+    repository: "example/design-system", run: (command, args) => calls.push(args),
+  }), /artifact\.publishRef .* is the remote default branch/);
+  assert.deepEqual(calls, [], "refuse before staging or pushing an orphan artifact commit");
+  assert.equal(f.git("--git-dir", remote, "rev-parse", `refs/heads/${branch}`).trim(), sourceHead);
+  assert.equal(f.git("--git-dir", remote, "show", `${branch}:${embedded ? "design-system/" : ""}timds.json`).trim(), JSON.stringify(manifest));
+  await assert.rejects(fs.access(path.join(f.sourceRoot, PUBLICATION_STAMP)), /ENOENT/);
+});
+
+test("artifact push refuses a remote HEAD without a resolvable default branch", async (t) => {
+  const f = await fixture(t);
+  const remote = await localRemote(t, f);
+  f.git("--git-dir", remote, "update-ref", "--no-deref", "HEAD", f.head());
+  const calls = [];
+  await assert.rejects(publishArtifactRef(f.workspace, {
+    repository: "example/design-system", run: (command, args) => calls.push(args),
+  }), /Cannot resolve the remote default branch/);
+  assert.deepEqual(calls, []);
+  await assert.rejects(fs.access(path.join(f.sourceRoot, PUBLICATION_STAMP)), /ENOENT/);
+});
+
 test("artifact push refuses a checkout that is not the remote default-branch head", async (t) => {
   const f = await fixture(t); const calls = [];
   for (const head of ["0".repeat(40), null]) {
-    await assert.rejects(publishArtifactRef(f.workspace, { repository: "example/design-system", remoteHead: () => head, run: (command, args) => calls.push(args) }), /not the default-branch head of https:\/\/github\.com\/example\/design-system\.git/);
+    await assert.rejects(publishArtifactRef(f.workspace, { repository: "example/design-system", remoteHead: () => ({ ref: "refs/heads/main", sha: head }), run: (command, args) => calls.push(args) }), /not the default-branch head of https:\/\/github\.com\/example\/design-system\.git/);
   }
   assert.deepEqual(calls, []);
   await assert.rejects(fs.access(path.join(f.sourceRoot, PUBLICATION_STAMP)), /ENOENT/);
