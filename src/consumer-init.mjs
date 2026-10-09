@@ -478,7 +478,7 @@ function refuseCustomizedFiles(conflicts, rerun) {
   throw new Error(`Refusing to replace customized TimDS consumer files:\n${conflicts.map((file) => `- ${file}`).join("\n")}\nReview them, or rerun ${rerun} with --force to replace them`);
 }
 
-async function planPackageJson(repoRoot, force, { published = false } = {}) {
+async function planPackageJson(repoRoot, force, { published = false, command = "timds consumer init" } = {}) {
   const packagePath = path.join(repoRoot, "package.json");
   const existing = await readJsonFile(packagePath, "package.json");
   const packageJson = existing ? structuredClone(existing) : { name: slug(path.basename(repoRoot)), private: true };
@@ -486,10 +486,10 @@ async function planPackageJson(repoRoot, force, { published = false } = {}) {
   const releaseRange = toolkitReleaseRange(identity);
   const current = packageJson.devDependencies?.[identity.name] ?? packageJson.dependencies?.[identity.name];
   if (current && !acceptsToolkitReleaseRange(current, identity) && !force) {
-    throw new Error(`package.json already declares ${identity.name} as ${current}; rerun timds consumer init with --force to select ${releaseRange}`);
+    throw new Error(`package.json already declares ${identity.name} as ${current}; rerun ${command} with --force to select ${releaseRange}`);
   }
   if (packageJson.scripts?.timds && packageJson.scripts.timds !== "timds" && !force) {
-    throw new Error(`package.json scripts.timds is already ${JSON.stringify(packageJson.scripts.timds)}; rerun timds consumer init with --force to replace it`);
+    throw new Error(`package.json scripts.timds is already ${JSON.stringify(packageJson.scripts.timds)}; rerun ${command} with --force to replace it`);
   }
   if (packageJson.dependencies?.[identity.name]) {
     delete packageJson.dependencies[identity.name];
@@ -585,15 +585,14 @@ async function planMcp(repoRoot, desired, recorded, force) {
   return { mcpPath, content, changed, kept, managed, statuses };
 }
 
-async function ensureGitignoreLines(repoRoot, lines) {
+async function planGitignoreLines(repoRoot, lines) {
   const gitignorePath = path.join(repoRoot, ".gitignore");
   const existing = (await readText(gitignorePath)) ?? "";
   const present = new Set(existing.split(/\r?\n/).map((line) => line.trim()));
   const missing = lines.filter((line) => !present.has(line));
-  if (!missing.length) return false;
+  if (!missing.length) return null;
   const prefix = existing && !existing.endsWith("\n") ? "\n" : "";
-  await fs.writeFile(gitignorePath, `${existing}${prefix}${missing.join("\n")}\n`, "utf8");
-  return true;
+  return { path: ".gitignore", content: `${existing}${prefix}${missing.join("\n")}\n` };
 }
 
 /**
@@ -618,6 +617,42 @@ function consumerInstallationRecord(files, launchPlan, mcpPlan) {
     launchConfigurations: launchPlan.managed,
     mcpServers: mcpPlan.managed,
   };
+}
+
+/**
+ * Plan init's installation against a supplied manifest without regenerating
+ * it or requiring its pin to be in the index yet. Migration uses this before
+ * removing the submodule; force applies only to the installation's files.
+ */
+export async function planConsumerInstallation(repoRoot, manifest, { force = false, portalUrl = null, command = "timds consumer init" } = {}) {
+  const validated = validateConsumerManifest(manifest);
+  const installationPath = path.join(repoRoot, CONSUMER_INSTALLATION_PATH);
+  const installation = (await readJsonFile(installationPath, CONSUMER_INSTALLATION_PATH)) ?? {};
+  const previous = installation.consumer && typeof installation.consumer === "object" ? installation.consumer : {};
+  const defaultBranch = await consumerDefaultBranch(repoRoot);
+  const { files, filePlan, launchPlan, mcpPlan } = await planConsumerManagedState(repoRoot, validated, previous, {
+    defaultBranch, force, portalUrl: portalUrl ?? await installedPortalUrl(repoRoot),
+  });
+  refuseCustomizedFiles(filePlan.conflicts, command);
+  const published = consumerPinMode(validated.designSystem) === "published";
+  const packagePlan = await planPackageJson(repoRoot, force, { published, command });
+  const gitignorePlan = await planGitignoreLines(repoRoot, ["node_modules/", ".timds/preview/", ...(published ? [`${validated.designSystem.path}/`] : [])]);
+  installation.consumer = consumerInstallationRecord(files, launchPlan, mcpPlan);
+  const writes = [
+    ...filePlan.writes,
+    ...(packagePlan.changed ? [{ path: "package.json", content: packagePlan.content }] : []),
+    ...(launchPlan.changed ? [{ path: CONSUMER_LAUNCH_PATH, content: launchPlan.content }] : []),
+    ...(mcpPlan.changed ? [{ path: CONSUMER_MCP_PATH, content: mcpPlan.content }] : []),
+    ...(gitignorePlan ? [gitignorePlan] : []),
+    { path: CONSUMER_INSTALLATION_PATH, content: toJson(installation) },
+  ];
+  return { writes, defaultBranch, launchPlan, mcpPlan, packagePlan, installation: installation.consumer };
+}
+
+/** Apply the already validated installation plan; never writes the manifest. */
+export async function applyConsumerInstallation(repoRoot, plan) {
+  for (const file of plan.writes) await writeFile(path.join(repoRoot, file.path), file.content);
+  return plan.writes.map((file) => file.path);
 }
 
 // ---------------------------------------------------------------------------
@@ -673,43 +708,15 @@ export async function initializeConsumer(rootInput = process.cwd(), { force = fa
   let general = [];
   if (!keepManifest) ({ manifest, todos, general } = await buildConsumerManifest(repoRoot, designSystemPath, published));
 
-  const installationPath = path.join(repoRoot, CONSUMER_INSTALLATION_PATH);
-  const installation = (await readJsonFile(installationPath, CONSUMER_INSTALLATION_PATH)) ?? {};
-  const previous = installation.consumer && typeof installation.consumer === "object" ? installation.consumer : {};
-  const defaultBranch = await consumerDefaultBranch(repoRoot);
-
-  const { files, filePlan, launchPlan, mcpPlan } = await planConsumerManagedState(repoRoot, manifest, previous, { defaultBranch, force, portalUrl });
-  refuseCustomizedFiles(filePlan.conflicts, "timds consumer init");
-  const writes = filePlan.writes;
-  const packagePlan = await planPackageJson(repoRoot, force, { published: Boolean(published) });
+  const plan = await planConsumerInstallation(repoRoot, manifest, { force, portalUrl });
+  const { defaultBranch, launchPlan, mcpPlan, packagePlan } = plan;
 
   const written = [];
   if (!keepManifest) {
     await writeFile(manifestPath, toJson(manifest));
     written.push(CONSUMER_MANIFEST_FILE);
   }
-  for (const file of writes) {
-    await writeFile(path.join(repoRoot, file.path), file.content);
-    written.push(file.path);
-  }
-  if (packagePlan.changed) {
-    await writeFile(packagePlan.packagePath, packagePlan.content);
-    written.push("package.json");
-  }
-  if (launchPlan.changed) {
-    await writeFile(launchPlan.launchPath, launchPlan.content);
-    written.push(CONSUMER_LAUNCH_PATH);
-  }
-  if (mcpPlan.changed) {
-    await writeFile(mcpPlan.mcpPath, mcpPlan.content);
-    written.push(CONSUMER_MCP_PATH);
-  }
-  // The fetched bundle never enters git; the ignore line goes in before the first sync.
-  if (await ensureGitignoreLines(repoRoot, ["node_modules/", ".timds/preview/", ...(published ? [`${designSystemPath}/`] : [])])) written.push(".gitignore");
-
-  installation.consumer = consumerInstallationRecord(files, launchPlan, mcpPlan);
-  await writeFile(installationPath, toJson(installation));
-  written.push(CONSUMER_INSTALLATION_PATH);
+  written.push(...await applyConsumerInstallation(repoRoot, plan));
 
   output(keepManifest
     ? `Kept the existing ${CONSUMER_MANIFEST_FILE}; rerun with --force to regenerate it from the app folders.`
@@ -767,7 +774,7 @@ export async function initializeConsumer(rootInput = process.cwd(), { force = fa
     todos: checklist,
     keptLaunchConfigurations: launchPlan.kept,
     keptMcpServers: mcpPlan.kept,
-    installation: installation.consumer,
+    installation: plan.installation,
     published,
     synced,
   };
