@@ -725,6 +725,52 @@ only the base URL. `timds doctor` reports the kit's readiness in one line and
 `timds brand` prints it in full, with the fix for every gap; `--json` returns
 the kit itself.
 
+### Publish the portal release
+
+After the source commit reaches the connected repository's source branch, an
+operator can release its exact build:
+
+```bash
+npm run timds -- auth login
+npm run timds -- publish
+```
+
+`publish` builds and checks, pushes `artifact.publishRef`, then calls
+`POST /api/timds/publish` with the local version, source commit and content digest.
+The ref push is refused unless the checkout commit is the remote default-branch
+head, since the portal only promotes that commit and the push replaces the live ref.
+It needs an unbound operator CLI token; set `TIMDS_ACCESS_TOKEN` in CI. Client-bound
+designer/website tokens and consumer read credentials cannot promote releases.
+The command never changes the source version or enables automatic updates.
+
+With **Automatic updates** on for the system, the response names its public root
+and pinned release URLs. The command verifies the current root's
+`.timds-artifact.json` before succeeding. With the setting off it succeeds with
+an `awaiting-operator` candidate, prints the portal action and leaves the root
+unchanged. Publishing an already live identical stamp is a successful no-op.
+`--json` prints the result for automation; returned bundle URLs require the system
+to supply a consumer bundle.
+
+The local stamp lives at `.timds/cache/.timds-artifact.json`, outside `dist/`,
+and is written only after the ref push succeeds. Its SHA-256 covers the normalized
+publication snapshot (artifact file paths, byte counts and hashes, source assets,
+documents, components, public manifest, media and authored tokens); build times
+and repository IDs do not participate. Source contract files must be committed;
+their bytes are hashed from the commit's blobs, so checkout line-ending or LFS
+filters cannot change the digest, and every file in `dist/` is pushed even when a
+Git ignore rule matches it.
+Stale local stamps, mismatched remote candidates and unavailable public bytes
+fail the command. After a successful ref push, retry promotion without changing
+the build using `npm run timds -- publish --skip-build --skip-push`.
+
+Managed standalone release workflows finish CDN extraction, push the exact
+artifact, and then run that promotion command as their final publication step.
+They require an operator `TIMDS_ACCESS_TOKEN`; a missing secret fails the run
+before the version advances, and `upgrade` says so when it refreshes the workflow.
+`extract --publish` remains the separate CDN upload operation. Adopt older stock
+automation with `upgrade --auto-release`; ordinary upgrades refresh already
+adopted stock files and refuse customized workflows unless replacement is forced.
+
 Extraction keys on HTML semantics — `main`, `section`, `h1`/`h2`, `table`,
 `figure`, `pre` — and needs no configuration. Content the vocabulary does not
 recognize is captured as untyped prose and counted rather than dropped; a rising

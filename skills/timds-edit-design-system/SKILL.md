@@ -341,9 +341,19 @@ contrast, overflow, focus states, and the requested change.
 When a standalone `timds.json` declares a `consumer`, treat the Design System
 release as the source of the consumer's submodule update. Every accepted change
 on `main` becomes a patch release: CI synchronizes the version, publishes the
-exact commit, and only then opens or refreshes a gitlink-only pull request in
+exact commit, requests portal publication, and only then opens or refreshes a gitlink-only pull request in
 the consumer. Tags are not required. `scripts/release.sh` remains available for
 an intentional explicit version advance.
+
+Portal promotion respects the system's Automatic updates setting. ON publishes
+and verifies the public root; OFF reports a candidate waiting for an operator.
+When explicitly authorized to release, run `npm run timds -- publish`: it builds,
+pushes the artifact ref, and sends its local stamp using an unbound operator
+token (`auth login` or `TIMDS_ACCESS_TOKEN`). It prints the root and pinned URLs,
+or the portal action for a waiting candidate. A repeated live stamp is a no-op;
+stale or mismatched bytes fail. `extract --publish` only uploads CDN files. Do
+not enable Automatic updates or substitute client-bound/consumer credentials
+to get publication through.
 
 The consumer owns its `.gitmodules` record and reviewed gitlink. Prefer a
 same-host relative submodule URL, and never merge the consumer pull request or

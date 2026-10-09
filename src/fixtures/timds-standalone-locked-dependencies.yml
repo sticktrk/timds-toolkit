@@ -1,0 +1,147 @@
+name: TimDS design system
+
+# Pull requests validate. Every accepted update to main becomes a release:
+# prepare-release advances the patch exactly once unless the pull request
+# explicitly advanced the version, publish ships that exact commit, and the
+# final reusable job advances the linked consumer pin. Tags are not required.
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: timds-design-system-${{ github.event_name == 'pull_request' && github.ref || 'main-release' }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run timds -- dependencies check
+      - run: npm run check:versions
+      - run: npm run test:release
+      - run: npm run timds -- check
+
+  prepare-release:
+    if: github.event_name != 'pull_request'
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    outputs:
+      consumer_branch: ${{ steps.prepare.outputs.consumer_branch }}
+      consumer_path: ${{ steps.prepare.outputs.consumer_path }}
+      consumer_repository: ${{ steps.prepare.outputs.consumer_repository }}
+      sha: ${{ steps.commit.outputs.sha }}
+      version: ${{ steps.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'push' && github.sha || 'main' }}
+          fetch-depth: 0
+      - name: Prepare the merged release
+        id: prepare
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          RELEASE_NOTE: ${{ github.event.head_commit.message }}
+        run: |
+          set -euo pipefail
+
+          consumer_repository="$(node -p "require('./timds.json').consumer?.repository || ''")"
+          consumer_branch="$(node -p "require('./timds.json').consumer?.branch || 'main'")"
+          consumer_path="$(node -p "require('./timds.json').consumer?.path || 'design-system'")"
+          {
+            echo "consumer_repository=${consumer_repository}"
+            echo "consumer_branch=${consumer_branch}"
+            echo "consumer_path=${consumer_path}"
+          } >> "$GITHUB_OUTPUT"
+
+          if [[ "$EVENT_NAME" == "push" && -n "${BEFORE_SHA:-}" && ! "$BEFORE_SHA" =~ ^0+$ ]]; then
+            previous_version="$(git show "${BEFORE_SHA}:timds.json" | node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).version")"
+            node scripts/prepare-merge-release.mjs \
+              --previous "$previous_version" \
+              --fallback-note "$RELEASE_NOTE" \
+              --github-output "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "version=$(node -p "require('./timds.json').version")" >> "$GITHUB_OUTPUT"
+            echo "Initial push or manual dispatch publishes the selected main commit without changing its version."
+          fi
+      - name: Verify and commit the synchronized version
+        id: commit
+        env:
+          CHANGED: ${{ steps.prepare.outputs.changed }}
+          VERSION: ${{ steps.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          npm run check:versions
+          npm run test:release
+          git diff --check
+          if [[ "$CHANGED" == "true" ]]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add CHANGELOG.md package.json package-lock.json timds.json
+            git commit -m "Release ${VERSION}"
+            git push origin HEAD:main
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  publish:
+    needs: prepare-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.prepare-release.outputs.sha }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run timds -- dependencies check
+      - run: npm run timds -- check
+      - name: Publish exact TimDS artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh auth setup-git
+          npm exec -- timds-publish-artifact
+      - name: Publish machine index to the CDN
+        env:
+          TIMDS_ACCESS_TOKEN: ${{ secrets.TIMDS_ACCESS_TOKEN }}
+        run: |
+          if [[ -z "${TIMDS_ACCESS_TOKEN:-}" ]]; then
+            echo "TIMDS_ACCESS_TOKEN not configured; skipping CDN publication."
+            exit 0
+          fi
+          npm run timds -- extract --skip-build --publish
+
+  pin-consumer:
+    needs: [prepare-release, publish]
+    if: needs.prepare-release.outputs.consumer_repository != ''
+    uses: ./.github/workflows/update-consumer-submodule.yml
+    with:
+      branch: ${{ needs.prepare-release.outputs.consumer_branch }}
+      path: ${{ needs.prepare-release.outputs.consumer_path }}
+      repository: ${{ needs.prepare-release.outputs.consumer_repository }}
+      sha: ${{ needs.prepare-release.outputs.sha }}
+      version: ${{ needs.prepare-release.outputs.version }}
+    secrets: inherit

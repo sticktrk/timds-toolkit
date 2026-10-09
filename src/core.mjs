@@ -25,6 +25,8 @@ import { checkRuntimeDependencies, upgradeConsumerToRelease, upgradeToRelease } 
 import { migrateVideoComponents } from "./video-migration.mjs";
 import { acceptsToolkitReleaseRange, assertVideoContractRuntime, runtimeIdentity, toolkitReleaseRange } from "./runtime.mjs";
 import { publishExtractedIndex } from "./artifact.mjs";
+import { MAX_ARTIFACT_FILE_BYTES, collectArtifactFiles } from "./artifact-files.mjs";
+import { publicStampUrl, publishArtifactRef, publishRelease } from "./publish.mjs";
 import { buildBundle, describeBundle, normalizeBundleConfig } from "./bundle.mjs";
 import { DESIGNS_SOURCE_DIRECTORY, buildDesigns, checkDesigns, declaredClasses, readDesignCatalog, renderDesigns } from "./designs.mjs";
 import { STARTER_RECORD_FILE, describeStarterSync, forceReplaceable, isStarterSystem, knownStarterHashes, planStockFile, readStarterRecord, recordFreshStarter, recordStarterFiles, starterPlumbingFiles, starterSyncPaths, syncStarter } from "./starter.mjs";
@@ -49,11 +51,6 @@ import {
   voiceoverVideoWorkspace,
 } from "./video.mjs";
 
-const MAX_ARTIFACT_FILE_BYTES = 12_000_000;
-const MAX_ARTIFACT_FILES = 2_000;
-const MAX_ARTIFACT_TOTAL_BYTES = 80_000_000;
-const MAX_DIRECTORY_DEPTH = 20;
-const MAX_SCANNED_ENTRIES = 5_000;
 const supportedSchemaVersions = new Set([1, 2]);
 const workspaceCommandNames = ["install", "dev", "build", "check"];
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -88,8 +85,10 @@ const starterScriptFiles = Object.freeze([
 ]);
 const legacyStandaloneAutomationHashes = new Map([
   [".github/workflows/timds-design-system.yml", [
+    "44c91cf8fd9ae5c9712ff1bc69605d182470b54d76f14292af2c7a714eb8a95a",
     "203ba2218b7e9d9216166707d89707a8740c8e1835f0a1e3bd31e19768c34992",
     "3d27e370cc596307a73a71617f95e1314c24de0229716af4cb9d2384dee5ae32",
+    "4a65fa9b0b70ec8becf911f5691cee492e08a7f376c5dd577925d44799ea7abc",
   ]],
   [".github/workflows/update-consumer-submodule.yml", ["a93c345503d5c344b2ab7b3aa37ee901e71d48608ca94df5b145235f21a5ef6f"]],
   ["scripts/release.mjs", ["ba1b6ec7e4022a7104d7d0c7e2497fb61a839c37394395ea3bdaa979def1260a"]],
@@ -381,48 +380,6 @@ export async function loadWorkspace(repoRootInput = process.cwd()) {
   await readJsonObject(path.join(designSystemRoot, "tokens.json"), "tokens.json");
   const { catalog: mediaCatalog, catalogPath: mediaCatalogPath } = await readMediaCatalog(designSystemRoot);
   return { designSystemRoot, layout, manifest, manifestPath, mediaCatalog, mediaCatalogPath, repoRoot, scopePath };
-}
-
-async function collectArtifactFiles(root) {
-  const files = [];
-  let scannedEntries = 0;
-  let totalBytes = 0;
-  const walk = async (directory, depth) => {
-    if (depth > MAX_DIRECTORY_DEPTH) throw new Error("design-system/dist exceeds the directory depth limit");
-    const entries = (await fs.readdir(directory, { withFileTypes: true })).sort((left, right) => left.name.localeCompare(right.name));
-    for (const entry of entries) {
-      scannedEntries += 1;
-      if (scannedEntries > MAX_SCANNED_ENTRIES) throw new Error("design-system/dist contains too many entries");
-      const absolutePath = path.join(directory, entry.name);
-      const info = await fs.lstat(absolutePath);
-      if (info.isSymbolicLink()) throw new Error("design-system/dist cannot contain symbolic links");
-      if (info.isDirectory()) {
-        await walk(absolutePath, depth + 1);
-        continue;
-      }
-      if (!info.isFile()) continue;
-      if (info.size > MAX_ARTIFACT_FILE_BYTES) {
-        throw new Error(`${path.relative(root, absolutePath)} exceeds the ${MAX_ARTIFACT_FILE_BYTES}-byte artifact file limit`);
-      }
-      totalBytes += info.size;
-      if (totalBytes > MAX_ARTIFACT_TOTAL_BYTES) {
-        throw new Error(`design-system/dist exceeds the ${MAX_ARTIFACT_TOTAL_BYTES}-byte total limit`);
-      }
-      if (files.length >= MAX_ARTIFACT_FILES) {
-        throw new Error(`design-system/dist contains more than ${MAX_ARTIFACT_FILES} files`);
-      }
-      const content = await fs.readFile(absolutePath);
-      files.push({
-        absolutePath,
-        bytes: info.size,
-        content,
-        path: path.relative(root, absolutePath).split(path.sep).join("/"),
-        sha256: createHash("sha256").update(content).digest("hex"),
-      });
-    }
-  };
-  await walk(root, 0);
-  return { files, totalBytes };
 }
 
 function externalReference(value) {
@@ -1271,7 +1228,7 @@ function parseArguments(argv) {
     }
     const [rawName, inlineValue] = value.replace(/^--?/, "").split("=", 2);
     const name = ({ m: "message", p: "port" })[rawName] || rawName.replace(/-([a-z])/g, (_match, letter) => letter.toUpperCase());
-    if (["json", "apply", "autoRelease", "dryRun", "force", "help", "list", "ownRuntime", "dependencyPrs", "noBuild", "noOpen", "noPr", "noPush", "plan", "prepare", "publish", "render", "requireCleanDist", "serve", "silent", "skipBuild", "standalone"].includes(name)) {
+    if (["json", "apply", "autoRelease", "dryRun", "force", "help", "list", "ownRuntime", "dependencyPrs", "noBuild", "noOpen", "noPr", "noPush", "plan", "prepare", "publish", "render", "requireCleanDist", "serve", "silent", "skipBuild", "skipPush", "standalone"].includes(name)) {
       options[name] = true;
       continue;
     }
@@ -1441,7 +1398,7 @@ function machineSummary({ counts }) {
 }
 
 function helpText() {
-  return `TimDS local design-system workflow\n\nUsage:\n  timds init [--root PATH] [--standalone] [--name NAME] [--system-id ID] [--description TEXT] [--json] [--consumer-repository OWNER/REPO] [--consumer-branch BRANCH] [--consumer-path PATH] [--force]\n  timds upgrade [--root PATH] [--auto-release] [--dependency-prs] [--force]\n  timds upgrade --version VERSION [--own-runtime] [--root PATH]\n  timds dependencies check [--root PATH]\n  timds auth login [--token TOKEN] [--portal-url URL]\n  timds auth status [--portal-url URL]\n  timds auth logout [--portal-url URL]\n  timds defaults [--root PATH] [--apply]\n  timds designs init [--root PATH] [--force]\n  timds starter sync [--root PATH] [--force PATH...]\n  timds doctor [--root PATH]\n  timds brand [--root PATH] [--json]\n  timds dev [--root PATH]\n  timds check [--root PATH] [--skip-build] [--require-clean-dist]\n  timds extract [--root PATH] [--skip-build] [--publish]\n  timds preview [--root PATH] [--port 4400] [--no-build]\n  timds diff [--root PATH] [--base origin/main]\n  timds assets list [--root PATH]\n  timds assets add FILE [--key LOGICAL_KEY] [--title TEXT] [--tags a,b]\n  timds assets backfill-metadata [--root PATH] [--force]\n  timds assets publish [--root PATH]\n  timds assets pull KEY [--output PATH] [--force]\n  timds video --help\n  timds mcp [edit] [--root PATH]\n  timds mcp read [--root PATH | --published URL]\n  timds submit --message "Change summary" [--dry-run] [--no-push] [--no-pr]\n  timds consumer check [--root PATH] [--app NAME] [--base REF]\n  timds consumer sync [--root PATH]\n  timds consumer update [VERSION] [--root PATH]\n  timds consumer migrate [--version VERSION] [--url URL] [--root PATH] [--force] [--skip-sync]\n  timds consumer preview --app NAME [--root PATH] [--base REF] [--output DIR] [--publish] [--pull-request N]\n  timds consumer init [--root PATH] [--system ID] [--version VERSION] [--url URL] [--force] [--skip-install] [--portal-url URL]\n  timds consumer scaffold emdash --root PATH --design-system GIT_URL [--stylesheet PATH]... [--site-url URL] [--skip-install]\n  timds consumer notes [--root PATH] [--app NAME] [--pull-request N] [--all] [--json]\n  timds consumer notes resolve ID [ID...] [--commit SHA] [--dismiss]\n\nCheck and extract derive index.json, tokens.json, brand.json (each font role with the files or font service that provide it), formats.json (from src/formats.json when the system keeps one), llms.txt (the brand essentials and the page directory), llms-full.txt, and per-page Markdown from the built artifact so agents, pipelines, and anyone given the system's public link can read the system without scraping HTML or CSS. Brand prints the derived brand kit in plain language with a fix for every gap. Extract --publish uploads the index, tokens, brand kit, formats, llms.txt, llms-full.txt, the per-page Markdown mirrors, a .timds-artifact.json provenance stamp, and the artifact files the index and the kit reference (logos, imagery, font files) to the system's stable CDN prefix through the portal, so pipelines and agents consume the system from one stable URL. A manifest with bundle.include globs also gets a consumer bundle: the stylesheets, scripts, and assets a website loads, copied into the artifact under their source paths with a bundle.json of digests, and published under the current prefix and an immutable v/<version>/ prefix a website pins. Large public media is copied into ignored media-local/ for authoring. assets add measures timed-media duration and dimensions before upload; backfill-metadata repairs older catalogs from their stable public URLs without re-uploading them. Designs init adds the website-designs contract to an existing Design System: whole pages under src/designs/ in plain HTML on the system's stylesheets, built to /designs/ and checked for portability, so an engineer can port them to any production stack; a fresh scaffold already has it. Starter sync brings a starter-based system up to the installed release's scaffold and opts it into doing so on every upgrade: stock scripts and viewer stylesheets are refreshed while unmodified, new views, planned pages, and asset formats are merged into src/site.json and src/formats.json without touching what the client declared, and the overview fragments the starter mirrors are written for views the sync adds; in a terminal the sync asks about each customized stock script or stylesheet (keep, replace with stock, or see the diff first), otherwise they are reported and replaced only when --force names them one by one (an overview fragment this system wrote is never replaced), the sync refuses to run over uncommitted changes to the files it writes, and it is rolled back if check fails afterwards. Video-enabled systems keep client rules and production data in the Design System while TimDS owns validation, voiceover orchestration, Remotion rendering, and packaging. Mcp serves the Design System editing tools (guide, workspace description, guarded file reads and writes, check, derived layer, media catalog) over stdio for an MCP-capable agent; protected tooling and generated paths stay read-only. Mcp read serves the consumer read tools (brand roles, tokens, guidance search, pages, media catalog, gap reports) over the derived layer of the current checkout or of a published base URL. Submit creates a review branch and draft pull request. Consumer commands run in a product repository that pins a Design System (a published version fetched by npm install into the gitignored design-system directory, or the design-system git submodule) and declares its apps in timds.consumer.json: check validates the manifest, the pin, and that a branch only touches the declared design surface; sync fetches the pinned published bundle, verifying every digest, and update moves the pin to a version or the current release; migrate replaces the submodule with a published pin at the version the checkout declared, removing the gitlink, .gitmodules entry, and checkout, and lists the product files that still mention the submodule; preview captures each app's routes for review; init writes the manifest skeleton (with --system ID, a published pin and the postinstall sync), the consumer skill, the preview and designer-change workflows, and the read MCP entry; scaffold emdash creates a new EmDash CMS site repository that pins a Design System as that submodule, reads its stylesheets and tokens from the pin, and is adopted the way init adopts a product; notes lists the designer's notes on a pull request's preview and resolves them once addressed.`;
+  return `TimDS local design-system workflow\n\nUsage:\n  timds init [--root PATH] [--standalone] [--name NAME] [--system-id ID] [--description TEXT] [--json] [--consumer-repository OWNER/REPO] [--consumer-branch BRANCH] [--consumer-path PATH] [--force]\n  timds upgrade [--root PATH] [--auto-release] [--dependency-prs] [--force]\n  timds upgrade --version VERSION [--own-runtime] [--root PATH]\n  timds dependencies check [--root PATH]\n  timds auth login [--token TOKEN] [--portal-url URL]\n  timds auth status [--portal-url URL]\n  timds auth logout [--portal-url URL]\n  timds defaults [--root PATH] [--apply]\n  timds designs init [--root PATH] [--force]\n  timds starter sync [--root PATH] [--force PATH...]\n  timds doctor [--root PATH]\n  timds brand [--root PATH] [--json]\n  timds dev [--root PATH]\n  timds check [--root PATH] [--skip-build] [--require-clean-dist]\n  timds extract [--root PATH] [--skip-build] [--publish]\n  timds publish [--root PATH] [--skip-build] [--skip-push] [--portal-url URL] [--json]\n  timds preview [--root PATH] [--port 4400] [--no-build]\n  timds diff [--root PATH] [--base origin/main]\n  timds assets list [--root PATH]\n  timds assets add FILE [--key LOGICAL_KEY] [--title TEXT] [--tags a,b]\n  timds assets backfill-metadata [--root PATH] [--force]\n  timds assets publish [--root PATH]\n  timds assets pull KEY [--output PATH] [--force]\n  timds video --help\n  timds mcp [edit] [--root PATH]\n  timds mcp read [--root PATH | --published URL]\n  timds submit --message "Change summary" [--dry-run] [--no-push] [--no-pr]\n  timds consumer check [--root PATH] [--app NAME] [--base REF]\n  timds consumer sync [--root PATH]\n  timds consumer update [VERSION] [--root PATH]\n  timds consumer migrate [--version VERSION] [--url URL] [--root PATH] [--force] [--skip-sync]\n  timds consumer preview --app NAME [--root PATH] [--base REF] [--output DIR] [--publish] [--pull-request N]\n  timds consumer init [--root PATH] [--system ID] [--version VERSION] [--url URL] [--force] [--skip-install] [--portal-url URL]\n  timds consumer scaffold emdash --root PATH --design-system GIT_URL [--stylesheet PATH]... [--site-url URL] [--skip-install]\n  timds consumer notes [--root PATH] [--app NAME] [--pull-request N] [--all] [--json]\n  timds consumer notes resolve ID [ID...] [--commit SHA] [--dismiss]\n\nCheck and extract derive index.json, tokens.json, brand.json (each font role with the files or font service that provide it), formats.json (from src/formats.json when the system keeps one), llms.txt (the brand essentials and the page directory), llms-full.txt, and per-page Markdown from the built artifact so agents, pipelines, and anyone given the system's public link can read the system without scraping HTML or CSS. Brand prints the derived brand kit in plain language with a fix for every gap. Extract --publish uploads the index, tokens, brand kit, formats, llms.txt, llms-full.txt, the per-page Markdown mirrors, a .timds-artifact.json provenance stamp, and the artifact files the index and the kit reference (logos, imagery, font files) to the system's stable CDN prefix through the portal, so pipelines and agents consume the system from one stable URL. A manifest with bundle.include globs also gets a consumer bundle: the stylesheets, scripts, and assets a website loads, copied into the artifact under their source paths with a bundle.json of digests, and published under the current prefix and an immutable v/<version>/ prefix a website pins. Large public media is copied into ignored media-local/ for authoring. assets add measures timed-media duration and dimensions before upload; backfill-metadata repairs older catalogs from their stable public URLs without re-uploading them. Designs init adds the website-designs contract to an existing Design System: whole pages under src/designs/ in plain HTML on the system's stylesheets, built to /designs/ and checked for portability, so an engineer can port them to any production stack; a fresh scaffold already has it. Starter sync brings a starter-based system up to the installed release's scaffold and opts it into doing so on every upgrade: stock scripts and viewer stylesheets are refreshed while unmodified, new views, planned pages, and asset formats are merged into src/site.json and src/formats.json without touching what the client declared, and the overview fragments the starter mirrors are written for views the sync adds; in a terminal the sync asks about each customized stock script or stylesheet (keep, replace with stock, or see the diff first), otherwise they are reported and replaced only when --force names them one by one (an overview fragment this system wrote is never replaced), the sync refuses to run over uncommitted changes to the files it writes, and it is rolled back if check fails afterwards. Video-enabled systems keep client rules and production data in the Design System while TimDS owns validation, voiceover orchestration, Remotion rendering, and packaging. Mcp serves the Design System editing tools (guide, workspace description, guarded file reads and writes, check, derived layer, media catalog) over stdio for an MCP-capable agent; protected tooling and generated paths stay read-only. Mcp read serves the consumer read tools (brand roles, tokens, guidance search, pages, media catalog, gap reports) over the derived layer of the current checkout or of a published base URL. Submit creates a review branch and draft pull request. Consumer commands run in a product repository that pins a Design System (a published version fetched by npm install into the gitignored design-system directory, or the design-system git submodule) and declares its apps in timds.consumer.json: check validates the manifest, the pin, and that a branch only touches the declared design surface; sync fetches the pinned published bundle, verifying every digest, and update moves the pin to a version or the current release; migrate replaces the submodule with a published pin at the version the checkout declared, removing the gitlink, .gitmodules entry, and checkout, and lists the product files that still mention the submodule; preview captures each app's routes for review; init writes the manifest skeleton (with --system ID, a published pin and the postinstall sync), the consumer skill, the preview and designer-change workflows, and the read MCP entry; scaffold emdash creates a new EmDash CMS site repository that pins a Design System as that submodule, reads its stylesheets and tokens from the pin, and is adopted the way init adopts a product; notes lists the designer's notes on a pull request's preview and resolves them once addressed.`;
 }
 
 export async function runCli(argv) {
@@ -1666,6 +1623,9 @@ export async function runCli(argv) {
     output(`Agent skill: ${result.skillDestination}`);
     if (result.releaseAutomationChanges.length) {
       output(`Managed automation: ${result.releaseAutomationChanges.length} files updated`);
+      if (result.releaseAutomationChanges.includes(".github/workflows/timds-design-system.yml")) {
+        output("The release workflow now requires the TIMDS_ACCESS_TOKEN repository secret (an unbound operator token); without it a main push fails before any version advance or publication.");
+      }
     }
     if (result.starter) {
       output(result.starter.written.length ? `Starter: ${result.starter.written.length} file${result.starter.written.length === 1 ? "" : "s"} synced with the ${result.package.version} scaffold.` : "Starter: current.");
@@ -1738,6 +1698,24 @@ export async function runCli(argv) {
     }
     for (const warning of result.video?.warnings ?? []) output(`Warning: ${warning}`);
     if (result.video) output(`Video contract: ${result.video.productionCount} production${result.video.productionCount === 1 ? "" : "s"}`);
+    return result;
+  }
+  if (command === "publish") {
+    const workspace = options.skipBuild ? await loadWorkspace(root) : await checkWorkspace(root);
+    // The ref push already stamped this exact build; promotion reuses that stamp.
+    const stamp = options.skipPush ? undefined : await publishArtifactRef(workspace);
+    const result = await publishRelease(workspace, { portalUrl: options.portalUrl, stamp, token: options.token });
+    if (options.json) output(JSON.stringify(result, null, 2));
+    else if (result.status === "awaiting-operator") {
+      output(`Candidate ${result.candidate.version} (${result.candidate.contentDigest}) is awaiting operator publication; automatic updates is off.`);
+      output(`Open ${result.operatorUrl} and publish the candidate in Design Systems.`);
+    } else {
+      output(`${result.unchanged ? "Already published" : "Published"} ${result.systemId} ${result.version}: ${result.publicRoot}`);
+      output(`Pinned release: ${result.versionedUrls.root}`);
+      output(`Agent docs: ${result.versionedUrls.llmsTxt}`);
+      output(`Consumer bundle (when supplied): ${result.versionedUrls.bundleJson}`);
+      output(`Verified public stamp: ${publicStampUrl(result.publicRoot)}`);
+    }
     return result;
   }
   if (command === "extract") {

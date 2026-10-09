@@ -361,8 +361,15 @@ touch the declared component module.
   into a synchronized patch version after merge. Do not edit `version` by
   hand.
 - `__TIMDS_CLI__ submit` may create a branch, commit, push, and draft pull request only when the user asks.
-- In a standalone repository with managed automatic releases, merging is the
-  publication decision: every accepted `main` change becomes a patch release.
+- In a standalone repository with managed automatic releases, every accepted
+  `main` change becomes a patch release and a source-linked artifact candidate.
+  The portal's Automatic updates setting controls promotion: ON releases the
+  root; OFF requires operator publication in the portal.
+- Only when authorized, `__TIMDS_CLI__ publish` builds, pushes the artifact ref
+  and requests promotion with an unbound operator token. A matching live stamp
+  is a no-op; stale stamps fail. Success with ON verifies the public root;
+  OFF reports the waiting candidate and portal link. `extract --publish` is
+  a separate CDN upload and does not promote the root.
 - Only a DT Concepts operator may approve that merge or roll back a TimDS
   version.
 - When `timds.json.consumer` is present, publish the exact synchronized Design
