@@ -30,7 +30,7 @@ holds `timds.json`. Run `__TIMDS_CLI__` commands from the repository root.
 | `src/site.json` | The views and every page in them; the one place that declares which pages exist | Edit |
 | `src/formats.json` | Every print sheet and screen canvas the system produces, each tied to the page that shows it; previews and spec tables read it | Edit |
 | `src/pages/` | One content fragment per authored page | Edit |
-| `src/designs/` | Website designs: whole pages in plain HTML on the system's stylesheets, one directory per design | Edit |
+| `src/designs/` | Website designs: whole pages in HTML with JavaScript on the system's stylesheets, one directory per design | Edit |
 | `src/layout.html` | The shell every page shares: app bar, page navigation, content slot | Edit |
 | `src/styles/`, `src/assets/` | The system's styles, the viewer chrome, and small optimized assets | Edit |
 | `scripts/build.mjs`, `dev.mjs`, `check.mjs`, `viewer.mjs` | The `workspace` commands that `timds.json` runs and the renderer they share | Edit only when the viewer needs it |
@@ -106,7 +106,7 @@ framework's layout.
 ## Website designs
 
 The system is designer-owned down to the pages themselves. A whole website,
-or any set of screens, is designed here in plain HTML on the system's own
+or any set of screens, is designed here in HTML with JavaScript on the system's own
 stylesheets, and a backend engineer ports it to whatever runs production:
 EmDash, WordPress, a static host, anything. The design is the reference the
 port must match. It is never the production site itself, however simple the
@@ -123,12 +123,13 @@ clean.
   route segments. Link between pages by their eventual site route
   (`href="/contact"`); the build points those links at the design's place
   in the artifact and leaves every other reference as written.
-- A state is a file beside its page, never a script. `contact.sent.html` is
+- A named reference state is a file beside its page. `contact.sent.html` is
   `/contact` after the form is sent; `index.signed-in.html`,
   `orders.empty.html`, and `checkout.error.html` work the same way. Every
-  state a port must handle is a file a port can see.
-- A design uses only what the system defines. `check` refuses `<script>`,
-  inline event handlers, `<style>`, `style` attributes, a class no linked
+  named state is a file a port can inspect. JavaScript may also implement
+  interactive states, animations, navigation, and form demonstrations.
+- A design uses only what the system defines. JavaScript is allowed.
+  `check` refuses `<style>`, `style` attributes, a class no linked
   stylesheet declares, and a relative reference. When a page needs a style
   the system lacks, add it to `src/styles/system.css` and document it on
   `web/components`; never add it to the page.
@@ -136,6 +137,11 @@ clean.
   `/styles/system.css`) and never `viewer.css`, which is documentation
   chrome a product does not have. Reference imagery by site-absolute path
   or a published media URL.
+- Inline scripts, linked scripts (including modules), and event handlers are
+  allowed. Put shared scripts in `src/assets/` so they reach the artifact,
+  and link them by site-absolute path. Build script dependencies into the
+  artifact; TimDS does not bundle imports or execute JavaScript during checks.
+  Preview scripts run under the hosting sandbox and content policy.
 - Design the pages, not the content. A blog is its archive page and one
   sample post, not forty posts.
 - TimDS builds the designs to `dist/designs/<design>/<route>/index.html`

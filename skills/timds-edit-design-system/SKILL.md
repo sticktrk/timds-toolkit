@@ -93,7 +93,7 @@ only that layer, so structure the pages for it whatever the framework:
 ## Design whole pages in the system
 
 The system is designer-owned down to the pages. A website, or any set of
-screens, is designed under `src/designs/<design>/` in plain HTML on the
+screens, is designed under `src/designs/<design>/` in HTML with JavaScript on the
 system's own stylesheets; an engineer ports it to production. The design is
 the reference the port must match, never the production site itself.
 
@@ -101,17 +101,22 @@ the reference the port must match, never the production site itself.
   by route). An optional `layout.html` with `{{content}}` is the shell;
   `pages/` holds one file per route and state: `index.html` is `/`,
   `about.html` is `/about`, `contact/index.html` is `/contact`, and
-  `contact.sent.html` is `/contact` in its sent state. A state is always a
-  file, never a script.
+  `contact.sent.html` is `/contact` in its sent state. Named reference states
+  stay inspectable as files; JavaScript may also implement interactive states.
 - Link pages by their eventual site route (`href="/contact"`); the build
   points those links at the design's place in the artifact. Link the
   system's stylesheets by site-absolute path and never the viewer's
   documentation chrome.
-- Use only what the system defines. `check` refuses `<script>`, inline event
-  handlers, `<style>`, `style` attributes, a class no linked stylesheet
+- Use only what the system defines. JavaScript is allowed.
+  `check` refuses `<style>`, `style` attributes, a class no linked stylesheet
   declares, and a relative reference, and names the file and the class. When
   a page needs a style the system lacks, add it to the system's stylesheet
   and document it on the components page, then use it.
+- Inline scripts, linked scripts (including modules), and event handlers are
+  allowed. Put shared scripts in `src/assets/` so they reach the artifact,
+  and link them by site-absolute path. Build script dependencies into the
+  artifact; TimDS does not bundle imports or execute JavaScript during checks.
+  Preview scripts run under the hosting sandbox and content policy.
 - Design the pages, not the content: an archive page and one sample post,
   not forty posts.
 - The built pages sit under `/designs/<design>/` with a directory at

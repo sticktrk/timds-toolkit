@@ -902,10 +902,17 @@ test("the starter viewer renders its site model, and its build guards pages, pla
   const designsDocument = JSON.parse(await read("dist/designs.json"));
   assert.deepEqual(designsDocument.designs[0].pages.map((page) => [page.route, page.title, page.states.map((state) => state.name)]), [["/", "Home", ["default"]], ["/contact", "Contact", ["default", "sent"]]]);
 
+  // JavaScript survives the complete build/check/extraction path without running on the build host.
+  await fs.writeFile(path.join(repoRoot, "src/designs/website/pages/about.html"), '<section class="hero"><h1>About</h1><button onclick="this.textContent=\'Done\'">Try</button><script src="/assets/interactions.js"></script></section>\n');
+  await fs.mkdir(path.join(repoRoot, "src/assets"), { recursive: true });
+  await fs.writeFile(path.join(repoRoot, "src/assets/interactions.js"), 'document.body.dataset.ready = "true";');
+  assert.equal((await checkWorkspace(repoRoot)).designs.pageCount, 3);
+  assert.match(await read("dist/designs/website/about/index.html"), /<script src="\/assets\/interactions\.js"><\/script>/);
+  assert.equal(await read("dist/assets/interactions.js"), 'document.body.dataset.ready = "true";');
+
   // A design may use only what the system defines; check names the file and what it reached for.
   await fs.writeFile(path.join(repoRoot, "src/designs/website/pages/about.html"), '<section class="hero fancy"><h1>About</h1><p style="color:red">x</p><script>1</script></section>\n');
   await assert.rejects(checkWorkspace(repoRoot), (error) => /src\/designs\/website\/pages\/about\.html: uses classes the linked stylesheets do not declare \(fancy\)/.test(error.message)
-    && /about\.html: contains 1 <script> element/.test(error.message)
     && /about\.html: 1 element has a style attribute/.test(error.message));
   await fs.rm(path.join(repoRoot, "src/designs/website/pages/about.html"));
   // A state without its default page, and a view that would collide with the designs output, both stop the build.

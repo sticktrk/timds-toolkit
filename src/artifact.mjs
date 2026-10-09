@@ -48,6 +48,8 @@ const CONTENT_TYPES = {
   ".jpeg": "image/jpeg",
   ".jpg": "image/jpeg",
   ".json": "application/json",
+  ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
   ".md": "text/markdown; charset=utf-8",
   ".mp3": "audio/mpeg",
   ".mp4": "video/mp4",
@@ -168,7 +170,7 @@ export async function collectBrandKitFiles(kit, artifactRoot, files = new Map())
 }
 
 /**
- * The stylesheets and media the website designs load, added to `files` so a
+ * The stylesheets, scripts, and media the website designs load, added to `files` so a
  * consumer reading designs.json from the CDN can resolve every site-absolute
  * reference under its `base`. The HTML itself travels inside designs.json.
  */

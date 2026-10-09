@@ -113,10 +113,12 @@ change. Work only in the Design System the user gave you.
 - Edit authored tokens, source, documentation, components, navigation, and
   lightweight assets. Preserve the framework and visual language unless the
   user asks for a migration or redesign.
-- Website designs live under \`src/designs/<design>/\`: whole pages in plain
-  HTML on the system's stylesheets, one file per route and state
+- Website designs live under \`src/designs/<design>/\`: whole pages in HTML
+  with system stylesheets and optional JavaScript, one file per route and state
   (\`pages/contact.html\`, \`pages/contact.sent.html\`), with an optional
-  \`layout.html\` shell. \`run_check\` refuses scripts, inline styles,
+  \`layout.html\` shell. JavaScript interactions, script elements, and event
+  handlers are allowed. Put shared scripts in \`src/assets/\` and link them
+  by site-absolute path. \`run_check\` refuses inline styles,
   classes the linked stylesheets do not declare, and relative references,
   so a design uses only what the system defines. When a design needs a
   style the system lacks, add it to the system's stylesheet and document

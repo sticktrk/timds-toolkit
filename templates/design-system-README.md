@@ -39,7 +39,7 @@ tokens; the rest are declared as planned and built once someone writes them.
 | `src/site.json` | The views and their pages, authored or planned; drives the navigation and the overview |
 | `src/formats.json` | Every print sheet and screen canvas the system produces, each tied to its page; `{{formats:GROUP}}` tables and `{{canvas:ID}}` previews read it |
 | `src/pages/` | One content fragment per authored page, such as `src/pages/brand/color.html` |
-| `src/designs/` | Website designs: whole pages in plain HTML on the system's stylesheets, one directory per design, built to `/designs/` |
+| `src/designs/` | Website designs: whole pages in HTML with JavaScript on the system's stylesheets, one directory per design, built to `/designs/` |
 | `src/layout.html` | The shell every page shares |
 | `src/styles/system.css`, `src/styles/canvas.css`, `src/styles/viewer.css` | The system's own styles, the format previews, and the documentation chrome |
 | `src/assets/` | Small optimized assets such as logos, copied into the artifact |
@@ -53,11 +53,11 @@ does not watch files, so rerun `__TIMDS_CLI__ check` after an edit and reload.
 ## Website designs
 
 The system is designer-owned down to the pages. A whole website, or any set
-of screens, is designed under `src/designs/<design>/` in plain HTML on the
+of screens, is designed under `src/designs/<design>/` in HTML with JavaScript on the
 system's own stylesheets, one file per route and state
 (`pages/contact.html`, `pages/contact.sent.html`), and an engineer ports it to
 whatever runs production. `check` builds the designs to `/designs/` and
-refuses anything the system does not define: scripts, inline styles,
+allows JavaScript interactions and refuses inline styles,
 undeclared classes, relative references. The starter ships one sample design
 to replace; a system scaffolded before designs existed adopts them with
 `__TIMDS_CLI__ designs init`. `AGENTS.md` holds the rules.

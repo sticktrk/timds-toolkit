@@ -19,7 +19,7 @@ __IMPORTS__
 | Pages, posts, menus, media, site settings | The EmDash database | The admin at `/_emdash/admin`, or an agent through the site's EmDash MCP server at `/_emdash/api/mcp`. No pull request. |
 | Layouts, components, page templates, site styles | This repository | A draft pull request that stays inside the design surface in `timds.consumer.json`; review locally or through an enabled TimDS preview before merging. |
 | Colors, fonts, tokens, logos, brand guidance | The Design System repository | A pull request there, then the pin update here. |
-| The design of a page or route, and its states | The Design System repository, under `__DESIGN_SYSTEM_PATH__/dist/designs/` | The designer authors it there in plain HTML on the system's stylesheets; a developer ports it here. |
+| The design of a page or route, and its states | The Design System repository, under `__DESIGN_SYSTEM_PATH__/dist/designs/` | The designer authors it there in HTML with JavaScript on the system's stylesheets; a developer ports it here. |
 
 Content never needs a pull request, and the theme is never edited through the
 CMS. When a request mixes them, split it.

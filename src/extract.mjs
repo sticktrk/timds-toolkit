@@ -439,7 +439,7 @@ export function buildLlmsText(manifest, pages, { indexUrl, tokensUrl = null, bra
   if (tokensUrl) lines.push(`Design tokens: ${tokensUrl} — every CSS custom property the pages load, resolved by scope.`);
   if (brandUrl) lines.push(`Brand kit: ${brandUrl} — role colors and fonts, logos, and imagery for on-brand production.`);
   if (formatsUrl) lines.push(`Asset formats: ${formatsUrl} — every print sheet and screen canvas with its size, bleed, and safe margin.`);
-  if (designsUrl) lines.push(`Website designs: ${designsUrl} — whole pages as plain HTML on the system's stylesheets, the reference a product port must match.`);
+  if (designsUrl) lines.push(`Website designs: ${designsUrl} — whole pages as HTML with JavaScript on the system's stylesheets, the reference a product port must match.`);
   lines.push("");
   lines.push(...llmsEssentials(kit, formats));
   for (const view of [...new Set(pages.map((page) => page.view))]) {

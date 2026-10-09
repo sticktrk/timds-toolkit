@@ -1,4 +1,4 @@
-/** Website designs: whole pages authored in plain HTML on the system's stylesheets, the reference a product port must match. */
+/** Website designs: whole pages authored in HTML with JavaScript on the system's stylesheets, the reference a product port must match. */
 import type { Design, DesignPage, DesignPageState, DesignsDocument, SystemStamp } from "./derived.mjs";
 
 export type { Design, DesignPage, DesignPageState, DesignsDocument };
@@ -20,7 +20,7 @@ export type RenderedDesigns = {
   basePrefix: string;
   catalog: DesignCatalog;
   designs: RenderedDesign[];
-  /** Artifact-relative output path → HTML, the /designs/ directory page included. */
+  /** Artifact-relative output path → HTML or CSS, including the /designs/ directory and its stylesheet. */
   files: Map<string, string>;
   outputDirectory: string;
   pageCount: number;

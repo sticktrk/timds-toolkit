@@ -14,7 +14,7 @@
 //                 one URL
 //   formats.json  the asset format catalog: print sheets in inches, screen
 //                 canvases in pixels, each tied to the page that shows it
-//   designs.json  the website designs: every page state as plain HTML on the
+//   designs.json  the website designs: every page state as HTML with JavaScript on the
 //                 system's stylesheets, the reference a product port matches
 //
 // This is the surface a consumer — an MCP server, a render host, a pipeline —

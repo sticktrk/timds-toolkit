@@ -70,10 +70,10 @@ servers must keep stdout as a protocol stream.
 ### The derived layer (the consumer contract)
 
 `designs.mjs` owns website designs: whole pages a designer authors under
-`src/designs/<design>/pages/` in plain HTML on the system's stylesheets, one
+`src/designs/<design>/pages/` in HTML with JavaScript on the system's stylesheets, one
 file per route and state. It reads the catalog, renders the pages (layout
 shell, route rewriting under `/designs/<id>/`, a directory page) into `dist/`,
-enforces portability in `check` (no scripts, inline styles, undeclared
+enforces portability in `check` (no inline styles, undeclared
 classes, or relative references), and serializes `designs.json`. `check`
 always builds designs itself after the workspace build; the starter build
 calls the same function so `dev` shows them. `timds designs init` is the
