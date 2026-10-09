@@ -779,7 +779,8 @@ test("initializes opt-in consumer submodule automation", async (t) => {
   assert.doesNotMatch(workflow, /tag: \$\{\{/);
   const updater = await fs.readFile(path.join(repoRoot, ".github", "workflows", "update-consumer-submodule.yml"), "utf8");
   assert.match(updater, /TIMDS_CONSUMER_TOKEN/);
-  assert.match(updater, /git update-index --cacheinfo/);
+  assert.match(updater, /consumer update "\$DESIGN_SYSTEM_VERSION"/, "a published pin moves with the consumer's own toolkit");
+  assert.match(updater, /git update-index --cacheinfo/, "a submodule consumer still gets its gitlink advanced");
   assert.match(updater, /INPUT_SHA/);
   assert.match(updater, /declared_version/);
   assert.doesNotMatch(updater, /Resolve release tag/);
