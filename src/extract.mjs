@@ -346,7 +346,7 @@ export function buildLlmsText(manifest, pages, indexUrl, tokensUrl = null, brand
   lines.push(`Machine-readable index: ${indexUrl} — every page below also exists as \`index.md\`.`);
   if (tokensUrl) lines.push(`Design tokens: ${tokensUrl} — every CSS custom property the pages load, resolved by scope.`);
   if (brandUrl) lines.push(`Brand kit: ${brandUrl} — role colors and fonts, logos, and imagery for on-brand production.`);
-  if (designsUrl) lines.push(`Website designs: ${designsUrl} — whole pages as plain HTML on the system's stylesheets, the reference a product port must match.`);
+  if (designsUrl) lines.push(`Website designs: ${designsUrl} — whole pages as HTML with JavaScript on the system's stylesheets, the reference a product port must match.`);
   lines.push("");
   for (const view of [...new Set(pages.map((page) => page.view))]) {
     lines.push(`## ${view || "pages"}`, "");

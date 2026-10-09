@@ -504,7 +504,7 @@ against the extracted index:
 
 A Design System is designer-owned down to the pages. Under
 `src/designs/<design>/` a designer authors a whole website, or any set of
-screens, in plain HTML on the system's own stylesheets: `design.json` names
+screens, in HTML with JavaScript on the system's own stylesheets: `design.json` names
 it, an optional `layout.html` is the shell, and `pages/` holds one file per
 route and state (`index.html` is `/`, `contact.html` is `/contact`,
 `contact.sent.html` is `/contact` after the form is sent). A backend engineer
@@ -512,12 +512,17 @@ ports the design to whatever runs production; the design is the reference the
 port must match, never the production site itself.
 
 `check` builds the designs to `/designs/` and refuses anything the system does
-not define: `<script>`, inline handlers, `<style>`, `style` attributes, a
+not define: `<style>`, `style` attributes, a
 class no linked stylesheet declares, a relative reference. A design that
-passes needs only the system's stylesheets and its markup to port.
+passes carries the system's stylesheets, markup, and JavaScript interactions.
+Inline scripts, linked scripts (including modules), and event handlers are allowed.
+Place shared scripts in `src/assets/` so the workspace copies them into `dist/`,
+and link them by site-absolute path. TimDS does not execute scripts during checks
+or bundle their imports; publish self-contained scripts or build their dependencies
+into the artifact. Preview scripts run under the host's sandbox and content policy.
 `designs.json` beside `index.json` carries every page state's HTML and the
 files it loads; `list_designs` and `read_design` serve it to consumers, and
-`extract --publish` uploads it with the stylesheets and media it references.
+`extract --publish` uploads it with the stylesheets, scripts, and media it references.
 `@dtconcepts/timds/designs` exports the renderer (`buildDesigns`), the check
 (`checkDesigns`), and the catalog reader. A system scaffolded before designs
 existed adopts them with `timds designs init`.

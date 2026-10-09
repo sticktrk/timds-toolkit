@@ -1,4 +1,4 @@
-// Website designs: whole pages a designer authors in plain HTML on the
+// Website designs: whole pages a designer authors in HTML, CSS, and JavaScript on the
 // system's own stylesheets, kept in the Design System as the reference a
 // production port must match.
 //
@@ -12,9 +12,8 @@
 //   pages/contact/index.html   route /contact   default state
 //   pages/contact.sent.html    route /contact   state "sent"
 //
-// States are files, never scripts: a signed-in, empty, error, or sent view is
-// its own HTML file beside the default, so a port sees every state and an
-// agent can diff them.
+// Named reference states are HTML files beside the default so consumers can
+// inspect and diff them. JavaScript may also implement interactive states.
 //
 // TimDS owns the renderer and the portability rules; the client owns the
 // designs. The renderer is deliberately small: it fills the layout shell,
@@ -25,10 +24,10 @@
 // it the same way, so a system whose build script predates designs still
 // builds them.
 //
-// Portability is enforced by `check`: no scripts, no inline styles, no class
+// Portability is enforced by `check`: no inline styles, no class
 // the linked stylesheets do not declare, and no relative reference. A design
 // that passes uses nothing the system does not define, so an engineer porting
-// it to any stack needs only the system's stylesheets and the markup.
+// it to any stack carries the system's stylesheets, markup, and interactions.
 //
 // The built pages sit at <entry-dir>/designs/<id>/<route>/index.html (states
 // as <state>.html beside the default), excluded from guidance extraction, and
@@ -53,7 +52,7 @@ const MAX_REPORTED_PROBLEMS = 30;
 // Attributes that carry a reference a consumer must be able to resolve.
 const REFERENCE_ATTRIBUTES = ["href", "src", "action", "poster"];
 // Attributes the publisher uploads alongside designs.json; anchors are routes, not files.
-const FILE_REFERENCE_TAGS = new Set(["link", "img", "source", "video", "audio", "track", "object"]);
+const FILE_REFERENCE_TAGS = new Set(["link", "img", "source", "video", "audio", "track", "object", "script"]);
 
 const escapeHtml = (value) => String(value)
   .replaceAll("&", "&amp;")
@@ -190,12 +189,23 @@ export async function readDesignCatalog(designSystemRoot) {
 
 /* ── rendering ──────────────────────────────────────────────────────────── */
 
+// Script bodies are JavaScript or data, not TimDS placeholders or HTML links.
+function transformMarkup(html, transform) {
+  let end = 0;
+  let result = "";
+  for (const match of html.matchAll(/(<script\b[^>]*>)([\s\S]*?)(<\/script\s*>|$)/gi)) {
+    result += transform(html.slice(end, match.index) + match[1]) + match[2] + match[3];
+    end = match.index + match[0].length;
+  }
+  return result + transform(html.slice(end));
+}
+
 function fill(template, file, values) {
-  return template.replace(PLACEHOLDER, (match, name) => {
+  return transformMarkup(template, (markup) => markup.replace(PLACEHOLDER, (match, name) => {
     const value = values[name];
     if (value === undefined) throw new Error(`${file} uses the unknown placeholder ${match}`);
     return value;
-  });
+  }));
 }
 
 function pageTitle(html, fallback) {
@@ -225,7 +235,7 @@ function pageUrl(basePrefix, designId, route, state) {
  */
 export function rewriteDesignRoutes(html, routes, basePrefix, designId) {
   const known = new Set(routes);
-  return html.replace(/\b(href|src|action)=("|')([^"']*)\2/g, (match, name, quote, value) => {
+  return transformMarkup(html, (markup) => markup.replace(/\b(href|src|action)=("|')([^"']*)\2/g, (match, name, quote, value) => {
     if (!value.startsWith("/") || value.startsWith("//")) return match;
     const end = value.search(/[?#]/);
     const target = end === -1 ? value : value.slice(0, end);
@@ -233,10 +243,10 @@ export function rewriteDesignRoutes(html, routes, basePrefix, designId) {
     const route = target.length > 1 ? target.replace(/\/+$/, "") : target;
     if (!known.has(route)) return match;
     return `${name}=${quote}${pageUrl(basePrefix, designId, route, DEFAULT_STATE)}${suffix}${quote}`;
-  });
+  }));
 }
 
-/** Site-absolute files a page loads: stylesheets and media, never anchors. */
+/** Site-absolute files a page loads: stylesheets, scripts, and media, never anchors. */
 function fileReferences(html) {
   const found = new Set();
   for (const node of findAll(parseHtml(html), (candidate) => FILE_REFERENCE_TAGS.has(candidate.tag))) {
@@ -290,7 +300,7 @@ function renderDirectory({ name, basePrefix, designs, stylesheets }) {
     "    <main>",
     `      <p><a href="${basePrefix}/">${escapeHtml(name)}</a></p>`,
     "      <h1>Designs</h1>",
-    "      <p>Whole pages designed in plain HTML on this system's stylesheets. Each is the reference a production port must match. A page's other states are listed beside it.</p>",
+    "      <p>Whole pages designed with HTML, CSS, and JavaScript on this system's stylesheets. Each is the reference a production port must match. A page's other states are listed beside it.</p>",
     ...sections,
     "    </main>",
     "  </body>",
@@ -445,17 +455,10 @@ export async function checkDesigns({ designSystemRoot, manifest = null, artifact
         const { source, html } = state;
         const document = parseHtml(html);
         const elements = [...walk(document)].filter((node) => node.type === "element");
-        const scripts = elements.filter((node) => node.tag === "script").length;
-        if (scripts) problems.push(`${source}: contains ${scripts} <script> element${scripts === 1 ? "" : "s"}; a design holds no scripts, and another state of the page is another file`);
         const styles = elements.filter((node) => node.tag === "style").length;
         if (styles) problems.push(`${source}: contains ${styles} <style> element${styles === 1 ? "" : "s"}; add the rules to the system's stylesheet instead`);
         const styled = elements.filter((node) => attr(node, "style") !== undefined).length;
         if (styled) problems.push(`${source}: ${styled} element${styled === 1 ? " has a" : "s have a"} style attribute; use classes the system's stylesheet declares`);
-        const handlers = new Set();
-        for (const node of elements) {
-          for (const name of Object.keys(node.attrs ?? {})) if (/^on[a-z]/i.test(name)) handlers.add(name.toLowerCase());
-        }
-        if (handlers.size) problems.push(`${source}: uses inline event handlers (${[...handlers].sort().join(", ")}); a design holds no scripts`);
 
         const { links } = stylesheetReferences(html);
         if (!links.length) problems.push(`${source}: links no local stylesheet; link the system's stylesheet by site-absolute path such as /styles/system.css`);
@@ -473,10 +476,6 @@ export async function checkDesigns({ designSystemRoot, manifest = null, artifact
           for (const name of REFERENCE_ATTRIBUTES) {
             const value = String(attr(node, name) ?? "").trim();
             if (!value || value.startsWith("#") || value.startsWith("?")) continue;
-            if (/^javascript:/i.test(value)) {
-              problems.push(`${source}: ${name}="${value}" runs script; a design holds no scripts`);
-              continue;
-            }
             if (value.startsWith("/") || isExternal(value)) continue;
             relative.add(value);
           }

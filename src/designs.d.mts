@@ -1,4 +1,4 @@
-/** Website designs: whole pages authored in plain HTML on the system's stylesheets, the reference a product port must match. */
+/** Website designs: whole pages authored in HTML with JavaScript on the system's stylesheets, the reference a product port must match. */
 import type { Design, DesignPage, DesignPageState, DesignsDocument, SystemStamp } from "./derived.mjs";
 
 export type { Design, DesignPage, DesignPageState, DesignsDocument };
