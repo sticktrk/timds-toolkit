@@ -605,8 +605,8 @@ digest, and where it sits. Paths mirror the source tree on purpose, so a
 developer who symlinks a website's bundle location to a Design System
 checkout serves the same paths live. A pattern under `dist/` is allowed, for
 a built file such as the starter's `tokens.css`; `node_modules/`, local
-media, and the bundle's own output are never bundled, a symbolic link is
-skipped with a warning, and a pattern that matches nothing fails `check`.
+media, and the bundle's own output are never bundled, a symbolic link or an
+empty file is skipped with a warning, and a pattern that matches nothing fails `check`.
 `extract --publish` uploads the bundle under the current prefix and again
 under an immutable `v/<version>/` prefix; `bundle.json` names that copy as
 `versioned`, and a website pins it, so a release can never change what a

@@ -71,6 +71,7 @@ test("collects matched files from the root, enters dist only when asked, skips l
     "src/styles/viewer.css": ".v{}",
     "public/ds.js": "// js",
     "public/design-system/logo.svg": "<svg/>",
+    "public/design-system/photos/.gitkeep": "",
     "public/design-system/brand/huge.psd": "psd",
     "dist/tokens.css": ":root{}",
     "dist/design-system/bundle/src/styles/ds/brand.css": "stale copy",
@@ -82,9 +83,10 @@ test("collects matched files from the root, enters dist only when asked, skips l
   await fs.symlink(path.join(root, "src/styles/ds/brand.css"), path.join(root, "src/styles/ds/link.css"));
 
   const config = normalizeBundleConfig({ include: ["src/styles/ds/**", "public/**"], exclude: ["public/design-system/brand/**"] });
-  const { files, skipped } = await collectBundleFiles(root, config, { outputDirectory: "design-system/bundle" });
+  const { files, skipped, empty } = await collectBundleFiles(root, config, { outputDirectory: "design-system/bundle" });
   assert.deepEqual(files.map((file) => file.path), ["public/design-system/logo.svg", "public/ds.js", "src/styles/ds/brand.css", "src/styles/ds/print.css"]);
   assert.deepEqual(skipped, ["src/styles/ds/link.css"]);
+  assert.deepEqual(empty, ["public/design-system/photos/.gitkeep"], "a placeholder file matches the glob but is never bundled");
   assert.match(files[0].sha256, /^[a-f0-9]{64}$/);
   assert.equal(files[1].bytes, 5);
 

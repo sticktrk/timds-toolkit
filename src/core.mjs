@@ -533,6 +533,7 @@ async function buildWorkspaceDesigns(workspace) {
 async function buildWorkspaceBundle(workspace) {
   const built = await buildBundle(workspace.designSystemRoot, { manifest: workspace.manifest });
   for (const relative of built.skipped) output(`Warning: bundle skips ${relative}: symbolic links are not bundled`);
+  for (const relative of built.empty) output(`Warning: bundle skips ${relative}: empty files are not bundled`);
   return built;
 }
 
