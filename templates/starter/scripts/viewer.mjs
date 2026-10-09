@@ -6,6 +6,12 @@
 // and each fragment's token tables from tokens.json, so a page never restates
 // a value and the navigation never drifts from the pages that exist.
 //
+// src/formats.json is the catalog of every asset format the system produces
+// (print sheets in inches, screen canvases in pixels), each tied to the page
+// that shows it. {{formats:GROUP}} renders a group's table and {{canvas:ID}}
+// fills a preview's style attribute (src/styles/canvas.css), so a size lives
+// in exactly one place.
+//
 // Website designs under src/designs/ are whole pages on the system's own
 // stylesheets, rendered by TimDS (see build.mjs). The viewer only lists them:
 // the app bar links /designs/ and the overview's sitemap names each one.
@@ -74,7 +80,7 @@ function readSiteModel(site) {
   const views = [];
 
   for (const view of site.views) {
-    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(view.id ?? "")) throw new Error(`src/site.json view id ${JSON.stringify(view.id)} must be lowercase words joined by hyphens`);
+    if (!slugPattern.test(view.id ?? "")) throw new Error(`src/site.json view id ${JSON.stringify(view.id)} must be lowercase words joined by hyphens`);
     if (views.some((existing) => existing.id === view.id)) throw new Error(`src/site.json declares the view ${view.id} twice`);
     if (!view.label) throw new Error(`src/site.json view ${view.id} needs a label`);
     if (!Array.isArray(view.pages) || !view.pages.length) throw new Error(`src/site.json view ${view.id} must declare at least one page`);
@@ -106,6 +112,52 @@ function readSiteModel(site) {
   }
 
   return { home, pages, views };
+}
+
+const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+/** The format catalog: every print sheet and screen canvas, each tied to the page that shows it. */
+function readFormats(catalog, model) {
+  const groups = new Map();
+  const byId = new Map();
+  if (catalog === null) return { groups, byId };
+  if (!catalog || typeof catalog !== "object" || Array.isArray(catalog)) throw new Error("src/formats.json must be an object of format groups");
+  for (const [group, entry] of Object.entries(catalog)) {
+    if (group.startsWith("$")) continue;
+    if (!slugPattern.test(group)) throw new Error(`src/formats.json group ${JSON.stringify(group)} must be lowercase words joined by hyphens`);
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new Error(`src/formats.json group ${group} must be an object with a unit and formats`);
+    if (!["in", "px"].includes(entry.unit)) throw new Error(`src/formats.json group ${group} needs a unit of "in" (print) or "px" (screen)`);
+    const declared = entry.formats && typeof entry.formats === "object" && !Array.isArray(entry.formats) ? Object.entries(entry.formats) : [];
+    if (!declared.length) throw new Error(`src/formats.json group ${group} must declare at least one format`);
+    const formats = [];
+    for (const [id, format] of declared) {
+      const where = `src/formats.json format ${group}.${id}`;
+      if (!slugPattern.test(id)) throw new Error(`${where} must be named with lowercase words joined by hyphens`);
+      if (byId.has(id)) throw new Error(`src/formats.json declares the format ${id} twice; ids are shared across groups so {{canvas:${id}}} names one format`);
+      if (!format || typeof format !== "object" || Array.isArray(format)) throw new Error(`${where} must be an object`);
+      if (typeof format.name !== "string" || !format.name.trim()) throw new Error(`${where} needs a name`);
+      const number = (value, minimum) => typeof value === "number" && Number.isFinite(value) && value >= minimum;
+      for (const field of ["width", "height"]) if (!number(format[field], Number.MIN_VALUE)) throw new Error(`${where} needs a positive number for ${field}`);
+      if (!number(format.safe, 0)) throw new Error(`${where} needs a non-negative number for safe`);
+      for (const field of ["bleed", "maxKB"]) if (format[field] !== undefined && !number(format[field], 0)) throw new Error(`${where} ${field} must be a non-negative number`);
+      for (const [field, sides] of [["ui", ["top", "bottom", "left", "right"]], ["keepClear", ["left", "right"]]]) {
+        const value = format[field];
+        if (value === undefined) continue;
+        if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${where} ${field} must be an object of ${sides.join(", ")}`);
+        for (const [side, amount] of Object.entries(value)) {
+          if (!sides.includes(side) || !number(amount, 0)) throw new Error(`${where} ${field}.${side} must be one of ${sides.join(", ")} with a non-negative number`);
+        }
+      }
+      for (const field of ["stock", "file", "note"]) if (format[field] !== undefined && typeof format[field] !== "string") throw new Error(`${where} ${field} must be a string`);
+      const page = model.pages.find((candidate) => candidate.id === format.page);
+      if (!page) throw new Error(`${where} names the page ${JSON.stringify(format.page)}, which src/site.json does not declare; every format is shown on one page`);
+      const record = { ...format, id, group, unit: entry.unit, page };
+      formats.push(record);
+      byId.set(id, record);
+    }
+    groups.set(group, { id: group, unit: entry.unit, formats });
+  }
+  return { groups, byId };
 }
 
 /** The website designs declared under src/designs/, for the app bar and the sitemap; TimDS renders them. */
@@ -156,6 +208,57 @@ function renderTokenTable(tokens, group, file) {
     "      </tbody>",
     "    </table>",
   ].join("\n");
+}
+
+function formatLength(value, unit) {
+  return unit === "in" ? `${value}″` : `${value} px`;
+}
+
+function formatWeight(kilobytes) {
+  if (kilobytes === undefined) return "";
+  return kilobytes >= 1024 ? `${Math.round(kilobytes / 1024)} MB` : `${kilobytes} KB`;
+}
+
+function renderFormatTable(formats, group, file) {
+  const entry = formats.groups.get(group);
+  if (!entry) throw new Error(`src/pages/${file} uses {{formats:${group}}}, but src/formats.json has no ${group} group`);
+  const print = entry.unit === "in";
+  const noted = entry.formats.some((format) => format.note);
+  const head = print ? ["Format", "Trim", "Bleed", "Safe area", "Stock", "Page"] : ["Format", "Size", "Safe area", "File", "Max weight", "Page"];
+  if (noted) head.push("Notes");
+  const rows = entry.formats.map((format) => {
+    // A planned page is named, never linked, the same as in the sitemap.
+    const page = format.page.planned
+      ? `${escapeHtml(format.page.title)} <span class="tag">Planned</span>`
+      : `<a href="${format.page.href}">${escapeHtml(format.page.title)}</a>`;
+    const size = `<span style="white-space:nowrap">${print ? `${format.width}″ × ${format.height}″` : `${format.width} × ${format.height} px`}</span>`;
+    const cells = print
+      ? [`<strong>${escapeHtml(format.name)}</strong>`, size, formatLength(format.bleed ?? 0, "in"), formatLength(format.safe, "in"), escapeHtml(format.stock || ""), page]
+      : [`<strong>${escapeHtml(format.name)}</strong>`, size, formatLength(format.safe, "px"), escapeHtml(format.file || ""), formatWeight(format.maxKB), page];
+    if (noted) cells.push(escapeHtml(format.note || ""));
+    return `      <tr>${cells.map((cell) => `<td>${cell}</td>`).join("")}</tr>`;
+  });
+  return [
+    '<table class="spec">',
+    `      <thead><tr>${head.map((column) => `<th>${column}</th>`).join("")}</tr></thead>`,
+    "      <tbody>",
+    ...rows,
+    "      </tbody>",
+    "    </table>",
+  ].join("\n");
+}
+
+/** The custom properties a preview reads (src/styles/canvas.css), for a .canvas-frame's style attribute. */
+function canvasVars(formats, id, file) {
+  const format = formats.byId.get(id);
+  if (!format) throw new Error(`src/pages/${file} uses {{canvas:${id}}}, but src/formats.json declares no format ${id}`);
+  const ui = format.ui || {};
+  const clear = format.keepClear || {};
+  return [
+    `--cw:${format.width}`, `--ch:${format.height}`, `--safe:${format.safe}`, `--bleed:${format.bleed ?? 0}`,
+    `--ui-t:${ui.top ?? 0}`, `--ui-b:${ui.bottom ?? 0}`, `--ui-l:${ui.left ?? 0}`, `--ui-r:${ui.right ?? 0}`,
+    `--clear-l:${clear.left ?? 0}`, `--clear-r:${clear.right ?? 0}`,
+  ].join(";");
 }
 
 function renderSitemap(model, designs) {
@@ -235,13 +338,15 @@ function fill(template, file, values) {
 /**
  * Render every authored page in memory. Throws on anything that would ship a
  * broken viewer: a page without a source file, a source file the navigation
- * does not declare, an unknown placeholder, or a fragment without one <h1>.
+ * does not declare, an unknown placeholder, a format without its page, or a
+ * fragment without one <h1>.
  */
 export async function renderSite() {
   const manifest = await readJson("timds.json");
   const tokens = await readJson("tokens.json");
   const compiled = compileTokens(tokens);
   const model = readSiteModel(await readJson("src/site.json"));
+  const formats = readFormats(existsSync(path.join(source, "formats.json")) ? await readJson("src/formats.json") : null, model);
   const designs = await designList();
   // TimDS builds the designs to dist/designs/, so no view may claim that path.
   if (designs.length && model.views.some((view) => view.id === "designs")) throw new Error("src/site.json may not declare a view named designs while src/designs/ exists; the designs are built there");
@@ -272,6 +377,8 @@ export async function renderSite() {
     if ((fragment.match(/<h1[\s>]/gi) || []).length !== 1) throw new Error(`${file} must contain exactly one <h1>`);
     const content = fill(fragment, file, {
       ...shared,
+      canvas: (id) => canvasVars(formats, id, page.file),
+      formats: (group) => renderFormatTable(formats, group, page.file),
       sitemap: () => renderSitemap(model, designs),
       tokens: (group) => renderTokenTable(tokens, group, page.file),
     });
@@ -288,6 +395,8 @@ export async function renderSite() {
   return {
     designs,
     files: rendered,
+    formatCount: formats.byId.size,
+    formatGroups: formats.groups.size,
     pages: authored.length,
     planned: model.pages.filter((page) => page.planned).map((page) => page.id),
     tokens,

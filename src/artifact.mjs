@@ -48,6 +48,8 @@ const CONTENT_TYPES = {
   ".jpeg": "image/jpeg",
   ".jpg": "image/jpeg",
   ".json": "application/json",
+  ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
   ".md": "text/markdown; charset=utf-8",
   ".mp3": "audio/mpeg",
   ".mp4": "video/mp4",
@@ -88,7 +90,7 @@ export async function collectIndexAssetFiles(index, artifactRoot) {
   const files = new Map();
   const references = [];
   eachIndexMedia(index, (media) => {
-    if (typeof media.url === "string" && media.url.startsWith("/")) references.push(media.url);
+    if (typeof media.url === "string" && media.url.startsWith("/") && !media.url.startsWith("//")) references.push(media.url);
   });
   for (const url of references) {
     const relative = url.split("?", 1)[0].replace(/^\/+/, "");
@@ -118,8 +120,11 @@ export async function collectIndexAssetFiles(index, artifactRoot) {
 export function rewriteIndexForPublish(index, files, publicBase, each = eachIndexMedia) {
   const base = String(publicBase).replace(/\/+$/, "");
   const rewritten = structuredClone(index);
+  for (const page of rewritten.pages ?? []) {
+    if (page.markdownUrl?.startsWith("/") && !page.markdownUrl.startsWith("//")) page.markdownUrl = `${base}${page.markdownUrl}`;
+  }
   each(rewritten, (media) => {
-    if (typeof media.url !== "string" || !media.url.startsWith("/")) return;
+    if (typeof media.url !== "string" || !media.url.startsWith("/") || media.url.startsWith("//")) return;
     const relative = media.url.split("?", 1)[0].replace(/^\/+/, "");
     const file = files.get(relative);
     if (!file) return;
@@ -143,7 +148,7 @@ export const rewriteBrandKitForPublish = (kit, files, publicBase) => rewriteInde
 export async function collectBrandKitFiles(kit, artifactRoot, files = new Map()) {
   const references = [];
   eachBrandKitMedia(kit, (media) => {
-    if (typeof media.url === "string" && media.url.startsWith("/")) references.push(media.url);
+    if (typeof media.url === "string" && media.url.startsWith("/") && !media.url.startsWith("//")) references.push(media.url);
   });
   for (const url of references) {
     const relative = url.split("?", 1)[0].replace(/^\/+/, "");
@@ -166,7 +171,7 @@ export async function collectBrandKitFiles(kit, artifactRoot, files = new Map())
 }
 
 /**
- * The stylesheets and media the website designs load, added to `files` so a
+ * The stylesheets, scripts, and media the website designs load, added to `files` so a
  * consumer reading designs.json from the CDN can resolve every site-absolute
  * reference under its `base`. The HTML itself travels inside designs.json.
  */
@@ -243,11 +248,11 @@ export async function collectMachineDocFiles(artifactRoot, entryDirectory) {
 export function rewriteLlmsForPublish(text, publicBase) {
   const base = String(publicBase).replace(/\/+$/, "");
   return String(text)
-    .replace(/\]\(\//g, `](${base}/`)
-    .replace(/^(Machine-readable index: |Full text: |Design tokens: |Brand kit: |Asset formats: |Website designs: |Consumer bundle: )(\/\S+)/gm, (_match, label, target) => `${label}${base}${target}`)
+    .replace(/\]\(\/(?!\/)/g, `](${base}/`)
+    .replace(/^(Machine-readable index: |Full text: |Design tokens: |Brand kit: |Asset formats: |Website designs: |Consumer bundle: )(\/(?!\/)\S+)/gm, (_match, label, target) => `${label}${base}${target}`)
     // Logo and font file lines in the essentials name site-absolute files after a colon.
-    .replace(/^(\s*- .*?: )(\/\S+)$/gm, (_match, label, target) => `${label}${base}${target}`)
-    .replace(/^(<!-- source: )(\/\S*)/gm, (_match, label, target) => `${label}${base}${target}`);
+    .replace(/^(\s*- .*?: )(\/(?!\/)\S+)$/gm, (_match, label, target) => `${label}${base}${target}`)
+    .replace(/^(<!-- source: )(\/(?!\/)\S*)/gm, (_match, label, target) => `${label}${base}${target}`);
 }
 
 /** formats.json names each format's page by its mirror URL; on the CDN that URL is absolute like every other link. */
@@ -293,6 +298,21 @@ async function performUpload(fetchImpl, portalUrl, upload, filePath, contentType
       }
     }
     throw caught;
+  }
+}
+
+/** Refuse changing the content of a version that consumers can already pin. */
+async function checkPublishedBundle(fetchImpl, publicBase, bundle, options) {
+  const relative = bundleManifestPublishPaths(options).versioned;
+  const response = await fetchImpl(`${publicBase}/${relative}`, { cache: "no-store" });
+  if (response.status === 404) return;
+  if (!response.ok) throw new Error(`Could not check published bundle ${relative}: responded ${response.status}`);
+  const published = await response.json();
+  const fileDigests = (document) => (document.files ?? []).map(({ path, sha256, bytes }) => ({ path, sha256, bytes })).sort((a, b) => a.path.localeCompare(b.path));
+  if (published.system?.id !== bundle.system.id || published.system?.version !== options.version
+    || JSON.stringify(fileDigests(published)) !== JSON.stringify(fileDigests(bundle))
+    || (published.designs !== undefined && JSON.stringify(published.designs) !== JSON.stringify(bundle.designs))) {
+    throw new Error(`Design System version ${options.version} already has a different published bundle. Bump the Design System version before publishing; ${relative} is immutable.`);
   }
 }
 
@@ -360,6 +380,9 @@ export async function publishExtractedIndex(workspace, options = {}) {
     designs: (designs?.designs ?? []).map((design) => ({ id: design.id, routes: (design.pages ?? []).map((page) => page.route) })),
   };
   const version = workspace.manifest.version;
+  if (bundle && (bundle.system?.id !== workspace.manifest.systemId || bundle.system?.version !== version)) {
+    throw new Error(`Artifact bundle is stamped ${bundle.system?.id ?? "unknown"} ${bundle.system?.version ?? "unknown"} but timds.json declares ${workspace.manifest.systemId} ${version}; rebuild before publishing`);
+  }
   if (bundle) await collectBundleFiles(bundle, artifactRoot, { entryDirectory, version }, files);
   const docs = await collectMachineDocFiles(artifactRoot, entryDirectory);
   for (const relative of docs) {
@@ -383,6 +406,7 @@ export async function publishExtractedIndex(workspace, options = {}) {
   );
   const publicBase = String(assetSession.publicBase || "").replace(/\/+$/, "");
   if (!/^https:\/\/.+/.test(publicBase)) throw new Error("TimDS returned an invalid artifact publicBase");
+  if (bundle) await checkPublishedBundle(fetchImpl, publicBase, bundle, { entryDirectory, version });
 
   let uploaded = 0;
   for (const upload of assetSession.uploads ?? []) {
@@ -403,7 +427,7 @@ export async function publishExtractedIndex(workspace, options = {}) {
   const tokensSource = await fs.readFile(path.join(artifactRoot, ...tokensRelative.split("/"))).catch(() => null);
   // formats.json names pages by their mirror URL, which the Markdown link rule resolves the same way.
   const formatsRelative = entryDirectory === "." ? "formats.json" : `${entryDirectory}/formats.json`;
-  const formatsSource = await fs.readFile(path.join(artifactRoot, ...formatsRelative.split("/")), "utf8").catch(() => null);
+  const formatsSource = index.formats ? await fs.readFile(path.join(artifactRoot, ...formatsRelative.split("/")), "utf8").catch(() => null) : null;
   const formats = formatsSource === null ? null : rewriteFormatsForPublish(JSON.parse(formatsSource), publicBase);
 
   const staging = await fs.mkdtemp(path.join(os.tmpdir(), "timds-artifact-"));

@@ -30,7 +30,7 @@ import process from "node:process";
 
 import { BUNDLE_MANIFEST_FILE, BUNDLE_VERSION_PREFIX } from "./bundle.mjs";
 import { CONSUMER_BUNDLE_RECORD_FILE, CONSUMER_MANIFEST_FILE, loadConsumer, publishedBaseUrl } from "./consumer.mjs";
-import { fetchDerivedLayer } from "./derived.mjs";
+import { PROVENANCE_FILE } from "./derived.mjs";
 
 export const BUNDLE_RECORD_SCHEMA_VERSION = 1;
 
@@ -67,27 +67,21 @@ async function fetchJson(fetchImpl, url, what) {
 
 /**
  * The bundle a pin resolves to. A named version reads the immutable copy
- * directly; `current` reads the provenance stamp at the base, which names the
- * published version and where its bundle sits. Returns the manifest with
+ * directly; `current` reads the provenance stamp at the base, then resolves
+ * the immutable bundle for that version. Returns the manifest with
  * absolute file URLs, the version it is for, and the designs summary when
  * the caller asked for it.
  */
 export async function resolvePublishedBundle({ url, version, fetchImpl = fetch, withDesigns = false }) {
   const base = String(url).replace(/\/+$/, "");
-  let document;
   let resolvedVersion = version;
-  let layer = null;
   if (version === "current") {
-    layer = await fetchDerivedLayer(base, { fetchImpl });
-  }
-  if (version === "current") {
-    resolvedVersion = layer.system?.version ?? layer.provenance?.version ?? null;
+    const provenance = await fetchJson(fetchImpl, `${base}/${PROVENANCE_FILE}`, "Design System provenance");
+    resolvedVersion = provenance.version ?? null;
     if (!resolvedVersion) throw new Error(`${base} publishes no version in its provenance stamp`);
-    document = layer.bundle;
-    if (!document) throw new Error(`${base} (version ${resolvedVersion}) publishes no consumer bundle; the Design System needs bundle.include in its timds.json`);
-  } else {
-    document = await fetchJson(fetchImpl, `${base}/${BUNDLE_VERSION_PREFIX}/${encodeURIComponent(version)}/${BUNDLE_MANIFEST_FILE}`, `Design System version ${version}'s bundle`);
   }
+  const document = await fetchJson(fetchImpl, `${base}/${BUNDLE_VERSION_PREFIX}/${encodeURIComponent(resolvedVersion)}/${BUNDLE_MANIFEST_FILE}`, `Design System version ${resolvedVersion}'s bundle`);
+  if (document.system?.version !== resolvedVersion) throw new Error(`Design System version ${resolvedVersion}'s bundle is stamped ${document.system?.version ?? "unknown"}; republish the correct version`);
   const files = (document.files ?? []).map((file) => {
     const relative = safeBundlePath(file.path);
     const fileUrl = typeof file.url === "string" && /^https?:\/\//.test(file.url) ? file.url : `${String(document.directory ?? "").replace(/\/+$/, "")}/${relative}`;
@@ -97,7 +91,7 @@ export async function resolvePublishedBundle({ url, version, fetchImpl = fetch, 
   });
   return {
     version: resolvedVersion,
-    systemId: document.system?.id ?? layer?.system?.id ?? null,
+    systemId: document.system?.id ?? null,
     url: document.url ?? null,
     directory: document.directory ?? null,
     versioned: document.versioned ?? null,

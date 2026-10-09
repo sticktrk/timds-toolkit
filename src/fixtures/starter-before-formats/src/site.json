@@ -1,0 +1,28 @@
+{
+  "views": [
+    {
+      "id": "brand",
+      "label": "Brand",
+      "blurb": "Core essentials",
+      "pages": [
+        { "slug": "foundation", "title": "Foundation", "summary": "What the brand stands for and the few decisions every other page follows from.", "planned": true },
+        { "slug": "logo", "title": "Logo", "summary": "Each lockup on the ground it is for, clear space, minimum sizes, and misuse.", "planned": true },
+        { "slug": "typography", "title": "Typography", "summary": "The type families, the type scale, and specimens." },
+        { "slug": "color", "title": "Color", "summary": "The palette and which text color belongs on which ground." },
+        { "slug": "icons", "title": "Icons", "summary": "The icon set, its sizes, and how it takes color.", "planned": true },
+        { "slug": "voice", "title": "Voice & Tone", "summary": "How the brand sounds: rules, rewrites, and words to use or avoid.", "planned": true }
+      ]
+    },
+    {
+      "id": "web",
+      "label": "Web",
+      "blurb": "Interface system",
+      "pages": [
+        { "slug": "spacing", "title": "Spacing & shape", "group": "Tokens", "summary": "The spacing scale, radii, layout constants, and motion durations." },
+        { "slug": "photography", "title": "Photography", "group": "Imagery", "summary": "Subjects, treatment, crops, and the approved image library.", "planned": true },
+        { "slug": "components", "title": "Components", "group": "Library", "summary": "Buttons and form fields, each with a live preview, its rules, and its markup." },
+        { "slug": "layout", "title": "Layout", "summary": "Grid, section rhythm, breakpoints, and how long content wraps.", "planned": true }
+      ]
+    }
+  ]
+}

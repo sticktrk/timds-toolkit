@@ -64,6 +64,39 @@ Never extend upgrades to authored source, `timds.json`, tokens, `media.json`,
 framework configuration, documentation, or generated artifacts without an
 explicit contract change and migration plan.
 
+The starter scaffold has its own recorded boundary, kept by `src/starter.mjs`
+and `.timds/starter.json` in the client repository. A fresh `init` records it;
+an existing starter-based system opts in once with `timds starter sync`, and
+every `upgrade` syncs an adopted system from then on. Inside that boundary the
+toolkit may touch exactly three kinds of things: the starter plumbing
+(`scripts/build.mjs`, `check.mjs`, `dev.mjs`, `viewer.mjs`,
+`src/styles/canvas.css`, `src/styles/viewer.css`), which a fresh `init`
+records as the toolkit's outright (`plumbing: "toolkit"`: every sync brings
+it to stock, replacing a local change and reporting it, never halting) and an
+adopted system records by hash (`"recorded"`: replaced only while the file
+matches a hash the toolkit wrote); the structure catalogs `src/site.json`
+and `src/formats.json`, merged three ways against the recorded stock baseline
+so entries the client lacks are appended (pages as `planned`), fields still
+equal to the baseline advance, and anything the client changed is kept (and
+reported when the stock value moved, not on every sync), with nothing
+removed, reordered, or retitled; and the overview
+fragments the starter mirrors from the golden system
+(`starterManagedFragments`), written when the sync adds or authors their page
+and refreshed only while unmodified. `src/layout.html` only gains a missing
+stock stylesheet link. Every other fragment, `tokens.json`, `system.css`, and
+the rest of authored source stay outside the boundary. Recorded plumbing
+that was customized is asked about file by file when the sync or upgrade runs
+in a terminal, and otherwise reported and replaced only by an explicit
+`timds starter sync --force <path>` that names each file; `upgrade --force` covers the managed boundary
+and never reaches starter files, and a customized overview fragment is the
+system's own page, never replaced. The sync refuses to run over uncommitted
+changes to the files it writes. A sync whose `check` fails is rolled back
+whole, and `upgrade` runs
+it before touching managed files so a failed sync aborts the upgrade with the
+repository as it was. A structural change to `templates/starter` therefore
+reaches existing systems through this sync; do not add another one-shot
+migration for it.
+
 `timds defaults --apply` is the explicit migration for shared publishing defaults.
 It updates only `publishing.targets` and `publishing.targetDefaults` and records
 the supplied values and persistent override paths in `.timds/defaults.json`.
@@ -105,6 +138,67 @@ snapshots become shared re-exports, preserving registration and named exports.
 Custom overrides require reviewed exact runtime versions. Shared geometry and
 fit limits live in `video/board-layouts.mjs`. Keep packed-release checks with
 two brands and before/after visual comparisons in CI.
+
+## The starter scaffold mirrors the golden system
+
+One private client Design System is the golden reference for
+`templates/starter/`. Its name never enters this public repository; the
+maintainer supplies it. When it gains a view, a sidebar group, a template
+family, or shared plumbing, rework the starter to match, so a fresh scaffold
+is organized the way a fleshed-out system ends up.
+
+Mirror structure, never content:
+
+- Views, in `src/site.json`: ids, labels, blurbs, order, sidebar groups, and
+  page lists. Keep the golden view labels (`Web DS`, `Digital DS`); the golden
+  `marketing` view is the starter's `web` view. Keep a page title unless it
+  is ambiguous outside its sidebar group (`LinkedIn specs`, not `Specs`).
+  A page that needs the client's mark, photos, or copy stays `planned`.
+  Author a view's overview when it carries what every system needs:
+  principles, the catalog table, and how a preview is built.
+- Single-owner catalogs become JSON the viewer validates: asset sizes in
+  `src/formats.json`, the counterpart of the golden format modules, with
+  every entry naming its page. A page never restates a size or a token.
+- Preview engines and shared atoms become script-free CSS under
+  `src/styles/`, written against the starter tokens with no color literals.
+- Platform facts (standard ad sizes, upload limits, print trims) may be
+  mirrored; say on the page that they need confirming before use.
+- Leave out client copy, names and addresses, photos and focus points,
+  campaign content, ink builds, field-specific compliance text, and
+  product-specific sub-systems such as an admin theme.
+
+When mirroring a golden change:
+
+1. Run `npm run golden-drift -- --golden PATH` against a checkout of the
+   change: it lists the views, groups, pages, and formats the starter lacks
+   or declares differently. Then read the navigation model, catalogs,
+   stylesheet imports, and overview pages before the template pages; the
+   templates follow from those.
+2. Update `src/site.json`, `src/formats.json`, the stylesheets, and the
+   fragments. A fresh scaffold must still pass `check` with exactly its two
+   expected warnings (no voice page, no annotated logo) and no untyped prose.
+3. Keep the scaffolded `templates/design-system-AGENTS.md`,
+   `design-system-README.md`, the edit skill, and this repository's
+   `CLAUDE.md` describing the new structure.
+4. A changed plumbing file or managed fragment needs no hash bookkeeping:
+   an adopted system's `.timds/starter.json` records what the toolkit last
+   wrote, and `starter sync` advances it. `legacyStarterFileHashes` in
+   `src/starter.mjs` only recognizes systems scaffolded before the record
+   existed and stays as it is. A new authored page under a mirrored view goes
+   in `starterManagedFragments`; a new stylesheet the layout must link goes
+   in the plumbing table and the layout link list.
+5. Update the starter assertions in `src/core.test.mjs` (page ids, page
+   counts, rendered tables) and `src/mcp.test.mjs` (the stylesheet list),
+   then run `npm test` and `npm run pack:check`. Rerun the drift script
+   until it reports none; a deliberate omission is recorded with its reason
+   in `MAPPING` in `scripts/golden-drift.mjs`, never left as noise.
+6. Cite the golden pull request by number in the commit message, never by
+   repository name.
+
+The golden repository's own workflow opens a `golden-mirror` issue here
+when a merged pull request touched its structure-bearing files (navigation
+model, catalogs and content modules, shared stylesheets, layout). Work the
+issue with the steps above and close it from the mirror pull request.
 
 Never add client-specific content, credentials, private URLs, access tokens,
 media, or portal-internal implementation to this public repository or npm

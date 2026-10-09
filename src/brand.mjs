@@ -92,23 +92,24 @@ const familyKey = (family) => String(family ?? "").trim().toLowerCase();
 
 /** Whether an external stylesheet URL (a font service) loads the family: `family=Cormorant+Garamond` or an encoded form. */
 function stylesheetServesFamily(url, family) {
-  let decoded = String(url);
   try {
-    decoded = decodeURIComponent(decoded);
+    const parsed = new URL(url, "https://fonts.invalid");
+    const needle = familyKey(family);
+    const families = parsed.searchParams.getAll("family").flatMap((value) => value.split("|"));
+    if (families.some((value) => familyKey(value.split(":", 1)[0]) === needle)) return true;
+    const slug = needle.replace(/\s+/g, "-");
+    return decodeURIComponent(parsed.pathname).toLowerCase().split("/").some((part) => part.replace(/\.css$/, "") === slug);
   } catch {
-    // keep the raw URL
+    return false;
   }
-  const haystack = decoded.replace(/\+/g, " ").toLowerCase();
-  const needle = familyKey(family);
-  return haystack.includes(`family=${needle}`) || haystack.includes(`family=${needle}:`) || haystack.includes(`/${needle.replace(/ /g, "-")}`);
 }
 
 /**
  * Where a consumer obtains each font role's family: the `@font-face` files
  * the loaded stylesheets declare for it, and the external stylesheets the
  * pages load that serve it. Google Fonts also gets its specimen page, the
- * place a person downloads the family by hand. A family every device ships
- * with is marked `system` and needs neither.
+ * place a person downloads the family by hand. Conventional system stacks
+ * are marked `system` and may use a platform fallback.
  */
 export function resolveFontSources(roles, { faces = [], stylesheets = [] } = {}) {
   const resolved = {};
@@ -116,7 +117,10 @@ export function resolveFontSources(roles, { faces = [], stylesheets = [] } = {})
   for (const [role, entry] of Object.entries(roles ?? {})) {
     if (entry.kind !== "font-family") continue;
     const family = primaryFontFamily(entry.value);
-    if (!family) continue;
+    if (!family) {
+      resolved[role] = { system: true };
+      continue;
+    }
     const files = faces
       .filter((face) => familyKey(face.family) === familyKey(family))
       .flatMap((face) => face.sources.map((source) => ({ url: source.url, ...(source.format ? { format: source.format } : {}), weight: face.weight, style: face.style })));

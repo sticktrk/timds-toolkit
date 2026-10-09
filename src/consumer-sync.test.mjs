@@ -92,6 +92,21 @@ test("resolvePublishedBundle reads a pinned version directly and the current rel
   await assert.rejects(resolvePublishedBundle({ url: BASE, version: "9.9.9", fetchImpl }), /version 9\.9\.9's bundle is not published at .*v\/9\.9\.9\/bundle\.json/);
 });
 
+test("current pins resolve immutable bytes and reject a missing or mismatched versioned bundle", async () => {
+  const { fetchImpl, served, requests } = publishedSystem();
+  // A CDN can still serve the previous release's mutable manifest while the
+  // stamp has advanced; it must not be relabeled as the new release.
+  served.set("design-system/bundle.json", served.get("v/1.2.0/bundle.json"));
+  const current = await resolvePublishedBundle({ url: BASE, version: "current", fetchImpl });
+  assert.equal(current.version, "1.3.0");
+  assert.ok(current.files.every((file) => file.url.startsWith(`${BASE}/v/1.3.0/`)));
+  assert.deepEqual(requests, [`${BASE}/.timds-artifact.json`, `${BASE}/v/1.3.0/bundle.json`]);
+  served.delete("v/1.3.0/bundle.json");
+  await assert.rejects(resolvePublishedBundle({ url: BASE, version: "current", fetchImpl }), /version 1\.3\.0's bundle is not published/);
+  served.set("v/1.3.0/bundle.json", served.get("v/1.2.0/bundle.json"));
+  await assert.rejects(resolvePublishedBundle({ url: BASE, version: "1.3.0", fetchImpl }), /bundle is stamped 1\.2\.0/);
+});
+
 test("sync fetches the pinned bundle under its source paths, verifies digests, records what it fetched, and is idempotent", async (t) => {
   const product = await productRepo(t);
   const { fetchImpl, requests, pinnedFiles } = publishedSystem();

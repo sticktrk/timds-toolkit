@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { readDerivedLayer } from "./derived.mjs";
 
 import {
   blockToMarkdown,
@@ -166,7 +167,7 @@ test("llms.txt opens with the brand essentials a person needs with no other acce
   assert.ok(text.includes("- Display (headlines) (`font.display`): **Cormorant Garamond** — CSS `\"Cormorant Garamond\", Georgia, serif`\n  - download: https://fonts.google.com/specimen/Cormorant+Garamond\n  - stylesheet: https://fonts.googleapis.com/css2?family=Cormorant+Garamond"));
   assert.ok(text.includes("- Body (`font.body`): **Newsreader** — CSS `Newsreader, serif`\n  - 400 normal woff2: /design-system/fonts/newsreader-400.woff2"));
   assert.ok(text.includes("- UI (`font.ui`): **Hanken Grotesk** — CSS `'Hanken Grotesk', sans-serif` — no font file or service is published for this family"));
-  assert.ok(text.includes("- print (`font.print`): **Georgia** — CSS `Georgia, serif` — a system font, installed on every device"));
+  assert.ok(text.includes("- print (`font.print`): **Georgia** — CSS `Georgia, serif` — a system font stack; rendering may use a platform fallback"));
   assert.ok(text.includes("## Logos\n\n- Colour logo (primary, colour, on light, svg): /design-system/logo.svg\n- White logo (white, stacked, on dark, png): https://cdn.example.com/logo-white.png"));
   assert.ok(text.includes("### print\n\n- [Business card · US](/design-system/print/business-cards/index.md) (`business-card`): 3.5 × 2 in · bleed 0.125 in · safe 0.125 in · 16–32 pt cover.\n- Worksheet (`worksheet`): 8.5 × 11 in · safe 0.5 in"));
   assert.ok(text.includes("- [Medium rectangle](/design-system/digital/display-ads/index.md) (`gdn-300x250`): 300 × 250 px · safe 12 px · max 150 KB · PNG or JPG"));
@@ -387,4 +388,48 @@ test("the index carries the video board catalog summary only when the system has
   assert.deepEqual(JSON.parse(await fs.readFile(path.join(artifactRoot, "index.json"), "utf8")).video, { boards });
   const without = await extractArtifact({ artifactRoot, manifest, write: false });
   assert.equal("video" in without.index, false);
+});
+
+test("format and directory links use the actual root, flat, and directory Markdown mirrors", async (t) => {
+  const artifactRoot = await fs.mkdtemp(path.join(os.tmpdir(), "timds-format-mirrors-"));
+  t.after(() => fs.rm(artifactRoot, { recursive: true, force: true }));
+  for (const [file, title] of [["index.html", "Home"], ["print/cards.html", "Cards"], ["print/letters/index.html", "Letters"]]) {
+    const target = path.join(artifactRoot, file);
+    await fs.mkdir(path.dirname(target), { recursive: true });
+    await fs.writeFile(target, `<main><h1>${title}</h1></main>`);
+  }
+  const manifest = { artifact: { entry: "index.html" }, name: "S", systemId: "s", version: "1.0.0" };
+  const formats = [{ id: "print", unit: "in", formats: ["index", "print/cards", "print/letters"].map((page, i) => ({ id: `f-${i}`, name: page, width: 1, height: 1, unit: "in", safe: 0, page })) }];
+  const result = await extractArtifact({ artifactRoot, manifest, formats });
+  assert.deepEqual(result.formats.groups[0].formats.map((format) => format.pageUrl), ["/index.md", "/print/cards.md", "/print/letters/index.md"]);
+  assert.ok(!result.warnings.some((warning) => warning.startsWith("format ")));
+  const llms = await fs.readFile(path.join(artifactRoot, "llms.txt"), "utf8");
+  for (const { pageUrl } of result.formats.groups[0].formats) {
+    await fs.access(path.join(artifactRoot, pageUrl.slice(1)));
+    assert.ok(llms.includes(`](${pageUrl})`));
+  }
+  assert.ok(llms.includes("- [Cards](/print/cards.md)"));
+  assert.ok(llms.includes("- [Home](/index.md)"));
+  const dryRun = await extractArtifact({ artifactRoot, manifest, formats, write: false });
+  assert.deepEqual(dryRun.formats, result.formats);
+});
+
+test("removing a format catalog removes its derived file on the next extraction", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "timds-format-removal-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const artifactRoot = path.join(root, "dist");
+  await fs.mkdir(artifactRoot);
+  await fs.writeFile(path.join(artifactRoot, "index.html"), "<main><h1>Home</h1></main>");
+  const manifest = { artifact: { entry: "index.html" }, name: "S", systemId: "s", version: "1.0.0" };
+  const formats = [{ id: "print", unit: "in", formats: [{ id: "card", name: "Card", width: 3.5, height: 2, unit: "in", safe: 0.125, page: "index" }] }];
+  await extractArtifact({ artifactRoot, manifest, formats });
+  assert.equal((await readDerivedLayer(root, manifest)).formats.count, 1);
+  await extractArtifact({ artifactRoot, manifest, write: false });
+  await fs.access(path.join(artifactRoot, "formats.json"));
+  const removed = await extractArtifact({ artifactRoot, manifest });
+  assert.equal(removed.index.formats, undefined);
+  await assert.rejects(fs.access(path.join(artifactRoot, "formats.json")), { code: "ENOENT" });
+  const layer = await readDerivedLayer(root, manifest);
+  assert.equal(layer.formats, null);
+  assert.equal(layer.stale, false);
 });

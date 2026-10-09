@@ -112,8 +112,8 @@ test("font roles carry their family and where to obtain it, and a role with no s
   ]);
   assert.equal(resolved["font.body"].specimen, "https://fonts.google.com/specimen/Newsreader");
   assert.deepEqual(resolved["font.ui"], { family: "Hanken Grotesk" });
-  assert.equal(resolved["font.mono"], undefined, "a generic-only stack names no family to obtain");
-  // A family every device ships with needs no file or service, and is not a gap.
+  assert.deepEqual(resolved["font.mono"], { system: true }, "a generic-only stack needs no published source");
+  // Conventional system stacks may use a platform fallback.
   assert.deepEqual(resolved["font.print"], { family: "Georgia", system: true });
   assert.equal(resolved["color.accent"], undefined);
   assert.deepEqual(unsourced, [{ role: "font.ui", family: "Hanken Grotesk" }]);
@@ -127,6 +127,31 @@ test("font roles carry their family and where to obtain it, and a role with no s
   const urls = [];
   eachBrandKitMedia(kit, (entry) => urls.push(entry.url));
   assert.deepEqual(urls, ["/design-system/fonts/newsreader-400.woff2", "/design-system/fonts/newsreader-700i.woff2", "https://fonts.example.com/newsreader-700i.ttf"]);
+});
+
+test("font-service URLs match whole family names across query and path conventions", () => {
+  const roles = { "font.body": { token: "--body", value: "Inter, sans-serif", kind: "font-family", source: "convention" } };
+  const wrong = resolveFontSources(roles, { stylesheets: [
+    "https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400",
+    "https://fonts.example.com/inter-tight.css",
+  ] });
+  assert.deepEqual(wrong.resolved["font.body"], { family: "Inter" });
+  assert.deepEqual(wrong.unsourced, [{ role: "font.body", family: "Inter" }]);
+  const urls = [
+    "//fonts.googleapis.com/css2?family=Inter:wght@400&family=Other:wght@500",
+    "https://fonts.googleapis.com/css?family=Other|Inter:400,700",
+    "https://fonts.example.com/css/inter.css",
+  ];
+  assert.deepEqual(resolveFontSources(roles, { stylesheets: urls }).resolved["font.body"].stylesheets, urls);
+});
+
+test("named platform-specific fonts still require published sources", () => {
+  for (const family of ["Roboto", "Ubuntu", "SF Pro", "Segoe UI", "Noto Sans", "Helvetica Neue", "Consolas"]) {
+    const roles = { "font.body": { token: "--body", value: `${family}, sans-serif`, kind: "font-family", source: "convention" } };
+    const { resolved, unsourced } = resolveFontSources(roles);
+    assert.equal(resolved["font.body"].system, undefined, family);
+    assert.deepEqual(unsourced, [{ role: "font.body", family }]);
+  }
 });
 
 test("validates guidance groups from the manifest", () => {
