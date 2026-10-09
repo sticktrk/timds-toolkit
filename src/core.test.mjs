@@ -634,7 +634,7 @@ test("loads and validates a standalone repository contract", async (t) => {
   const checked = await checkWorkspace(repoRoot, { skipBuild: true });
   assert.deepEqual(
     checked.artifact.files.map((file) => file.path).sort(),
-    ["brand.json", "index.html", "index.json", "index.md", "llms.txt", "tokens.json"],
+    ["brand.json", "index.html", "index.json", "index.md", "llms-full.txt", "llms.txt", "tokens.json"],
   );
   assert.equal(checked.machine.counts.blocks, 1);
   assert.equal(checked.machine.counts.tokens, 0);

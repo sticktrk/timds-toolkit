@@ -7,7 +7,13 @@
 //                 with the brand roles they fill
 //   brand.json    the brand kit: role colors and fonts, logos, imagery, and
 //                 guidance groups with their Markdown
-//   llms.txt      the page directory in the llms.txt convention
+//   llms.txt      the page directory in the llms.txt convention, opening with
+//                 the brand essentials a person needs with no other access:
+//                 colors, fonts and where to get them, logos, asset formats
+//   llms-full.txt every page's Markdown in one file, for a tool that reads
+//                 one URL
+//   formats.json  the asset format catalog: print sheets in inches, screen
+//                 canvases in pixels, each tied to the page that shows it
 //   designs.json  the website designs: every page state as plain HTML on the
 //                 system's stylesheets, the reference a product port matches
 //
@@ -25,6 +31,8 @@ export const DERIVED_LAYER_FILES = Object.freeze({
   tokens: "tokens.json",
   brand: "brand.json",
   llms: "llms.txt",
+  llmsFull: "llms-full.txt",
+  formats: "formats.json",
   designs: "designs.json",
 });
 export const PROVENANCE_FILE = ".timds-artifact.json";
@@ -64,11 +72,12 @@ async function readOptional(filePath, parse) {
  * version other than the manifest's, so a consumer knows to rerun `check`.
  */
 export async function readDerivedLayer(designSystemRoot, manifest) {
-  const [index, tokens, brand, llms, designs] = await Promise.all([
+  const [index, tokens, brand, llms, formats, designs] = await Promise.all([
     readOptional(derivedFilePath(designSystemRoot, manifest, "index"), JSON.parse),
     readOptional(derivedFilePath(designSystemRoot, manifest, "tokens"), JSON.parse),
     readOptional(derivedFilePath(designSystemRoot, manifest, "brand"), JSON.parse),
     readOptional(derivedFilePath(designSystemRoot, manifest, "llms"), String),
+    readOptional(derivedFilePath(designSystemRoot, manifest, "formats"), JSON.parse),
     readOptional(derivedFilePath(designSystemRoot, manifest, "designs"), JSON.parse),
   ]);
   const version = index?.system?.version ?? tokens?.system?.version ?? brand?.system?.version ?? null;
@@ -82,7 +91,8 @@ export async function readDerivedLayer(designSystemRoot, manifest) {
     tokens,
     brand,
     llms,
-    // Null for a system that designs no pages, exactly like a file check has not written.
+    // Null for a system without a format catalog or without designs, exactly like a file check has not written.
+    formats,
     designs,
   };
 }
@@ -112,11 +122,12 @@ export async function fetchDerivedLayer(publicBase, { fetchImpl = fetch } = {}) 
   // A stamp written before designs existed names no designs file; it then
   // sits where the entry says, and is simply absent for an older publish.
   const paths = { ...derivedLayerPaths(provenance.entry), ...(provenance.files ?? {}) };
-  const [index, tokens, brand, llms, designs] = await Promise.all([
+  const [index, tokens, brand, llms, formats, designs] = await Promise.all([
     get(paths.index, JSON.parse),
     get(paths.tokens, JSON.parse),
     get(paths.brand, JSON.parse),
     get(paths.llms, String),
+    get(paths.formats, JSON.parse),
     get(paths.designs, JSON.parse),
   ]);
   const system = index?.system ?? tokens?.system ?? brand?.system ?? { id: null, name: null, version: provenance.version ?? null };
@@ -130,6 +141,7 @@ export async function fetchDerivedLayer(publicBase, { fetchImpl = fetch } = {}) 
     tokens,
     brand,
     llms,
+    formats,
     designs,
   };
 }

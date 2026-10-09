@@ -63,9 +63,10 @@ layout instead.
 ## Shape pages for the derived layer
 
 `check` reads the built HTML and CSS, never authored source, and derives
-`index.json`, `tokens.json`, `brand.json`, `llms.txt`, and a Markdown mirror of
-every page. Video, product repositories, and consumer agents read only that
-layer, so structure the pages for it whatever the framework:
+`index.json`, `tokens.json`, `brand.json`, `formats.json`, `llms.txt`,
+`llms-full.txt`, and a Markdown mirror of every page. Video, product
+repositories, consumer agents, and anyone given the system's public link read
+only that layer, so structure the pages for it whatever the framework:
 
 - Give every page one `<h1>`; a page without one is skipped. When the `<h1>`
   is a direct child of `<main>`, the element before it becomes the eyebrow and
@@ -189,6 +190,12 @@ components or production records to adopt publishing defaults.
    pages that present them instead of listing them elsewhere. Voice and
    compliance guidance reach the kit from `brand/voice` and `*/compliance`
    pages by convention, or from `timds.json` `brand.guidance` references.
+   Each font role reaches the kit with the `@font-face` files the loaded
+   stylesheets declare for its family and the font-service stylesheets the
+   pages link; when `check` warns that a font role has no source, add one of
+   those rather than naming a file anywhere else. `formats.json` derives from
+   `src/formats.json`, so a new print sheet or screen canvas is a catalog
+   entry tied to the page that shows it.
 6. Keep `dist/` out of source pull requests when `artifact.publishRef` declares
    a separate CI publication branch.
 7. Use genuine licensed assets. Never invent client marks or usage rights.

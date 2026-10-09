@@ -154,7 +154,10 @@ read-only apart from `report_gap`, and never sees authored source:
   token that fills it and its value; an unfilled role is a reported gap, never
   a guessed value.
 - `get_tokens`: resolved custom properties by name, kind, scope, or base only.
-- `get_brand`: roles, logos, imagery, and guidance groups.
+- `get_brand`: roles (each font role with its family and the files or
+  service that provide it), logos, imagery, and guidance groups.
+- `list_formats`: the asset format catalog, every print sheet and screen
+  canvas with its size, bleed, and safe margin.
 - `list_pages`, `read_page`: the page directory and one page or block as
   Markdown or structured blocks.
 - `search_guidance`: the blocks that answer a question, guidance groups first,
@@ -164,7 +167,8 @@ read-only apart from `report_gap`, and never sees authored source:
   provides one; locally it reports that none exists.
 
 Resources `timds://brand.json`, `timds://tokens.json`, `timds://index.json`,
-`timds://llms.txt`, and `timds://guidance/{group}` serve the same documents.
+`timds://llms.txt`, `timds://formats.json`, and `timds://guidance/{group}`
+serve the same documents.
 
 A host that serves consumers imports the tools from
 `@dtconcepts/timds/mcp/read`. `registerDesignSystemReadTools(server, {
@@ -425,8 +429,11 @@ npm run timds -- extract
 ```
 
 Beside the published pages this writes `index.json` (the structured tree, with
-assets joined to their media records), `tokens.json` (the design tokens), 
-`llms.txt` (the page index), and an `index.md` Markdown mirror of every page.
+assets joined to their media records), `tokens.json` (the design tokens),
+`brand.json` (the brand kit), `formats.json` (the asset format catalog, when
+the system keeps one), `llms.txt` (the brand essentials and the page index),
+`llms-full.txt` (every page in one file), and an `index.md` Markdown mirror
+of every page.
 Every record carries a stable id such as `social/shorts#safe-zones/bottom-band`,
 so an agent can cite a rule and a reviewer can resolve the citation.
 
@@ -482,7 +489,17 @@ maintains:
 `icon`, `pattern` — fills `imagery` under that role. `variant`, `lockup`, `on`
 (the background the variant is for), and `tags` are free lowercase qualifiers,
 and the `primary` flag sorts a variant first. An asset shown on several pages
-appears once with every citation. `check` warns when no logo is annotated.
+appears once with every citation, and each carries the file `format` its URL
+implies (`svg`, `png`, …). `check` warns when no logo is annotated.
+
+A font is only usable outside the browser when the face can be obtained, so
+each `font.*` role in the kit also names its `family` and where to get it:
+`files`, the `@font-face` sources the loaded stylesheets declare for the
+family (published with the logos, by weight and style); `stylesheets`, the
+external stylesheets the pages link that serve it (a font service); and for
+Google Fonts a `specimen` page to download it by hand. `check` warns about a
+font role with none of these: the pages render it, but nobody making a
+business card can.
 
 The kit's **guidance groups** are the pages a consumer reads before producing
 anything. By convention `voice` is the `brand/voice` page and `compliance` is
@@ -499,6 +516,24 @@ against the extracted index:
   }
 }
 ```
+
+### Asset formats and the public link
+
+A system that keeps an asset format catalog at `src/formats.json` (the
+starter does: print sheets in inches, screen canvases in pixels, each tied to
+the page that shows it) gets `formats.json` beside `brand.json`, so a consumer
+can ask for "the business card" and receive its size, bleed, safe margin, and
+stock, not a page to scrape. `check` validates the catalog and warns about a
+format whose page is not built. `@dtconcepts/timds/formats` exports the reader
+and the validator.
+
+`llms.txt` is the one URL a person pastes into any AI tool. It opens with how
+to use the file, then the brand essentials — every role color as hex, every
+font with its family and the files or service that provide it, every logo by
+variant with its URL, and every asset format with its size — and only then the
+page directory. `llms-full.txt` beside it is every page's Markdown in one
+file, for a tool that reads a single URL. Both are rewritten to absolute URLs
+on publish, so nothing in them depends on a viewer origin.
 
 ### Website designs
 
@@ -524,8 +559,9 @@ existed adopts them with `timds designs init`.
 
 ### The derived layer is the contract consumers read
 
-Together `index.json`, `tokens.json`, `brand.json`, `llms.txt`, and, for a
-system with website designs, `designs.json` are the
+Together `index.json`, `tokens.json`, `brand.json`, `llms.txt`,
+`llms-full.txt`, and, when the system keeps them, `formats.json` and
+`designs.json` are the
 **derived layer**: generated on every `check`, published on every
 `extract --publish`, and the only thing a consumer — an MCP server, a render
 host, a pipeline, another agent — needs. Nothing in it is authored by hand,

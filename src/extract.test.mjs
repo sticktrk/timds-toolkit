@@ -6,6 +6,7 @@ import test from "node:test";
 
 import {
   blockToMarkdown,
+  buildLlmsFullText,
   buildLlmsText,
   deriveTokensFromArtifact,
   extractArtifact,
@@ -119,23 +120,72 @@ test("llms.txt groups pages by view and strips links from summaries", () => {
   const text = buildLlmsText(
     { name: "Acme", description: "Shared brand standards." },
     [page],
-    "/design-system/index.json",
+    { indexUrl: "/design-system/index.json" },
   );
   assert.match(text, /^# Acme/);
   assert.ok(text.includes("> Shared brand standards."));
+  assert.ok(text.includes("This file is the entry point to the Acme for people and AI tools."));
   assert.ok(text.includes("- [Short-form video](/design-system/social/shorts/index.md)"));
   assert.ok(!text.includes("(/spec)"));
   assert.ok(!text.includes("Design tokens:"));
-  const withTokens = buildLlmsText({ name: "Acme" }, [page], "/design-system/index.json", "/design-system/tokens.json");
+  assert.ok(!text.includes("## Colors"), "no essentials without a kit");
+  const withTokens = buildLlmsText({ name: "Acme", version: "1.2.3" }, [page], { indexUrl: "/design-system/index.json", tokensUrl: "/design-system/tokens.json", fullUrl: "/design-system/llms-full.txt" });
+  assert.ok(withTokens.includes("(version 1.2.3)"));
   assert.ok(withTokens.includes("Machine-readable index: /design-system/index.json"));
+  assert.ok(withTokens.includes("Full text: /design-system/llms-full.txt"));
   assert.ok(withTokens.includes("Design tokens: /design-system/tokens.json"));
+});
+
+test("llms.txt opens with the brand essentials a person needs with no other access", () => {
+  const kit = {
+    roles: {
+      "color.accent": { token: "--accent", value: "#c2a15a", kind: "color", source: "convention" },
+      "color.text": { token: "--text", value: "#10243d", kind: "color", source: "convention" },
+      "font.display": { token: "--font-display", value: '"Cormorant Garamond", Georgia, serif', kind: "font-family", source: "convention", family: "Cormorant Garamond", stylesheets: ["https://fonts.googleapis.com/css2?family=Cormorant+Garamond"], specimen: "https://fonts.google.com/specimen/Cormorant+Garamond" },
+      "font.body": { token: "--font-body", value: "Newsreader, serif", kind: "font-family", source: "convention", family: "Newsreader", files: [{ url: "/design-system/fonts/newsreader-400.woff2", format: "woff2", weight: "400", style: "normal" }] },
+      "font.ui": { token: "--font-ui", value: "'Hanken Grotesk', sans-serif", kind: "font-family", source: "manifest", family: "Hanken Grotesk" },
+      "font.print": { token: "--font-print", value: "Georgia, serif", kind: "font-family", source: "manifest", family: "Georgia", system: true },
+    },
+    logos: [
+      { name: "Colour logo", primary: true, variant: "colour", on: "light", format: "svg", media: { url: "/design-system/logo.svg" } },
+      { name: "White logo", variant: "white", lockup: "stacked", on: "dark", format: "png", media: { url: "https://cdn.example.com/logo-white.png" } },
+    ],
+  };
+  const formats = {
+    groups: [
+      { id: "print", unit: "in", formats: [
+        { id: "business-card", name: "Business card · US", width: 3.5, height: 2, unit: "in", bleed: 0.125, safe: 0.125, stock: "16–32 pt cover.", page: "print/business-cards", pageUrl: "/design-system/print/business-cards/index.md" },
+        { id: "worksheet", name: "Worksheet", width: 8.5, height: 11, unit: "in", bleed: 0, safe: 0.5, page: "print/worksheets" },
+      ] },
+      { id: "digital", unit: "px", formats: [{ id: "gdn-300x250", name: "Medium rectangle", width: 300, height: 250, unit: "px", safe: 12, maxKB: 150, file: "PNG or JPG", page: "digital/display-ads", pageUrl: "/design-system/digital/display-ads/index.md" }] },
+    ],
+  };
+  const text = buildLlmsText({ name: "Client" }, [page], { indexUrl: "/design-system/index.json", brandUrl: "/design-system/brand.json", formatsUrl: "/design-system/formats.json", kit, formats });
+  assert.ok(text.includes("Asset formats: /design-system/formats.json"));
+  assert.ok(text.includes("## Colors\n\n- Accent (`color.accent`): `#c2a15a` — CSS `var(--accent)`\n- Text (`color.text`): `#10243d` — CSS `var(--text)`"));
+  assert.ok(text.includes("- Display (headlines) (`font.display`): **Cormorant Garamond** — CSS `\"Cormorant Garamond\", Georgia, serif`\n  - download: https://fonts.google.com/specimen/Cormorant+Garamond\n  - stylesheet: https://fonts.googleapis.com/css2?family=Cormorant+Garamond"));
+  assert.ok(text.includes("- Body (`font.body`): **Newsreader** — CSS `Newsreader, serif`\n  - 400 normal woff2: /design-system/fonts/newsreader-400.woff2"));
+  assert.ok(text.includes("- UI (`font.ui`): **Hanken Grotesk** — CSS `'Hanken Grotesk', sans-serif` — no font file or service is published for this family"));
+  assert.ok(text.includes("- print (`font.print`): **Georgia** — CSS `Georgia, serif` — a system font, installed on every device"));
+  assert.ok(text.includes("## Logos\n\n- Colour logo (primary, colour, on light, svg): /design-system/logo.svg\n- White logo (white, stacked, on dark, png): https://cdn.example.com/logo-white.png"));
+  assert.ok(text.includes("### print\n\n- [Business card · US](/design-system/print/business-cards/index.md) (`business-card`): 3.5 × 2 in · bleed 0.125 in · safe 0.125 in · 16–32 pt cover.\n- Worksheet (`worksheet`): 8.5 × 11 in · safe 0.5 in"));
+  assert.ok(text.includes("- [Medium rectangle](/design-system/digital/display-ads/index.md) (`gdn-300x250`): 300 × 250 px · safe 12 px · max 150 KB · PNG or JPG"));
+  // The page directory still follows the essentials.
+  assert.ok(text.indexOf("## Asset formats") < text.indexOf("## social"));
+
+  const full = buildLlmsFullText({ name: "Client", version: "1.2.3" }, [page]);
+  assert.match(full, /^# Client\n\nEvery page of the system at version 1\.2\.3, in one file\./);
+  assert.ok(full.includes("---\n\n# Short-form video\n"));
+  assert.ok(full.includes("<!-- source: /design-system/social/shorts · id: social/shorts -->"));
 });
 
 test("extractArtifact derives tokens.json from the stylesheets the pages load", async () => {
   const artifactRoot = await fs.mkdtemp(path.join(os.tmpdir(), "timds-tokens-test-"));
   try {
     const files = {
-      "design-system/index.html": '<html><head><link rel="stylesheet" href="/_astro/site.css"></head><body><main><h1>Home</h1></main></body></html>',
+      // The home page links a font service for the display face; the body face is a @font-face file in the artifact.
+      "design-system/index.html": '<html><head><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500..700&display=swap" rel="stylesheet"><link rel="stylesheet" href="/_astro/site.css"></head><body><main><h1>Home</h1></main></body></html>',
+      "design-system/fonts/newsreader.woff2": "woff2-bytes",
       "design-system/brand/color/index.html": '<html><head><link rel="stylesheet" href="/_astro/site.css"><link rel="stylesheet" href="../../theme.css"><style>.swatch{--swatch-gap:var(--space-1)}</style></head><body><main><h1>Color</h1></main></body></html>',
       "design-system/theme.css": "[data-theme=dark]{--navy-900:#000}",
       "design-system/brand/logo/index.html": '<html><body><main><h1>Logo</h1><section id="family"><h2>Family</h2><img src="/design-system/logo.svg" alt="Colour logo" data-timds-role="logo" data-timds-on="light"><img src="/design-system/logo-white.svg" alt="White logo" data-timds-role="logo primary" data-timds-on="dark"></section><section id="usage"><h2>Usage</h2><img src="/design-system/logo.svg" alt="Colour logo in use" data-timds-role="logo"><img src="/design-system/hero.webp" alt="Hero" data-timds-role="photo" data-timds-tags="hero"></section></main></body></html>',
@@ -145,7 +195,7 @@ test("extractArtifact derives tokens.json from the stylesheets the pages load", 
       "design-system/logo-white.svg": "<svg/>",
       "design-system/hero.webp": "webp",
       "design-system/missing-page.html": '<html><head><link rel="stylesheet" href="/nope.css"></head><body><main><h1>Orphan</h1></main></body></html>',
-      "_astro/site.css": '@import "ramps.css";:root{--navy:var(--navy-900);--space-1:4px;--accent:var(--navy)}',
+      "_astro/site.css": '@import "ramps.css";@font-face{font-family:"Newsreader";font-weight:400;src:url(../design-system/fonts/newsreader.woff2) format("woff2")}:root{--navy:var(--navy-900);--space-1:4px;--accent:var(--navy);--font-display:"Cormorant Garamond",Georgia,serif;--font-body:Newsreader,Georgia,serif}',
       "_astro/ramps.css": ":root{--navy-900:#0a1729}",
       "_astro/unused.css": ":root{--never-loaded:1}",
     };
@@ -155,15 +205,25 @@ test("extractArtifact derives tokens.json from the stylesheets the pages load", 
       await fs.writeFile(target, content);
     }
     const manifest = { artifact: { entry: "design-system/index.html" }, name: "Client", systemId: "client/system", version: "2.0.0", machine: {}, brand: { roles: { "color.text": "--navy-900" }, guidance: { shorts: ["brand/voice#clear"] } } };
+    // One format shows on a built page, one on a page the artifact lacks (planned, not built).
+    const formats = [{ id: "print", unit: "in", formats: [
+      { id: "logo-sheet", name: "Logo sheet", width: 8.5, height: 11, unit: "in", bleed: 0.125, safe: 0.5, page: "brand/logo" },
+      { id: "business-card", name: "Business card", width: 3.5, height: 2, unit: "in", bleed: 0.125, safe: 0.125, stock: "16 pt cover.", page: "print/business-cards" },
+    ] }];
 
-    const result = await extractArtifact({ artifactRoot, manifest, write: true });
-    assert.equal(result.counts.tokens, 6);
+    const result = await extractArtifact({ artifactRoot, manifest, formats, write: true });
+    assert.equal(result.counts.tokens, 8);
     assert.equal(result.counts.stylesheets, 4);
-    assert.equal(result.counts.roles, 2);
-    assert.deepEqual(result.index.tokens, { url: "/design-system/tokens.json", count: 6, stylesheets: 4, roles: 2 });
-    assert.equal(result.warnings.length, 6);
+    // color.text, color.accent, font.display, font.body, and font.ui (which --font-body fills by convention).
+    assert.equal(result.counts.roles, 5);
+    assert.equal(result.counts.formats, 2);
+    assert.deepEqual(result.index.tokens, { url: "/design-system/tokens.json", count: 8, stylesheets: 4, roles: 5 });
+    assert.deepEqual(result.index.formats, { url: "/design-system/formats.json", groups: 1, count: 2 });
+    assert.equal(result.warnings.length, 4);
     assert.match(result.warnings[0], /brand role color\.background is not filled/);
     assert.ok(!result.warnings.some((warning) => warning.includes("no logo")));
+    assert.ok(!result.warnings.some((warning) => warning.includes("has no source")), "both font roles have a source");
+    assert.match(result.warnings.at(-1), /format business-card \(Business card\) names the page print\/business-cards, which the built artifact does not contain/);
     assert.deepEqual(result.index.brand, { url: "/design-system/brand.json", logos: 2, imagery: 1, guidance: 3 });
     assert.equal(result.counts.guidance, 3);
     assert.equal(result.counts.logos, 2);
@@ -172,10 +232,24 @@ test("extractArtifact derives tokens.json from the stylesheets the pages load", 
     const kit = JSON.parse(await fs.readFile(path.join(artifactRoot, "design-system", "brand.json"), "utf8"));
     assert.deepEqual(kit.system, { id: "client/system", name: "Client", version: "2.0.0" });
     assert.equal(kit.roles["color.text"].token, "--navy-900");
-    assert.deepEqual(kit.logos.map((logo) => [logo.name, logo.media.url, Boolean(logo.primary), logo.citations.length]), [
-      ["White logo", "/design-system/logo-white.svg", true, 1],
-      ["Colour logo", "/design-system/logo.svg", false, 2],
+    // The body face resolves to the artifact file its @font-face names, relative to the stylesheet; the display face to the service the page links.
+    assert.deepEqual(kit.roles["font.body"], {
+      token: "--font-body", value: "Newsreader,Georgia,serif", kind: "font-family", source: "convention",
+      family: "Newsreader", files: [{ url: "/design-system/fonts/newsreader.woff2", format: "woff2", weight: "400", style: "normal" }],
+    });
+    assert.deepEqual(kit.roles["font.display"].stylesheets, ["https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500..700&display=swap"]);
+    assert.equal(kit.roles["font.display"].specimen, "https://fonts.google.com/specimen/Cormorant+Garamond");
+    assert.deepEqual(kit.logos.map((logo) => [logo.name, logo.media.url, Boolean(logo.primary), logo.citations.length, logo.format]), [
+      ["White logo", "/design-system/logo-white.svg", true, 1, "svg"],
+      ["Colour logo", "/design-system/logo.svg", false, 2, "svg"],
     ]);
+
+    // The format catalog is derived beside the kit, each format linked to its built page.
+    const formatsDoc = JSON.parse(await fs.readFile(path.join(artifactRoot, "design-system", "formats.json"), "utf8"));
+    assert.deepEqual(formatsDoc.system, kit.system);
+    assert.equal(formatsDoc.url, "/design-system/formats.json");
+    assert.deepEqual(formatsDoc.groups[0].formats.map((format) => [format.id, format.pageUrl ?? null]), [["logo-sheet", "/design-system/brand/logo/index.md"], ["business-card", null]]);
+    assert.ok(result.written.includes(path.join(artifactRoot, "design-system", "formats.json")));
     assert.deepEqual(kit.imagery.map((entry) => [entry.role, entry.tags, entry.block]), [["photo", ["hero"], "brand/logo#usage"]]);
     // Voice and compliance fill by convention; the manifest adds a group. Each block carries its Markdown.
     assert.deepEqual(Object.keys(kit.guidance).sort(), ["compliance", "shorts", "voice"]);
@@ -206,11 +280,23 @@ test("extractArtifact derives tokens.json from the stylesheets the pages load", 
     // The manifest mapping fills color.text; convention fills color.accent through the var() chain.
     assert.deepEqual(document.roles["color.text"], { token: "--navy-900", value: "#0a1729", kind: "color", source: "manifest" });
     assert.deepEqual(document.roles["color.accent"], { token: "--accent", value: "#0a1729", kind: "color", source: "convention" });
-    assert.ok(document.missingRoles.includes("font.display"));
+    assert.deepEqual(document.missingRoles, ["color.background", "color.panel", "color.muted"]);
+    // tokens.json keeps the role as the stylesheet states it; the sources live on the kit.
+    assert.equal(document.roles["font.body"].files, undefined);
 
     const llms = await fs.readFile(path.join(artifactRoot, "design-system", "llms.txt"), "utf8");
     assert.ok(llms.includes("Design tokens: /design-system/tokens.json"));
     assert.ok(llms.includes("Brand kit: /design-system/brand.json"));
+    assert.ok(llms.includes("Asset formats: /design-system/formats.json"));
+    assert.ok(llms.includes("Full text: /design-system/llms-full.txt"));
+    assert.ok(llms.includes("- Body (`font.body`): **Newsreader** — CSS `Newsreader,Georgia,serif`\n  - 400 normal woff2: /design-system/fonts/newsreader.woff2"));
+    assert.ok(llms.includes("- White logo (primary, on dark, svg): /design-system/logo-white.svg"));
+    assert.ok(llms.includes("- [Logo sheet](/design-system/brand/logo/index.md) (`logo-sheet`): 8.5 × 11 in · bleed 0.125 in · safe 0.5 in"));
+    assert.ok(llms.includes("- Business card (`business-card`): 3.5 × 2 in · bleed 0.125 in · safe 0.125 in · 16 pt cover."));
+    const llmsFull = await fs.readFile(path.join(artifactRoot, "design-system", "llms-full.txt"), "utf8");
+    assert.ok(llmsFull.includes("---\n\n# Color\n"));
+    assert.ok(llmsFull.includes("<!-- source: /design-system/brand/voice · id: brand/voice -->"));
+    assert.ok(result.written.includes(path.join(artifactRoot, "design-system", "llms-full.txt")));
 
     // The in-memory derivation reads the same stylesheets and writes nothing.
     const inMemory = await deriveTokensFromArtifact({ artifactRoot, manifest });

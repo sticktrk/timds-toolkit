@@ -172,8 +172,12 @@ test("publishExtractedIndex uploads assets and mirrors first, then index, llms.t
       "dist/design-system/photos/elder-hands.webp": "webp-bytes",
       "dist/design-system/social/video-assets/index.md": "# Video assets\n",
       "dist/design-system/tokens.json": '{"schemaVersion":1,"tokens":[{"name":"--navy","resolved":"#0a1729"}]}\n',
-      "dist/design-system/brand.json": JSON.stringify({ schemaVersion: 1, roles: {}, logos: [{ name: "Mark", role: "logo", media: { url: "/design-system/photos/elder-hands.webp" } }], imagery: [] }),
-      "dist/design-system/llms.txt": "Machine-readable index: /design-system/index.json\nDesign tokens: /design-system/tokens.json\nBrand kit: /design-system/brand.json\nWebsite designs: /design-system/designs.json — whole pages.\n\n- [Video assets](/design-system/social/video-assets/index.md)\n",
+      // The kit names a font file the index does not: it publishes beside the logos so a consumer can download the face.
+      "dist/design-system/brand.json": JSON.stringify({ schemaVersion: 1, roles: { "font.body": { token: "--font-body", value: "Newsreader, serif", kind: "font-family", source: "convention", family: "Newsreader", files: [{ url: "/design-system/fonts/newsreader.woff2", format: "woff2", weight: "400", style: "normal" }] } }, logos: [{ name: "Mark", role: "logo", media: { url: "/design-system/photos/elder-hands.webp" } }], imagery: [] }),
+      "dist/design-system/fonts/newsreader.woff2": "woff2-bytes",
+      "dist/design-system/formats.json": JSON.stringify({ schemaVersion: 1, url: "/design-system/formats.json", count: 1, groups: [{ id: "print", unit: "in", formats: [{ id: "card", name: "Card", width: 3.5, height: 2, unit: "in", safe: 0.125, page: "social/video-assets", pageUrl: "/design-system/social/video-assets/index.md" }] }] }),
+      "dist/design-system/llms.txt": "Machine-readable index: /design-system/index.json\nFull text: /design-system/llms-full.txt\nDesign tokens: /design-system/tokens.json\nBrand kit: /design-system/brand.json\nAsset formats: /design-system/formats.json\nWebsite designs: /design-system/designs.json — whole pages.\n\n## Fonts\n\n- Body (`font.body`): **Newsreader** — CSS `Newsreader, serif`\n  - 400 normal woff2: /design-system/fonts/newsreader.woff2\n\n## Logos\n\n- Mark (svg): /design-system/photos/elder-hands.webp\n\n- [Video assets](/design-system/social/video-assets/index.md)\n",
+      "dist/design-system/llms-full.txt": "# Client System\n\n---\n\n# Video assets\n\n<!-- source: /design-system/social/video-assets · id: social/video-assets -->\n\nSee [photos](/design-system/photos/elder-hands.webp).\n",
       // The website designs carry their HTML and name the stylesheet they load, which publishes beside them.
       "dist/design-system/designs.json": JSON.stringify({ schemaVersion: 1, base: null, designs: [{ id: "site", pages: [{ route: "/", states: [{ name: "default", html: "<link rel=\"stylesheet\" href=\"/design-system/styles/site.css\">", references: ["/design-system/styles/site.css"] }] }] }] }),
       "dist/design-system/styles/site.css": ".wrap{}",
@@ -228,14 +232,18 @@ test("publishExtractedIndex uploads assets and mirrors first, then index, llms.t
     assert.equal(published.tokensUrl, "https://cdn.example.com/clients/c/design-systems/s/artifact/design-system/tokens.json");
     assert.equal(published.brandUrl, "https://cdn.example.com/clients/c/design-systems/s/artifact/design-system/brand.json");
     assert.equal(published.designsUrl, "https://cdn.example.com/clients/c/design-systems/s/artifact/design-system/designs.json");
+    assert.equal(published.formatsUrl, "https://cdn.example.com/clients/c/design-systems/s/artifact/design-system/formats.json");
+    assert.equal(published.llmsFullUrl, "https://cdn.example.com/clients/c/design-systems/s/artifact/design-system/llms-full.txt");
     assert.equal(published.docCount, 1);
-    assert.equal(published.uploaded, 8);
+    assert.equal(published.uploaded, 11);
     assert.equal(published.skipped, 1);
-    assert.equal(published.total, 9);
+    assert.equal(published.total, 12);
 
     assert.equal(sessions.length, 2);
+    // Index assets, then the kit's font files, then design references, then the page mirrors.
     assert.deepEqual(sessions[0].files.map((file) => file.path), [
       "design-system/photos/elder-hands.webp",
+      "design-system/fonts/newsreader.woff2",
       "design-system/styles/site.css",
       "design-system/social/video-assets/index.md",
     ]);
@@ -245,10 +253,25 @@ test("publishExtractedIndex uploads assets and mirrors first, then index, llms.t
       ".timds-artifact.json",
       "design-system/brand.json",
       "design-system/designs.json",
+      "design-system/formats.json",
       "design-system/index.json",
+      "design-system/llms-full.txt",
       "design-system/llms.txt",
       "design-system/tokens.json",
     ]);
+    // Font files resolve on the CDN with their integrity, like logos.
+    const kitFont = JSON.parse(puts.get("design-system/brand.json")).roles["font.body"].files[0];
+    assert.equal(kitFont.url, "https://cdn.example.com/clients/c/design-systems/s/artifact/design-system/fonts/newsreader.woff2");
+    assert.match(kitFont.sha256, /^[a-f0-9]{64}$/);
+    assert.equal(kitFont.weight, "400");
+    // The format catalog's page links and its own URL resolve on the CDN.
+    const formats = JSON.parse(puts.get("design-system/formats.json"));
+    assert.equal(formats.url, "https://cdn.example.com/clients/c/design-systems/s/artifact/design-system/formats.json");
+    assert.equal(formats.groups[0].formats[0].pageUrl, "https://cdn.example.com/clients/c/design-systems/s/artifact/design-system/social/video-assets/index.md");
+    // llms-full.txt rewrites its links and source comments the way llms.txt does.
+    const llmsFull = puts.get("design-system/llms-full.txt");
+    assert.ok(llmsFull.includes("<!-- source: https://cdn.example.com/clients/c/design-systems/s/artifact/design-system/social/video-assets · id: social/video-assets -->"));
+    assert.ok(llmsFull.includes("[photos](https://cdn.example.com/clients/c/design-systems/s/artifact/design-system/photos/elder-hands.webp)"));
     // Designs publish as written, plus the base their site-absolute references resolve against.
     const designs = JSON.parse(puts.get("design-system/designs.json"));
     assert.equal(designs.base, "https://cdn.example.com/clients/c/design-systems/s/artifact");
@@ -267,7 +290,13 @@ test("publishExtractedIndex uploads assets and mirrors first, then index, llms.t
     assert.match(llms, /Design tokens: https:\/\/cdn\.example\.com\/clients\/c\/design-systems\/s\/artifact\/design-system\/tokens\.json/);
     assert.match(llms, /Brand kit: https:\/\/cdn\.example\.com\/clients\/c\/design-systems\/s\/artifact\/design-system\/brand\.json/);
     assert.match(llms, /Website designs: https:\/\/cdn\.example\.com\/clients\/c\/design-systems\/s\/artifact\/design-system\/designs\.json/);
+    assert.match(llms, /^Full text: https:\/\/cdn\.example\.com\/clients\/c\/design-systems\/s\/artifact\/design-system\/llms-full\.txt$/m);
+    assert.match(llms, /^Asset formats: https:\/\/cdn\.example\.com\/clients\/c\/design-systems\/s\/artifact\/design-system\/formats\.json$/m);
+    // The essentials' font and logo file lines resolve too.
+    assert.match(llms, /^  - 400 normal woff2: https:\/\/cdn\.example\.com\/clients\/c\/design-systems\/s\/artifact\/design-system\/fonts\/newsreader\.woff2$/m);
+    assert.match(llms, /^- Mark \(svg\): https:\/\/cdn\.example\.com\/clients\/c\/design-systems\/s\/artifact\/design-system\/photos\/elder-hands\.webp$/m);
     assert.doesNotMatch(llms, /\]\(\//);
+    assert.doesNotMatch(llms, /: \/design-system/);
 
     const uploadedIndex = JSON.parse(puts.get("design-system/index.json"));
     assert.equal(
@@ -283,7 +312,7 @@ test("publishExtractedIndex uploads assets and mirrors first, then index, llms.t
       version: "1.2.3",
       systemId: "client/system",
       entry: "design-system/index.html",
-      files: { index: "design-system/index.json", tokens: "design-system/tokens.json", brand: "design-system/brand.json", llms: "design-system/llms.txt", designs: "design-system/designs.json" },
+      files: { index: "design-system/index.json", tokens: "design-system/tokens.json", brand: "design-system/brand.json", llms: "design-system/llms.txt", llmsFull: "design-system/llms-full.txt", formats: "design-system/formats.json", designs: "design-system/designs.json" },
     });
   } finally {
     await fs.rm(designSystemRoot, { force: true, recursive: true });

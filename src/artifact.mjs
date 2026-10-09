@@ -129,8 +129,40 @@ export function rewriteIndexForPublish(index, files, publicBase, each = eachInde
   return rewritten;
 }
 
-/** The brand kit's logos and imagery are index assets, so they resolve the same way. */
+/** The brand kit's logos, imagery, and font files resolve the same way as index assets. */
 export const rewriteBrandKitForPublish = (kit, files, publicBase) => rewriteIndexForPublish(kit, files, publicBase, eachBrandKitMedia);
+
+/**
+ * The artifact files the brand kit names that the index does not: the font
+ * files behind each font role. Logos and imagery are index assets and are
+ * already in `files`; a font the stylesheet declares but the artifact lacks
+ * is skipped, since the page renders without it and the kit then simply
+ * keeps the unresolved path.
+ */
+export async function collectBrandKitFiles(kit, artifactRoot, files = new Map()) {
+  const references = [];
+  eachBrandKitMedia(kit, (media) => {
+    if (typeof media.url === "string" && media.url.startsWith("/")) references.push(media.url);
+  });
+  for (const url of references) {
+    const relative = url.split("?", 1)[0].replace(/^\/+/, "");
+    if (!relative || files.has(relative)) continue;
+    const localPath = path.join(artifactRoot, ...relative.split("/"));
+    let body;
+    try {
+      body = await fs.readFile(localPath);
+    } catch {
+      continue;
+    }
+    files.set(relative, {
+      bytes: body.length,
+      contentType: artifactContentType(relative),
+      localPath,
+      sha256: sha256Of(body),
+    });
+  }
+  return files;
+}
 
 /**
  * The stylesheets and media the website designs load, added to `files` so a
@@ -187,7 +219,23 @@ export function rewriteLlmsForPublish(text, publicBase) {
   const base = String(publicBase).replace(/\/+$/, "");
   return String(text)
     .replace(/\]\(\//g, `](${base}/`)
-    .replace(/^(Machine-readable index: |Design tokens: |Brand kit: |Website designs: )(\/\S+)/gm, (_match, label, target) => `${label}${base}${target}`);
+    .replace(/^(Machine-readable index: |Full text: |Design tokens: |Brand kit: |Asset formats: |Website designs: )(\/\S+)/gm, (_match, label, target) => `${label}${base}${target}`)
+    // Logo and font file lines in the essentials name site-absolute files after a colon.
+    .replace(/^(\s*- .*?: )(\/\S+)$/gm, (_match, label, target) => `${label}${base}${target}`)
+    .replace(/^(<!-- source: )(\/\S*)/gm, (_match, label, target) => `${label}${base}${target}`);
+}
+
+/** formats.json names each format's page by its mirror URL; on the CDN that URL is absolute like every other link. */
+export function rewriteFormatsForPublish(document, publicBase) {
+  const base = String(publicBase).replace(/\/+$/, "");
+  const rewritten = structuredClone(document);
+  rewritten.url = typeof rewritten.url === "string" && rewritten.url.startsWith("/") ? `${base}${rewritten.url}` : rewritten.url;
+  for (const group of rewritten.groups ?? []) {
+    for (const format of group.formats ?? []) {
+      if (typeof format.pageUrl === "string" && format.pageUrl.startsWith("/")) format.pageUrl = `${base}${format.pageUrl}`;
+    }
+  }
+  return rewritten;
 }
 
 export function detectSourceCommit(cwd) {
@@ -263,6 +311,13 @@ export async function publishExtractedIndex(workspace, options = {}) {
   // Referenced files and page mirrors publish first, so no entry point ever
   // precedes the files it names.
   const files = await collectIndexAssetFiles(index, artifactRoot);
+  // The brand kit names logos and imagery by artifact-local URL, rewritten to
+  // the CDN like the index, and the font files behind each font role, which
+  // publish beside the logos so a consumer can download the face.
+  const brandRelative = entryDirectory === "." ? "brand.json" : `${entryDirectory}/brand.json`;
+  const brandSource = await fs.readFile(path.join(artifactRoot, ...brandRelative.split("/")), "utf8").catch(() => null);
+  const brandKit = brandSource === null ? null : JSON.parse(brandSource);
+  if (brandKit) await collectBrandKitFiles(brandKit, artifactRoot, files);
   // Website designs publish with the stylesheets and media they load, and
   // learn the base they resolve against; a system without designs has no file.
   const designsRelative = entryDirectory === "." ? "designs.json" : `${entryDirectory}/designs.json`;
@@ -302,13 +357,17 @@ export async function publishExtractedIndex(workspace, options = {}) {
 
   const llmsRelative = entryDirectory === "." ? "llms.txt" : `${entryDirectory}/llms.txt`;
   const llmsSource = await fs.readFile(path.join(artifactRoot, ...llmsRelative.split("/")), "utf8").catch(() => null);
+  // llms-full.txt is the page mirrors in one file; its source comments and links resolve like llms.txt.
+  const llmsFullRelative = entryDirectory === "." ? "llms-full.txt" : `${entryDirectory}/llms-full.txt`;
+  const llmsFullSource = await fs.readFile(path.join(artifactRoot, ...llmsFullRelative.split("/")), "utf8").catch(() => null);
   // tokens.json carries resolved CSS values and no artifact-local references,
   // so it publishes as written; an older artifact without one still publishes.
   const tokensRelative = entryDirectory === "." ? "tokens.json" : `${entryDirectory}/tokens.json`;
   const tokensSource = await fs.readFile(path.join(artifactRoot, ...tokensRelative.split("/"))).catch(() => null);
-  // The brand kit names logos and imagery by artifact-local URL, rewritten to the CDN like the index.
-  const brandRelative = entryDirectory === "." ? "brand.json" : `${entryDirectory}/brand.json`;
-  const brandSource = await fs.readFile(path.join(artifactRoot, ...brandRelative.split("/")), "utf8").catch(() => null);
+  // formats.json names pages by their mirror URL, which the Markdown link rule resolves the same way.
+  const formatsRelative = entryDirectory === "." ? "formats.json" : `${entryDirectory}/formats.json`;
+  const formatsSource = await fs.readFile(path.join(artifactRoot, ...formatsRelative.split("/")), "utf8").catch(() => null);
+  const formats = formatsSource === null ? null : rewriteFormatsForPublish(JSON.parse(formatsSource), publicBase);
 
   const staging = await fs.mkdtemp(path.join(os.tmpdir(), "timds-artifact-"));
   try {
@@ -316,12 +375,18 @@ export async function publishExtractedIndex(workspace, options = {}) {
     const metaFiles = [
       { body: Buffer.from(`${JSON.stringify(rewritten, null, 2)}\n`), contentType: "application/json", path: indexRelative },
       ...(tokensSource === null ? [] : [{ body: tokensSource, contentType: "application/json", path: tokensRelative }]),
-      ...(brandSource === null
+      ...(brandKit === null
         ? []
-        : [{ body: Buffer.from(`${JSON.stringify(rewriteBrandKitForPublish(JSON.parse(brandSource), files, publicBase), null, 2)}\n`), contentType: "application/json", path: brandRelative }]),
+        : [{ body: Buffer.from(`${JSON.stringify(rewriteBrandKitForPublish(brandKit, files, publicBase), null, 2)}\n`), contentType: "application/json", path: brandRelative }]),
+      ...(formats === null
+        ? []
+        : [{ body: Buffer.from(`${JSON.stringify(formats, null, 2)}\n`), contentType: "application/json", path: formatsRelative }]),
       ...(llmsSource === null
         ? []
         : [{ body: Buffer.from(rewriteLlmsForPublish(llmsSource, publicBase)), contentType: "text/plain; charset=utf-8", path: llmsRelative }]),
+      ...(llmsFullSource === null
+        ? []
+        : [{ body: Buffer.from(rewriteLlmsForPublish(llmsFullSource, publicBase)), contentType: "text/plain; charset=utf-8", path: llmsFullRelative }]),
       ...(designs === null
         ? []
         : [{ body: Buffer.from(`${JSON.stringify({ ...designs, base: publicBase }, null, 2)}\n`), contentType: "application/json", path: designsRelative }]),
@@ -358,12 +423,14 @@ export async function publishExtractedIndex(workspace, options = {}) {
     await fs.rm(staging, { force: true, recursive: true });
   }
 
-  const total = files.size + 2 + (llmsSource === null ? 0 : 1) + (tokensSource === null ? 0 : 1) + (brandSource === null ? 0 : 1) + (designs === null ? 0 : 1);
+  const total = files.size + 2 + [llmsSource, llmsFullSource, tokensSource, brandKit, formats, designs].filter((document) => document !== null).length;
   return {
-    brandUrl: brandSource === null ? null : `${publicBase}/${brandRelative}`,
+    brandUrl: brandKit === null ? null : `${publicBase}/${brandRelative}`,
     designsUrl: designs === null ? null : `${publicBase}/${designsRelative}`,
     docCount: docs.length,
+    formatsUrl: formats === null ? null : `${publicBase}/${formatsRelative}`,
     indexUrl: `${publicBase}/${indexRelative}`,
+    llmsFullUrl: llmsFullSource === null ? null : `${publicBase}/${llmsFullRelative}`,
     llmsUrl: llmsSource === null ? null : `${publicBase}/${llmsRelative}`,
     tokensUrl: tokensSource === null ? null : `${publicBase}/${tokensRelative}`,
     publicBase,

@@ -57,10 +57,13 @@ Take every color, font, spacing value, logo, and image from the system:
 - After `npm --prefix __DESIGN_SYSTEM_PATH__ ci` and
   `npm --prefix __DESIGN_SYSTEM_PATH__ run timds -- check`, the derived layer
   sits beside the built entry page under `__DESIGN_SYSTEM_PATH__/dist/`
-  (usually `dist/design-system/`): `brand.json` (brand roles, logos,
+  (usually `dist/design-system/`): `brand.json` (brand roles, each font
+  role with its family and the files or service that provide it, logos,
   imagery), `tokens.json` (resolved CSS custom properties by scope),
-  `llms.txt`, and a Markdown mirror of every guidance page. These are build
-  output: read them, never edit or commit them.
+  `formats.json` (the asset format catalog, when the system keeps one),
+  `llms.txt` (the brand essentials and the page directory), `llms-full.txt`,
+  and a Markdown mirror of every guidance page. These are build output: read
+  them, never edit or commit them.
 - When the `timds-design-system-read` MCP tools are connected, prefer them:
   `describe_system`, then `resolve_role` for "what is the accent color" or
   "what font are headings" (`color.accent`, `color.text`, `font.display`,

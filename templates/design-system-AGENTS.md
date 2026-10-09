@@ -144,10 +144,20 @@ clean.
 ## Write pages the derived layer can read
 
 `check` reads the built HTML and CSS, never authored source, and writes
-`index.json`, `tokens.json`, `brand.json`, `llms.txt`, and a Markdown mirror of
-every page beside them. Video, product repositories, and other agents consume
-only that layer, so page structure decides what they receive.
+`index.json`, `tokens.json`, `brand.json`, `formats.json`, `llms.txt`,
+`llms-full.txt`, and a Markdown mirror of every page beside them. Video,
+product repositories, other agents, and anyone given the system's public link
+consume only that layer, so page structure decides what they receive.
+`llms.txt` opens with the brand essentials (colors, fonts and where to get
+them, logos, asset formats), so what reaches the kit reaches every tool.
 
+- A font role is usable outside the browser only when its family can be
+  obtained: declare an `@font-face` for it in a stylesheet the pages load, or
+  link the font service's stylesheet from the layout. `check` warns about a
+  font role with neither.
+- Keep `src/formats.json` current: it is the catalog of every print sheet and
+  screen canvas, and `formats.json` is derived from it so a consumer gets the
+  business card's exact size rather than a page to scrape.
 - A page needs one `<h1>`; a page without one is skipped. When the `<h1>` is
   a direct child of `<main>`, the element before it becomes the page eyebrow
   and the first `<p>` after it the page summary.

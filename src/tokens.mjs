@@ -54,20 +54,24 @@ const isExternal = (value) => /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(value);
 /**
  * The stylesheets a page loads: `<link rel="stylesheet">` targets in document
  * order and the text of every inline `<style>`. Resolution against the
- * artifact is the caller's job; this only reads the markup.
+ * artifact is the caller's job; this only reads the markup. `external` keeps
+ * the links that leave the artifact (a font service, a CDN): they hold no
+ * tokens, but they are how a consumer obtains the fonts the roles name.
  */
 export function stylesheetReferences(html) {
   const document = parseHtml(html);
-  const links = byTag(document, "link")
+  const hrefs = byTag(document, "link")
     .filter((node) => String(attr(node, "rel") ?? "").toLowerCase().split(/\s+/).includes("stylesheet"))
     .map((node) => String(attr(node, "href") ?? "").trim())
-    .filter((href) => href && !isExternal(href));
+    .filter(Boolean);
+  const links = hrefs.filter((href) => !isExternal(href));
+  const external = hrefs.filter((href) => isExternal(href));
   // The HTML parser keeps <style> as raw text; the visible-text helpers skip
   // it on purpose, so read its text children directly.
   const inline = findAll(document, (node) => node.tag === "style")
     .map((node) => (node.children ?? []).filter((child) => child.type === "text").map((child) => child.value).join(""))
     .filter((text) => text.trim());
-  return { links, inline };
+  return { links, inline, external };
 }
 
 /** `@import` targets of a stylesheet, relative to that stylesheet. */
@@ -80,13 +84,90 @@ export function importReferences(css) {
   return references;
 }
 
+/* ── font faces ─────────────────────────────────────────────────────────── */
+
+const FONT_FORMATS = Object.freeze({ ".woff2": "woff2", ".woff": "woff", ".ttf": "truetype", ".otf": "opentype", ".eot": "embedded-opentype" });
+const unquote = (value) => String(value ?? "").trim().replace(/^["']|["']$/g, "").trim();
+
+/** The font format a file URL implies, or null when the extension is not a font's. */
+export function fontFormatFromUrl(url) {
+  const clean = String(url ?? "").split(/[?#]/, 1)[0].toLowerCase();
+  return FONT_FORMATS[clean.slice(clean.lastIndexOf("."))] ?? null;
+}
+
+/** The first family of a `font-family` stack, unquoted; null when the stack opens with a generic family. */
+export function primaryFontFamily(stack) {
+  const family = unquote(String(stack ?? "").split(",")[0]);
+  return family && !GENERIC_FONT_FAMILIES.has(family.toLowerCase()) ? family : null;
+}
+
+// Families every device already has: the classic web-safe faces and the
+// operating-system UI stacks. A role on one of these needs no file or service.
+const SYSTEM_FONT_FAMILIES = new Set([
+  "arial", "arial black", "helvetica", "helvetica neue", "verdana", "tahoma", "trebuchet ms", "segoe ui", "gill sans",
+  "georgia", "times", "times new roman", "palatino", "palatino linotype", "book antiqua", "garamond", "baskerville", "cambria",
+  "courier", "courier new", "lucida console", "lucida sans unicode", "monaco", "menlo", "consolas", "impact",
+  "-apple-system", "blinkmacsystemfont", "sf pro", "sf pro text", "sf pro display", "roboto", "ubuntu", "cantarell", "noto sans", "oxygen",
+]);
+
+/** Whether a family ships with every operating system, so a consumer needs no file or service to use it. */
+export function isSystemFontFamily(family) {
+  return SYSTEM_FONT_FAMILIES.has(String(family ?? "").trim().toLowerCase());
+}
+
+/** `src: url(a.woff2) format("woff2"), local("Name"), url(b.ttf)` → the url() entries in order, data URIs skipped. */
+function parseFontSources(value) {
+  const sources = [];
+  const pattern = /url\(\s*(?:"([^"]*)"|'([^']*)'|([^)]*))\s*\)(?:\s*format\(\s*["']?([^"')]*)["']?\s*\))?/gi;
+  for (const match of String(value ?? "").matchAll(pattern)) {
+    const url = (match[1] ?? match[2] ?? match[3] ?? "").trim();
+    if (!url || url.toLowerCase().startsWith("data:")) continue;
+    const format = (match[4] ?? "").trim().toLowerCase() || fontFormatFromUrl(url);
+    sources.push({ url, ...(format ? { format } : {}) });
+  }
+  return sources;
+}
+
+/**
+ * Every `@font-face` a stylesheet declares: the family, weight, and style it
+ * registers and each `src` file as written (resolution against the artifact
+ * is the caller's job). A font role names a family; a face is how that
+ * family becomes a file a consumer can download.
+ */
+export function parseFontFaces(css, { source = "" } = {}) {
+  const faces = [];
+  const visit = (block) => {
+    for (const child of block.children) {
+      if (normalizeSelector(child.prelude).toLowerCase() === "@font-face") {
+        const descriptor = (name) => child.declarations.filter((declaration) => declaration.name.toLowerCase() === name).at(-1)?.value;
+        const family = unquote(descriptor("font-family"));
+        const sources = parseFontSources(descriptor("src"));
+        if (family && sources.length) {
+          faces.push({
+            family,
+            weight: normalizeSelector(descriptor("font-weight")) || "400",
+            style: normalizeSelector(descriptor("font-style")) || "normal",
+            sources,
+            source,
+          });
+        }
+        continue;
+      }
+      if (child.children.length) visit(child);
+    }
+  };
+  visit(scanBlocks(css));
+  return faces;
+}
+
 /* ── CSS scanning ───────────────────────────────────────────────────────── */
 
 /**
- * A minimal block scanner: enough CSS structure to find custom property
- * declarations and the selector / at-rule chain each one sits under. Strings,
- * parentheses, and comments are respected so a `;` inside `url(data:…)` or a
- * quoted font name never splits a declaration.
+ * A minimal block scanner: enough CSS structure to find declarations and the
+ * selector / at-rule chain each one sits under. Strings, parentheses, and
+ * comments are respected so a `;` inside `url(data:…)` or a quoted font name
+ * never splits a declaration. Every declaration is kept; readers pick the
+ * custom properties or the `@font-face` descriptors they want.
  */
 function scanBlocks(css) {
   const root = { prelude: null, declarations: [], children: [] };
@@ -102,7 +183,7 @@ function scanBlocks(css) {
     const colon = text.indexOf(":");
     if (colon <= 0) return;
     const name = text.slice(0, colon).trim();
-    if (!name.startsWith("--")) return;
+    if (!name || /[\s{}]/.test(name)) return;
     const value = text.slice(colon + 1).replace(/!important\s*$/i, "").trim();
     stack[stack.length - 1].declarations.push({ name, value });
   };
@@ -177,6 +258,7 @@ export function parseCssTokens(css, { source = "" } = {}) {
   const records = [];
   const visit = (block, selector, condition) => {
     for (const declaration of block.declarations) {
+      if (!declaration.name.startsWith("--")) continue; // only custom properties are tokens
       if (!selector) continue; // a custom property outside any rule has no scope
       records.push({
         name: declaration.name,

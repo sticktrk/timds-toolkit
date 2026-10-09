@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { annotationFor, buildBrandKit, eachBrandKitMedia, normalizeBrandGuidance, parseAnnotation, resolveGuidance } from "./brand.mjs";
+import { annotationFor, buildBrandKit, eachBrandKitMedia, mediaFormat, normalizeBrandGuidance, parseAnnotation, resolveFontSources, resolveGuidance } from "./brand.mjs";
 import { parseHtml, findOne, walk } from "./html.mjs";
 
 const parentsOf = (root) => {
@@ -60,10 +60,14 @@ test("builds the kit from annotated assets, deduplicating by role and url, prima
   assert.equal(kit.logos[0].page, "brand/logo");
   assert.equal(kit.logos[0].block, "brand/logo#family");
   assert.deepEqual(kit.imagery[0], {
-    id: "marketing/photography#heroes/porch", name: "Porch gathering", role: "photo", tags: ["hero"],
+    id: "marketing/photography#heroes/porch", name: "Porch gathering", role: "photo", tags: ["hero"], format: "webp",
     media: { key: "photo-porch", url: "https://cdn/porch.webp" }, page: "marketing/photography", block: "marketing/photography#heroes",
     citations: ["marketing/photography#heroes/porch"],
   });
+  // The format says which file a tool that takes no vectors can use.
+  assert.deepEqual(kit.logos.map((logo) => logo.format), ["svg", "svg"]);
+  assert.equal(mediaFormat("/logo.PNG?v=2"), "png");
+  assert.equal(mediaFormat("/logo"), null);
   const urls = [];
   eachBrandKitMedia(kit, (entry) => urls.push(entry.url));
   assert.deepEqual(urls, ["/colour.svg", "/white.svg", "https://cdn/porch.webp"]);
@@ -75,6 +79,54 @@ test("builds the kit from annotated assets, deduplicating by role and url, prima
   ]);
   assert.deepEqual(empty.kit.roles, {});
   assert.deepEqual(empty.kit.guidance, {});
+});
+
+test("font roles carry their family and where to obtain it, and a role with no source is a warning", () => {
+  const roles = {
+    "color.accent": { token: "--accent", value: "#111", kind: "color", source: "convention" },
+    "font.display": { token: "--font-display", value: '"Cormorant Garamond", Georgia, serif', kind: "font-family", source: "convention" },
+    "font.body": { token: "--font-body", value: "Newsreader, Georgia, serif", kind: "font-family", source: "convention" },
+    "font.ui": { token: "--font-ui", value: "'Hanken Grotesk', system-ui, sans-serif", kind: "font-family", source: "manifest" },
+    "font.mono": { token: "--font-mono", value: "ui-monospace, monospace", kind: "font-family", source: "manifest" },
+    "font.print": { token: "--font-print", value: "Georgia, 'Times New Roman', serif", kind: "font-family", source: "manifest" },
+  };
+  const fonts = {
+    faces: [
+      { family: "newsreader", weight: "400", style: "normal", sources: [{ url: "/design-system/fonts/newsreader-400.woff2", format: "woff2" }], source: "/_astro/site.css" },
+      { family: "Newsreader", weight: "700", style: "italic", sources: [{ url: "/design-system/fonts/newsreader-700i.woff2", format: "woff2" }, { url: "https://fonts.example.com/newsreader-700i.ttf" }], source: "/_astro/site.css" },
+      { family: "Other", weight: "400", style: "normal", sources: [{ url: "/other.woff2" }], source: "/_astro/site.css" },
+    ],
+    stylesheets: ["https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500..700&family=Newsreader:wght@400&display=swap", "https://use.typekit.net/abc.css"],
+  };
+  const { resolved, unsourced } = resolveFontSources(roles, fonts);
+  assert.deepEqual(resolved["font.display"], {
+    family: "Cormorant Garamond",
+    stylesheets: ["https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500..700&family=Newsreader:wght@400&display=swap"],
+    specimen: "https://fonts.google.com/specimen/Cormorant+Garamond",
+  });
+  // Files match by family regardless of case; a face that serves a family from outside the artifact keeps its absolute URL.
+  assert.deepEqual(resolved["font.body"].files, [
+    { url: "/design-system/fonts/newsreader-400.woff2", format: "woff2", weight: "400", style: "normal" },
+    { url: "/design-system/fonts/newsreader-700i.woff2", format: "woff2", weight: "700", style: "italic" },
+    { url: "https://fonts.example.com/newsreader-700i.ttf", weight: "700", style: "italic" },
+  ]);
+  assert.equal(resolved["font.body"].specimen, "https://fonts.google.com/specimen/Newsreader");
+  assert.deepEqual(resolved["font.ui"], { family: "Hanken Grotesk" });
+  assert.equal(resolved["font.mono"], undefined, "a generic-only stack names no family to obtain");
+  // A family every device ships with needs no file or service, and is not a gap.
+  assert.deepEqual(resolved["font.print"], { family: "Georgia", system: true });
+  assert.equal(resolved["color.accent"], undefined);
+  assert.deepEqual(unsourced, [{ role: "font.ui", family: "Hanken Grotesk" }]);
+
+  const { kit, warnings } = buildBrandKit({ manifest: { systemId: "s", name: "S", version: "1" }, tokens: { roles }, pages: [], fonts });
+  assert.equal(kit.roles["font.body"].family, "Newsreader");
+  assert.equal(kit.roles["font.body"].token, "--font-body");
+  assert.equal(kit.roles["font.display"].specimen, "https://fonts.google.com/specimen/Cormorant+Garamond");
+  assert.ok(warnings.includes("font role font.ui (Hanken Grotesk) has no source: no loaded stylesheet declares an @font-face for it and no page links an external stylesheet that serves it, so a consumer cannot obtain the font"));
+  // Font files are kit media: they publish and rewrite like logos.
+  const urls = [];
+  eachBrandKitMedia(kit, (entry) => urls.push(entry.url));
+  assert.deepEqual(urls, ["/design-system/fonts/newsreader-400.woff2", "/design-system/fonts/newsreader-700i.woff2", "https://fonts.example.com/newsreader-700i.ttf"]);
 });
 
 test("validates guidance groups from the manifest", () => {

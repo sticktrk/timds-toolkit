@@ -8,8 +8,23 @@ export const BRAND_ROLES: Readonly<Record<string, readonly string[]>>;
 
 export type ParsedToken = Pick<TokenRecord, "name" | "value" | "selector" | "condition" | "base" | "source">;
 
-export function stylesheetReferences(html: string): { links: string[]; inline: string[] };
+/** One `@font-face` rule: the family it registers and its `src` files as written. */
+export type FontFace = {
+  family: string;
+  weight: string;
+  style: string;
+  sources: Array<{ url: string; format?: string }>;
+  /** The stylesheet the rule sits in. */
+  source: string;
+};
+
+/** `links` are artifact-local stylesheet hrefs, `external` the ones that leave the artifact (a font service). */
+export function stylesheetReferences(html: string): { links: string[]; inline: string[]; external: string[] };
 export function importReferences(css: string): string[];
+export function parseFontFaces(css: string, options?: { source?: string }): FontFace[];
+export function fontFormatFromUrl(url: string | null | undefined): string | null;
+export function primaryFontFamily(stack: string | null | undefined): string | null;
+export function isSystemFontFamily(family: string | null | undefined): boolean;
 export function parseCssTokens(css: string, options?: { source?: string }): ParsedToken[];
 export function substituteVars(value: string, lookup: (name: string) => string | undefined): string;
 export function resolveTokens(records: ParsedToken[]): TokenRecord[];

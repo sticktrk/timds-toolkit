@@ -76,7 +76,7 @@ test("the local read server describes, resolves roles, lists tokens and pages, a
   const { tools } = await client.listTools();
   const names = tools.map((tool) => tool.name).sort();
   assert.deepEqual(names, [
-    "describe_system", "get_brand", "get_consumer_guide", "get_tokens", "list_design_systems", "list_designs", "list_media",
+    "describe_system", "get_brand", "get_consumer_guide", "get_tokens", "list_design_systems", "list_designs", "list_formats", "list_media",
     "list_pages", "read_design", "read_page", "report_gap", "resolve_role", "search_guidance",
   ]);
   for (const tool of tools) {
@@ -98,7 +98,12 @@ test("the local read server describes, resolves roles, lists tokens and pages, a
   assert.ok(described.brand.summary.roles.filled > 0);
   assert.ok(typeof described.llms === "string");
   assert.equal(described.video, null, "a system without a board catalog lists no boards");
+  assert.equal(described.formats, null, "the starter keeps no asset format catalog");
   assert.deepEqual(described.designs, { count: 1, pages: 2, states: 3, designs: [{ id: "website", title: "Marketing site", pageCount: 2 }] });
+
+  // A system without a catalog answers list_formats with an empty, explained result rather than an error.
+  const formats = await ok(client, "list_formats", {});
+  assert.deepEqual([formats.total, formats.groups, formats.note], [0, [], "This system publishes no asset format catalog"]);
 
   // The website designs are whole pages: the directory names routes and states, and a read returns the HTML as authored.
   const designs = await ok(client, "list_designs", {});
