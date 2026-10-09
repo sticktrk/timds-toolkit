@@ -30,6 +30,8 @@ After committing and pushing source changes, an authorized operator runs
 publication. Sign in with `__TIMDS_CLI__ auth login`, or configure an unbound
 operator `TIMDS_ACCESS_TOKEN` in CI. Designer/website and consumer tokens cannot
 promote a release.
+The artifact ref must be separate from the remote default branch. Publication
+refuses to push if it cannot resolve that branch name.
 
 The portal's **Automatic updates** setting controls promotion. When on, the
 command prints the root and pinned URLs and verifies the public release stamp.

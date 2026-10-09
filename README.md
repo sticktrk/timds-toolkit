@@ -739,6 +739,8 @@ npm run timds -- publish
 `POST /api/timds/publish` with the local version, source commit and content digest.
 The ref push is refused unless the checkout commit is the remote default-branch
 head, since the portal only promotes that commit and the push replaces the live ref.
+The artifact ref must differ from the remote default branch; publication refuses
+to push if that branch name cannot be resolved.
 It needs an unbound operator CLI token; set `TIMDS_ACCESS_TOKEN` in CI. Client-bound
 designer/website tokens and consumer read credentials cannot promote releases.
 The command never changes the source version or enables automatic updates.
