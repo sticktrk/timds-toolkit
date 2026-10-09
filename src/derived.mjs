@@ -8,7 +8,7 @@
 //   brand.json    the brand kit: role colors and fonts, logos, imagery, and
 //                 guidance groups with their Markdown
 //   llms.txt      the page directory in the llms.txt convention
-//   designs.json  the website designs: every page state as plain HTML on the
+//   designs.json  the website designs: every page state as HTML with JavaScript on the
 //                 system's stylesheets, the reference a product port matches
 //
 // This is the surface a consumer — an MCP server, a render host, a pipeline —
