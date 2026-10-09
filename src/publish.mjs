@@ -128,7 +128,7 @@ export async function publishArtifactRef(workspace, { repository = process.env.G
     remote = `https://github.com/${repository}.git`;
   } else {
     remote = git(workspace.repoRoot, ["remote", "get-url", "origin"]).trim();
-    if (!/^(https:\/\/github\.com\/|git@github\.com:)[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\.git)?$/.test(remote)) throw new Error("Publication requires a GitHub origin without embedded credentials");
+    if (!/^(https:\/\/github\.com\/|git@github\.com:)[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\.git)?\/?$/.test(remote)) throw new Error(`Publication requires a GitHub origin without embedded credentials; origin is ${JSON.stringify(remote)}`);
   }
   const stamp = await createPublicationStamp(workspace);
   // The portal promotes a stamp only for the default-branch head, and the push
