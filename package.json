@@ -31,7 +31,8 @@
     "./video/transport": "./src/video-transport.mjs",
     "./video/remotion": "./video/remotion.tsx",
     "./runtime": "./src/runtime.mjs",
-    "./video/board-layouts": "./video/board-layouts.mjs"
+    "./video/board-layouts": "./video/board-layouts.mjs",
+    "./publish": "./src/publish.mjs"
   },
   "scripts": {
     "test": "npm run typecheck && node --test .github/scripts/*.test.mjs src/*.test.mjs video/*.test.mjs && tsx --test video/*.test.tsx",
@@ -90,7 +91,9 @@
     "src/runtime.d.mts",
     "src/upgrade.mjs",
     "src/video-migration.mjs",
-    "src/video-component-loader.mjs"
+    "src/video-component-loader.mjs",
+    "src/publish.mjs",
+    "src/publication-snapshot.mjs"
   ],
   "dependencies": {
     "@anthropic-ai/sdk": "0.125.0",

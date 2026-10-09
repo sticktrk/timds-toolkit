@@ -23,6 +23,22 @@ logo and no voice guidance until you add them. `dev` starts the
 repository-declared authoring server. `preview` serves the exact generated
 static artifact that TimDS will publish.
 
+## Release publication
+
+After committing and pushing source changes, an authorized operator runs
+`__TIMDS_CLI__ publish` to build, push the declared artifact ref and request portal
+publication. Sign in with `__TIMDS_CLI__ auth login`, or configure an unbound
+operator `TIMDS_ACCESS_TOKEN` in CI. Designer/website and consumer tokens cannot
+promote a release.
+
+The portal's **Automatic updates** setting controls promotion. When on, the
+command prints the root and pinned URLs and verifies the public release stamp.
+When off, it reports a waiting candidate and a portal link for operator
+publication. Repeating an already live identical release is a no-op.
+`extract --publish` uploads CDN files separately. Managed release workflows
+extract, push the exact artifact, then request promotion before updating a
+linked consumer. Missing operator credentials fail publication.
+
 ## Starter viewer
 
 New contracts include a dependency-free starter viewer under `src/` and
