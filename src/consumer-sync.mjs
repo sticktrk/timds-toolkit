@@ -70,7 +70,10 @@ async function fetchJson(fetchImpl, url, what) {
  * directly; `current` reads the provenance stamp at the base, then resolves
  * the immutable bundle for that version. Returns the manifest with
  * absolute file URLs, the version it is for, and the designs summary when
- * the caller asked for it.
+ * the caller asked for it. A manifest served from a system's public root
+ * names its files by site-absolute path (`/v/1.2.0/design-system/bundle/...`);
+ * every entry resolves against the manifest's own URL, so a root and the CDN
+ * prefix both work as the pin's base.
  */
 export async function resolvePublishedBundle({ url, version, fetchImpl = fetch, withDesigns = false }) {
   const base = String(url).replace(/\/+$/, "");
@@ -80,21 +83,32 @@ export async function resolvePublishedBundle({ url, version, fetchImpl = fetch, 
     resolvedVersion = provenance.version ?? null;
     if (!resolvedVersion) throw new Error(`${base} publishes no version in its provenance stamp`);
   }
-  const document = await fetchJson(fetchImpl, `${base}/${BUNDLE_VERSION_PREFIX}/${encodeURIComponent(resolvedVersion)}/${BUNDLE_MANIFEST_FILE}`, `Design System version ${resolvedVersion}'s bundle`);
+  const manifestUrl = `${base}/${BUNDLE_VERSION_PREFIX}/${encodeURIComponent(resolvedVersion)}/${BUNDLE_MANIFEST_FILE}`;
+  const document = await fetchJson(fetchImpl, manifestUrl, `Design System version ${resolvedVersion}'s bundle`);
   if (document.system?.version !== resolvedVersion) throw new Error(`Design System version ${resolvedVersion}'s bundle is stamped ${document.system?.version ?? "unknown"}; republish the correct version`);
+  const absolute = (candidate) => {
+    if (typeof candidate !== "string" || !candidate.trim()) return null;
+    try {
+      const resolved = new URL(candidate, manifestUrl);
+      return /^https?:$/.test(resolved.protocol) ? resolved.toString() : null;
+    } catch {
+      return null;
+    }
+  };
+  const directory = absolute(document.directory);
   const files = (document.files ?? []).map((file) => {
     const relative = safeBundlePath(file.path);
-    const fileUrl = typeof file.url === "string" && /^https?:\/\//.test(file.url) ? file.url : `${String(document.directory ?? "").replace(/\/+$/, "")}/${relative}`;
-    if (!/^https?:\/\//.test(fileUrl)) throw new Error(`the published bundle names ${relative} without an absolute URL; republish the Design System`);
+    const fileUrl = absolute(file.url) ?? (directory ? `${directory.replace(/\/+$/, "")}/${relative}` : null);
+    if (!fileUrl) throw new Error(`the published bundle names ${relative} without a resolvable URL; republish the Design System`);
     if (!/^[a-f0-9]{64}$/.test(String(file.sha256 ?? ""))) throw new Error(`the published bundle lists ${relative} without a sha256 digest`);
     return { path: relative, url: fileUrl, bytes: Number(file.bytes ?? 0), sha256: file.sha256 };
   });
   return {
     version: resolvedVersion,
     systemId: document.system?.id ?? null,
-    url: document.url ?? null,
-    directory: document.directory ?? null,
-    versioned: document.versioned ?? null,
+    url: absolute(document.url),
+    directory,
+    versioned: absolute(document.versioned),
     files,
     designs: withDesigns && Array.isArray(document.designs) ? document.designs : null,
   };
