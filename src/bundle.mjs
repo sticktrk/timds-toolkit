@@ -94,7 +94,7 @@ export function matchesPattern(filePath, pattern) {
  * The files the bundle holds, walked from the Design System root. `dist/` is
  * entered only when a pattern names something under it, since a built file
  * (the starter's `tokens.css`) can be the thing a website wants; the bundle's
- * own output is never part of itself. Symbolic links are skipped and
+ * own output is never part of itself. Symbolic links and empty files are skipped and
  * reported. A pattern that matches nothing is an error: the manifest is
  * wrong, and a website would silently lose a file.
  */
@@ -130,11 +130,17 @@ export async function collectBundleFiles(designSystemRoot, config, { outputDirec
     throw new Error(`timds.json bundle.include matches no file for ${unmatched.map((pattern) => JSON.stringify(pattern)).join(", ")}; fix the pattern or remove it`);
   }
   const files = [];
+  const empty = [];
   for (const file of found) {
     const body = await fs.readFile(file.absolutePath);
+    // A placeholder such as .gitkeep matches a directory glob but serves nothing, and the CDN refuses a zero-byte upload.
+    if (body.length === 0) {
+      empty.push(file.path);
+      continue;
+    }
     files.push({ path: file.path, absolutePath: file.absolutePath, bytes: body.length, sha256: sha256Of(body) });
   }
-  return { files, skipped };
+  return { files, skipped, empty };
 }
 
 /** Where the bundle sits in the artifact for an entry such as `design-system/index.html`: `design-system/bundle`. */
@@ -177,9 +183,9 @@ export async function buildBundle(designSystemRoot, { manifest }) {
   const manifestPath = path.join(artifactRoot, ...(entryDirectory === "." ? [] : entryDirectory.split("/")), BUNDLE_MANIFEST_FILE);
   await fs.rm(path.join(artifactRoot, ...outputDirectory.split("/")), { force: true, recursive: true });
   await fs.rm(manifestPath, { force: true });
-  if (!manifest.bundle) return { enabled: false, document: null, outputDirectory, skipped: [], written: [] };
+  if (!manifest.bundle) return { enabled: false, document: null, outputDirectory, skipped: [], empty: [], written: [] };
 
-  const { files, skipped } = await collectBundleFiles(designSystemRoot, manifest.bundle, { outputDirectory });
+  const { files, skipped, empty } = await collectBundleFiles(designSystemRoot, manifest.bundle, { outputDirectory });
   const written = [];
   for (const file of files) {
     const target = path.join(artifactRoot, ...outputDirectory.split("/"), ...file.path.split("/"));
@@ -192,7 +198,7 @@ export async function buildBundle(designSystemRoot, { manifest }) {
   await fs.mkdir(path.dirname(manifestPath), { recursive: true });
   await fs.writeFile(manifestPath, `${JSON.stringify(document, null, 2)}\n`);
   written.push(manifestPath);
-  return { enabled: true, document, outputDirectory, skipped, written };
+  return { enabled: true, document, outputDirectory, skipped, empty, written };
 }
 
 /**
