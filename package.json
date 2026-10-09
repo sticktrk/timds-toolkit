@@ -1,6 +1,6 @@
 {
   "name": "@dtconcepts/timds",
-  "version": "0.1.450",
+  "version": "0.1.451",
   "description": "Versioned CLI, contracts, templates, and AI skill for repository-owned TimDS design systems.",
   "type": "module",
   "bin": {
@@ -37,7 +37,8 @@
     "typecheck": "tsc --noEmit",
     "pack:check": "npm pack --dry-run",
     "release": "./scripts/release.sh",
-    "test:shared-upgrades": "node scripts/check-shared-upgrades.mjs"
+    "test:shared-upgrades": "node scripts/check-shared-upgrades.mjs",
+    "golden-drift": "node scripts/golden-drift.mjs"
   },
   "files": [
     "bin",
@@ -52,6 +53,7 @@
     "src/consumer-browser.mjs",
     "src/consumer-png.mjs",
     "src/defaults.mjs",
+    "src/starter.mjs",
     "src/artifact.mjs",
     "src/auth.mjs",
     "src/extract.mjs",

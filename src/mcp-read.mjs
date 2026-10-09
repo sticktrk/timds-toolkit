@@ -81,8 +81,9 @@ pages, and the media catalog. Nothing here is editable; use it to be on-brand.
 - Each font role in \`get_brand\` names its \`family\` and where to obtain it:
   \`files\` (the \`@font-face\` files the system publishes, by weight and
   style), \`stylesheets\` (a font service the pages load), and \`specimen\`
-  (the page to download the family by hand). A font role with none of these
-  is a gap: the pages render it, but a consumer cannot.
+  (the page to download the family by hand). A \`system\` role uses the
+  device's fonts and may render with a platform fallback; a named font role
+  with no source and no \`system\` flag is a gap.
 - \`list_media\` lists the published media catalog by tag or kind: reviewed
   photography, B-roll, and audio with stable public URLs. Reference assets by
   their stable URL or key; never paste an expiring or private URL.

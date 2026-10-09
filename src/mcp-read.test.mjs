@@ -98,12 +98,17 @@ test("the local read server describes, resolves roles, lists tokens and pages, a
   assert.ok(described.brand.summary.roles.filled > 0);
   assert.ok(typeof described.llms === "string");
   assert.equal(described.video, null, "a system without a board catalog lists no boards");
-  assert.equal(described.formats, null, "the starter keeps no asset format catalog");
+  assert.equal(described.formats.count, 48);
+  assert.deepEqual(described.formats.groups.map((group) => group.id), ["print", "digital", "social"]);
   assert.deepEqual(described.designs, { count: 1, pages: 2, states: 3, designs: [{ id: "website", title: "Marketing site", pageCount: 2 }] });
 
-  // A system without a catalog answers list_formats with an empty, explained result rather than an error.
+  // The starter's production sizes remain readable while its guidance pages are planned.
   const formats = await ok(client, "list_formats", {});
-  assert.deepEqual([formats.total, formats.groups, formats.note], [0, [], "This system publishes no asset format catalog"]);
+  assert.equal(formats.total, 48);
+  const card = formats.groups.find((group) => group.id === "print").formats.find((format) => format.id === "business-card");
+  assert.deepEqual([card.width, card.height, card.unit, card.planned, card.pageUrl], [3.5, 2, "in", true, undefined]);
+  assert.equal((await ok(client, "list_formats", { group: "print" })).total, 15);
+  assert.match((await call(client, "list_formats", { group: "unknown" })).content[0].text, /No format group unknown/);
 
   // The website designs are whole pages: the directory names routes and states, and a read returns the HTML as authored.
   const designs = await ok(client, "list_designs", {});
@@ -179,7 +184,7 @@ test("the local read server describes, resolves roles, lists tokens and pages, a
   const resource = await client.readResource({ uri: CONSUMER_GUIDE_URI });
   assert.equal(resource.contents[0].text, consumerGuideText());
 
-  for (const [uri, mimeType] of [["timds://brand.json", "application/json"], ["timds://tokens.json", "application/json"], ["timds://index.json", "application/json"], ["timds://llms.txt", "text/plain"]]) {
+  for (const [uri, mimeType] of [["timds://brand.json", "application/json"], ["timds://tokens.json", "application/json"], ["timds://index.json", "application/json"], ["timds://formats.json", "application/json"], ["timds://llms.txt", "text/plain"]]) {
     const read = await client.readResource({ uri });
     assert.equal(read.contents[0].mimeType, mimeType, uri);
     if (mimeType === "application/json") assert.ok(JSON.parse(read.contents[0].text).system.version, uri);
@@ -366,6 +371,7 @@ test("a published base serves the layer the CDN holds", async (t) => {
     "index.json": JSON.stringify(layer.index),
     "tokens.json": JSON.stringify(layer.tokens),
     "brand.json": JSON.stringify(layer.brand),
+    "formats.json": JSON.stringify(layer.formats),
     "llms.txt": layer.llms,
   };
   const requested = [];
@@ -383,10 +389,19 @@ test("a published base serves the layer the CDN holds", async (t) => {
   assert.equal(described.system.published, layer.system.version);
   assert.equal(described.provenance.sourceCommit, "abc123");
   assert.equal(described.media.catalog, false);
+  assert.equal(described.formats.count, 48);
   const media = await ok(client, "list_media", {});
   assert.equal(media.catalog, false);
   assert.match(media.note, /No media catalog/);
   assert.ok(requested.some((url) => url.endsWith("/.timds-artifact.json")));
+  // Removing the catalog from the current index retires its old CDN object
+  // for both describe_system and list_formats.
+  const withoutFormats = { ...layer.index };
+  delete withoutFormats.formats;
+  files["index.json"] = JSON.stringify(withoutFormats);
+  assert.equal((await ok(client, "describe_system", {})).formats, null);
+  const emptyFormats = await ok(client, "list_formats", {});
+  assert.deepEqual([emptyFormats.total, emptyFormats.groups, emptyFormats.note], [0, [], "This system publishes no asset format catalog"]);
   await assert.rejects(createDesignSystemReadMcpServer({ published: "https://design-systems.example/nothing", fetchImpl }), /404/);
 });
 

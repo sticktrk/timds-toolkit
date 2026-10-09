@@ -11,6 +11,6 @@ export function normalizeFormatCatalog(input: unknown, options?: { where?: strin
 /** The validated catalog of a Design System, or null when it keeps none. */
 export function readFormatCatalog(designSystemRoot: string): Promise<AssetFormatGroup[] | null>;
 /** The `formats.json` document, each format linked to its page's mirror when the extracted pages include it. */
-export function formatsDocument(groups: AssetFormatGroup[], manifest: { systemId: string; name: string; version: string }, options?: { pages?: Pick<IndexPage, "id" | "url">[]; basePrefix?: string }): { document: FormatsDocument; warnings: string[] };
+export function formatsDocument(groups: AssetFormatGroup[], manifest: { systemId: string; name: string; version: string }, options?: { pages?: Pick<IndexPage, "id" | "url" | "markdownUrl">[]; plannedPages?: string[]; basePrefix?: string }): { document: FormatsDocument; warnings: string[] };
 /** `3.5 × 2 in`, the way a person says a size. */
 export function describeFormatSize(format: Pick<AssetFormat, "width" | "height" | "unit">): string;

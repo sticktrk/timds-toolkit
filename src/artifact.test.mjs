@@ -7,11 +7,13 @@ import test from "node:test";
 
 import {
   artifactContentType,
+  collectBrandKitFiles,
   collectIndexAssetFiles,
   collectMachineDocFiles,
   detectSourceCommit,
   publishExtractedIndex,
   rewriteIndexForPublish,
+  rewriteBrandKitForPublish,
   rewriteLlmsForPublish,
 } from "./artifact.mjs";
 
@@ -44,6 +46,7 @@ const INDEX = {
     {
       id: "social/video-assets",
       url: "/design-system/social/video-assets",
+      markdownUrl: "/design-system/social/video-assets/index.md",
       view: "social",
       eyebrow: "",
       title: "Video assets",
@@ -119,6 +122,7 @@ test("rewriteIndexForPublish rewrites local references, stamps integrity, and le
     assert.equal(local.bytes, 10);
     assert.match(local.sha256, /^[a-f0-9]{64}$/);
     assert.equal(localWithQuery.url, local.url);
+    assert.equal(rewritten.pages[0].markdownUrl, "https://cdn.example.com/clients/c/design-systems/s/artifact/design-system/social/video-assets/index.md");
     assert.equal(mediaRecord.url, "https://cdn.example.com/media/abc/widow-window.mp4");
     assert.equal(mediaRecord.bytes, undefined);
     // The extracted index on disk keeps its site-absolute form.
@@ -164,11 +168,30 @@ test("collectMachineDocFiles finds page mirrors under the entry directory", asyn
   }
 });
 
+test("protocol-relative font URLs remain external during collection and publishing", async () => {
+  const root = await makeArtifact({ "fonts.example.com/inter.woff2": "unrelated-local-file" });
+  try {
+    const url = "//fonts.example.com/inter.woff2";
+    const kit = { roles: { "font.body": { files: [{ url, weight: "400", style: "normal" }] } } };
+    const files = await collectBrandKitFiles(kit, root);
+    assert.equal(files.size, 0);
+    assert.equal(rewriteBrandKitForPublish(kit, files, "https://cdn.example.com/artifact").roles["font.body"].files[0].url, url);
+    const text = "  - stylesheet: //fonts.googleapis.com/css2?family=Inter\n  - 400 normal woff2: //fonts.example.com/inter.woff2\n- [External](//fonts.example.com/inter.css)\n- 400 normal woff2: /fonts/inter.woff2\n";
+    const published = rewriteLlmsForPublish(text, "https://cdn.example.com/artifact");
+    assert.ok(published.includes("stylesheet: //fonts.googleapis.com/css2?family=Inter"));
+    assert.ok(published.includes("woff2: //fonts.example.com/inter.woff2"));
+    assert.ok(published.includes("[External](//fonts.example.com/inter.css)"));
+    assert.ok(published.includes("woff2: https://cdn.example.com/artifact/fonts/inter.woff2"));
+  } finally {
+    await fs.rm(root, { force: true, recursive: true });
+  }
+});
+
 test("publishExtractedIndex uploads assets and mirrors first, then index, llms.txt, and stamp", async () => {
   const designSystemRoot = await fs.mkdtemp(path.join(os.tmpdir(), "timds-publish-test-"));
   try {
     const artifact = {
-      "dist/design-system/index.json": `${JSON.stringify(INDEX, null, 2)}\n`,
+      "dist/design-system/index.json": `${JSON.stringify({ ...INDEX, formats: { url: "/design-system/formats.json", groups: 1, count: 1 } }, null, 2)}\n`,
       "dist/design-system/photos/elder-hands.webp": "webp-bytes",
       "dist/design-system/social/video-assets/index.md": "# Video assets\n",
       "dist/design-system/tokens.json": '{"schemaVersion":1,"tokens":[{"name":"--navy","resolved":"#0a1729"}]}\n',
@@ -314,6 +337,13 @@ test("publishExtractedIndex uploads assets and mirrors first, then index, llms.t
       entry: "design-system/index.html",
       files: { index: "design-system/index.json", tokens: "design-system/tokens.json", brand: "design-system/brand.json", llms: "design-system/llms.txt", llmsFull: "design-system/llms-full.txt", formats: "design-system/formats.json", designs: "design-system/designs.json" },
     });
+    // A former catalog may remain on disk, but a release that does not
+    // advertise it must not publish it again, even if that file is invalid.
+    await fs.writeFile(path.join(designSystemRoot, "dist/design-system/index.json"), JSON.stringify(INDEX));
+    await fs.writeFile(path.join(designSystemRoot, "dist/design-system/formats.json"), "{obsolete");
+    const withoutFormats = await publishExtractedIndex(workspace, { token: "timds_test_token", fetchImpl, sourceCommit: "a".repeat(40) });
+    assert.equal(withoutFormats.formatsUrl, null);
+    assert.ok(!sessions.at(-1).files.some((file) => file.path.endsWith("formats.json")));
   } finally {
     await fs.rm(designSystemRoot, { force: true, recursive: true });
   }

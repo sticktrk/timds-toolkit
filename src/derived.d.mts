@@ -63,7 +63,7 @@ export type BrandFontRole = BrandRole & {
   stylesheets?: string[];
   /** The page to download the family by hand, when a known service serves it. */
   specimen?: string;
-  /** True for a family every device ships with (Georgia, Arial, the OS UI stacks): nothing to obtain. */
+  /** True for a conventional system stack; rendering may use a platform fallback. */
   system?: true;
 };
 
@@ -148,7 +148,7 @@ export type IndexBlock = {
   prose?: Array<{ id: string; text: string }>;
 };
 
-export type IndexPage = { id: string; url: string; view: string; eyebrow: string; title: string; lede: string; blocks: IndexBlock[] };
+export type IndexPage = { id: string; url: string; markdownUrl?: string; view: string; eyebrow: string; title: string; lede: string; blocks: IndexBlock[] };
 
 export type IndexDocument = {
   schemaVersion: 1;
@@ -187,6 +187,8 @@ export type AssetFormat = {
   page: string;
   /** The page's Markdown mirror URL, when the built artifact has the page. */
   pageUrl?: string;
+  /** The guidance page is explicitly planned in src/site.json and has not been built. */
+  planned?: true;
 };
 
 export type AssetFormatGroup = { id: string; unit: "in" | "px"; formats: AssetFormat[] };

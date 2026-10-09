@@ -1,0 +1,86 @@
+<span class="eyebrow">Digital DS · Foundations</span>
+<h1 class="page-title">The digital design system</h1>
+<p class="lede">Paid ads, event banners, and promotional graphics for screens: everything placed in front of people who have not visited the website yet, and the banners that bring them to an event. It uses the Brand view's mark, type, and palette, and adds pixel sizes, safe areas, file weights, and the rules each placement brings. Meta and LinkedIn ads live in <a href="/social/">Social DS</a>.</p>
+<div class="rule"></div>
+
+<section class="block" id="organization">
+  <div class="block__head">
+    <h2 class="h2">How this is organized</h2>
+    <p>Each page is one placement family. Every template on it ships in the three steps of the <a href="/print/#scale">template scale</a>, and one step runs across a campaign set, so the two units a person sees on the same day look related.</p>
+  </div>
+  <table class="spec">
+    <thead><tr><th>Group</th><th>Covers</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Advertising</strong></td><td>The standard display units and the image and text assets for responsive campaigns.</td></tr>
+      <tr><td><strong>Events</strong></td><td>The webinar page hero, registration banner, and title slide, and the virtual background a speaker sits in front of.</td></tr>
+      <tr><td><strong>Owned Channels</strong></td><td>Email headers and signature banners, the website's promotional hero and strip, and business profile posts.</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section class="block" id="formats">
+  <div class="block__head">
+    <h2 class="h2">Every format</h2>
+    <p>The catalog is the <code>digital</code> group in <code>src/formats.json</code>. Previews, spec tables, and this list all read it, so a size changes in one place. Sizes and limits are the platforms' own; confirm them against current specifications before a campaign ships.</p>
+  </div>
+  {{formats:digital}}
+</section>
+
+<section class="block" id="previews">
+  <div class="block__head">
+    <h2 class="h2">Previews</h2>
+    <p>A template is a canvas sized from the catalog and composed from the pieces in <code>src/styles/canvas.css</code>: a safe-area box, an eyebrow, a display line, a button, and a foot. Everything inside is written in design pixels, so the same markup is a leaderboard or a billboard. Turn on the guides to see the safe area and any band the platform covers with its own interface.</p>
+  </div>
+  <figure class="demo">
+    <label class="canvas-guides"><input type="checkbox"> Show guides</label>
+    <div class="canvas-frame canvas-frame--actual" style="{{canvas:gdn-728x90}}">
+      <div class="canvas">
+        <div class="canvas-ui"></div>
+        <div class="canvas-safe canvas-safe--row">
+          <span class="canvas-mark">{{name}}</span>
+          <p class="canvas-display" style="font-size:calc(var(--t) * 22)">One message, <em>one next step.</em></p>
+          <span class="canvas-button">Learn more</span>
+        </div>
+      </div>
+    </div>
+    <div class="canvas-frame canvas-frame--actual" style="{{canvas:gdn-300x250}}">
+      <div class="canvas canvas--ink">
+        <div class="canvas-ui"></div>
+        <div class="canvas-safe">
+          <span class="canvas-eyebrow">Free session</span>
+          <p class="canvas-display">One message, <em>one next step.</em></p>
+          <span class="canvas-button">Learn more</span>
+          <div class="canvas-foot"><span>{{name}}</span><span>Disclaimer line</span></div>
+        </div>
+      </div>
+    </div>
+  </figure>
+  <pre>&lt;div class="canvas-frame" style="&#123;&#123;canvas:gdn-300x250&#125;&#125;"&gt;
+  &lt;div class="canvas"&gt;
+    &lt;div class="canvas-ui"&gt;&lt;/div&gt;
+    &lt;div class="canvas-safe"&gt;
+      &lt;span class="canvas-eyebrow"&gt;Eyebrow&lt;/span&gt;
+      &lt;p class="canvas-display"&gt;Headline, &lt;em&gt;accent.&lt;/em&gt;&lt;/p&gt;
+      &lt;span class="canvas-button"&gt;Call to action&lt;/span&gt;
+    &lt;/div&gt;
+  &lt;/div&gt;
+&lt;/div&gt;</pre>
+</section>
+
+<section class="block" id="delivery">
+  <div class="block__head">
+    <h2 class="h2">Delivery rules</h2>
+  </div>
+  <table class="spec">
+    <thead><tr><th>Rule</th><th>What it means in practice</th></tr></thead>
+    <tbody>
+      <tr><td><strong>File type</strong></td><td>JPG for anything with a photo, PNG for flat color and type. Export at exactly the listed pixel size unless the format says 2×. Never upload SVG or WebP to an ad platform unless its specification lists them.</td></tr>
+      <tr><td><strong>Weight</strong></td><td>Stay under the listed limit. Export a photo at about 80% JPG quality and check the file size before upload, not after a rejection.</td></tr>
+      <tr><td><strong>Alt text</strong></td><td>Where a placement takes alt text, write the message, not a description of the picture. Ad platforms take no alt text, so the message must also be in the ad's text fields.</td></tr>
+      <tr><td><strong>The mark on every asset</strong></td><td>Every paid or promotional asset carries the full brand mark from the Brand view. A monogram is never the only identification.</td></tr>
+      <tr><td><strong>Disclaimers</strong></td><td>Where the brand's field requires a disclaimer line, it appears wherever it fits at a legible size; a format too small to hold it is marked in the catalog and is not used where the line is required.</td></tr>
+      <tr><td><strong>Safe areas</strong></td><td>Keep the mark and the copy inside each format's safe area. The guides on any template page show it, with any band the platform covers.</td></tr>
+      <tr><td><strong>Shared copy</strong></td><td>A campaign reads word for word the same on every channel: the ad, the banner, the event cover, and the post take their headline, date, and call to action from one place, never retyped per template.</td></tr>
+    </tbody>
+  </table>
+</section>

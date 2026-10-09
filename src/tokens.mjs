@@ -101,16 +101,15 @@ export function primaryFontFamily(stack) {
   return family && !GENERIC_FONT_FAMILIES.has(family.toLowerCase()) ? family : null;
 }
 
-// Families every device already has: the classic web-safe faces and the
-// operating-system UI stacks. A role on one of these needs no file or service.
+// Conventional web-safe faces and OS UI aliases need no published source.
+// Their stacks may use a platform fallback; named platform-specific faces
+// such as Roboto or SF Pro still need a file or service.
 const SYSTEM_FONT_FAMILIES = new Set([
-  "arial", "arial black", "helvetica", "helvetica neue", "verdana", "tahoma", "trebuchet ms", "segoe ui", "gill sans",
-  "georgia", "times", "times new roman", "palatino", "palatino linotype", "book antiqua", "garamond", "baskerville", "cambria",
-  "courier", "courier new", "lucida console", "lucida sans unicode", "monaco", "menlo", "consolas", "impact",
-  "-apple-system", "blinkmacsystemfont", "sf pro", "sf pro text", "sf pro display", "roboto", "ubuntu", "cantarell", "noto sans", "oxygen",
+  "arial", "arial black", "verdana", "tahoma", "trebuchet ms", "georgia", "times new roman", "courier new", "impact",
+  "-apple-system", "blinkmacsystemfont",
 ]);
 
-/** Whether a family ships with every operating system, so a consumer needs no file or service to use it. */
+/** Whether a conventional system stack can use this family without a published source. */
 export function isSystemFontFamily(family) {
   return SYSTEM_FONT_FAMILIES.has(String(family ?? "").trim().toLowerCase());
 }

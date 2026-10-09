@@ -87,7 +87,7 @@ export async function collectIndexAssetFiles(index, artifactRoot) {
   const files = new Map();
   const references = [];
   eachIndexMedia(index, (media) => {
-    if (typeof media.url === "string" && media.url.startsWith("/")) references.push(media.url);
+    if (typeof media.url === "string" && media.url.startsWith("/") && !media.url.startsWith("//")) references.push(media.url);
   });
   for (const url of references) {
     const relative = url.split("?", 1)[0].replace(/^\/+/, "");
@@ -117,8 +117,11 @@ export async function collectIndexAssetFiles(index, artifactRoot) {
 export function rewriteIndexForPublish(index, files, publicBase, each = eachIndexMedia) {
   const base = String(publicBase).replace(/\/+$/, "");
   const rewritten = structuredClone(index);
+  for (const page of rewritten.pages ?? []) {
+    if (page.markdownUrl?.startsWith("/") && !page.markdownUrl.startsWith("//")) page.markdownUrl = `${base}${page.markdownUrl}`;
+  }
   each(rewritten, (media) => {
-    if (typeof media.url !== "string" || !media.url.startsWith("/")) return;
+    if (typeof media.url !== "string" || !media.url.startsWith("/") || media.url.startsWith("//")) return;
     const relative = media.url.split("?", 1)[0].replace(/^\/+/, "");
     const file = files.get(relative);
     if (!file) return;
@@ -142,7 +145,7 @@ export const rewriteBrandKitForPublish = (kit, files, publicBase) => rewriteInde
 export async function collectBrandKitFiles(kit, artifactRoot, files = new Map()) {
   const references = [];
   eachBrandKitMedia(kit, (media) => {
-    if (typeof media.url === "string" && media.url.startsWith("/")) references.push(media.url);
+    if (typeof media.url === "string" && media.url.startsWith("/") && !media.url.startsWith("//")) references.push(media.url);
   });
   for (const url of references) {
     const relative = url.split("?", 1)[0].replace(/^\/+/, "");
@@ -218,11 +221,11 @@ export async function collectMachineDocFiles(artifactRoot, entryDirectory) {
 export function rewriteLlmsForPublish(text, publicBase) {
   const base = String(publicBase).replace(/\/+$/, "");
   return String(text)
-    .replace(/\]\(\//g, `](${base}/`)
-    .replace(/^(Machine-readable index: |Full text: |Design tokens: |Brand kit: |Asset formats: |Website designs: )(\/\S+)/gm, (_match, label, target) => `${label}${base}${target}`)
+    .replace(/\]\(\/(?!\/)/g, `](${base}/`)
+    .replace(/^(Machine-readable index: |Full text: |Design tokens: |Brand kit: |Asset formats: |Website designs: )(\/(?!\/)\S+)/gm, (_match, label, target) => `${label}${base}${target}`)
     // Logo and font file lines in the essentials name site-absolute files after a colon.
-    .replace(/^(\s*- .*?: )(\/\S+)$/gm, (_match, label, target) => `${label}${base}${target}`)
-    .replace(/^(<!-- source: )(\/\S*)/gm, (_match, label, target) => `${label}${base}${target}`);
+    .replace(/^(\s*- .*?: )(\/(?!\/)\S+)$/gm, (_match, label, target) => `${label}${base}${target}`)
+    .replace(/^(<!-- source: )(\/(?!\/)\S*)/gm, (_match, label, target) => `${label}${base}${target}`);
 }
 
 /** formats.json names each format's page by its mirror URL; on the CDN that URL is absolute like every other link. */
@@ -366,7 +369,7 @@ export async function publishExtractedIndex(workspace, options = {}) {
   const tokensSource = await fs.readFile(path.join(artifactRoot, ...tokensRelative.split("/"))).catch(() => null);
   // formats.json names pages by their mirror URL, which the Markdown link rule resolves the same way.
   const formatsRelative = entryDirectory === "." ? "formats.json" : `${entryDirectory}/formats.json`;
-  const formatsSource = await fs.readFile(path.join(artifactRoot, ...formatsRelative.split("/")), "utf8").catch(() => null);
+  const formatsSource = index.formats ? await fs.readFile(path.join(artifactRoot, ...formatsRelative.split("/")), "utf8").catch(() => null) : null;
   const formats = formatsSource === null ? null : rewriteFormatsForPublish(JSON.parse(formatsSource), publicBase);
 
   const staging = await fs.mkdtemp(path.join(os.tmpdir(), "timds-artifact-"));

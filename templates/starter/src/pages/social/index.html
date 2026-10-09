@@ -1,0 +1,70 @@
+<span class="eyebrow">Social DS · Foundations</span>
+<h1 class="page-title">The social design system</h1>
+<p class="lede">How the brand shows up on social channels. It inherits the identity from the Brand view and adapts it to fixed-canvas, mobile-first surfaces, then layers on the platform specs, the post and event templates, and the compliance rules every post passes before it goes out.</p>
+<div class="rule"></div>
+
+<section class="block" id="principles">
+  <div class="block__head">
+    <h2 class="h2">Principles</h2>
+    <p>This view does not redefine the brand; it translates it. Colors, fonts, the mark, and voice are owned by Brand. This view governs how those assets behave on a square post or a vertical story.</p>
+  </div>
+  <table class="spec">
+    <thead><tr><th>Principle</th><th>What it means in practice</th></tr></thead>
+    <tbody>
+      <tr><td><strong>One brand, every channel.</strong></td><td>A post is recognizable before the mark is read: the same palette, the same display type, the same accent. Never introduce a social-only color or typeface.</td></tr>
+      <tr><td><strong>Platform-native, not platform-generic.</strong></td><td>Respect each channel's dimensions, safe areas, and reading behavior. A document carousel and a video thumbnail are different crafts; design for where each is seen.</td></tr>
+      <tr><td><strong>Mobile-first legibility.</strong></td><td>Most impressions are on a phone. Type, contrast, and the focal point must hold at thumbnail scale before a post is approved at full size.</td></tr>
+      <tr><td><strong>Compliant by default.</strong></td><td>Claims, testimonials, and results follow the rules of the brand's field. When in doubt, a post goes to review before it goes out.</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section class="block" id="organization">
+  <div class="block__head">
+    <h2 class="h2">How it's organized</h2>
+  </div>
+  <table class="spec">
+    <thead><tr><th>Group</th><th>Covers</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Foundations</strong></td><td>Brand assets on a fixed canvas, and the social voice and tone.</td></tr>
+      <tr><td><strong>Production</strong></td><td>How a video goes from brief to published cut, the lab it is drafted in, and the footage library.</td></tr>
+      <tr><td><strong>LinkedIn, YouTube, Shorts</strong></td><td>Each platform's specs and templates, and vertical video under platform chrome.</td></tr>
+      <tr><td><strong>Events</strong></td><td>Event listing images, event covers, and webinar promo posts and stories in Minimal, Accent, and Bold.</td></tr>
+      <tr><td><strong>Post Templates</strong></td><td>Feed, story, and carousel templates per platform, with caption rules.</td></tr>
+      <tr><td><strong>Advertising</strong></td><td>Paid social ads and the text around each image. Display and search placements live in <a href="/digital/">Digital DS</a>.</td></tr>
+      <tr><td><strong>Content &amp; Compliance</strong></td><td>Content pillars, posting cadence, and the legal and accessibility guardrails.</td></tr>
+    </tbody>
+  </table>
+  <div class="note"><b>Canonical tokens live in Brand.</b> Anything in this view that references a color, font, or the mark defers to the Brand view. If they ever disagree, Brand wins and this page is wrong.</div>
+</section>
+
+<section class="block" id="canvases">
+  <div class="block__head">
+    <h2 class="h2">Canvases</h2>
+    <p>Every event image, post, and ad is sized from the <code>social</code> group in <code>src/formats.json</code>, and a template is built from the same pieces as Digital DS (<code>src/styles/canvas.css</code>). A story keeps its message out of the bands the platform covers with its own interface; turn on the guides to see them.</p>
+  </div>
+  {{formats:social}}
+  <figure class="demo">
+    <label class="canvas-guides"><input type="checkbox"> Show guides</label>
+    <div class="canvas-frame" style="{{canvas:ig-1080x1080}};max-width:18rem">
+      <div class="canvas">
+        <div class="canvas-ui"></div>
+        <div class="canvas-safe">
+          <span class="canvas-eyebrow">Plain answers</span>
+          <p class="canvas-display" style="font-size:calc(var(--t) * 64)">One idea per post, <em>said plainly.</em></p>
+          <div class="canvas-foot" style="font-size:calc(var(--t) * 24)"><span>{{name}}</span><span>example.com</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="canvas-frame" style="{{canvas:ig-1080x1920}};max-width:10rem">
+      <div class="canvas canvas--ink">
+        <div class="canvas-ui"></div>
+        <div class="canvas-safe" style="justify-content:center;gap:calc(var(--t) * 40)">
+          <span class="canvas-eyebrow" style="font-size:calc(var(--t) * 28)">Free session</span>
+          <p class="canvas-display" style="font-size:calc(var(--t) * 88)">One idea, <em>said plainly.</em></p>
+          <span class="canvas-button" style="font-size:calc(var(--t) * 30);padding:calc(var(--t) * 18) calc(var(--t) * 36)">Save your seat</span>
+        </div>
+      </div>
+    </div>
+  </figure>
+</section>

@@ -82,3 +82,15 @@ test("the formats document links each format to its built page and warns about t
   // The source groups are not mutated by the page join.
   assert.equal(groups[0].formats[0].pageUrl, undefined);
 });
+
+test("planned format pages are explicit catalog entries without missing-page warnings", () => {
+  const groups = normalizeFormatCatalog(CATALOG);
+  const { document, warnings } = formatsDocument(groups, { systemId: "s", name: "S", version: "1.0.0" }, {
+    pages: [{ id: "print/business-cards", url: "/print/business-cards" }],
+    plannedPages: ["print/worksheets", "print/business-cards"],
+  });
+  assert.deepEqual(document.groups[0].formats[1].planned, true);
+  assert.equal(document.groups[0].formats[1].pageUrl, undefined);
+  assert.equal(document.groups[0].formats[0].planned, undefined);
+  assert.deepEqual(warnings, ["format ig-1080x1920 (Instagram story) names the page social/instagram-posts, which the built artifact does not contain; it is listed without a page link"]);
+});

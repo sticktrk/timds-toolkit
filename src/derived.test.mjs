@@ -48,6 +48,9 @@ test("reads the local derived layer, tolerating files check has not written and 
     assert.equal(partial.formats.groups[0].formats[0].id, "business-card");
     assert.equal(partial.tokens, null);
 
+    await fs.writeFile(path.join(root, "dist", "design-system", "index.json"), JSON.stringify({ system: KIT.system, pages: [] }));
+    assert.equal((await readDerivedLayer(root, manifest)).formats, null, "the current index no longer advertises the former catalog");
+
     const stale = await readDerivedLayer(root, { ...manifest, version: "2.1.0" });
     assert.equal(stale.stale, true);
 
@@ -103,4 +106,27 @@ test("summarizes a kit for doctor in one line", () => {
   assert.deepEqual(summary, { version: "2.0.0", roles: { filled: 1, missing: ["font.ui"], total: 2 }, logos: 1, primaryLogo: "White logo", imagery: 0, guidance: ["voice"] });
   assert.equal(describeBrandKit(summary), "Brand kit: 1/2 roles (missing font.ui), 1 logo (primary: White logo), 0 imagery, guidance voice (derived for 2.0.0)");
   assert.equal(describeBrandKit(summarizeBrandKit(null)), "Brand kit: not derived; run timds check");
+});
+
+test("a published index controls whether an old CDN catalog is still served", async () => {
+  const index = { system: KIT.system, pages: [], formats: { url: "/formats.json", groups: 0, count: 0 } };
+  const catalog = { schemaVersion: 1, system: KIT.system, count: 0, groups: [] };
+  const served = {
+    ".timds-artifact.json": JSON.stringify({ schemaVersion: 1, entry: "index.html" }),
+    "index.json": JSON.stringify(index),
+    "formats.json": JSON.stringify(catalog),
+  };
+  const requests = [];
+  const fetchImpl = async (url) => {
+    const relative = url.replace("https://cdn.example.com/artifact/", "");
+    requests.push(relative);
+    return new Response(served[relative] ?? "missing", { status: served[relative] ? 200 : 404 });
+  };
+  assert.deepEqual((await fetchDerivedLayer("https://cdn.example.com/artifact", { fetchImpl })).formats, catalog);
+  delete index.formats;
+  served["index.json"] = JSON.stringify(index);
+  served["formats.json"] = "{obsolete";
+  requests.length = 0;
+  assert.equal((await fetchDerivedLayer("https://cdn.example.com/artifact", { fetchImpl })).formats, null);
+  assert.ok(!requests.includes("formats.json"));
 });

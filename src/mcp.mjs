@@ -104,7 +104,11 @@ change. Work only in the Design System the user gave you.
   \`scripts/prepare-merge-release.test.mjs\`), and any symbolic link. The
   TimDS release line, lockfile, installation record, agent skills, workspace
   commands, release automation, and workflows change only when the operator
-  updates TimDS. The build, dev, and check scripts stay editable. When a change needs a protected file, say so in your hand-off
+  updates TimDS. The build, dev, and check scripts stay editable, but they,
+  \`scripts/viewer.mjs\`, \`src/styles/viewer.css\`, and
+  \`src/styles/canvas.css\` are stock starter plumbing that \`upgrade\`
+  refreshes while unmodified; a local change leaves that file behind on later
+  upgrades, so prefer \`tokens.json\`, \`system.css\`, and the pages. When a change needs a protected file, say so in your hand-off
   instead of working around it.
 - Edit authored tokens, source, documentation, components, navigation, and
   lightweight assets. Preserve the framework and visual language unless the

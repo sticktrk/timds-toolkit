@@ -17,6 +17,8 @@ node --test src/core.test.mjs # one test file
 node --test --test-name-pattern="upgrade" src/core.test.mjs   # one test by name
 tsx --test video/remotion.test.tsx                            # the React component test
 node bin/timds.mjs <command> --root /path/to/client-design-system   # run the CLI from source
+node bin/timds.mjs starter sync --root /path/to/client-design-system  # adopt or re-sync a starter-based system (then every upgrade does it)
+npm run golden-drift -- --golden /path/to/golden-checkout            # where templates/starter has drifted from the golden system (exit 1 on drift)
 ```
 
 CI (`.github/workflows/ci.yml`) runs `npm ci && npm test && npm run pack:check`
@@ -75,8 +77,8 @@ enforces portability in `check` (no scripts, inline styles, undeclared
 classes, or relative references), and serializes `designs.json`. `check`
 always builds designs itself after the workspace build; the starter build
 calls the same function so `dev` shows them. `timds designs init` is the
-migration for systems scaffolded without them (`legacyStarterScriptHashes` in
-core pins the stock starter scripts it may replace).
+migration for systems scaffolded without them; it replaces the stock build
+and viewer scripts through the same hash check `starter sync` uses.
 
 `extract.mjs` harvests the built HTML in `dist/` (using the tolerant parser in
 `html.mjs`, which exists so the package needs no HTML dependency) and writes
@@ -132,17 +134,33 @@ lifecycle belong to the host.
 - `src/defaults.mjs` implements `timds defaults --apply`: merge against the
   `.timds/defaults.json` baseline with sticky overrides. See `AGENTS.md` for
   the test matrix this migration must keep.
+- `src/starter.mjs` implements `timds starter sync`, the recurring starter
+  migration `upgrade` runs on every adopted system: stock plumbing replaced
+  by recorded hash, `src/site.json` and `src/formats.json` merged against the
+  baseline in `.timds/starter.json` (the catalogs are serialized in the
+  starter's one-entry-per-line style so diffs stay reviewable), managed
+  overview fragments written for added or planned pages, a missing stylesheet
+  link inserted into the layout, then `check` with full rollback on failure.
+  `init` records a fresh scaffold as adopted. `src/fixtures/starter-before-
+  formats/` is the pre-format-catalog scaffold the tests adopt from, and
+  `templates/starter-history/` holds the stock `site.json` versions the
+  bootstrap compares against. See `AGENTS.md` for the boundary.
 
 ### Templates and managed files
 
 `templates/` is copied verbatim (with `__PLACEHOLDER__` substitution) by `init`
 and `video init`. `templates/starter/` is the standalone repo scaffold including
 its release scripts; `templates/*.yml` are the stock workflows. The starter
-viewer is client-owned once copied: `scripts/viewer.mjs` renders
+is client-owned once copied, except the plumbing and catalogs `starter sync`
+keeps current (see above): `scripts/viewer.mjs` renders
 `src/site.json` (views and pages, authored or `planned`), `src/layout.html`,
 and the fragments under `src/pages/` into `dist/`, filling `{{tokens:GROUP}}`
-tables from `tokens.json`, and lists the designs under `src/designs/` in the
-app bar and sitemap. Planned pages are never built, so a fresh scaffold
+tables from `tokens.json` and `{{formats:GROUP}}` tables and `{{canvas:ID}}`
+preview variables from `src/formats.json` (the catalog of print sheets and
+screen canvases, each tied to its page; `src/styles/canvas.css` is the
+script-free preview engine), and lists the designs under `src/designs/` in the
+app bar and sitemap. The starter's views mirror the golden client system
+(Brand, Web DS, Digital DS, Social DS, Print DS); keep them in step with it. Planned pages are never built, so a fresh scaffold
 keeps its two expected brand warnings. The sample design uses the site layout
 block in `src/styles/system.css` (between its marker comments), which
 `designs init` appends to a migrating system that kept the starter tokens.
