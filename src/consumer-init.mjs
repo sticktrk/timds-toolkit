@@ -51,11 +51,15 @@ import { CONSUMER_MANIFEST_FILE, consumerPinMode, publishedBaseUrl, validateCons
 import { resolvePublishedBundle, syncConsumerBundle } from "./consumer-sync.mjs";
 import { planConsumerToolkitLock, resolveConsumerToolkitLock, runConsumerNpm } from "./consumer-install.mjs";
 import { acceptsToolkitReleaseRange, runtimeIdentity, toolkitReleaseRange } from "./runtime.mjs";
+import { linkClaudeSkills } from "./agent-skills.mjs";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 export const CONSUMER_SKILL_NAME = "timds-consume-design-system";
 export const CONSUMER_SKILL_PATH = `.agents/skills/${CONSUMER_SKILL_NAME}`;
+// The developer's counterpart: move the pin to a new release and port the designs that changed.
+export const CONSUMER_UPDATE_SKILL_NAME = "timds-update-design-system";
+export const CONSUMER_SKILL_NAMES = [CONSUMER_SKILL_NAME, CONSUMER_UPDATE_SKILL_NAME];
 export const CONSUMER_WORKFLOW_PATH = ".github/workflows/timds-consumer-preview.yml";
 export const CONSUMER_DESIGNER_WORKFLOW_PATH = ".github/workflows/timds-designer-change.yml";
 export const CONSUMER_LAUNCH_PATH = ".claude/launch.json";
@@ -361,12 +365,14 @@ function pinSections(designSystem) {
     const pin = designSystem.version === "current" ? "the current published version" : `version ${designSystem.version}`;
     return {
       __PIN_SETUP__: `Run \`npm ci\` at repository root; its \`postinstall\` fetches the pinned\n   Design System bundle (${pin}) into \`${dsPath}/\`. If that directory is\n   empty, run \`npm run timds -- consumer sync\`.`,
+      __PIN_UPDATE__: `The product pins a published version (${pin}) in \`timds.consumer.json\`.\nMove it to the release the designers handed off, or to the current one:\n\n\`\`\`bash\nnpm run timds -- consumer update            # the current published release\nnpm run timds -- consumer update 1.4.0      # a named release\n\`\`\`\n\nIt rewrites \`designSystem.version\` and fetches that version's bundle into\n\`${dsPath}/\` (ignored by git). Commit the manifest change. Never edit files\nunder \`${dsPath}/\`; \`npm ci\` recreates them from the pin.`,
       __PIN_RULES__: `- \`${dsPath}/\` holds the published bundle of \`__SYSTEM_ID__\` at the version\n  \`timds.consumer.json\` pins, fetched by \`npm install\` and ignored by git.\n  Never edit, commit, or add files under it, and never change\n  \`designSystem.version\`. Moving the pin is a separate developer decision\n  (\`timds consumer update\`).\n- Never copy Design System stylesheets, fonts, or images into the product.\n  Reference what the app already loads from \`${dsPath}/\`.`,
       __DERIVED_LAYER__: `- The published system is one URL away: the \`describe_system\` tool names\n  it, and \`${dsPath}/.timds-bundle.json\` records the version and files that\n  were fetched. Read \`llms.txt\` at the published prefix for the brand\n  essentials (colors, fonts and where to get them, logos, asset formats),\n  \`brand.json\` and \`tokens.json\` beside it for the details. These are\n  published output: read them, never edit them.`,
     };
   }
   return {
     __PIN_SETUP__: `Run \`git submodule update --init ${dsPath}\` so the checkout\n   matches the pin, then \`npm ci\` at repository root.`,
+    __PIN_UPDATE__: `The product pins the Design System as the git submodule at \`${dsPath}/\`.\nMove it to the released commit the designers handed off:\n\n\`\`\`bash\ngit -C ${dsPath} fetch origin\ngit -C ${dsPath} checkout <release commit>\ngit add ${dsPath}\n\`\`\`\n\nThen \`npm --prefix ${dsPath} ci\` and \`npm --prefix ${dsPath} run timds -- check\`\nso the derived layer under \`${dsPath}/dist/\` matches the pin. Commit only\nthe gitlink; never commit inside the submodule.`,
     __PIN_RULES__: `- \`${dsPath}/\` is a git submodule at the exact commit this\n  product was reviewed against. Never \`git pull\`, switch, or commit inside it,\n  and never stage a new pin. Moving the pin is a separate developer decision.\n- Never copy Design System source, stylesheets, fonts, or images into the\n  product. Reference what the app already imports from the submodule.`,
     __DERIVED_LAYER__: `- After \`npm --prefix ${dsPath} ci\` and\n  \`npm --prefix ${dsPath} run timds -- check\`, the derived layer\n  sits beside the built entry page under \`${dsPath}/dist/\`\n  (usually \`dist/design-system/\`): \`brand.json\` (brand roles, each font\n  role with its family and the files or service that provide it, logos,\n  imagery), \`tokens.json\` (resolved CSS custom properties by scope),\n  \`formats.json\` (the asset format catalog, when the system keeps one),\n  \`llms.txt\` (the brand essentials and the page directory), \`llms-full.txt\`,\n  and a Markdown mirror of every guidance page. These are build output: read\n  them, never edit or commit them.`,
   };
@@ -379,8 +385,13 @@ function pinSections(designSystem) {
  * `options.defaultBranch` names the pull-request base (default `main`).
  */
 export async function renderConsumerSkill(manifest, options = {}) {
+  return renderConsumerSkillFile(CONSUMER_SKILL_NAME, manifest, options);
+}
+
+/** Render any consumer skill's SKILL.md for `manifest`: the pin sections, the system, the branch, and the apps. */
+export async function renderConsumerSkillFile(skillName, manifest, options = {}) {
   const validated = validateConsumerManifest(manifest);
-  const source = await fs.readFile(path.join(packageRoot, "skills", CONSUMER_SKILL_NAME, "SKILL.md"), "utf8");
+  const source = await fs.readFile(path.join(packageRoot, "skills", skillName, "SKILL.md"), "utf8");
   const apps = Object.entries(validated.apps).map(([name, app]) => appSection(name, app)).join("\n\n");
   let text = source;
   for (const [placeholder, replacement] of Object.entries(pinSections(validated.designSystem))) text = text.replace(placeholder, () => replacement);
@@ -411,18 +422,22 @@ export async function consumerLaunchConfigurations(manifest) {
  * is merged, not owned, so it is not listed (see consumerLaunchConfigurations).
  */
 export async function consumerManagedFiles(manifest, options = {}) {
-  const files = [{ path: `${CONSUMER_SKILL_PATH}/SKILL.md`, content: await renderConsumerSkill(manifest, options) }];
-  const skillRoot = path.join(packageRoot, "skills", CONSUMER_SKILL_NAME);
-  const walk = async (directory) => {
-    for (const entry of (await fs.readdir(directory, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
-      const absolute = path.join(directory, entry.name);
-      if (entry.isDirectory()) await walk(absolute);
-      else if (entry.isFile() && absolute !== path.join(skillRoot, "SKILL.md")) {
-        files.push({ path: `${CONSUMER_SKILL_PATH}/${path.relative(skillRoot, absolute).split(path.sep).join("/")}`, content: await fs.readFile(absolute, "utf8") });
+  const files = [];
+  for (const skillName of CONSUMER_SKILL_NAMES) {
+    const skillPath = `.agents/skills/${skillName}`;
+    files.push({ path: `${skillPath}/SKILL.md`, content: await renderConsumerSkillFile(skillName, manifest, options) });
+    const skillRoot = path.join(packageRoot, "skills", skillName);
+    const walk = async (directory) => {
+      for (const entry of (await fs.readdir(directory, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
+        const absolute = path.join(directory, entry.name);
+        if (entry.isDirectory()) await walk(absolute);
+        else if (entry.isFile() && absolute !== path.join(skillRoot, "SKILL.md")) {
+          files.push({ path: `${skillPath}/${path.relative(skillRoot, absolute).split(path.sep).join("/")}`, content: await fs.readFile(absolute, "utf8") });
+        }
       }
-    }
-  };
-  await walk(skillRoot);
+    };
+    await walk(skillRoot);
+  }
   files.push({ path: CONSUMER_WORKFLOW_PATH, content: await template("timds-consumer-preview.yml") });
   files.push({ path: CONSUMER_DESIGNER_WORKFLOW_PATH, content: await template("timds-designer-change.yml") });
   return files;
@@ -733,6 +748,10 @@ export async function initializeConsumer(rootInput = process.cwd(), { force = fa
     written.push(CONSUMER_MANIFEST_FILE);
   }
   written.push(...await applyConsumerInstallation(repoRoot, plan));
+  // After every write succeeded: the link is not a managed file, so a
+  // migration's rollback need not know about it.
+  const skillsLink = await linkClaudeSkills(repoRoot);
+  if (skillsLink) written.push(path.relative(repoRoot, skillsLink).split(path.sep).join("/"));
 
   output(keepManifest
     ? `Kept the existing ${CONSUMER_MANIFEST_FILE}; rerun with --force to regenerate it from the app folders.`
@@ -846,7 +865,7 @@ export async function upgradeConsumer(rootInput = process.cwd(), { force = false
   const retired = [];
   for (const [relative, recordedHash] of Object.entries(previous.managedFiles || {})) {
     // Only paths inside the consumer-managed boundary are ever removed.
-    const managedPath = relative.startsWith(`${CONSUMER_SKILL_PATH}/`) || relative.startsWith(".github/workflows/timds-");
+    const managedPath = CONSUMER_SKILL_NAMES.some((name) => relative.startsWith(`.agents/skills/${name}/`)) || relative.startsWith(".github/workflows/timds-");
     if (shipped.has(relative) || !managedPath || relative.split("/").includes("..")) continue;
     const current = await readText(path.join(repoRoot, relative));
     if (current === null) continue;
@@ -854,6 +873,7 @@ export async function upgradeConsumer(rootInput = process.cwd(), { force = false
   }
 
   for (const file of filePlan.writes) await writeFile(path.join(repoRoot, file.path), file.content);
+  await linkClaudeSkills(repoRoot);
   for (const file of retired.filter((entry) => entry.status === "removed")) await fs.rm(path.join(repoRoot, file.path), { force: true });
   if (launchPlan.changed) await writeFile(launchPlan.launchPath, launchPlan.content);
   if (mcpPlan.changed) await writeFile(mcpPlan.mcpPath, mcpPlan.content);

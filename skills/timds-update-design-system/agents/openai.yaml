@@ -1,0 +1,4 @@
+interface:
+  display_name: "Update to a Design System release"
+  short_description: "Move the pin and port the designs that changed"
+  default_prompt: "Use $timds-update-design-system to adopt the latest Design System release in this product and port what changed."

@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { spawn } from "node:child_process";
+import { linkClaudeSkills } from "./agent-skills.mjs";
 import { createHash } from "node:crypto";
 import { createReadStream, existsSync } from "node:fs";
 import { promises as fs } from "node:fs";
@@ -656,12 +657,19 @@ async function toolkitPackageIdentity(root = packageRoot) {
   return { name, version };
 }
 
+// The designer-facing skills a Design System repository carries beside the
+// editing and video procedures: each one takes a moment of the designer's
+// day (starting, adding media, shipping, handing off to developers) and
+// runs the tooling for it, so the designer never has to.
+export const designerSkillNames = ["design-start", "design-media", "design-ship", "design-handoff"];
+export const designSystemSkillNames = ["timds-edit-design-system", "timds-create-video", ...designerSkillNames];
 function managedToolkitPaths(repoRoot, designSystemRoot) {
   return {
     installationPath: path.join(designSystemRoot, ".timds", "installation.json"),
     legacyVendoredCliRoot: path.join(designSystemRoot, ".timds", "cli"),
     skillDestination: path.join(repoRoot, ".agents", "skills", "timds-edit-design-system"),
     videoSkillDestination: path.join(repoRoot, ".agents", "skills", "timds-create-video"),
+    skillDestinations: designSystemSkillNames.map((name) => path.join(repoRoot, ".agents", "skills", name)),
   };
 }
 
@@ -690,18 +698,12 @@ async function installManagedToolkit({ designSystemRoot, releaseAutomation, depe
   const paths = managedToolkitPaths(repoRoot, designSystemRoot);
   const previousInstallation = await readInstallationMetadata(designSystemRoot);
   if (replace) await fs.rm(paths.legacyVendoredCliRoot, { force: true, recursive: true });
-  if (replace) await fs.rm(paths.skillDestination, { force: true, recursive: true });
-  if (replace) await fs.rm(paths.videoSkillDestination, { force: true, recursive: true });
-  await copyDirectory(
-    path.join(packageRoot, "skills", "timds-edit-design-system"),
-    paths.skillDestination,
-    { overwrite: replace },
-  );
-  await copyDirectory(
-    path.join(packageRoot, "skills", "timds-create-video"),
-    paths.videoSkillDestination,
-    { overwrite: replace },
-  );
+  for (const [index, name] of designSystemSkillNames.entries()) {
+    const destination = paths.skillDestinations[index];
+    if (replace) await fs.rm(destination, { force: true, recursive: true });
+    await copyDirectory(path.join(packageRoot, "skills", name), destination, { overwrite: replace });
+  }
+  await linkClaudeSkills(repoRoot);
   await fs.mkdir(path.dirname(paths.installationPath), { recursive: true });
   const selectedReleaseAutomation = releaseAutomation ?? previousInstallation.releaseAutomation;
   const installation = { name: installedIdentity.name, schemaVersion: 1, version: installedIdentity.version };
@@ -948,7 +950,7 @@ export async function upgradeRepository(repoRootInput, { autoRelease = false, de
   }
   const paths = managedToolkitPaths(workspace.repoRoot, workspace.designSystemRoot);
   if (!force) {
-    const pathspecs = [paths.legacyVendoredCliRoot, paths.installationPath, paths.skillDestination, paths.videoSkillDestination, path.join(workspace.designSystemRoot, ...STARTER_RECORD_FILE.split("/"))]
+    const pathspecs = [paths.legacyVendoredCliRoot, paths.installationPath, ...paths.skillDestinations, path.join(workspace.designSystemRoot, ...STARTER_RECORD_FILE.split("/"))]
       .map((filePath) => path.relative(workspace.repoRoot, filePath).split(path.sep).join("/"));
     const status = await git(["status", "--porcelain", "--untracked-files=all", "--", ...pathspecs], workspace.repoRoot);
     if (status.stdout.trim()) {
@@ -1264,8 +1266,8 @@ function allowedSubmitPath(filePath, layout) {
   if (layout === "standalone") return filePath !== ".git" && !filePath.startsWith(".git/");
   return filePath === "design-system"
     || filePath.startsWith("design-system/")
-    || filePath.startsWith(".agents/skills/timds-edit-design-system/")
-    || filePath.startsWith(".agents/skills/timds-create-video/")
+    || designSystemSkillNames.some((name) => filePath.startsWith(`.agents/skills/${name}/`))
+    || filePath === ".claude/skills"
     || filePath === ".github/workflows/timds-design-system.yml";
 }
 
@@ -1322,7 +1324,7 @@ export async function submitWorkspace(repoRootInput, message, options = {}) {
   if (!branch || branch === baseBranch) commands.push(["git", "switch", "-c", plannedBranch]);
   commands.push(checked.layout === "standalone"
     ? ["git", "add", "--all"]
-    : ["git", "add", "--", "design-system", ".agents/skills/timds-edit-design-system", ".agents/skills/timds-create-video", ".github/workflows/timds-design-system.yml"]);
+    : ["git", "add", "--", "design-system", ...designSystemSkillNames.map((name) => `.agents/skills/${name}`), ".claude/skills", ".github/workflows/timds-design-system.yml"]);
   commands.push(["git", "commit", "-m", message]);
   if (!options.noPush) commands.push(["git", "push", "--set-upstream", "origin", plannedBranch]);
   if (!options.noPr && !options.noPush) {

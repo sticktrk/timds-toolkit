@@ -189,8 +189,13 @@ block in `src/styles/system.css` (between its marker comments), which
 `design-system-README.md` are the scaffolded agent and human entry points;
 they are written once and then client-owned, so keep them accurate for a fresh
 scaffold. `skills/` holds the managed agent skills installed under
-`.agents/skills/`: two for Design System repos and
-`timds-consume-design-system` for consumer repos. `upgrade` compares managed files by hash against
+`.agents/skills/`: for Design System repos the editing and video
+procedures plus the four designer skills (`design-start`, `design-media`,
+`design-ship`, `design-handoff`; names in `designSystemSkillNames` in
+`src/core.mjs`), and for consumer repos `timds-consume-design-system` and
+`timds-update-design-system` (names in `CONSUMER_SKILL_NAMES` in
+`src/consumer-init.mjs`, rendered per manifest). `src/agent-skills.mjs`
+links `.claude/skills` to `.agents/skills` in both repository kinds. `upgrade` compares managed files by hash against
 `.timds/installation.json` and refuses locally modified files without
 `--force`; `legacyStandaloneAutomationHashes` in core pins the recognized stock
 release files for the `--auto-release` migration. When a template or skill

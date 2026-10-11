@@ -6,6 +6,24 @@ __CONTRACT_DESCRIPTION__
 this system: where things live, how pages reach the machine-readable layer,
 and what is protected. Read it before the first change.
 
+## Designers design here, developers ship it
+
+Designers do all of their work in this repository and never touch the
+toolkit: the skills under `.agents/skills/` (and, for Claude Code, the
+`.claude/skills` link to them) run it for them.
+
+| Say | Skill | Result |
+| --- | --- | --- |
+| "Let's start" | `design-start` | Installed, built, local preview open, change branch ready |
+| "Here is the new logo" | `design-media` | Staged, published, placed on the page, in the brand kit |
+| "It's done" | `design-ship` | Validated, reviewed at both widths, changelog note written, draft pull request open |
+| "Give it to the developers" | `design-handoff` | A brief naming the version to pin and the designs to port |
+
+Merging a pull request releases a patch version. The production product
+pins a release and a developer carries it across there, with its own
+`timds-update-design-system` skill. `AGENTS.md` names the product under
+"Handing a release to production".
+
 ## First local run
 
 ```bash

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Start a design session"
+  short_description: "Install, build, preview, and branch, then report the system's state"
+  default_prompt: "Use $design-start to get this Design System running locally and tell me where things stand."

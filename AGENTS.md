@@ -22,8 +22,14 @@ Client repositories select the bounded `0.1.x` package line, commit the exact
 resolved lockfile, and execute `npm run timds --`. They do not vendor package
 source. The always-managed repository-local boundary is
 `.timds/installation.json`, `.agents/skills/timds-edit-design-system/`,
-`.agents/skills/timds-create-video/`, and the legacy `.timds/cli/` tree only
-while removing it during migration. Standalone
+`.agents/skills/timds-create-video/`, the four designer skills
+(`.agents/skills/design-start/`, `design-media/`, `design-ship/`,
+`design-handoff/`, listed in `designSystemSkillNames` in `src/core.mjs`),
+and the legacy `.timds/cli/` tree only
+while removing it during migration. `init` and `upgrade` also create the
+`.claude/skills -> ../.agents/skills` link (`src/agent-skills.mjs`) when
+nothing is at that path, so Claude Code sees the same skills as slash
+commands; an existing path there is never touched. Standalone
 initialization also owns the stock release workflows and preparation scripts.
 Existing standalone repos enter that expanded boundary only through the
 explicit `upgrade --auto-release` migration; refuse customized files unless
@@ -31,7 +37,11 @@ replacement is forced. Package and lockfile changes select the resolved package
 release.
 
 In a consumer (product) repository, the consumer-managed boundary is
-`.agents/skills/timds-consume-design-system/`, the
+`.agents/skills/timds-consume-design-system/` (a designer's change inside
+the design surface), `.agents/skills/timds-update-design-system/` (a
+developer moving the pin to a release and porting the designs that
+changed; both are rendered from the manifest by `renderConsumerSkillFile`),
+the
 `timds-consumer-preview.yml` and `timds-designer-change.yml` workflows, the
 tracked `.claude/launch.json` and `.mcp.json` entries, and `consumer` in
 `.timds/installation.json`; `upgrade` there refreshes only that boundary (and,
@@ -199,6 +209,18 @@ The golden repository's own workflow opens a `golden-mirror` issue here
 when a merged pull request touched its structure-bearing files (navigation
 model, catalogs and content modules, shared stylesheets, layout). Work the
 issue with the steps above and close it from the mirror pull request.
+
+## Designers design in the system, developers ship it in the product
+
+The scaffolded `AGENTS.md`, `README.md`, and skills all describe one
+division of labor, and every change here keeps it: designers do all of
+their work in the Design System repository and never run the toolkit
+themselves (the designer skills run it for them); an operator's merge is
+the release; a developer carries each release into the product by moving
+its pin and porting the website designs onto the product's stack. A design
+is the reference a port must match, never the production page. When the
+toolkit gains a command a designer or a developer meets on that path, the
+matching skill and template section change in the same release.
 
 Never add client-specific content, credentials, private URLs, access tokens,
 media, or portal-internal implementation to this public repository or npm

@@ -281,6 +281,12 @@ test("renders the skill from the manifest and records managed-file hashes", asyn
   assert.match(skill, /state that\nvisual checks were not performed/);
   assert.equal(skill, await renderConsumerSkill(result.manifest, { defaultBranch: "main" }));
   await fs.access(path.join(product, ".agents", "skills", "timds-consume-design-system", "agents", "openai.yaml"));
+  // The developer's update skill is rendered for the same manifest, with no placeholder left behind, and Claude Code reaches both through one link.
+  const updateSkill = await fs.readFile(path.join(product, ".agents", "skills", "timds-update-design-system", "SKILL.md"), "utf8");
+  assert.match(updateSkill, /^name: timds-update-design-system$/m);
+  assert.match(updateSkill, /git -C design-system checkout <release commit>/, "a submodule pin gets the submodule procedure");
+  assert.doesNotMatch(updateSkill, /__[A-Z_]+__/);
+  assert.equal(await fs.readlink(path.join(product, ".claude", "skills")), path.join("..", ".agents", "skills"));
 
   const workflow = await fs.readFile(path.join(product, ".github", "workflows", "timds-consumer-preview.yml"), "utf8");
   assert.match(workflow, /pull_request:\n\s+types: \[opened, synchronize, reopened\]/);

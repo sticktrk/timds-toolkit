@@ -5,6 +5,34 @@ __CONTRACT_DESCRIPTION__ Read `timds.json`, this file, and the relevant source b
 Paths in this file are relative to the Design System root, the directory that
 holds `timds.json`. Run `__TIMDS_CLI__` commands from the repository root.
 
+## Who works here
+
+This repository is where designers do all of their design work: tokens,
+guidance pages, components, media, and whole website designs. Developers
+do not design here, and designers do not build production here. The
+production product (a website or app) lives in its own repository, pins a
+released version of this system, and is where developers carry each release
+across. Keep the line clean in both directions:
+
+| Role | Works in | Does | Never does |
+| --- | --- | --- | --- |
+| Designer, or an agent acting for one | This repository | Edits tokens, pages, styles, media, and website designs; ships each change as a draft pull request | Edits the product repository, moves its pin, or deploys |
+| Operator | This repository's pull requests | Reviews and merges; merging is the release decision | Designs in a release branch |
+| Developer, or an agent acting for one | The product repository | Moves the product's pin to a release, ports the website designs onto the product's stack, and verifies the routes | Edits this system to fit the product; a gap is a pull request here |
+
+A designer never touches the toolkit. The skills under `.agents/skills/`
+run it for them, one per moment of the work:
+
+| Moment | Skill | What it does |
+| --- | --- | --- |
+| Starting | `design-start` | Installs, builds, opens the local preview, starts a change branch, and reports the system's state in plain language |
+| Adding a logo, photo, or video | `design-media` | Stages, names, publishes, and places the file where the brand kit will find it |
+| Finishing | `design-ship` | Validates, reviews at desktop and phone widths, writes the changelog note, and opens the draft pull request |
+| Releasing to developers | `design-handoff` | Writes the brief that tells developers what to pin and what to port |
+
+Claude Code sees the same skills through the `.claude/skills` link at the
+repository root, so each one is also a slash command.
+
 ## Start here
 
 1. Install the toolkit: `npm ci` when a lockfile is committed. A fresh scaffold
@@ -18,7 +46,9 @@ holds `timds.json`. Run `__TIMDS_CLI__` commands from the repository root.
 4. Read `.agents/skills/timds-edit-design-system/SKILL.md` at the repository
    root before design work, and `.agents/skills/timds-create-video/SKILL.md`
    before video work. They hold the full procedures; this file holds the
-   rules.
+   rules. The designer skills (`design-start`, `design-media`,
+   `design-ship`, `design-handoff`) wrap those procedures for the moments a
+   designer meets them.
 5. Work on a `design-system/<change>` branch. Finish every change with
    `__TIMDS_CLI__ check` and a look at `__TIMDS_CLI__ preview`.
 
@@ -353,6 +383,36 @@ Regenerating components with `video components init --force` discards client
 changes and requires explicit authorization. A normal `timds upgrade` does not
 touch the declared component module.
 
+## Handing a release to production
+
+The product repository pins a released version of this system and follows
+it; nothing here reaches production until a developer moves that pin. Name
+the product here, under this heading, so every handoff and every agent
+knows where the work goes:
+
+- Product repository: _not yet linked; add the repository and, when one is
+  kept beside this checkout, its path such as `../<product>`_.
+
+The handoff, in order:
+
+1. The designer ships a change (`design-ship`) and an operator merges it.
+   The merge releases a patch version and publishes it.
+2. The designer, or anyone, runs `design-handoff`. It compares the version
+   the product pins with the release and writes the developer brief: the
+   version to pin, the website designs and states to port, the tokens,
+   styles, media, and guidance that moved, and the routes to review. Filed
+   in the product repository as an issue titled `Design System <version>`
+   when asked.
+3. A developer, in the product repository, runs its
+   `timds-update-design-system` skill: moves the pin, ports each design
+   route and state onto the product's stack with the system's classes and
+   tokens, verifies the review routes, and opens the product's pull
+   request. Deployment is a separate decision there.
+
+A design is the reference the port must match, never the production page
+itself. When a port needs something the system lacks, the fix is a pull
+request here, and the product waits for the next release.
+
 ## Git and publication
 
 - Use a `design-system/<change>` branch and a pull request.
@@ -380,7 +440,7 @@ touch the declared component module.
 
 Treat the approved `@dtconcepts/timds` release line and resolved lockfile,
 `.timds/installation.json`, the repository-local AI skills under
-`.agents/skills/`, the TimDS workflows under `.github/workflows/`, the release
+`.agents/skills/` and the `.claude/skills` link to them, the TimDS workflows under `.github/workflows/`, the release
 automation scripts (`scripts/release.mjs`, `scripts/release.sh`,
 `scripts/check-versions.mjs`, `scripts/prepare-merge-release.mjs` and its
 test), and the `systemId`, `version`, `artifact`, `media`, `consumer`, and
