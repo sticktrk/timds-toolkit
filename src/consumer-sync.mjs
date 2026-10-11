@@ -28,7 +28,7 @@ import { existsSync, promises as fs } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 
-import { BUNDLE_MANIFEST_FILE, BUNDLE_VERSION_PREFIX } from "./bundle.mjs";
+import { BUNDLE_MANIFEST_FILE, BUNDLE_OUTPUT_DIRECTORY, BUNDLE_VERSION_PREFIX } from "./bundle.mjs";
 import { CONSUMER_BUNDLE_RECORD_FILE, CONSUMER_MANIFEST_FILE, loadConsumer, publishedBaseUrl } from "./consumer.mjs";
 import { PROVENANCE_FILE } from "./derived.mjs";
 
@@ -70,10 +70,13 @@ async function fetchJson(fetchImpl, url, what) {
  * directly; `current` reads the provenance stamp at the base, then resolves
  * the immutable bundle for that version. Returns the manifest with
  * absolute file URLs, the version it is for, and the designs summary when
- * the caller asked for it. A manifest served from a system's public root
- * names its files by site-absolute path (`/v/1.2.0/design-system/bundle/...`);
- * every entry resolves against the manifest's own URL, so a root and the CDN
- * prefix both work as the pin's base.
+ * the caller asked for it. A rewritten manifest (`base` filled in by
+ * publish) names its files by absolute URL and is read as written. The
+ * portal can instead serve the artifact's own `bundle.json` at the versioned
+ * prefix: `base` is null and its paths are site-absolute to the artifact
+ * root (`/bundle/...`), which would resolve to the current release's copy and
+ * break the pin as soon as that copy moves on. The immutable copy keeps its
+ * files beside its manifest, so a raw manifest's files resolve there.
  */
 export async function resolvePublishedBundle({ url, version, fetchImpl = fetch, withDesigns = false }) {
   const base = String(url).replace(/\/+$/, "");
@@ -95,10 +98,14 @@ export async function resolvePublishedBundle({ url, version, fetchImpl = fetch, 
       return null;
     }
   };
-  const directory = absolute(document.directory);
+  const rawArtifactManifest = !document.base;
+  const manifestDirectory = manifestUrl.slice(0, -BUNDLE_MANIFEST_FILE.length - 1);
+  const directory = rawArtifactManifest ? `${manifestDirectory}/${BUNDLE_OUTPUT_DIRECTORY}` : absolute(document.directory);
   const files = (document.files ?? []).map((file) => {
     const relative = safeBundlePath(file.path);
-    const fileUrl = absolute(file.url) ?? (directory ? `${directory.replace(/\/+$/, "")}/${relative}` : null);
+    const fileUrl = rawArtifactManifest
+      ? `${directory}/${relative}`
+      : absolute(file.url) ?? (directory ? `${directory.replace(/\/+$/, "")}/${relative}` : null);
     if (!fileUrl) throw new Error(`the published bundle names ${relative} without a resolvable URL; republish the Design System`);
     if (!/^[a-f0-9]{64}$/.test(String(file.sha256 ?? ""))) throw new Error(`the published bundle lists ${relative} without a sha256 digest`);
     return { path: relative, url: fileUrl, bytes: Number(file.bytes ?? 0), sha256: file.sha256 };
