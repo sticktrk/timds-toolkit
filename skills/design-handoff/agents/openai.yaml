@@ -1,0 +1,4 @@
+interface:
+  display_name: "Hand off to developers"
+  short_description: "Brief the developers on what to pin and port"
+  default_prompt: "Use $design-handoff to write the developer brief for the current Design System release."

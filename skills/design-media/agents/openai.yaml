@@ -1,0 +1,4 @@
+interface:
+  display_name: "Add media"
+  short_description: "Stage, publish, and place a logo, photo, or video"
+  default_prompt: "Use $design-media to add this file to the Design System and put it on the right page."

@@ -532,6 +532,13 @@ test("initializes guarded tooling without overwriting the design-system manifest
   await fs.access(path.join(repoRoot, "design-system", "media-local", "README.md"));
   await fs.access(path.join(repoRoot, ".agents", "skills", "timds-edit-design-system", "SKILL.md"));
   await fs.access(path.join(repoRoot, ".agents", "skills", "timds-create-video", "SKILL.md"));
+  // The designer skills ship with every system, and Claude Code sees them through one relative link.
+  for (const name of ["design-start", "design-media", "design-ship", "design-handoff"]) {
+    await fs.access(path.join(repoRoot, ".agents", "skills", name, "SKILL.md"));
+    await fs.access(path.join(repoRoot, ".agents", "skills", name, "agents", "openai.yaml"));
+  }
+  assert.equal(await fs.readlink(path.join(repoRoot, ".claude", "skills")), path.join("..", ".agents", "skills"));
+  await fs.access(path.join(repoRoot, ".claude", "skills", "design-ship", "SKILL.md"));
   await fs.access(path.join(repoRoot, ".github", "workflows", "timds-design-system.yml"));
 });
 
@@ -550,7 +557,7 @@ test("upgrades clean managed records and removes the legacy vendored CLI", async
   const stalePath = path.join(repoRoot, "design-system", ".timds", "cli", "src", "removed-in-new-release.mjs");
   await fs.mkdir(path.dirname(stalePath), { recursive: true });
   await fs.writeFile(stalePath, "export default true;\n", "utf8");
-  execFileSync("git", ["add", "design-system/.timds", ".agents/skills/timds-edit-design-system", ".agents/skills/timds-create-video", "package.json"], { cwd: repoRoot });
+  execFileSync("git", ["add", "design-system/.timds", ".agents/skills", ".claude/skills", "package.json"], { cwd: repoRoot });
   execFileSync("git", ["commit", "-m", "Install TimDS toolkit"], { cwd: repoRoot, stdio: "ignore" });
 
   const skillPath = path.join(repoRoot, ".agents", "skills", "timds-edit-design-system", "SKILL.md");
@@ -739,6 +746,11 @@ test("initializes the reusable standalone repository shape", async (t) => {
     await fs.readFile(path.join(repoRoot, ".agents", "skills", "timds-edit-design-system", "SKILL.md"), "utf8"),
     /standalone Design System/,
   );
+  for (const name of ["design-start", "design-media", "design-ship", "design-handoff"]) {
+    assert.match(await fs.readFile(path.join(repoRoot, ".agents", "skills", name, "SKILL.md"), "utf8"), new RegExp(`^name: ${name}$`, "m"));
+  }
+  assert.equal(await fs.readlink(path.join(repoRoot, ".claude", "skills")), path.join("..", ".agents", "skills"));
+  assert.match(agentContract, /design-ship/);
 
   await fs.mkdir(path.join(repoRoot, "node_modules", "example"), { recursive: true });
   await fs.writeFile(path.join(repoRoot, "node_modules", "example", "ignored.js"), "ignored\n", "utf8");

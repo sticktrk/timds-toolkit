@@ -59,7 +59,11 @@ scripts, starter tokens, and a validated initial artifact. They also include
 the agent entry points: `AGENTS.md` (the working contract: a start sequence,
 a map of the scaffold, how pages reach the machine-readable layer, a first
 design pass, and the protected tooling), a `CLAUDE.md` that imports it for
-Claude Code, and the managed skills under `.agents/skills/`. An agent can
+Claude Code, and the managed skills under `.agents/skills/` (linked from
+`.claude/skills` so Claude Code lists them as slash commands): the editing
+and video procedures, and four designer skills, `design-start`,
+`design-media`, `design-ship`, and `design-handoff`, that run the toolkit
+for the designer at each moment of the work. An agent can
 start designing from `AGENTS.md` alone. The initializer also
 adds the appropriate dependency and artifact ignore rules, so after
 `npm install` creates the exact lockfile, `git add --all` is safe. Commit

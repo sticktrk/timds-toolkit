@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ship a design change"
+  short_description: "Validate, review, note, and open the draft pull request"
+  default_prompt: "Use $design-ship to validate this change, look at it, and open the draft pull request for review."

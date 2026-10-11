@@ -47,6 +47,7 @@
     "scripts/publish-artifact.mjs",
     "skills",
     "src/core.mjs",
+    "src/agent-skills.mjs",
     "src/consumer.mjs",
     "src/consumer-init.mjs",
     "src/consumer-install.mjs",
