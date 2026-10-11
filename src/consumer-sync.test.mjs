@@ -98,25 +98,30 @@ test("resolvePublishedBundle reads a pinned version directly and the current rel
   await assert.rejects(resolvePublishedBundle({ url: BASE, version: "9.9.9", fetchImpl }), /version 9\.9\.9's bundle is not published at .*v\/9\.9\.9\/bundle\.json/);
 });
 
-test("a manifest served from a public root names files by site-absolute path and resolves against that root", async () => {
+test("a raw artifact manifest at the versioned prefix resolves its files beside itself, never at the current release", async () => {
   const { fetchImpl, served } = publishedSystem();
-  // The portal serves the ref's manifest at the system's root: directory and
-  // file URLs are site-absolute, with no base or versioned prefix filled in.
+  // The portal serves the artifact's own bundle.json at v/<version>/: no base,
+  // and paths site-absolute to the artifact root. Read literally, `/bundle/...`
+  // is the current release's copy, which moves on with every publish; the
+  // immutable copy keeps its files beside its manifest.
   const original = JSON.parse(served.get("v/1.2.0/bundle.json"));
-  const rootRelative = (value) => String(value).replace(BASE, "/acme/core/artifact");
   served.set("v/1.2.0/bundle.json", JSON.stringify({
     ...original,
-    url: rootRelative(original.url),
-    directory: rootRelative(original.directory),
+    url: "/bundle.json",
+    directory: "/bundle",
     base: null,
     versioned: null,
-    files: original.files.map((file) => ({ ...file, url: rootRelative(file.url) })),
+    files: original.files.map((file) => ({ ...file, url: `/bundle/${file.path}` })),
   }));
   const pinned = await resolvePublishedBundle({ url: BASE, version: "1.2.0", fetchImpl });
   assert.deepEqual(pinned.files.map((file) => file.url), [`${BASE}/v/1.2.0/bundle/src/styles/ds/brand.css`, `${BASE}/v/1.2.0/bundle/public/ds.js`]);
   assert.equal(pinned.directory, `${BASE}/v/1.2.0/bundle`);
   assert.equal(pinned.versioned, null);
-  // An entry with no URL falls back to the directory; one that cannot resolve is refused.
+  // The same holds when the root-relative paths carry the version (an entry under a system root).
+  const rootRelative = (value) => String(value).replace(BASE, "/acme/core/artifact");
+  served.set("v/1.2.0/bundle.json", JSON.stringify({ ...original, url: rootRelative(original.url), directory: rootRelative(original.directory), base: null, versioned: null, files: original.files.map((file) => ({ ...file, url: rootRelative(file.url) })) }));
+  assert.deepEqual((await resolvePublishedBundle({ url: BASE, version: "1.2.0", fetchImpl })).files.map((file) => file.url), [`${BASE}/v/1.2.0/bundle/src/styles/ds/brand.css`, `${BASE}/v/1.2.0/bundle/public/ds.js`]);
+  // A rewritten manifest without a URL for an entry falls back to its directory; one that cannot resolve is refused.
   served.set("v/1.2.0/bundle.json", JSON.stringify({ ...original, directory: null, files: original.files.map((file) => ({ ...file, url: "" })) }));
   await assert.rejects(resolvePublishedBundle({ url: BASE, version: "1.2.0", fetchImpl }), /without a resolvable URL/);
 });
