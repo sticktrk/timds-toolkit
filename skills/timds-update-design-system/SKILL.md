@@ -77,14 +77,11 @@ For every route whose design changed or is new:
 2. Run the app locally (its `.claude/launch.json` entry or the serve command)
    and visit every review route at each declared width and scheme, paired
    routes against their design state by state. Fix what you find.
-3. Run, from repository root:
-
-```bash
-npm run timds -- consumer check --base origin/__DEFAULT_BRANCH__
-```
-
-   The pin change and the port are expected; anything else outside the
-   design surface needs a reason in the pull request.
+3. Do not rely on `npm run timds -- consumer check` here: it guards
+   design-only changes and refuses a moved pin by design. The product's
+   typecheck, build, and the review routes are the verification for a
+   release. Anything outside the design surface beyond the manifest and
+   the port needs a reason in the pull request.
 
 ## Open the pull request
 
