@@ -554,3 +554,42 @@ test("never treats the root package.json init writes for the toolkit as an app",
   await initializeConsumer(product, { force: true, skipInstall: true, output: quiet });
   assert.deepEqual(Object.keys(JSON.parse(await fs.readFile(path.join(product, "timds.consumer.json"), "utf8")).apps), ["spa", "web"]);
 });
+
+test("refuses, before writing anything, when git ignores a file init would write; a tracked file matching a pattern passes", async (t) => {
+  const product = await createConsumerRepo(t);
+  await fs.writeFile(path.join(product, ".gitignore"), "/package.json\n/package-lock.json\n.mcp.json\n", "utf8");
+  git(product, "add", ".gitignore");
+  git(product, "commit", "-m", "Ignore npm files at the root");
+  const statusBefore = git(product, "status", "--porcelain", "--untracked-files=all");
+  await assert.rejects(initializeConsumer(product, { skipInstall: true, output: quiet }), (error) => {
+    assert.match(error.message, /timds consumer init would write files git ignores/);
+    assert.match(error.message, /^  package\.json  \(\.gitignore:1 \/package\.json\)$/m);
+    assert.match(error.message, /^  \.mcp\.json  \(\.gitignore:3 \.mcp\.json\)$/m);
+    assert.match(error.message, /then rerun timds consumer init/);
+    return true;
+  });
+  assert.equal(git(product, "status", "--porcelain", "--untracked-files=all"), statusBefore, "nothing was written");
+  await assert.rejects(fs.access(path.join(product, "timds.consumer.json")));
+
+  // A negation re-includes the package; the remaining pattern still refuses.
+  await fs.writeFile(path.join(product, ".gitignore"), "/package.json\n!/package.json\n.mcp.json\n", "utf8");
+  git(product, "commit", "-qam", "Re-include package.json");
+  await assert.rejects(initializeConsumer(product, { skipInstall: true, output: quiet }), (error) => {
+    assert.doesNotMatch(error.message, /package\.json  \(/);
+    assert.match(error.message, /^  \.mcp\.json  \(\.gitignore:3 \.mcp\.json\)$/m);
+    return true;
+  });
+
+  await fs.writeFile(path.join(product, ".gitignore"), "node_modules/\n", "utf8");
+  git(product, "commit", "-qam", "Keep the TimDS files");
+  const result = await initializeConsumer(product, { skipInstall: true, output: quiet });
+  assert.ok(result.written.includes("package.json"));
+
+  // A pattern that matches an already tracked file ignores nothing.
+  const tracked = await createConsumerRepo(t, { rootPackage: { name: "product", private: true, scripts: { dev: "node server.mjs" } } });
+  await fs.writeFile(path.join(tracked, ".gitignore"), "/package.json\n", "utf8");
+  git(tracked, "add", ".gitignore");
+  git(tracked, "commit", "-m", "Pattern on a tracked file");
+  const adopted = await initializeConsumer(tracked, { skipInstall: true, output: quiet });
+  assert.ok(adopted.written.includes("package.json"));
+});

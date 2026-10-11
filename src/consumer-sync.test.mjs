@@ -10,6 +10,7 @@ import { CONSUMER_BUNDLE_RECORD_FILE, CONSUMER_MANIFEST_FILE, checkConsumer, loa
 import { readBundleRecord, resolvePublishedBundle, syncConsumerBundle, updateConsumerPin } from "./consumer-sync.mjs";
 import { derivedLayerPaths } from "./derived.mjs";
 
+const toolkitPackage = JSON.parse(await fs.readFile(new URL("../package.json", import.meta.url), "utf8"));
 const BASE = "https://cdn.test/acme/core/artifact";
 const sha256 = (content) => createHash("sha256").update(content).digest("hex");
 
@@ -74,6 +75,11 @@ async function productRepo(t, designSystem = { path: "design-system", systemId: 
   git(product, "config", "user.email", "timds-test@example.com");
   git(product, "config", "user.name", "TimDS Test");
   await write(product, CONSUMER_MANIFEST_FILE, { schemaVersion: 1, designSystem, apps });
+  await write(product, "package.json", { name: "product", private: true, scripts: { postinstall: "timds consumer sync", timds: "timds" }, devDependencies: { "@dtconcepts/timds": "0.1.x" } });
+  await write(product, "package-lock.json", { lockfileVersion: 3, packages: {
+    "": { name: "product", devDependencies: { "@dtconcepts/timds": "0.1.x" } },
+    "node_modules/@dtconcepts/timds": { version: toolkitPackage.version },
+  } });
   await write(product, "web/package.json", { name: "web" });
   await write(product, ".gitignore", "node_modules/\ndesign-system/\n");
   git(product, "add", ".");
@@ -355,4 +361,17 @@ test("check diagnoses a lock that predates published pins without rejecting the 
   await write(product, "package-lock.json", lock);
   const compatible = await checkConsumer(product);
   assert.equal(compatible.status, "passed", compatible.errors.join("\n"));
+});
+
+test("check requires the root package and lockfile a published pin is installed through", async (t) => {
+  const product = await productRepo(t);
+  const { fetchImpl } = publishedSystem();
+  await syncConsumerBundle(product, { fetchImpl });
+  assert.equal((await checkConsumer(product)).status, "passed");
+  git(product, "rm", "-q", "package.json", "package-lock.json");
+  git(product, "commit", "-q", "-m", "Drop the root package");
+  const missing = await checkConsumer(product);
+  assert.equal(missing.status, "failed");
+  assert.match(missing.errors.join("\n"), /^package\.json is missing\. A published pin is fetched by npm install/m);
+  assert.match(missing.errors.join("\n"), /^package-lock\.json is missing[^]*timds consumer init --system acme\/core/m);
 });

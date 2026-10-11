@@ -416,3 +416,18 @@ test("preflights an older toolkit lock before removing the submodule and rolls t
   await assert.rejects(migrateConsumerToPublished(product, { url: BASE, fetchImpl: publishedSystem(), runNpm }), /files were restored: bundle write failed/);
   assert.deepEqual(await productState(product), before, "later failures restore the old lock with the checkout and managed files");
 });
+
+test("refuses when git ignores a file the migration writes, before changing anything", async (t) => {
+  const { product } = await submoduleProduct(t);
+  const fetchImpl = publishedSystem();
+  await write(product, ".gitignore", "node_modules/\n/.timds/\n");
+  git(product, "commit", "-qam", "Ignore the TimDS record");
+  const before = await productState(product);
+  await assert.rejects(migrateConsumerToPublished(product, { url: BASE, fetchImpl, output: () => {} }), (error) => {
+    assert.match(error.message, /timds consumer migrate would write files git ignores/);
+    assert.match(error.message, /^  \.timds\/installation\.json  \(\.gitignore:2 \/\.timds\/\)$/m);
+    assert.match(error.message, /then rerun timds consumer migrate/);
+    return true;
+  });
+  assert.deepEqual(await productState(product), before, "the submodule, the manifest, and every file are untouched");
+});

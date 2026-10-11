@@ -33,6 +33,12 @@
 // `consumerManagedFiles`, `consumerLaunchConfigurations`, and
 // `consumerMcpServers` are exported for that reuse.
 //
+// Every file init, migrate, or upgrade writes has to reach the commit: a
+// product whose .gitignore excludes the root package.json or lockfile would
+// pass every local command and fail its CI install with no lock. So the plan
+// is checked with `git check-ignore` and refused, before anything is written,
+// when any planned path is ignored (`refuseIgnoredPaths`).
+//
 // Boundary: init never edits product source, the Design System submodule, or
 // an existing manifest (it is kept unless --force regenerates it); upgrade
 // never touches the manifest, package.json, or product source at all
@@ -47,7 +53,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-import { CONSUMER_MANIFEST_FILE, consumerPinMode, publishedBaseUrl, validateConsumerManifest } from "./consumer.mjs";
+import { CONSUMER_INSTALLATION_PATH, CONSUMER_MANIFEST_FILE, consumerPinMode, gitIgnoredPaths, publishedBaseUrl, validateConsumerManifest } from "./consumer.mjs";
 import { resolvePublishedBundle, syncConsumerBundle } from "./consumer-sync.mjs";
 import { planConsumerToolkitLock, resolveConsumerToolkitLock, runConsumerNpm } from "./consumer-install.mjs";
 import { acceptsToolkitReleaseRange, runtimeIdentity, toolkitReleaseRange } from "./runtime.mjs";
@@ -62,7 +68,7 @@ export const CONSUMER_LAUNCH_PATH = ".claude/launch.json";
 export const CONSUMER_MCP_PATH = ".mcp.json";
 export const CONSUMER_MCP_SERVER_NAME = "timds-design-system-read";
 export const CONSUMER_DESIGN_CHANGE_LABEL = "timds-design-change";
-export const CONSUMER_INSTALLATION_PATH = ".timds/installation.json";
+export { CONSUMER_INSTALLATION_PATH };
 
 const DEFAULT_DESIGN_SYSTEM_PATH = "design-system";
 const DEFAULT_PORTAL_URL = "https://timds.com";
@@ -624,6 +630,17 @@ function consumerInstallationRecord(files, launchPlan, mcpPlan) {
 }
 
 /**
+ * Refuse when git would leave any of `paths` out of the next commit. Each
+ * ignored path is named with the pattern and its source line, so the fix is
+ * one edit away; a tracked file matching a pattern is not ignored and passes.
+ */
+async function refuseIgnoredPaths(repoRoot, paths, command) {
+  const ignored = await gitIgnoredPaths(repoRoot, paths);
+  if (!ignored.length) return;
+  throw new Error(`${command} would write files git ignores, so they would never be committed and a clone could not install TimDS:\n${ignored.map((entry) => `  ${entry.path}  (${entry.source}:${entry.line} ${entry.pattern})`).join("\n")}\nEdit the ignore file so these paths are no longer excluded (a negation such as !/${ignored[0].path} works unless a parent directory is ignored), then rerun ${command}.`);
+}
+
+/**
  * Plan init's installation against a supplied manifest without regenerating
  * it or requiring its pin to be in the index yet. Migration uses this before
  * removing the submodule; force applies only to the installation's files.
@@ -651,6 +668,9 @@ export async function planConsumerInstallation(repoRoot, manifest, { force = fal
     ...(gitignorePlan ? [gitignorePlan] : []),
     { path: CONSUMER_INSTALLATION_PATH, content: toJson(installation) },
   ];
+  // The manifest, package, and lock are checked even when unchanged: a kept
+  // one that git ignores is as absent from a clone as a new one.
+  await refuseIgnoredPaths(repoRoot, [CONSUMER_MANIFEST_FILE, "package.json", ...(toolkitLockPlan ? [toolkitLockPlan.path] : []), ...writes.map((file) => file.path)], command);
   return { writes, defaultBranch, launchPlan, mcpPlan, packagePlan, toolkitLockPlan, installation: installation.consumer };
 }
 
@@ -696,8 +716,8 @@ async function resolvePublishedPin({ system, version, url, fetchImpl }) {
 /**
  * Initialize a consumer repository. Returns what was written; refuses (before
  * writing anything) without a design-system gitlink or a `--system` to pin,
- * on a conflicting toolkit declaration, or on customized managed files
- * unless `force`.
+ * on a conflicting toolkit declaration, when git ignores a file it would
+ * write, or on customized managed files unless `force`.
  */
 export async function initializeConsumer(rootInput = process.cwd(), { force = false, skipInstall = false, portalUrl = DEFAULT_PORTAL_URL, system = null, version = null, url = null, fetchImpl = fetch, runNpm = runConsumerNpm, output = () => {} } = {}) {
   const repoRoot = await findGitRoot(rootInput);
@@ -841,6 +861,12 @@ export async function upgradeConsumer(rootInput = process.cwd(), { force = false
   const portalUrl = await installedPortalUrl(repoRoot);
   const { files, filePlan, launchPlan, mcpPlan } = await planConsumerManagedState(repoRoot, manifest, previous, { defaultBranch, force, portalUrl });
   refuseCustomizedFiles(filePlan.conflicts, "timds upgrade");
+  await refuseIgnoredPaths(repoRoot, [
+    ...filePlan.writes.map((file) => file.path),
+    ...(launchPlan.changed ? [CONSUMER_LAUNCH_PATH] : []),
+    ...(mcpPlan.changed ? [CONSUMER_MCP_PATH] : []),
+    CONSUMER_INSTALLATION_PATH,
+  ], "timds upgrade");
 
   const shipped = new Set(files.map((file) => file.path));
   const retired = [];

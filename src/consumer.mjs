@@ -11,7 +11,10 @@
 // commit, the form the first consumers adopted. This module reads and
 // validates the manifest, resolves the pin either way (gitlink commit or the
 // sync record), and guards the design-surface scope of a branch diff for
-// `timds consumer check`. The scope is judged against the manifest at the
+// `timds consumer check`. The check also confirms that git carries what a
+// clone needs (the manifest, the root package and lockfile, the installed
+// files): a root file an ignore pattern excludes passes locally and is absent
+// from the commit. The scope is judged against the manifest at the
 // merge base, so a branch cannot widen its own surface. The same diff names
 // the apps worth previewing (`previewApps`), so the stock workflow skips the
 // preview on a pull request that cannot change a look.
@@ -31,6 +34,8 @@ import { consumerToolkitLockRemedy, planConsumerToolkitLock, PUBLISHED_CONSUMER_
 export const CONSUMER_MANIFEST_FILE = "timds.consumer.json";
 /** The record `consumer sync` leaves in the bundle directory: which version is there and which files. */
 export const CONSUMER_BUNDLE_RECORD_FILE = ".timds-bundle.json";
+/** Where `consumer init` records the managed files it installed (also read by upgrade). */
+export const CONSUMER_INSTALLATION_PATH = ".timds/installation.json";
 /** Where a published system sits unless `designSystem.url` says otherwise: `<base>/<systemId>/artifact`. */
 export const DEFAULT_PUBLISHED_BASE_URL = "https://design-systems.timds.com";
 export const CONSUMER_VIEWPORTS = Object.freeze(["desktop", "tablet", "phone"]);
@@ -52,7 +57,7 @@ export const CONSUMER_ALWAYS_ALLOWED = Object.freeze([
   "pnpm-lock.yaml",
   "yarn.lock",
   ".gitignore",
-  ".timds/installation.json",
+  CONSUMER_INSTALLATION_PATH,
   ".agents/skills/timds-consume-design-system/**",
   ".github/workflows/timds-consumer-preview.yml",
   ".github/workflows/timds-designer-change.yml",
@@ -280,9 +285,10 @@ export function publishedBaseUrl(designSystem) {
 // ---------------------------------------------------------------------------
 // Repository and Design System resolution
 
-function run(command, args, cwd) {
+function run(command, args, cwd, { input = null } = {}) {
   return new Promise((resolve) => {
-    const child = spawn(command, args, { cwd, shell: false, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(command, args, { cwd, shell: false, stdio: [input === null ? "ignore" : "pipe", "pipe", "pipe"] });
+    if (input !== null) child.stdin.end(input);
     let stdout = "";
     let stderr = "";
     child.stdout.setEncoding("utf8");
@@ -294,7 +300,40 @@ function run(command, args, cwd) {
   });
 }
 
-const git = (args, cwd) => run("git", args, cwd);
+const git = (args, cwd, options) => run("git", args, cwd, options);
+
+/**
+ * The paths among `paths` (relative to `repoRoot`) that an ignore pattern
+ * keeps out of git, each with the pattern and where it comes from
+ * (`.gitignore:12 /package-lock.json`). A tracked file is never reported,
+ * whatever the patterns say: the result names only files the next `git add`
+ * would skip. A negated match is a kept file, not an ignored one. Empty
+ * outside a git work tree.
+ */
+export async function gitIgnoredPaths(repoRoot, paths) {
+  const unique = [...new Set(paths)];
+  if (!unique.length) return [];
+  const result = await git(["check-ignore", "--verbose", "--stdin", "-z"], repoRoot, { input: unique.map((filePath) => `${filePath}\0`).join("") });
+  // 0: something is ignored; 1: nothing is; anything else is not a work tree.
+  if (result.code !== 0) return [];
+  const fields = result.stdout.split("\0");
+  const ignored = [];
+  for (let index = 0; index + 3 < fields.length; index += 4) {
+    const [source, line, pattern, filePath] = fields.slice(index, index + 4);
+    if (!pattern || pattern.startsWith("!")) continue;
+    ignored.push({ path: filePath, source, line: Number(line), pattern });
+  }
+  return ignored;
+}
+
+/** Which of `paths` git tracks (in the index), or null outside a git work tree. */
+export async function gitTrackedPaths(repoRoot, paths) {
+  const unique = [...new Set(paths)];
+  if (!unique.length) return new Set();
+  const result = await git(["ls-files", "-z", "--", ...unique], repoRoot);
+  if (result.code !== 0) return null;
+  return new Set(result.stdout.split("\0").filter(Boolean));
+}
 
 /**
  * The root of the consumer repository containing `start`, or null when it is
@@ -371,6 +410,31 @@ async function readBundleRecord(root) {
   } catch {
     return null;
   }
+}
+
+/**
+ * The root files a consumer commit has to carry for a clone to work: the
+ * manifest, the root package.json and (for a published pin, whose bundle only
+ * arrives through its postinstall) the lockfile, plus whatever init installed
+ * and recorded in `.timds/installation.json`. `required` names the ones whose
+ * absence alone breaks a clone.
+ */
+async function consumerCommittedFiles(repoRoot, mode) {
+  const lockFile = existsSync(path.join(repoRoot, "npm-shrinkwrap.json")) ? "npm-shrinkwrap.json" : "package-lock.json";
+  const files = new Set([CONSUMER_MANIFEST_FILE, "package.json", lockFile, CONSUMER_INSTALLATION_PATH]);
+  const required = new Set(mode === "published" ? ["package.json", lockFile] : []);
+  let record = null;
+  try {
+    record = JSON.parse(await fs.readFile(path.join(repoRoot, CONSUMER_INSTALLATION_PATH), "utf8"))?.consumer;
+  } catch {
+    // Absent or unreadable: upgrade reports that; only recorded files are checked here.
+  }
+  if (record && typeof record === "object") {
+    for (const relative of Object.keys(record.managedFiles ?? {})) if (isSafeRelativePath(relative)) files.add(relative);
+    if (Object.keys(record.launchConfigurations ?? {}).length) files.add(".claude/launch.json");
+    if (Object.keys(record.mcpServers ?? {}).length) files.add(".mcp.json");
+  }
+  return { files: [...files], required };
 }
 
 /**
@@ -617,6 +681,26 @@ export async function checkConsumer(repoRootInput = process.cwd(), options = {})
     } catch {
       warnings.push(`${designSystem.path}/timds.json could not be read as JSON`);
     }
+  }
+
+  // What a clone needs is only there when git carries it. A root file an
+  // ignore pattern excludes exists locally, so every local command passes,
+  // while the commit leaves it out and CI fails on the install. An untracked
+  // file is the same hazard one step earlier, so it is named too.
+  const committed = await consumerCommittedFiles(repoRoot, designSystem.mode);
+  const present = committed.files.filter((file) => existsSync(path.join(repoRoot, file)));
+  for (const file of committed.required) {
+    if (!present.includes(file)) errors.push(`${file} is missing. A published pin is fetched by npm install (postinstall timds consumer sync), so the root package.json and its lockfile must be committed. Run timds consumer init --system ${designSystem.systemId} and commit what it writes.`);
+  }
+  const ignored = await gitIgnoredPaths(repoRoot, present);
+  for (const entry of ignored) {
+    errors.push(`${entry.path} is ignored by git (${entry.source}:${entry.line} ${entry.pattern}), so it is never committed and a clone will not have it. Edit ${entry.source} so the path is no longer excluded, then git add ${entry.path}.`);
+  }
+  const tracked = await gitTrackedPaths(repoRoot, present);
+  if (tracked) {
+    const ignoredPaths = new Set(ignored.map((entry) => entry.path));
+    const untracked = present.filter((file) => !tracked.has(file) && !ignoredPaths.has(file));
+    if (untracked.length) warnings.push(`Not tracked by git yet (commit them so a clone has them):\n${untracked.map((file) => `- ${file}`).join("\n")}`);
   }
 
   // Design pairings are checked against the pin's own catalog, so a renamed
