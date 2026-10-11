@@ -207,6 +207,13 @@ Init installs that resolution with `npm ci` before postinstall runs. With
 `--skip-install`, init refuses an older lock before writing files; rerun
 without the flag to refresh it. `consumer check` reports locks older than the
 release that introduced published pins, with a command to repair them.
+Because the root package and lockfile are what fetches the bundle, `consumer
+init`, `consumer migrate`, and `timds upgrade` refuse, before writing
+anything, when a `.gitignore` pattern would keep a file they write out of git
+(naming the pattern and its line), and `consumer check` fails on a root
+package, lockfile, manifest, installation record, or managed file that git
+ignores, on a published pin whose package or lockfile is missing, and warns
+on ones not committed yet.
 `timds consumer update [VERSION]` moves the pin to a version, or to the
 current published release, and syncs; a pin of `"current"` follows every
 release at the next install instead. `url` overrides the public prefix

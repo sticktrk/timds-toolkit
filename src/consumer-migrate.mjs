@@ -10,7 +10,8 @@
 //   1. reads the version the product is built against from the checked-out
 //      submodule's own timds.json (or takes --version), so the pin starts
 //      exactly where the gitlink was;
-//   2. validates the installation plan and downloads the full bundle, then
+//   2. validates the installation plan (refusing, like init, when git ignores
+//      a file it would write) and downloads the full bundle, then
 //      removes the submodule: deinit, the gitlink, `.git/modules/<name>`, the
 //      `.gitmodules` section, the checkout on disk;
 //   3. rewrites the manifest with the pin, then applies init's plan so

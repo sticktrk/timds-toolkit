@@ -497,3 +497,27 @@ test("timds consumer check runs through runCli", async (t) => {
   assert.equal(JSON.parse(lines.join("\n")).status, "passed");
   await assert.rejects(runCli(["consumer", "bogus"]), /Unknown consumer command bogus/);
 });
+
+test("checkConsumer fails on a root file git ignores and warns on installed files nobody committed", async (t) => {
+  const { product } = await consumerFixture(t);
+  await write(product, ".gitignore", "node_modules/\n/package.json\n");
+  await write(product, "package.json", { name: "product", private: true });
+  await write(product, ".timds/installation.json", { consumer: { managedFiles: { ".github/workflows/timds-consumer-preview.yml": "x", "../escape.yml": "x" }, mcpServers: { "timds-design-system-read": "x" } } });
+  await write(product, ".github/workflows/timds-consumer-preview.yml", "name: preview\n");
+  await write(product, ".mcp.json", { mcpServers: {} });
+  git(product, "add", ".gitignore", ".timds");
+  git(product, "commit", "-q", "-m", "Ignore the root package");
+
+  const ignored = await checkConsumer(product);
+  assert.equal(ignored.status, "failed");
+  assert.deepEqual(ignored.errors, ["package.json is ignored by git (.gitignore:2 /package.json), so it is never committed and a clone will not have it. Edit .gitignore so the path is no longer excluded, then git add package.json."]);
+  assert.match(ignored.warnings.join("\n"), /Not tracked by git yet[^]*- \.github\/workflows\/timds-consumer-preview\.yml\n- \.mcp\.json/);
+  assert.doesNotMatch(ignored.warnings.join("\n"), /package\.json|escape/);
+
+  // Tracked despite the pattern: git keeps it, so nothing is lost.
+  git(product, "add", "-f", "package.json", ".github", ".mcp.json");
+  git(product, "commit", "-q", "-m", "Track everything");
+  const tracked = await checkConsumer(product);
+  assert.equal(tracked.status, "passed", tracked.errors.join("\n"));
+  assert.doesNotMatch(tracked.warnings.join("\n"), /Not tracked/);
+});
