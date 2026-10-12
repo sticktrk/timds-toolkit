@@ -384,10 +384,12 @@ consuming-site update.
 ## Hosted sessions
 
 When `timds.json` selects the hosted provider, or `.timds/session.json` exists,
-use `timds start`, `check`, `submit`, `pull`, `update`, `status`, `history`, and
+use `timds start`, `check`, `submit`, `pull`, `update`, `status`, `history`, `publish`, and
 `sessions close` (or the matching `timds_*` MCP tools). Do not run git commands
 in that workspace. The host owns source history. On update conflicts, keep the
 local file, resolve it with the user intent, and use `timds update --resolve
-PATH` for each resolved path. Return the submission preview URL. Agents submit;
-a human publishes in the admin. Never put the access token in source or session
-metadata.
+PATH` for each resolved path. Return the submission preview URL. When publication
+is requested, run `timds publish --dry-run`, review the summary, then `timds
+publish --yes`. Users and agents require a publisher grant on the system;
+the host records the principal and originating request. Successful publication
+closes the session. Never put the access token in source or session metadata.

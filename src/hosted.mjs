@@ -55,8 +55,8 @@ export async function workspaceProvider(root) {
 export function createHostProvider({ url, token, fetchImpl = fetch }) {
   const origin = cleanPortalUrl(url);
   if (!token) throw new Error("A TimDS token is required; run timds auth login or set TIMDS_ACCESS_TOKEN.");
-  async function request(method, suffix, body) {
-    const response = await fetchImpl(`${origin}/api/timds/sessions${suffix}`, {
+  async function request(method, suffix, body, resource = 'sessions') {
+    const response = await fetchImpl(`${origin}/api/timds/${resource}${suffix}`, {
       method, redirect: "error",
       headers: { Accept: "application/json", "Content-Type": "application/json", Authorization: `Bearer ${token}`, "X-TimDS-API-Version": String(HOST_API_VERSION) },
       ...(body ? { body: JSON.stringify({ ...body, apiVersion: HOST_API_VERSION }) } : {}),
@@ -75,6 +75,8 @@ export function createHostProvider({ url, token, fetchImpl = fetch }) {
     status: (id) => request("GET", `${sessionPath(id)}/status`),
     history: (id) => request("GET", `${sessionPath(id)}/history`),
     close: (id) => request("POST", `${sessionPath(id)}/close`, {}),
+    publish: (id, input) => request("POST", `${sessionPath(id)}/publish`, input, 'submissions'),
+    publication: (id) => request("GET", sessionPath(id), undefined, 'publications'),
   };
 }
 
@@ -290,7 +292,7 @@ async function applySnapshot(root, snapshot, previous, provider, replace = false
 }
 
 /** The same implementation is called by the CLI and the editing MCP server. */
-export async function runHostedCommand(command, { root = process.cwd(), systemId, note, portalUrl, token, fetchImpl, credentialsPath, dryRun = false, resolve = [], idempotencyKey } = {}) {
+export async function runHostedCommand(command, { root = process.cwd(), systemId, note, portalUrl, token, fetchImpl, credentialsPath, dryRun = false, resolve = [], idempotencyKey, submission, yes = false, confirm, onSummary, wait = ms => new Promise(resolve => setTimeout(resolve, ms)), pollIntervalMs = 2000, timeoutMs = 30 * 60_000 } = {}) {
   const selected = command === "start" ? path.resolve(root) : await findHostedRoot(root);
   const state = await readJson(path.join(selected, SESSION_FILE));
   const configured = await workspaceProvider(selected);
@@ -300,6 +302,32 @@ export async function runHostedCommand(command, { root = process.cwd(), systemId
   const provider = normalizeProvider({ kind: "hosted", url });
   if (state && state.provider.url !== provider.url) throw new Error("Session belongs to a different TimDS host");
   const host = createHostProvider({ url: provider.url, token: await resolveAccessToken(provider.url, { token, credentialsPath }), fetchImpl });
+  if (command === 'publish') {
+    let selectedSubmission = submission;
+    if (!selectedSubmission) {
+      if (!state?.session?.id) throw new Error('No TimDS session here; provide --submission ID or run timds start first.');
+      const status = await host.status(state.session.id);
+      selectedSubmission = status.submissions?.find(item => ['submitted', 'publishing', 'published'].includes(item.status))?.id;
+      if (!selectedSubmission) throw new Error('This session has no submission to publish; run timds submit first.');
+    }
+    const summary = await host.publish(selectedSubmission, { preflight: !dryRun, dryRun });
+    onSummary?.(summary);
+    if (dryRun) return summary;
+    if (!yes && !(confirm && await confirm(summary))) throw new Error('Publication cancelled; use --yes after reviewing the submission to publish without a prompt.');
+    const response = await host.publish(selectedSubmission, { dryRun: false });
+    let publication = response.publication || response;
+    const deadline = Date.now() + timeoutMs;
+    while (!['published', 'failed', 'superseded'].includes(publication.status)) {
+      if (!publication.id) throw new Error('TimDS host did not return a publication identity');
+      if (Date.now() >= deadline) throw new Error(`Publication ${publication.id} is still running; retry timds publish --submission ${selectedSubmission} --yes to resume.`);
+      await wait(pollIntervalMs);
+      const polled = await host.publication(publication.id);
+      publication = polled.publication || polled;
+    }
+    if (publication.status !== 'published') throw new Error(publication.error || 'TimDS publication failed; update the session or retry the submission.');
+    if (state && summary.sessionId === state.session.id) await writeState(selected, { ...state, session: { ...state.session, status: 'closed' } });
+    return { ...publication, apiVersion: HOST_API_VERSION };
+  }
   if (command === "start") {
     if (!systemId) throw new Error("start requires a design-system identifier");
     const entries = await fs.readdir(selected).catch((error) => { if (error.code === "ENOENT") return []; throw error; });

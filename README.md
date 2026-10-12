@@ -1610,13 +1610,28 @@ main on the host. Conflicts are per file and preserve the local files; edit
 each conflicted file, then run `timds update --resolve path/to/file` (repeat
 `--resolve` for multiple files). The host checks that main has not changed
 since the conflict was shown. Submissions return the admin submission and
-preview URL; publishing is an explicit human action in the admin.
+preview URL. A user or agent principal granted publish on the system can
+publish from the admin or the CLI:
+
+```bash
+timds login
+timds publish --dry-run
+timds publish
+timds publish --submission SUBMISSION_ID --yes
+```
+
+No arguments selects the current session's latest submission. Publication
+shows the change summary, preview and proposed version before confirmation;
+`--yes` confirms without a prompt. `--dry-run` checks currency and builds
+without merging or publishing. Grant, conflict and build failures exit
+nonzero. Successful publication closes its session. Publish rights belong
+to the authenticated principal, independently of its session token.
 
 `timds mcp` exposes `timds_start`, `timds_pull`, `timds_submit`, `timds_update`,
-`timds_status`, `timds_history`, and `timds_sessions_close` through the same
+`timds_status`, `timds_history`, `timds_sessions_close`, and `timds_publish` through the same
 implementation. Set `TIMDS_PORTAL_URL` to start the MCP server in an empty
-directory before opening the first session. The MCP server has no publish
-tool.
+directory before opening the first session. The publish tool has `dryRun`
+and explicit `yes` confirmation options and uses the same principal grants.
 
 For a new hosted source use `timds init --standalone --provider hosted
 --portal-url https://timds.com`. It emits `wrangler.jsonc` with top-level
@@ -1668,6 +1683,8 @@ and `X-TimDS-API-Version: 1`:
 | GET | `/api/timds/sessions/:id/status` | Session and latest submission |
 | GET | `/api/timds/sessions/:id/history` | Commits and publication events |
 | POST | `/api/timds/sessions/:id/close` | `{apiVersion:1}` |
+| POST | `/api/timds/submissions/:id/publish` | `{apiVersion:1, preflight?, dryRun?}` |
+| GET | `/api/timds/publications/:id` | Publication progress and result |
 
 A change set is `{apiVersion:1, baseRevision, changedFiles, deletedPaths,
 note?}`. Files are `{path, encoding:"base64", content, mode?}`; modes are

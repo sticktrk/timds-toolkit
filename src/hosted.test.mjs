@@ -123,10 +123,47 @@ test("hosted scaffold has Wrangler/noindex, no workflows, and check works withou
   await promisify(execFile)(process.execPath, [cli, "check", "--root", root], { env: { ...process.env, PATH: bin }, maxBuffer: 2_000_000 });
 });
 
-test("MCP exposes the same seven hosted commands and never publication", () => {
+test("MCP exposes hosted commands and principal-authorized publication", () => {
   const names = [];
   registerHostedSessionTools({ registerTool(name) { names.push(name); } });
-  assert.deepEqual(names, ["timds_start", "timds_pull", "timds_submit", "timds_update", "timds_status", "timds_history", "timds_sessions_close"]);
+  assert.deepEqual(names, ["timds_start", "timds_pull", "timds_submit", "timds_update", "timds_status", "timds_history", "timds_sessions_close", "timds_publish"]);
+});
+
+test('hosted publish resolves the current submission, confirms, polls and closes local session metadata', async t => {
+  const f = await fixture(t); const calls = []; let confirmed = false;
+  const fetchImpl = async (url, request) => {
+    const body = request.body && JSON.parse(request.body); calls.push({ url, body });
+    if (url.endsWith('/status')) return response({ apiVersion: 1, submissions: [{ id: 'submitted', status: 'submitted' }] });
+    if (body?.preflight) return response({ apiVersion: 1, submissionId: 'submitted', sessionId: 'session-1', systemId: 'example/core', version: '1.0.1', previewUrl: 'https://preview.example' });
+    if (url.endsWith('/publish')) { assert(confirmed); return response({ apiVersion: 1, publication: { id: 'publication', status: 'queued' } }); }
+    return response({ apiVersion: 1, publication: { id: 'publication', status: 'published', result: { publicRoot: 'https://public.example' } } });
+  };
+  const result = await runHostedCommand('publish', { ...f.options, fetchImpl, wait: async () => {}, confirm: async summary => { assert.equal(summary.version, '1.0.1'); confirmed = true; return true; } });
+  assert.equal(result.status, 'published');
+  assert.equal((await f.state()).session.status, 'closed');
+  assert(calls.some(call => call.url.endsWith('/submissions/submitted/publish')));
+  assert(calls.some(call => call.url.endsWith('/publications/publication')));
+});
+
+test('explicit submission dry run works without a local session and sends no publish mutation', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'timds-publish-dry-')); t.after(() => fs.rm(root, { recursive: true, force: true }));
+  let calls = 0;
+  const result = await runHostedCommand('publish', { root, submission: 'chosen', dryRun: true, portalUrl: 'https://host.example', token: 'test', fetchImpl: async (url, request) => {
+    calls++; assert(url.endsWith('/submissions/chosen/publish')); assert.equal(JSON.parse(request.body).dryRun, true);
+    return response({ apiVersion: 1, dryRun: true, buildChecked: true });
+  } });
+  assert.equal(calls, 1); assert(result.buildChecked); assert.deepEqual(await fs.readdir(root), []);
+});
+
+test('hosted publication refusal and background build failures surface as errors', async t => {
+  const f = await fixture(t);
+  const options = { ...f.options, submission: 'chosen', yes: true, wait: async () => {} };
+  await assert.rejects(runHostedCommand('publish', { ...options, fetchImpl: async () => response({ error: 'Publish grant required' }, 403) }), /Publish grant required/);
+  await assert.rejects(runHostedCommand('publish', { ...options, fetchImpl: async (url, request) => {
+    const body = request.body && JSON.parse(request.body);
+    if (body?.preflight) return response({ apiVersion: 1 });
+    return response({ apiVersion: 1, publication: { id: 'failure', status: 'failed', error: 'Build failed' } });
+  } }), /Build failed/);
 });
 
 test("hosted commands without host configuration explain local and git modes", async (t) => {

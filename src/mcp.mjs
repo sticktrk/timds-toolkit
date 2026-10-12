@@ -819,16 +819,17 @@ async function packageVersion() {
 
 /** Hosted session commands use the identical API and filesystem guards as the CLI. */
 export function registerHostedSessionTools(server, { root = process.cwd() } = {}) {
-  for (const command of ["start", "pull", "submit", "update", "status", "history", "close"]) {
+  for (const command of ["start", "pull", "submit", "update", "status", "history", "close", "publish"]) {
     server.registerTool(`timds_${command === "close" ? "sessions_close" : command}`, {
       title: `TimDS session ${command}`,
-      description: `${command} a hosted TimDS design session. Agents can submit a change; publication requires a human in the admin.`,
+      description: `${command} a hosted TimDS design session. Publication requires a per-system publisher grant on the authenticated principal.`,
       inputSchema: {
         ...(command === "start" ? { systemId: z.string().min(1), idempotencyKey: z.string().min(1).max(200).optional(), portalUrl: z.string().url().optional() } : {}),
         ...(command === "update" ? { resolve: z.array(z.string().min(1)).optional().describe("Conflict paths whose local content is the explicit resolution") } : {}),
+        ...(command === "publish" ? { submission: z.string().min(1).optional(), dryRun: z.boolean().optional(), yes: z.boolean().optional().describe('Explicitly confirm publication after reviewing the dry run') } : {}),
         ...(["submit", "update"].includes(command) ? { note: z.string().max(2000).optional() } : {}),
       },
-      annotations: { readOnlyHint: ["status", "history"].includes(command), destructiveHint: command === "close", openWorldHint: true, idempotentHint: command !== "start" },
+      annotations: { readOnlyHint: ["status", "history"].includes(command), destructiveHint: ["close", "publish"].includes(command), openWorldHint: true, idempotentHint: command !== "start" },
     }, async (args) => {
       try { return toolResult(await runHostedCommand(command, { root, ...args })); }
       catch (error) { return toolError(error); }
