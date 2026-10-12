@@ -37,6 +37,7 @@ export const DERIVED_LAYER_FILES = Object.freeze({
   llmsFull: "llms-full.txt",
   formats: "formats.json",
   designs: "designs.json",
+  changelog: "changelog.json",
   bundle: "bundle.json",
 });
 export const PROVENANCE_FILE = ".timds-artifact.json";
@@ -77,13 +78,14 @@ async function readOptional(filePath, parse) {
  */
 export async function readDerivedLayer(designSystemRoot, manifest) {
   const indexPromise = readOptional(derivedFilePath(designSystemRoot, manifest, "index"), JSON.parse);
-  const [index, tokens, brand, llms, formats, designs, bundle] = await Promise.all([
+  const [index, tokens, brand, llms, formats, designs, changelog, bundle] = await Promise.all([
     indexPromise,
     readOptional(derivedFilePath(designSystemRoot, manifest, "tokens"), JSON.parse),
     readOptional(derivedFilePath(designSystemRoot, manifest, "brand"), JSON.parse),
     readOptional(derivedFilePath(designSystemRoot, manifest, "llms"), String),
     indexPromise.then((index) => (index && !index.formats) ? null : readOptional(derivedFilePath(designSystemRoot, manifest, "formats"), JSON.parse)),
     readOptional(derivedFilePath(designSystemRoot, manifest, "designs"), JSON.parse),
+    readOptional(derivedFilePath(designSystemRoot, manifest, "changelog"), JSON.parse),
     readOptional(derivedFilePath(designSystemRoot, manifest, "bundle"), JSON.parse),
   ]);
   const version = index?.system?.version ?? tokens?.system?.version ?? brand?.system?.version ?? null;
@@ -97,9 +99,10 @@ export async function readDerivedLayer(designSystemRoot, manifest) {
     tokens,
     brand,
     llms,
-    // Null for a system without a format catalog, designs, or a bundle, exactly like a file check has not written.
+    // Null for a system without a format catalog, designs, a changelog, or a bundle, exactly like a file check has not written.
     formats,
     designs,
+    changelog,
     bundle,
   };
 }
@@ -130,7 +133,7 @@ export async function fetchDerivedLayer(publicBase, { fetchImpl = fetch } = {}) 
   // sits where the entry says, and is simply absent for an older publish.
   const paths = { ...derivedLayerPaths(provenance.entry), ...(provenance.files ?? {}) };
   const indexPromise = get(paths.index, JSON.parse);
-  const [index, tokens, brand, llms, formats, designs, bundle] = await Promise.all([
+  const [index, tokens, brand, llms, formats, designs, changelog, bundle] = await Promise.all([
     indexPromise,
     get(paths.tokens, JSON.parse),
     get(paths.brand, JSON.parse),
@@ -139,6 +142,8 @@ export async function fetchDerivedLayer(publicBase, { fetchImpl = fetch } = {}) 
     // whether this release offers it, so do not read that obsolete object.
     indexPromise.then((index) => (index && !index.formats) ? null : get(paths.formats, JSON.parse)),
     get(paths.designs, JSON.parse),
+    // A system that removed its changelog may leave an older one on the CDN; the index owns whether this release has one.
+    indexPromise.then((index) => (index && !index.changelog) ? null : get(paths.changelog, JSON.parse)),
     // The CDN may retain an older bundle after the system disables it. The
     // current index declares whether this release publishes a bundle.
     indexPromise.then((index) => (index && !index.bundle) ? null : get(paths.bundle, JSON.parse)),
@@ -156,6 +161,7 @@ export async function fetchDerivedLayer(publicBase, { fetchImpl = fetch } = {}) 
     llms,
     formats,
     designs,
+    changelog,
     bundle,
   };
 }

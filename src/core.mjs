@@ -30,6 +30,7 @@ import { MAX_ARTIFACT_FILE_BYTES, collectArtifactFiles } from "./artifact-files.
 import { publicStampUrl, publishArtifactRef, publishRelease } from "./publish.mjs";
 import { buildBundle, describeBundle, normalizeBundleConfig } from "./bundle.mjs";
 import { DESIGNS_SOURCE_DIRECTORY, buildDesigns, checkDesigns, declaredClasses, readDesignCatalog, renderDesigns } from "./designs.mjs";
+import { CHANGELOG_FILE, buildChangelog, readUnreleasedNotes, renderChangelog, versionDate } from "./changelog.mjs";
 import { STARTER_RECORD_FILE, describeStarterSync, forceReplaceable, isStarterSystem, knownStarterHashes, planStockFile, readStarterRecord, recordFreshStarter, recordStarterFiles, starterPlumbingFiles, starterSyncPaths, syncStarter } from "./starter.mjs";
 import { extractArtifact, normalizeMachineConfig } from "./extract.mjs";
 import { readFormatCatalog } from "./formats.mjs";
@@ -65,6 +66,8 @@ const standaloneReleaseAutomationFiles = Object.freeze([
   [".github/workflows/timds-design-system.yml", "timds-standalone.yml"],
   [".github/workflows/update-consumer-submodule.yml", "update-consumer-submodule.yml"],
   ["scripts/release.mjs", "starter/scripts/release.mjs"],
+  ["scripts/release.sh", "starter/scripts/release.sh"],
+  ["scripts/check-versions.mjs", "starter/scripts/check-versions.mjs"],
   ["scripts/prepare-merge-release.mjs", "starter/scripts/prepare-merge-release.mjs"],
   ["scripts/prepare-merge-release.test.mjs", "starter/scripts/prepare-merge-release.test.mjs"],
 ]);
@@ -93,6 +96,11 @@ const legacyStandaloneAutomationHashes = new Map([
   ]],
   [".github/workflows/update-consumer-submodule.yml", ["a93c345503d5c344b2ab7b3aa37ee901e71d48608ca94df5b145235f21a5ef6f"]],
   ["scripts/release.mjs", ["ba1b6ec7e4022a7104d7d0c7e2497fb61a839c37394395ea3bdaa979def1260a"]],
+  // release.sh and check-versions.mjs were copied by init before the
+  // automation boundary recorded them; their one stock version is recognized
+  // so the dated-version migration replaces it without --force.
+  ["scripts/release.sh", ["4c182b0c21e6b2cb86b3cd8f66a2dfdaddb138f1c80510f32bb4f1087fab636b"]],
+  ["scripts/check-versions.mjs", ["d391be478debe43f4b67bd636e1d1c9bbc8d9d8b2d6a06854d8617311f4b9d51"]],
 ]);
 
 const contentTypes = {
@@ -484,6 +492,17 @@ async function buildWorkspaceDesigns(workspace) {
 }
 
 /**
+ * Render CHANGELOG.md into the artifact the same way: TimDS owns the page, so
+ * `check` writes it after the workspace build whatever that build does, and
+ * the starter build calls the same function so `dev` shows it.
+ */
+async function buildWorkspaceChangelog(workspace) {
+  const built = await buildChangelog(workspace.designSystemRoot, { manifest: workspace.manifest });
+  for (const problem of built.problems) output(`Warning: ${CHANGELOG_FILE}: ${problem}`);
+  return built;
+}
+
+/**
  * Copy the consumer bundle into the artifact, after the workspace build so a
  * built file (the starter's tokens.css) can be part of it. A symbolic link
  * the globs match is reported rather than followed.
@@ -509,6 +528,9 @@ export async function extractWorkspace(workspace, { write = true } = {}) {
   // The designs are rendered again here rather than read back from dist, so
   // designs.json always matches the source whatever the build script wrote.
   const designs = await renderDesigns({ designSystemRoot: workspace.designSystemRoot, manifest: workspace.manifest });
+  // The changelog is rendered again for the same reason; changelog.json
+  // carries the released history for a product moving its pin.
+  const changelog = await renderChangelog({ designSystemRoot: workspace.designSystemRoot, manifest: workspace.manifest });
   // The asset format catalog is client source like the board catalog; its
   // derived document lets a consumer ask for "the business card" by size.
   const formats = await readFormatCatalog(workspace.designSystemRoot);
@@ -522,6 +544,7 @@ export async function extractWorkspace(workspace, { write = true } = {}) {
   return extractArtifact({
     artifactRoot: path.join(workspace.designSystemRoot, "dist"),
     bundle,
+    changelog,
     designs,
     formats,
     plannedPages,
@@ -538,6 +561,7 @@ export async function checkWorkspace(repoRootInput, options = {}) {
   // Designs are derived output like the machine layer: written on every
   // check, after the workspace build and before anything reads dist.
   await buildWorkspaceDesigns(workspace);
+  const changelog = await buildWorkspaceChangelog(workspace);
   if (!options.skipBuild) await runWorkspaceCommand(workspace, "check");
   const designs = await checkDesigns({ designSystemRoot: workspace.designSystemRoot, manifest: workspace.manifest });
   // The consumer bundle is derived output too: copied after the build and
@@ -549,7 +573,7 @@ export async function checkWorkspace(repoRootInput, options = {}) {
   const artifact = await validateArtifact(workspace.designSystemRoot, workspace.manifest);
   const video = workspace.manifest.video ? await checkVideoWorkspace(workspace) : null;
   if (options.requireCleanDist) await verifyCleanDist(workspace);
-  return { ...workspace, artifact, bundle, designs, machine, video };
+  return { ...workspace, artifact, bundle, changelog, designs, machine, video };
 }
 
 async function resolvePreviewFile(artifactRoot, entryPath, requestPath) {
@@ -783,15 +807,15 @@ async function applyStandaloneReleaseAutomation(plan) {
   return changed;
 }
 
-async function configurePackageManifest(repoRoot, identity, { force = false, initializeRelease = false } = {}) {
+async function configurePackageManifest(repoRoot, identity, { force = false, initializeRelease = false, initialVersion = "0.0.0" } = {}) {
   const packagePath = path.join(repoRoot, "package.json");
   const packageJson = await readJsonObject(packagePath, "repository package.json", { required: false });
   if (!Object.keys(packageJson).length) {
     packageJson.name = slug(path.basename(repoRoot));
-    packageJson.version = initializeRelease ? "0.1.0" : "0.0.0";
+    packageJson.version = initializeRelease ? initialVersion : "0.0.0";
     packageJson.private = true;
   }
-  if (initializeRelease) packageJson.version = "0.1.0";
+  if (initializeRelease) packageJson.version = initialVersion;
   const releaseRange = toolkitReleaseRange(identity);
   const currentDependency = packageJson.devDependencies?.[identity.name] ?? packageJson.dependencies?.[identity.name];
   const currentScript = packageJson.scripts?.timds;
@@ -863,9 +887,13 @@ export async function initializeRepository(repoRootInput, {
   if (!consumerRepository && (consumerBranch !== "main" || consumerPath !== "design-system")) {
     throw new Error("--consumer-branch and --consumer-path require --consumer-repository");
   }
+  // A fresh system is the first release of the day it is scaffolded; every
+  // later release is dated the same way (2026.10.12-1, then -2 the same day).
+  const initialVersion = `${versionDate()}-1`;
   const packagePath = await configurePackageManifest(repoRoot, identity, {
     force,
     initializeRelease: standalone && createsContract,
+    initialVersion,
   });
   created.push(packagePath);
   await fs.mkdir(designSystemRoot, { recursive: true });
@@ -883,6 +911,7 @@ export async function initializeRepository(repoRootInput, {
   const manifest = JSON.parse((await template("timds.json"))
     .replaceAll("__SYSTEM_ID__", `${repoSlug}/core`)
     .replaceAll("__NAME__", "Starter")
+    .replaceAll("__VERSION__", initialVersion)
     .replaceAll("__PUBLISH_REF__", standalone ? ',\n    "publishRef": "timds-published"' : "")
     .replaceAll("__CONSUMER__", consumerConfig));
   manifest.name = name.trim() || `${path.basename(repoRoot)} Design System`;
@@ -910,7 +939,7 @@ export async function initializeRepository(repoRootInput, {
   // Claude Code reads CLAUDE.md, not AGENTS.md; the pointer imports the contract.
   await writeIfMissing(path.join(designSystemRoot, "CLAUDE.md"), renderTemplate(await template("design-system-CLAUDE.md")), created);
   await writeIfMissing(path.join(designSystemRoot, "README.md"), renderTemplate(await template("design-system-README.md")), created);
-  await writeIfMissing(path.join(designSystemRoot, "CHANGELOG.md"), await template("CHANGELOG.md"), created);
+  await writeIfMissing(path.join(designSystemRoot, CHANGELOG_FILE), (await template("CHANGELOG.md")).replaceAll("__VERSION__", initialVersion), created);
   if (createsContract) {
     await copyDirectory(path.join(packageRoot, "templates", "starter"), designSystemRoot, { created });
     // A fresh scaffold is adopted from the start: the record of what the
@@ -1292,6 +1321,12 @@ export async function submitWorkspace(repoRootInput, message, options = {}) {
     if (outsideCommittedScope.length) {
       throw new Error(`Refusing to submit a branch containing committed changes outside the TimDS scope:\n${outsideCommittedScope.map((filePath) => `- ${filePath}`).join("\n")}`);
     }
+  }
+  // Every submitted change carries its release note; the merge rolls the
+  // notes into the version, so a missing one would publish an empty release.
+  const unreleased = await readUnreleasedNotes(workspace.designSystemRoot);
+  if (unreleased !== null && !unreleased.length) {
+    throw new Error(`${CHANGELOG_FILE} has no note under ## Unreleased. Add one line saying what changed and where, for the people who use the system (the design-ship skill writes it), then submit again.`);
   }
   const media = options.dryRun
     ? { published: [], staged: 0, unchanged: [] }
@@ -1694,6 +1729,10 @@ export async function runCli(argv) {
       output(`Website designs: ${result.designs.designCount} design${result.designs.designCount === 1 ? "" : "s"}, ${result.designs.pageCount} page${result.designs.pageCount === 1 ? "" : "s"}, ${result.designs.stateCount} state${result.designs.stateCount === 1 ? "" : "s"}`);
     }
     if (result.bundle?.enabled) output(describeBundle(result.bundle.document));
+    if (result.changelog?.written?.length) {
+      const { releaseCount, entryCount, unreleasedCount } = result.changelog;
+      output(`Changelog: ${releaseCount} release${releaseCount === 1 ? "" : "s"}, ${entryCount} note${entryCount === 1 ? "" : "s"}${unreleasedCount ? `, ${unreleasedCount} unreleased` : ""}`);
+    }
     if (result.machine?.enabled) {
       output(machineSummary(result.machine));
       for (const warning of result.machine.warnings ?? []) output(`Warning: ${warning}`);
@@ -1724,6 +1763,7 @@ export async function runCli(argv) {
     const workspace = await loadWorkspace(root);
     if (!options.skipBuild) await runWorkspaceCommand(workspace, "build");
     await buildWorkspaceDesigns(workspace);
+    await buildWorkspaceChangelog(workspace);
     await buildWorkspaceBundle(workspace);
     const result = await extractWorkspace(workspace);
     if (!result.enabled) {
@@ -1746,6 +1786,7 @@ export async function runCli(argv) {
       if (published.formatsUrl) output(`Published asset formats: ${published.formatsUrl}`);
       if (published.llmsUrl) output(`Published agent docs: ${published.llmsUrl} (+${published.docCount} page mirrors${published.llmsFullUrl ? ", llms-full.txt" : ""})`);
       if (published.designsUrl) output(`Published website designs: ${published.designsUrl}`);
+      if (published.changelogUrl) output(`Published changelog: ${published.changelogUrl}`);
       if (published.bundleUrl) output(`Published consumer bundle: ${published.bundleUrl} (${published.bundleFiles} file${published.bundleFiles === 1 ? "" : "s"}; pinned copy at ${published.bundleVersionedUrl})`);
       return { ...result, published };
     }

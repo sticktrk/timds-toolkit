@@ -1,8 +1,14 @@
 #!/usr/bin/env node
+// Prepare a release by hand: the next dated version (YYYY.MM.DD-N, today's
+// date and the release number that day) or an explicit later one, the
+// Unreleased notes rolled under it, on a release branch and draft pull
+// request. Merging an ordinary change does this automatically; use this only
+// to release at a chosen moment or under a chosen version.
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { compareVersions, isVersion, nextVersion } from "./prepare-merge-release.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const git = (...args) => execFileSync("git", args, { cwd: root }).toString().trim();
@@ -10,15 +16,16 @@ const filePath = (file) => join(root, file);
 const readText = (file) => readFileSync(filePath(file), "utf8");
 const args = process.argv.slice(2);
 const push = args.includes("--push");
-const version = args.find((argument) => !argument.startsWith("--"));
+const requested = args.find((argument) => !argument.startsWith("--"));
 
-if (!/^\d+\.\d+\.\d+$/.test(version ?? "")) {
-  console.error("Usage: npm run release -- <MAJOR.MINOR.PATCH> [--push]");
+const current = JSON.parse(readText("timds.json")).version;
+if (requested !== undefined && !isVersion(requested)) {
+  console.error(`Usage: npm run release -- [YYYY.MM.DD-N] [--push]\nThe next version is ${nextVersion(current)}.`);
   process.exit(1);
 }
-const current = JSON.parse(readText("timds.json")).version;
-if (version === current) {
-  console.error(`timds.json is already ${version}; pick a new version.`);
+const version = requested ?? nextVersion(current);
+if (compareVersions(version, current) <= 0) {
+  console.error(`timds.json is already ${current}; ${version} does not follow it. The next version is ${nextVersion(current)}.`);
   process.exit(1);
 }
 if (git("status", "--porcelain")) {
@@ -38,8 +45,9 @@ const replaceVersion = (file, pattern) => {
   if (before === after) throw new Error(`Could not replace ${current} in ${file}`);
   writeFileSync(filePath(file), after);
 };
-replaceVersion("timds.json", new RegExp(`"version":\\s*"${current}"`));
-replaceVersion("package.json", new RegExp(`"version":\\s*"${current}"`));
+const escaped = current.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+replaceVersion("timds.json", new RegExp(`"version":\\s*"${escaped}"`));
+replaceVersion("package.json", new RegExp(`"version":\\s*"${escaped}"`));
 const lock = readText("package-lock.json").split("\n");
 let patched = 0;
 for (let index = 0; index < lock.length && patched < 2; index += 1) {

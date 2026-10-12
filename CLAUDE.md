@@ -80,6 +80,16 @@ calls the same function so `dev` shows them. `timds designs init` is the
 migration for systems scaffolded without them; it replaces the stock build
 and viewer scripts through the same hash check `starter sync` uses.
 
+`changelog.mjs` owns the release history: it reads the client's
+`CHANGELOG.md`, renders `dist/changelog/` (linked from the viewer's version
+chip, outside the views) the way designs are rendered, writes
+`changelog.json` into the derived layer, and holds the dated version rules
+(`YYYY.MM.DD-N`: the UTC day and the release number that day; legacy
+`MAJOR.MINOR.PATCH` orders below). The starter's `prepare-merge-release.mjs`
+keeps its own copy of those rules so a client releases without importing the
+toolkit; keep the two in step. `submit` refuses a change without an
+Unreleased note.
+
 `extract.mjs` harvests the built HTML in `dist/` (using the tolerant parser in
 `html.mjs`, which exists so the package needs no HTML dependency) and writes
 `index.json`, `tokens.json` (`tokens.mjs`, CSS custom properties resolved by

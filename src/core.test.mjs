@@ -589,6 +589,10 @@ test("plans a scoped branch and draft pull request without writing during submit
   execFileSync("git", ["add", "--all"], { cwd: repoRoot });
   execFileSync("git", ["commit", "-m", "Initialize TimDS"], { cwd: repoRoot, stdio: "ignore" });
   await writeJson(path.join(repoRoot, "design-system", "tokens.json"), { color: { gold: "#a8863f" } });
+  // A change ships with its release note; without one, submit stops before anything is planned.
+  await assert.rejects(submitWorkspace(repoRoot, "Darken marketing gold", { dryRun: true, noBuild: true }), /CHANGELOG\.md has no note under ## Unreleased/);
+  const changelogPath = path.join(repoRoot, "design-system", "CHANGELOG.md");
+  await fs.writeFile(changelogPath, (await fs.readFile(changelogPath, "utf8")).replace("## Unreleased\n", "## Unreleased\n\n- Brand · Color: darken the marketing gold.\n"));
   const result = await submitWorkspace(repoRoot, "Darken marketing gold", { dryRun: true, noBuild: true });
   assert.equal(result.branch, "design-system/darken-marketing-gold");
   assert.deepEqual(result.commands[0], ["git", "switch", "-c", "design-system/darken-marketing-gold"]);
@@ -713,7 +717,10 @@ test("initializes the reusable standalone repository shape", async (t) => {
     assert.doesNotMatch(document, /__(?:TIMDS_CLI|CONTRACT_DESCRIPTION|DIST_PATH|SKILLS_PATH)__/);
   }
   const packageJson = JSON.parse(await fs.readFile(path.join(repoRoot, "package.json"), "utf8"));
-  assert.equal(packageJson.version, "0.1.0");
+  // A fresh system is the first release of the day it was scaffolded, in timds.json, package.json, and the changelog alike.
+  assert.match(packageJson.version, /^\d{4}\.\d{2}\.\d{2}-1$/);
+  assert.equal(packageJson.version, manifest.version);
+  assert.match(await fs.readFile(path.join(repoRoot, "CHANGELOG.md"), "utf8"), new RegExp(`\\n## Unreleased\\n\\n## ${manifest.version.replaceAll(".", "\\.")}\\n\\n- Maintenance: Initialize`));
   assert.equal(packageJson.devDependencies["@dtconcepts/timds"], "0.1.x");
   assert.equal(packageJson.scripts["check:versions"], "node scripts/check-versions.mjs");
   assert.equal(packageJson.scripts.release, "node scripts/release.mjs");
@@ -824,6 +831,8 @@ test("migrates standalone release automation only with explicit replacement of c
     ".github/workflows/timds-design-system.yml",
     ".github/workflows/update-consumer-submodule.yml",
     "scripts/release.mjs",
+    "scripts/release.sh",
+    "scripts/check-versions.mjs",
     "scripts/prepare-merge-release.mjs",
     "scripts/prepare-merge-release.test.mjs",
   ], "every file the migration writes is recorded, so the next upgrade recognizes it as stock");
@@ -883,6 +892,13 @@ test("the starter viewer renders its site model, and its build guards pages, pla
   }
   const overview = await read("dist/index.html");
   assert.match(overview, /<h1 class="page-title">Client &amp; Co<\/h1>/);
+  // The version chip opens the changelog TimDS renders outside the views; the starter build writes it so dev shows it.
+  assert.match(overview, /<a class="appbar__version" href="\/changelog\/" title="Changelog">v\d{4}\.\d{2}\.\d{2}-1<\/a>/);
+  const changelogPage = await read("dist/changelog/index.html");
+  assert.match(changelogPage, /<title>Changelog · Client &amp; Co<\/title>/);
+  assert.match(changelogPage, /<link rel="stylesheet" href="\/tokens\.css">/);
+  assert.match(changelogPage, /<span class="td-changelog-area is-maintenance">Maintenance<\/span> Initialize the TimDS contract and starter viewer\./);
+  assert.match(changelogPage, /<span class="td-changelog-current">Current<\/span>/);
   assert.match(overview, /<span class="tag">Planned<\/span>/);
   assert.doesNotMatch(overview, /\{\{/);
   // The sample website design is listed by the viewer and built by TimDS as whole pages, states beside them.
@@ -905,7 +921,9 @@ test("the starter viewer renders its site model, and its build guards pages, pla
 
   // The derived layer carries only authored guidance, so the brand kit still reports what the client has not supplied.
   const { designs, machine } = await checkWorkspace(repoRoot);
-  assert.deepEqual(machine.pages.map((page) => page.id), ["brand/color", "brand/typography", "digital", "index", "print", "social", "web/components", "web/spacing"], "design pages are not guidance");
+  assert.deepEqual(machine.pages.map((page) => page.id), ["brand/color", "brand/typography", "digital", "index", "print", "social", "web/components", "web/spacing"], "design and changelog pages are not guidance");
+  assert.deepEqual(machine.index.changelog, { url: "/changelog.json", page: "/changelog/", releases: 1, latest: machine.index.system.version });
+  assert.equal(JSON.parse(await read("dist/changelog.json")).releases[0].entries[0].area, "Maintenance");
   assert.equal(machine.counts.untyped, 0);
   assert.deepEqual(machine.warnings.map((warning) => warning.split(":")[0]), ["guidance group voice is empty", 'no asset is annotated data-timds-role="logo"; the brand kit has no logo']);
   assert.equal(machine.formats.count, 48);
@@ -1087,7 +1105,7 @@ test("starter sync adopts a scaffold from before the asset views, and upgrade ke
   const result = await syncStarterWorkspace(repoRoot);
   assert.equal(result.adopted, true);
   assert.deepEqual(result.files.map((file) => [file.path, file.status]), [
-    ["scripts/build.mjs", "current"],
+    ["scripts/build.mjs", "updated"],
     ["scripts/check.mjs", "updated"],
     ["scripts/dev.mjs", "current"],
     ["scripts/viewer.mjs", "updated"],

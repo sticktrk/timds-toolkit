@@ -64,7 +64,7 @@ repository root, so each one is also a slash command.
 | `src/layout.html` | The shell every page shares: app bar, page navigation, content slot | Edit |
 | `src/styles/`, `src/assets/` | The system's styles, the viewer chrome, and small optimized assets | Edit |
 | `scripts/build.mjs`, `dev.mjs`, `check.mjs`, `viewer.mjs` | The `workspace` commands that `timds.json` runs and the renderer they share | Edit only when the viewer needs it |
-| `CHANGELOG.md` | Designer-facing change notes | Add to `## Unreleased` |
+| `CHANGELOG.md` | Designer-facing release notes, rendered at `/changelog/` in the built system | Add to `## Unreleased`, leading with the area the change touches |
 | `README.md`, `AGENTS.md` | This system's own documentation | Keep accurate as the system changes |
 | `timds.json` | Manifest: identity, version, artifact entry, workspace commands, the `bundle` globs naming what a website loads | Only `brand` and `machine` mappings; the rest is protected |
 | `media.json` | Published media catalog | Written by `assets` commands, never by hand |
@@ -307,7 +307,10 @@ them, logos, asset formats), so what reaches the kit reaches every tool.
    `__TIMDS_CLI__ brand` lists the logo and the voice guidance.
 8. Inspect `__TIMDS_CLI__ preview` at desktop and mobile widths, the designs
    under `/designs/` included.
-9. Record the change under `## Unreleased` in `CHANGELOG.md`.
+9. Record the change under `## Unreleased` in `CHANGELOG.md`: one or two
+   sentences for the people who use the system, led by the area it touches
+   (`Brand · Color: ...`, `Print DS: ...`). `submit` refuses a change
+   without one.
 
 ## Source and artifact boundary
 
@@ -396,7 +399,7 @@ knows where the work goes:
 The handoff, in order:
 
 1. The designer ships a change (`design-ship`) and an operator merges it.
-   The merge releases a patch version and publishes it.
+   The merge releases a dated version and publishes it.
 2. The designer, or anyone, runs `design-handoff`. It compares the version
    the product pins with the release and writes the developer brief: the
    version to pin, the website designs and states to port, the tokens,
@@ -418,11 +421,13 @@ request here, and the product waits for the next release.
 - Use a `design-system/<change>` branch and a pull request.
 - Keep unrelated repository files out of the design-system commit.
 - Record day-to-day changes under `## Unreleased`; standalone CI rolls them
-  into a synchronized patch version after merge. Do not edit `version` by
-  hand.
+  into the next version after merge. A version is the UTC day of the release
+  and its number that day: `2026.10.12-1`, then `2026.10.12-2` the same day.
+  Do not edit `version` by hand. The released history is published as the
+  `/changelog/` page and `changelog.json` beside `index.json`.
 - `__TIMDS_CLI__ submit` may create a branch, commit, push, and draft pull request only when the user asks.
 - In a standalone repository with managed automatic releases, every accepted
-  `main` change becomes a patch release and a source-linked artifact candidate.
+  `main` change becomes a dated release and a source-linked artifact candidate.
   The portal's Automatic updates setting controls promotion: ON releases the
   root; OFF requires operator publication in the portal.
 - Only when authorized, `__TIMDS_CLI__ publish` builds, pushes the artifact ref

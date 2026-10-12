@@ -39,6 +39,11 @@ the pages were built and validated but not viewed.
 Add one entry under `## Unreleased` in `CHANGELOG.md`, in the designer's
 language: what changed and where, as someone reading the release notes would
 want it. One or two sentences; no file paths unless a reader needs them.
+Lead with the area the change touches, so the note reads `Brand · Color:
+...`, `Print DS: ...`, or `Web DS · Components: ...`; the published system
+shows every release at `/changelog/` with that area as its label. `submit`
+refuses a change without a note, because merging rolls the notes into the
+release and an empty one would publish a release that says nothing.
 
 ## Submit
 
@@ -61,7 +66,9 @@ Give the designer the pull-request link and a two-sentence summary of what
 is in it. Then explain the path to production once, in order:
 
 1. An operator reviews and merges the pull request. Merging is the release
-   decision: every accepted change becomes a patch version and is published.
+   decision: every accepted change becomes a dated version (`2026.10.12-1`,
+   the day and the release number that day) and is published, with its notes
+   on the changelog page.
 2. The product site keeps using the version it pins until a developer moves
    that pin and ports what changed. The `design-handoff` skill writes the
    brief that developer needs; offer to run it once the release exists.

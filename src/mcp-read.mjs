@@ -424,7 +424,7 @@ export function registerDesignSystemReadTools(server, { resolveSystem, listSyste
   tool("describe_system", {
     title: "Describe a Design System",
     annotations: READ_ONLY,
-    description: "Describe a Design System at the served version: name, versions (served, pinned, published), page directory, token and role counts, brand kit summary, guidance groups, media catalog size, the asset format catalog, the consumer bundle a website loads (with the immutable copy to pin), the website designs it holds, and the video board kinds it offers.",
+    description: "Describe a Design System at the served version: name, versions (served, pinned, published), page directory, token and role counts, brand kit summary, guidance groups, media catalog size, the asset format catalog, the consumer bundle a website loads (with the immutable copy to pin), the website designs it holds, its release history (latest version and recent release notes), and the video board kinds it offers.",
   }, async (args) => {
     const resolved = await systemFor(args);
     const { layer } = resolved;
@@ -443,6 +443,8 @@ export function registerDesignSystemReadTools(server, { resolveSystem, listSyste
       // What a website loads from the system, and the immutable copy it pins; null until the manifest declares a bundle.
       bundle: layer.bundle ? { url: layer.bundle.url, directory: layer.bundle.directory, versioned: layer.bundle.versioned ?? null, files: layer.bundle.fileCount ?? 0, bytes: layer.bundle.bytes ?? 0, paths: (layer.bundle.files ?? []).map((file) => file.path) } : null,
       designs: layer.designs ? { count: layer.designs.designCount ?? 0, pages: layer.designs.pageCount ?? 0, states: layer.designs.stateCount ?? 0, designs: designsDirectory(layer.designs).map(({ id, title, pageCount }) => ({ id, title, pageCount })) } : null,
+      // The release history, when the system keeps a changelog: the latest version and the most recent releases with their notes.
+      changelog: layer.changelog ? { url: layer.changelog.url, latest: layer.changelog.latest ?? null, releases: layer.changelog.releaseCount ?? 0, recent: (layer.changelog.releases ?? []).slice(0, 5).map((release) => ({ version: release.version, date: release.date ?? null, notes: (release.entries ?? []).map((entry) => entry.area ? `${entry.area}: ${entry.text}` : entry.text) })) } : null,
       video: index?.video?.boards ? { boards: index.video.boards.kinds ?? [], cadence: index.video.boards.cadence ?? null, formats: index.video.boards.formats ?? null } : null,
       llms: layer.llms ?? null,
     };

@@ -373,7 +373,7 @@ test("publishExtractedIndex uploads assets and mirrors first, then index, llms.t
       version: "1.2.3",
       systemId: "client/system",
       entry: "design-system/index.html",
-      files: { index: "design-system/index.json", tokens: "design-system/tokens.json", brand: "design-system/brand.json", llms: "design-system/llms.txt", llmsFull: "design-system/llms-full.txt", formats: "design-system/formats.json", designs: "design-system/designs.json", bundle: "design-system/bundle.json" },
+      files: { index: "design-system/index.json", tokens: "design-system/tokens.json", brand: "design-system/brand.json", llms: "design-system/llms.txt", llmsFull: "design-system/llms-full.txt", formats: "design-system/formats.json", designs: "design-system/designs.json", changelog: "design-system/changelog.json", bundle: "design-system/bundle.json" },
     });
     // A former catalog may remain on disk, but a release that does not
     // advertise it must not publish it again, even if that file is invalid.

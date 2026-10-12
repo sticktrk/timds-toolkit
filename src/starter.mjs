@@ -32,7 +32,8 @@
 //   wrote. A fragment that differs is this system's own page and is never
 //   replaced, --force included. Every other fragment, tokens.json, the
 //   system stylesheet, and the layout shell are the client's; the layout
-//   only gains a missing stylesheet link.
+//   only gains a missing stylesheet link and the changelog link on its
+//   version chip.
 //
 // The sync rewrites the catalogs and the layout whole, so a CLI refuses to
 // run it over uncommitted changes to the files it writes (`starterSyncPaths`)
@@ -386,6 +387,17 @@ export function insertStylesheetLinks(layout, templateLayout, hrefs = starterLay
   return { html: lines.join("\n"), inserted, unplaced };
 }
 
+/**
+ * The viewer's version chip opens the changelog page TimDS renders. A layout
+ * still carrying the plain chip gains the link; any other chip is the client's.
+ */
+export function linkVersionChip(layout) {
+  const chip = /<span class="appbar__version">(\s*v?\{\{\s*version\s*\}\}\s*)<\/span>/;
+  const match = chip.exec(layout);
+  if (!match) return { html: layout, linked: false };
+  return { html: layout.replace(chip, `<a class="appbar__version" href="/changelog/" title="Changelog">${match[1]}</a>`), linked: true };
+}
+
 // The catalogs are written in the starter's own style, one page or format per
 // line, so a sync produces a reviewable diff instead of reflowing the file.
 function inline(value) {
@@ -663,15 +675,20 @@ export async function syncStarter({ designSystemRoot, version, check = null, dec
     plan(relative, planned.status, planned.write ? desired : null, planned.current, note);
   }
 
-  // 4. The layout shell gains the links it lacks and nothing else.
+  // 4. The layout shell gains the links it lacks (stylesheets, the changelog on its version chip) and nothing else.
   const layoutText = await readOptional(resolve(STARTER_LAYOUT_FILE));
   if (layoutText === null) {
     plan(STARTER_LAYOUT_FILE, "skipped", null, null, "absent");
   } else {
-    const { html, inserted, unplaced } = insertStylesheetLinks(layoutText, await template("starter/src/layout.html"));
-    const status = inserted.length ? "updated" : unplaced.length ? "customized" : "current";
-    const note = inserted.length ? `linked ${inserted.join(", ")}` : unplaced.length ? `could not place ${unplaced.join(", ")}; link it in <head> by hand` : undefined;
-    plan(STARTER_LAYOUT_FILE, status, inserted.length ? html : null, layoutText, note);
+    const links = insertStylesheetLinks(layoutText, await template("starter/src/layout.html"));
+    const chip = linkVersionChip(links.html);
+    const changed = links.inserted.length > 0 || chip.linked;
+    const status = changed ? "updated" : links.unplaced.length ? "customized" : "current";
+    const notes = [];
+    if (links.inserted.length) notes.push(`linked ${links.inserted.join(", ")}`);
+    if (chip.linked) notes.push("the version chip now opens /changelog/");
+    if (links.unplaced.length) notes.push(`could not place ${links.unplaced.join(", ")}; link it in <head> by hand`);
+    plan(STARTER_LAYOUT_FILE, status, changed ? chip.html : null, layoutText, notes.length ? notes.join("; ") : undefined);
   }
 
   // 5. Write, record, check; roll everything back when the check fails.

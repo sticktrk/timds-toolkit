@@ -160,6 +160,8 @@ export type IndexDocument = {
   formats?: { url: string; groups: number; count: number };
   /** Present when the system holds website designs: where designs.json sits and how much it holds. */
   designs?: { url: string; count: number; pages: number; states: number };
+  /** Present when the system keeps a CHANGELOG.md: where changelog.json sits, how many releases it lists, and the latest. */
+  changelog?: { url: string; page: string; releases: number; latest: string | null };
   /** Present when the manifest declares a consumer bundle: where bundle.json sits and how much it holds. */
   bundle?: { url: string; files: number; bytes: number };
   video?: {runtime?: RuntimeRequirements | null; engine?: RuntimeIdentity; boards?: VideoBoardCatalogSummary};
@@ -202,6 +204,42 @@ export type FormatsDocument = {
   groupCount: number;
   count: number;
   groups: AssetFormatGroup[];
+};
+
+/* ── changelog.json ──────────────────────────────────────────────────────── */
+
+export type ChangelogEntry = {
+  /** The area the note leads with ("Brand · Color", "Print DS", "Maintenance"), or null. */
+  area: string | null;
+  /** The note as plain text, area removed. */
+  text: string;
+  /** The note as written, area removed; nested items as `- ` lines. */
+  markdown: string;
+};
+
+export type ChangelogRelease = {
+  version: string;
+  /** The UTC release date (YYYY-MM-DD) of a dated version; null for a legacy MAJOR.MINOR.PATCH section. */
+  date: string | null;
+  /** The release's number on its day; null for a legacy section. */
+  build: number | null;
+  /** True for the manifest's version. */
+  current: boolean;
+  /** Artifact-relative URL of the release's section on the changelog page. */
+  url: string;
+  entries: ChangelogEntry[];
+};
+
+/** changelog.json: every released section of CHANGELOG.md, newest first; unreleased notes are not published. */
+export type ChangelogDocument = {
+  schemaVersion: 1;
+  system: SystemStamp;
+  /** Artifact-relative URL of the rendered changelog page. */
+  url: string;
+  releaseCount: number;
+  entryCount: number;
+  latest: string | null;
+  releases: ChangelogRelease[];
 };
 
 /* ── designs.json ────────────────────────────────────────────────────────── */
@@ -289,11 +327,13 @@ export type DerivedLayer = {
   formats: FormatsDocument | null;
   /** Null for a system that designs no pages. */
   designs: DesignsDocument | null;
+  /** Null for a system without a CHANGELOG.md. */
+  changelog: ChangelogDocument | null;
   /** Null for a system whose manifest declares no `bundle`. */
   bundle: BundleDocument | null;
 };
 
-export type DerivedFileName = "index" | "tokens" | "brand" | "llms" | "llmsFull" | "formats" | "designs" | "bundle";
+export type DerivedFileName = "index" | "tokens" | "brand" | "llms" | "llmsFull" | "formats" | "designs" | "changelog" | "bundle";
 
 export type BrandKitSummary = {
   version: string | null;

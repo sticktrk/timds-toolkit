@@ -40,7 +40,8 @@
 a.appbar__view:hover, .appbar__view[aria-current] { background: var(--color-accent-soft); }
 .appbar__view[aria-current] b { color: var(--color-accent); }
 .appbar__view.is-planned b { color: var(--color-muted); font-weight: 400; }
-.appbar__version { color: var(--color-muted); font-family: var(--font-mono); font-size: var(--type-label); }
+.appbar__version { color: var(--color-muted); font-family: var(--font-mono); font-size: var(--type-label); text-decoration: none; white-space: nowrap; }
+a.appbar__version:hover { color: var(--color-ink); text-decoration: underline; text-underline-offset: 0.2em; }
 
 /* ---- shell ---- */
 .layout { display: grid; max-width: var(--size-content); grid-template-columns: var(--size-sidebar) minmax(0, 1fr); align-items: start; margin: 0 auto; }

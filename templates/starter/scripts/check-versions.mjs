@@ -2,6 +2,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isVersion, todayVersion } from "./prepare-merge-release.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const readJson = (file) => JSON.parse(readFileSync(join(root, file), "utf8"));
@@ -12,7 +13,7 @@ const changelog = readFileSync(join(root, "CHANGELOG.md"), "utf8");
 const expected = timds.version;
 const problems = [];
 
-if (!/^\d+\.\d+\.\d+$/.test(expected ?? "")) problems.push(`timds.json version is invalid: ${JSON.stringify(expected)}`);
+if (!isVersion(expected)) problems.push(`timds.json version is invalid: ${JSON.stringify(expected)} (expected YYYY.MM.DD-N such as ${todayVersion()}-1)`);
 if (pkg.version !== expected) problems.push(`package.json is ${pkg.version}, expected ${expected}`);
 if (lock.version !== expected) problems.push(`package-lock.json root is ${lock.version}, expected ${expected}`);
 if (lock.packages?.[""]?.version !== expected) problems.push(`package-lock.json packages[""] is ${lock.packages?.[""]?.version}, expected ${expected}`);
