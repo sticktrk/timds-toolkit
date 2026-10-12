@@ -133,8 +133,8 @@ the reference the port must match, never the production site itself.
 `.timds/starter.json` records the starter plumbing (`scripts/build.mjs`,
 `check.mjs`, `dev.mjs`, `viewer.mjs`, `src/styles/canvas.css`,
 `src/styles/viewer.css`), the views in `src/site.json`, the formats in
-`src/formats.json`, and the Digital, Social, and Print overview fragments the
-toolkit wrote. Every `upgrade` re-syncs an adopted system: the plumbing is
+`src/formats.json`, and the Digital, Social, and Print overview fragments and
+the Use page the toolkit wrote. Every `upgrade` re-syncs an adopted system: the plumbing is
 brought to stock, new views, planned pages, and formats are appended
 without removing, reordering, or retitling anything the system declares,
 and a missing stock stylesheet link is added to `src/layout.html`. In a

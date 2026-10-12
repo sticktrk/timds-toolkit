@@ -67,7 +67,7 @@ deterministic Node.js commands under `scripts/`. The starter exists so the
 contract builds and validates immediately; replace its neutral tokens and
 examples with approved client foundations rather than treating them as brand
 guidance. It is organized as views (Brand, Web DS, Digital DS, Social DS,
-Print DS), each a list of pages, all rendered into one shared shell. Some pages are authored from the starter
+Print DS, Use), each a list of pages, all rendered into one shared shell. Some pages are authored from the starter
 tokens; the rest are declared as planned and built once someone writes them.
 
 | Path | Purpose |

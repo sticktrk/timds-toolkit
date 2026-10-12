@@ -292,6 +292,8 @@ function renderViews(model, current, designs) {
     return `<a class="appbar__view" href="${target.href}"${view.id === current.view ? ' aria-current="true"' : ""}>${label}</a>`;
   });
   if (designs.length) views.push('<a class="appbar__view" href="/designs/"><b>Designs</b><small>Whole pages</small></a>');
+  // On a phone the row scrolls sideways, so the current view is brought into view rather than left past the edge.
+  views.push('<script>document.querySelector(".appbar__view[aria-current]")?.scrollIntoView({ block: "nearest", inline: "center" });</script>');
   return views.join("\n        ");
 }
 

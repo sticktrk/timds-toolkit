@@ -80,7 +80,7 @@ guidance. Its structure is the part to keep: views, a shared shell, and pages
 built from the same few blocks.
 
 - `src/site.json` lists the views (Brand, Web DS, Digital DS, Social DS,
-  Print DS) and the pages in each, in
+  Print DS, Use) and the pages in each, in
   navigation order. A page is `{ "slug", "title", "summary" }` plus an
   optional `group` heading for the sidebar. The page `<view>/<slug>` is
   authored in `src/pages/<view>/<slug>.html` and built to
@@ -201,7 +201,8 @@ replaced on the next upgrade and reported, never kept; a system adopted
 later keeps a changed file as customized (`"recorded"`). It appends views, planned pages, and asset formats a newer scaffold
 declares to `src/site.json` and `src/formats.json` without removing,
 reordering, or retitling anything declared here; writes the Digital, Social,
-and Print overview fragments when it adds or authors their page; and adds a
+and Print overview fragments and the Use page (`use`, every way the system is
+consumed) when it adds or authors their page; and adds a
 missing stock stylesheet link to `src/layout.html`. It never touches other
 fragments, `tokens.json`, `system.css`, or `timds.json`. In the recorded
 mode a file changed here is reported as customized and kept unless the
