@@ -66,7 +66,7 @@ New contracts include a dependency-free starter viewer under `src/` and
 deterministic Node.js commands under `scripts/`. The starter exists so the
 contract builds and validates immediately; replace its neutral tokens and
 examples with approved client foundations rather than treating them as brand
-guidance. It is organized as views (Brand, Web DS, Digital DS, Social DS,
+guidance. It is organized as views (Brand, Web DS, Digital DS, Social DS, Use,
 Print DS), each a list of pages, all rendered into one shared shell. Some pages are authored from the starter
 tokens; the rest are declared as planned and built once someone writes them.
 

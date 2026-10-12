@@ -27,7 +27,8 @@
 //   reported when the stock value is news (it differs from every baseline),
 //   not on every sync. Nothing is removed, reordered, or retitled.
 // - Authored fragments the starter mirrors from the golden system (the
-//   Digital, Social, and Print overviews) are written when the sync adds
+//   Digital, Social, and Print overviews) and the toolkit's own Use page,
+//   every way to consume a system, are written when the sync adds
 //   their page and refreshed only while they still match what the toolkit
 //   wrote. A fragment that differs is this system's own page and is never
 //   replaced, --force included. Every other fragment, tokens.json, the
@@ -72,7 +73,9 @@ export const starterPlumbingFiles = Object.freeze([
 ]);
 
 /**
- * Authored fragments the starter mirrors from the golden system. Each renders
+ * Authored fragments the starter mirrors from the golden system, and the Use
+ * page the toolkit owns (how a system is consumed: browser, llms.txt, the
+ * derived layer, MCP, a product pin, the designs). Each renders
  * the page its path names (src/pages/<view>/index.html is the view's own
  * page, src/pages/<view>/<slug>.html the page <view>/<slug>). A fragment is
  * written when the sync adds its page and refreshed while it is unmodified.
@@ -81,6 +84,7 @@ export const starterManagedFragments = Object.freeze([
   ["src/pages/digital/index.html", "starter/src/pages/digital/index.html"],
   ["src/pages/print/index.html", "starter/src/pages/print/index.html"],
   ["src/pages/social/index.html", "starter/src/pages/social/index.html"],
+  ["src/pages/use/index.html", "starter/src/pages/use/index.html"],
 ]);
 
 /** Every file the sync may write, for a clean-tree guard before it runs. */

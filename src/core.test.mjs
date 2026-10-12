@@ -56,7 +56,7 @@ function commitAll(repoRoot, message) {
 /** Rewind a fresh standalone scaffold to the shape `init` produced before the asset views and format catalog existed. */
 async function rewindStarter(repoRoot) {
   await fs.cp(starterFixtureRoot, repoRoot, { force: true, recursive: true });
-  for (const relative of ["src/formats.json", "src/styles/canvas.css", "src/pages/digital", "src/pages/print", "src/pages/social", ".timds/starter.json"]) {
+  for (const relative of ["src/formats.json", "src/styles/canvas.css", "src/pages/digital", "src/pages/print", "src/pages/social", "src/pages/use", ".timds/starter.json"]) {
     await fs.rm(path.join(repoRoot, relative), { force: true, recursive: true });
   }
 }
@@ -905,7 +905,7 @@ test("the starter viewer renders its site model, and its build guards pages, pla
 
   // The derived layer carries only authored guidance, so the brand kit still reports what the client has not supplied.
   const { designs, machine } = await checkWorkspace(repoRoot);
-  assert.deepEqual(machine.pages.map((page) => page.id), ["brand/color", "brand/typography", "digital", "index", "print", "social", "web/components", "web/spacing"], "design pages are not guidance");
+  assert.deepEqual(machine.pages.map((page) => page.id), ["brand/color", "brand/typography", "digital", "index", "print", "social", "use", "web/components", "web/spacing"], "design pages are not guidance");
   assert.equal(machine.counts.untyped, 0);
   assert.deepEqual(machine.warnings.map((warning) => warning.split(":")[0]), ["guidance group voice is empty", 'no asset is annotated data-timds-role="logo"; the brand kit has no logo']);
   assert.equal(machine.formats.count, 48);
@@ -944,7 +944,7 @@ test("the starter viewer renders its site model, and its build guards pages, pla
   const voice = site.views[0].pages.find((page) => page.slug === "voice");
   delete voice.planned;
   await writeJson(path.join(repoRoot, "src/site.json"), site);
-  assert.match(run("build"), /9 pages/);
+  assert.match(run("build"), /10 pages/);
   assert.match(await read("dist/brand/voice/index.html"), /Lead with the answer/);
   await fs.rm(path.join(repoRoot, "src/pages/brand/voice.html"));
   fails("build", /src\/pages\/brand\/voice\.html is missing/);
@@ -1098,9 +1098,10 @@ test("starter sync adopts a scaffold from before the asset views, and upgrade ke
     ["src/pages/digital/index.html", "created"],
     ["src/pages/print/index.html", "created"],
     ["src/pages/social/index.html", "created"],
+    ["src/pages/use/index.html", "created"],
     ["src/layout.html", "updated"],
   ]);
-  assert.deepEqual(result.site, { addedPages: ["web/email", "web/email-templates"], addedViews: ["digital", "social", "print"], advanced: ["web.label", "web.blurb"], kept: [] });
+  assert.deepEqual(result.site, { addedPages: ["web/email", "web/email-templates"], addedViews: ["digital", "social", "print", "use"], advanced: ["web.label", "web.blurb"], kept: [] });
   assert.deepEqual([result.formats.addedGroups, result.formats.addedFormats.length, result.formats.kept, result.formats.skipped], [["print", "digital", "social"], 48, [], []]);
   // Nothing here was customized, so the merged catalogs and refreshed files equal the stock scaffold's byte for byte.
   for (const relative of ["src/site.json", "src/formats.json", "src/layout.html", "scripts/viewer.mjs", "scripts/check.mjs", "src/styles/canvas.css", "src/pages/print/index.html"]) {
@@ -1256,7 +1257,7 @@ test("starter sync merges around a view the client already declared", async (t) 
 
   const result = await syncStarterWorkspace(repoRoot);
   const merged = JSON.parse(await read("src/site.json"));
-  assert.deepEqual(merged.views.map((view) => view.id), ["brand", "web", "print", "digital", "social"], "the client's view keeps its place; new views follow");
+  assert.deepEqual(merged.views.map((view) => view.id), ["brand", "web", "print", "digital", "social", "use"], "the client's view keeps its place; new views follow");
   const print = merged.views[2];
   assert.deepEqual([print.label, print.blurb], ["Printed matter", "Paper"]);
   assert.deepEqual(print.pages.map((page) => [page.slug, page.planned === true]), [
@@ -1266,7 +1267,7 @@ test("starter sync merges around a view the client already declared", async (t) 
     ["swag", true],
   ], "stock pages are added as planned after their predecessors; the client's own page stays");
   assert.deepEqual(print.pages[1], { slug: "letterheads", title: "Letterhead", summary: "Ours." }, "a page the client declared keeps every field");
-  assert.deepEqual(result.site.addedViews, ["digital", "social"]);
+  assert.deepEqual(result.site.addedViews, ["digital", "social", "use"]);
   assert.deepEqual(result.site.addedPages.filter((id) => id.startsWith("print")), ["print", "print/business-cards", "print/brochures", "print/booklets", "print/worksheets", "print/calendars", "print/notepads", "print/conference-banners", "print/posters"]);
   assert.deepEqual(result.site.kept.map((kept) => [kept.path, kept.current]), [["print.label", "Printed matter"], ["print.blurb", "Paper"], ["print/letterheads.title", "Letterhead"], ["print/letterheads.group", undefined], ["print/letterheads.summary", "Ours."]]);
   assert.ok(describeStarterSync(result).includes('Kept print/letterheads.group undeclared; the scaffold now says "Stationery".'), describeStarterSync(result).join("\n"));

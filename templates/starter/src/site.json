@@ -83,6 +83,14 @@
         { "slug": "conference-banners", "title": "Conference Banners", "group": "Events & Display", "summary": "Pull-up and hanging banners sized to read across a room.", "planned": true },
         { "slug": "posters", "title": "Posters", "summary": "Event posters in four sizes, from tabloid to one-sheet.", "planned": true }
       ]
+    },
+    {
+      "id": "use",
+      "label": "Use",
+      "blurb": "People, products, agents",
+      "pages": [
+        { "slug": "", "title": "Using the system", "summary": "Every way in: the pages, one URL for any AI tool, the machine-readable layer, MCP, a pinned bundle, and the website designs." }
+      ]
     }
   ]
 }
