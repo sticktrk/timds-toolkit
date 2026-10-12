@@ -301,3 +301,15 @@ test("the editing guide carries the rules without local-only steps", async (t) =
   assert.equal(annotations.delete_file.destructiveHint, true);
   for (const tool of tools) assert.ok(!Object.hasOwn(tool.inputSchema.properties ?? {}, "draftId"), tool.name);
 });
+
+test("hosted editing refuses ignored files without a Git checkout", async (t) => {
+  const repoRoot = await temporaryDirectory(t);
+  await initializeRepository(repoRoot, { standalone: true, provider: "hosted", portalUrl: "https://host.example" });
+  await fs.appendFile(path.join(repoRoot, ".gitignore"), "scratch.txt\n");
+  const client = await connect(await createDesignSystemMcpServer({ root: repoRoot }));
+  t.after(() => client.close());
+  const result = await call(client, "write_file", { path: "scratch.txt", content: "ignored", note: "Test ignored write" });
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /ignored/);
+  assert.equal(await fs.stat(path.join(repoRoot, "scratch.txt")).catch(() => null), null);
+});

@@ -273,3 +273,36 @@ test("upgrade reports the operator token the refreshed release workflow now requ
   await runWithOutputSink((line) => lines.push(line), () => runCli(["upgrade", "--root", root]));
   assert.match(lines.join("\n"), /Managed automation: 1 files updated\nThe release workflow now requires the TIMDS_ACCESS_TOKEN repository secret/);
 });
+
+test("trusted in-process publication receives exact artifact bytes and never resolves CLI credentials", async (t) => {
+  const f = await fixture(t); const stamp = await writePublicationStamp(f.workspace);
+  const credentialFile = path.join(f.root, "invalid-credentials.json");
+  await fs.writeFile(credentialFile, "invalid credentials JSON must not be read");
+  const reads = [];
+  const result = await publishRelease(f.workspace, {
+    portalUrl: "not a portal URL", credentialsPath: credentialFile,
+    publisher: async ({ stamp: received, files }) => {
+      assert.deepEqual(received, stamp);
+      for (const expected of publicationFixture().artifactFiles) assert.deepEqual(files.find(file => file.path === expected.path).content, expected.content);
+      return resultFor(received);
+    },
+    fetchImpl: async (url, options) => { reads.push({ url, options }); return json(stamp); },
+  });
+  assert.equal(result.status, "published");
+  assert.equal(reads.length, 1);
+  assert.equal(reads[0].url, "https://example-ds.timds.com/.timds-artifact.json");
+  assert.equal(reads[0].options.headers.Authorization, undefined);
+  assert.equal((await createPublicationStamp(f.workspace)).contentDigest, stamp.contentDigest);
+});
+
+test("in-process publication keeps stamp, response, and public-byte validation", async (t) => {
+  const f = await fixture(t); const stamp = await writePublicationStamp(f.workspace);
+  let called = false;
+  const publisher = async () => { called = true; return resultFor(stamp); };
+  await f.write("dist/bundle.json", "different bytes");
+  await assert.rejects(publishRelease(f.workspace, { publisher }), /differs from the local/);
+  assert.equal(called, false);
+  await f.write("dist/bundle.json", publicationFixture().artifactFiles.find(file => file.path === "bundle.json").content);
+  await assert.rejects(publishRelease(f.workspace, { publisher: async () => ({ ...resultFor(stamp), version: "wrong" }) }), /Invalid TimDS publication response/);
+  await assert.rejects(publishRelease(f.workspace, { publisher, fetchImpl: async () => json({ ...stamp, contentDigest: "wrong" }) }), /public root does not serve/);
+});

@@ -229,3 +229,9 @@ package.
 Release tags must exactly match `package.json` as `v<version>`. Keep
 `publishConfig.access` public and use the tracked GitHub Actions trusted
 publisher workflow rather than a long-lived npm token.
+
+Hosted source initialization (`init --standalone --provider hosted`) owns
+Wrangler preview configuration and `_headers` instead of GitHub workflows.
+Local/git initialization keeps its existing release automation. Session API
+version 1 is implemented in `src/hosted.mjs`; CLI and MCP commands must share
+that implementation and keep files/token boundaries covered by tests.

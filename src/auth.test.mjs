@@ -30,7 +30,7 @@ test("stores portal access tokens outside the repository with owner-only permiss
   assert.deepEqual((await readCredentials({ credentialsPath })).portals, {});
 });
 
-test("completes the TimDS operator device authorization flow", async (t) => {
+test("completes the TimDS account device authorization flow", async (t) => {
   const credentialsPath = await temporaryCredentials(t);
   const calls = [];
   const fetchImpl = async (url) => {

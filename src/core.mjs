@@ -28,6 +28,7 @@ import { acceptsToolkitReleaseRange, assertVideoContractRuntime, runtimeIdentity
 import { publishExtractedIndex } from "./artifact.mjs";
 import { MAX_ARTIFACT_FILE_BYTES, collectArtifactFiles } from "./artifact-files.mjs";
 import { publicStampUrl, publishArtifactRef, publishRelease } from "./publish.mjs";
+import { normalizeProvider, runHostedCommand, workspaceProvider } from "./hosted.mjs";
 import { buildBundle, describeBundle, normalizeBundleConfig } from "./bundle.mjs";
 import { DESIGNS_SOURCE_DIRECTORY, buildDesigns, checkDesigns, declaredClasses, readDesignCatalog, renderDesigns } from "./designs.mjs";
 import { STARTER_RECORD_FILE, describeStarterSync, forceReplaceable, isStarterSystem, knownStarterHashes, planStockFile, readStarterRecord, recordFreshStarter, recordStarterFiles, starterPlumbingFiles, starterSyncPaths, syncStarter } from "./starter.mjs";
@@ -208,11 +209,18 @@ async function git(args, repoRoot, options = {}) {
 
 export async function findRepositoryRoot(start = process.cwd()) {
   const resolved = path.resolve(start);
+  let sessionRoot = resolved;
+  while (true) {
+    if (existsSync(path.join(sessionRoot, ".timds/session.json"))) return sessionRoot;
+    const parent = path.dirname(sessionRoot);
+    if (parent === sessionRoot) break;
+    sessionRoot = parent;
+  }
   const result = await execute(["git", "rev-parse", "--show-toplevel"], {
     allowFailure: true,
     capture: true,
     cwd: resolved,
-  });
+  }).catch((error) => { if (error.code === "ENOENT") return { code: 1, stdout: "" }; throw error; });
   if (result.code === 0 && result.stdout.trim()) return path.resolve(result.stdout.trim());
   let current = resolved;
   while (true) {
@@ -349,6 +357,7 @@ export function validateManifest(input) {
     // The files a website loads from the system, as globs; null builds no bundle.
     bundle: normalizeBundleConfig(manifest.bundle),
     consumer: normalizeConsumer(manifest.consumer),
+    provider: normalizeProvider(manifest.provider),
     description: String(manifest.description || "").trim(),
     machine,
     name,
@@ -837,7 +846,12 @@ export async function initializeRepository(repoRootInput, {
   description,
   force = false,
   standalone = false,
+  provider: providerInput,
+  portalUrl,
 } = {}) {
+  const provider = normalizeProvider(providerInput === "hosted" ? { kind: "hosted", url: portalUrl } : providerInput);
+  const hosted = provider?.kind === "hosted";
+  if (hosted && !standalone) throw new Error("Hosted initialization requires --standalone");
   if (name && (typeof name !== "string" || !name.trim() || name.length > 200)) throw new Error("name must be at most 200 characters");
   if (systemId && !/^[a-zA-Z0-9][a-zA-Z0-9._-]*(?:\/[a-zA-Z0-9][a-zA-Z0-9._-]*)*$/.test(systemId)) throw new Error("systemId must be a clean URL-safe hierarchical identifier");
   if (systemId.length > 160) throw new Error("systemId must be at most 160 characters");
@@ -885,6 +899,7 @@ export async function initializeRepository(repoRootInput, {
     .replaceAll("__NAME__", "Starter")
     .replaceAll("__PUBLISH_REF__", standalone ? ',\n    "publishRef": "timds-published"' : "")
     .replaceAll("__CONSUMER__", consumerConfig));
+  if (provider) manifest.provider = provider;
   manifest.name = name.trim() || `${path.basename(repoRoot)} Design System`;
   manifest.systemId = systemId || `${repoSlug}/core`;
   if (description !== undefined) manifest.description = description;
@@ -918,12 +933,12 @@ export async function initializeRepository(repoRootInput, {
     // and structure without guessing what the client has changed.
     created.push(await recordFreshStarter(designSystemRoot, identity.version));
   }
-  await writeIfMissing(
+  if (!hosted) await writeIfMissing(
     path.join(repoRoot, ".github", "workflows", "timds-design-system.yml"),
     await template(standalone ? "timds-standalone.yml" : "timds-design-system.yml"),
     created,
   );
-  if (standalone) {
+  if (standalone && !hosted) {
     await writeIfMissing(
       path.join(repoRoot, ".github", "workflows", "update-consumer-submodule.yml"),
       await template("update-consumer-submodule.yml"),
@@ -931,9 +946,18 @@ export async function initializeRepository(repoRootInput, {
     );
   }
 
+  if (hosted) {
+    const packageJson = JSON.parse(await fs.readFile(packagePath, "utf8"));
+    packageJson.devDependencies.wrangler = "^4.135.0";
+    packageJson.scripts["build:preview"] = "npm run timds -- check";
+    await fs.writeFile(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`);
+    await writeIfMissing(path.join(repoRoot, "wrangler.jsonc"), `${JSON.stringify({ name: repoSlug, compatibility_date: "2026-10-12", assets: { directory: "./dist" }, previews: {} }, null, 2)}\n`, created);
+    await writeIfMissing(path.join(repoRoot, "_headers"), "/*\n  X-Robots-Tag: noindex\n", created);
+    await ensureGitignoreLine(path.join(repoRoot, ".gitignore"), ".timds/session.json", created);
+  }
   const installed = await installManagedToolkit({
     designSystemRoot,
-    releaseAutomation: standalone && createsContract ? standaloneReleaseAutomation : undefined,
+    releaseAutomation: standalone && !hosted && createsContract ? standaloneReleaseAutomation : undefined,
     repoRoot,
     replace: force,
   });
@@ -1230,13 +1254,14 @@ function parseArguments(argv) {
     }
     const [rawName, inlineValue] = value.replace(/^--?/, "").split("=", 2);
     const name = ({ m: "message", p: "port" })[rawName] || rawName.replace(/-([a-z])/g, (_match, letter) => letter.toUpperCase());
-    if (["json", "apply", "autoRelease", "dryRun", "force", "help", "list", "ownRuntime", "dependencyPrs", "noBuild", "noOpen", "noPr", "noPush", "plan", "prepare", "publish", "render", "requireCleanDist", "serve", "silent", "skipBuild", "skipPush", "standalone"].includes(name)) {
+    if (["json", "apply", "autoRelease", "dryRun", "force", "help", "list", "ownRuntime", "dependencyPrs", "noBuild", "noOpen", "noPr", "noPush", "plan", "prepare", "publish", "render", "requireCleanDist", "serve", "silent", "skipBuild", "skipPush", "standalone", "yes"].includes(name)) {
       options[name] = true;
       continue;
     }
     const next = inlineValue ?? argv[index + 1];
     if (next === undefined || String(next).startsWith("-")) throw new Error(`--${rawName} requires a value`);
-    options[name] = next;
+    if (name === "resolve") options[name] = [...(options[name] || []), next];
+    else options[name] = next;
     if (inlineValue === undefined) index += 1;
   }
   return { options, positional };
@@ -1272,6 +1297,9 @@ function allowedSubmitPath(filePath, layout) {
 }
 
 export async function submitWorkspace(repoRootInput, message, options = {}) {
+  const provider = await workspaceProvider(repoRootInput);
+  if (provider?.kind === "hosted") return runHostedCommand("submit", { root: repoRootInput, note: message, ...options });
+  if (provider?.kind === "local") throw new Error("Local mode does not submit; select git mode for pull requests or hosted mode for sessions.");
   const workspace = await loadWorkspace(repoRootInput);
   const preflightStatus = await git(["status", "--porcelain", "--untracked-files=all"], workspace.repoRoot);
   const preflightChangedPaths = preflightStatus.stdout.split("\n").filter(Boolean).map(statusPath);
@@ -1400,11 +1428,12 @@ function machineSummary({ counts }) {
 }
 
 function helpText() {
-  return `TimDS local design-system workflow\n\nUsage:\n  timds init [--root PATH] [--standalone] [--name NAME] [--system-id ID] [--description TEXT] [--json] [--consumer-repository OWNER/REPO] [--consumer-branch BRANCH] [--consumer-path PATH] [--force]\n  timds upgrade [--root PATH] [--auto-release] [--dependency-prs] [--force]\n  timds upgrade --version VERSION [--own-runtime] [--root PATH]\n  timds dependencies check [--root PATH]\n  timds auth login [--token TOKEN] [--portal-url URL]\n  timds auth status [--portal-url URL]\n  timds auth logout [--portal-url URL]\n  timds defaults [--root PATH] [--apply]\n  timds designs init [--root PATH] [--force]\n  timds starter sync [--root PATH] [--force PATH...]\n  timds doctor [--root PATH]\n  timds brand [--root PATH] [--json]\n  timds dev [--root PATH]\n  timds check [--root PATH] [--skip-build] [--require-clean-dist]\n  timds extract [--root PATH] [--skip-build] [--publish]\n  timds publish [--root PATH] [--skip-build] [--skip-push] [--portal-url URL] [--json]\n  timds preview [--root PATH] [--port 4400] [--no-build]\n  timds diff [--root PATH] [--base origin/main]\n  timds assets list [--root PATH]\n  timds assets add FILE [--key LOGICAL_KEY] [--title TEXT] [--tags a,b]\n  timds assets backfill-metadata [--root PATH] [--force]\n  timds assets publish [--root PATH]\n  timds assets pull KEY [--output PATH] [--force]\n  timds video --help\n  timds mcp [edit] [--root PATH]\n  timds mcp read [--root PATH | --published URL]\n  timds submit --message "Change summary" [--dry-run] [--no-push] [--no-pr]\n  timds consumer check [--root PATH] [--app NAME] [--base REF]\n  timds consumer sync [--root PATH]\n  timds consumer update [VERSION] [--root PATH]\n  timds consumer migrate [--version VERSION] [--url URL] [--root PATH] [--force] [--skip-sync]\n  timds consumer preview --app NAME [--root PATH] [--base REF] [--output DIR] [--publish] [--pull-request N]\n  timds consumer init [--root PATH] [--system ID] [--version VERSION] [--url URL] [--force] [--skip-install] [--portal-url URL]\n  timds consumer scaffold emdash --root PATH --design-system GIT_URL [--stylesheet PATH]... [--site-url URL] [--skip-install]\n  timds consumer notes [--root PATH] [--app NAME] [--pull-request N] [--all] [--json]\n  timds consumer notes resolve ID [ID...] [--commit SHA] [--dismiss]\n\nCheck and extract derive index.json, tokens.json, brand.json (each font role with the files or font service that provide it), formats.json (from src/formats.json when the system keeps one), llms.txt (the brand essentials and the page directory), llms-full.txt, and per-page Markdown from the built artifact so agents, pipelines, and anyone given the system's public link can read the system without scraping HTML or CSS. Brand prints the derived brand kit in plain language with a fix for every gap. Extract --publish uploads the index, tokens, brand kit, formats, llms.txt, llms-full.txt, the per-page Markdown mirrors, a .timds-artifact.json provenance stamp, and the artifact files the index and the kit reference (logos, imagery, font files) to the system's stable CDN prefix through the portal, so pipelines and agents consume the system from one stable URL. A manifest with bundle.include globs also gets a consumer bundle: the stylesheets, scripts, and assets a website loads, copied into the artifact under their source paths with a bundle.json of digests, and published under the current prefix and an immutable v/<version>/ prefix a website pins. Large public media is copied into ignored media-local/ for authoring. assets add measures timed-media duration and dimensions before upload; backfill-metadata repairs older catalogs from their stable public URLs without re-uploading them. Designs init adds the website-designs contract to an existing Design System: whole pages under src/designs/ in plain HTML on the system's stylesheets, built to /designs/ and checked for portability, so an engineer can port them to any production stack; a fresh scaffold already has it. Starter sync brings a starter-based system up to the installed release's scaffold and opts it into doing so on every upgrade: stock scripts and viewer stylesheets are refreshed while unmodified, new views, planned pages, and asset formats are merged into src/site.json and src/formats.json without touching what the client declared, and the overview fragments the starter mirrors are written for views the sync adds; in a terminal the sync asks about each customized stock script or stylesheet (keep, replace with stock, or see the diff first), otherwise they are reported and replaced only when --force names them one by one (an overview fragment this system wrote is never replaced), the sync refuses to run over uncommitted changes to the files it writes, and it is rolled back if check fails afterwards. Video-enabled systems keep client rules and production data in the Design System while TimDS owns validation, voiceover orchestration, Remotion rendering, and packaging. Mcp serves the Design System editing tools (guide, workspace description, guarded file reads and writes, check, derived layer, media catalog) over stdio for an MCP-capable agent; protected tooling and generated paths stay read-only. Mcp read serves the consumer read tools (brand roles, tokens, guidance search, pages, media catalog, gap reports) over the derived layer of the current checkout or of a published base URL. Submit creates a review branch and draft pull request. Consumer commands run in a product repository that pins a Design System (a published version fetched by npm install into the gitignored design-system directory, or the design-system git submodule) and declares its apps in timds.consumer.json: check validates the manifest, the pin, and that a branch only touches the declared design surface; sync fetches the pinned published bundle, verifying every digest, and update moves the pin to a version or the current release; migrate replaces the submodule with a published pin at the version the checkout declared, removing the gitlink, .gitmodules entry, and checkout, and lists the product files that still mention the submodule; preview captures each app's routes for review; init writes the manifest skeleton (with --system ID, a published pin and the postinstall sync), the consumer skill, the preview and designer-change workflows, and the read MCP entry; scaffold emdash creates a new EmDash CMS site repository that pins a Design System as that submodule, reads its stylesheets and tokens from the pin, and is adopted the way init adopts a product; notes lists the designer's notes on a pull request's preview and resolves them once addressed.`;
+  return `TimDS local design-system workflow\n\nUsage:\n  timds init [--root PATH] [--standalone] [--name NAME] [--system-id ID] [--description TEXT] [--json] [--consumer-repository OWNER/REPO] [--consumer-branch BRANCH] [--consumer-path PATH] [--force]\n  timds start SYSTEM [--root PATH] [--portal-url URL]\n  timds pull|update|status|history [--root PATH] [--json]\n  timds update --resolve PATH [--resolve PATH...]\n  timds sessions close [--root PATH]\n  timds upgrade [--root PATH] [--auto-release] [--dependency-prs] [--force]\n  timds upgrade --version VERSION [--own-runtime] [--root PATH]\n  timds dependencies check [--root PATH]\n  timds login [--token TOKEN] [--portal-url URL]\n  timds auth status [--portal-url URL]\n  timds auth logout [--portal-url URL]\n  timds defaults [--root PATH] [--apply]\n  timds designs init [--root PATH] [--force]\n  timds starter sync [--root PATH] [--force PATH...]\n  timds doctor [--root PATH]\n  timds brand [--root PATH] [--json]\n  timds dev [--root PATH]\n  timds check [--root PATH] [--skip-build] [--require-clean-dist]\n  timds extract [--root PATH] [--skip-build] [--publish]\n  timds publish [--submission ID] [--dry-run] [--yes] [--root PATH] [--skip-build] [--skip-push] [--portal-url URL] [--json]\n  timds preview [--root PATH] [--port 4400] [--no-build]\n  timds diff [--root PATH] [--base origin/main]\n  timds assets list [--root PATH]\n  timds assets add FILE [--key LOGICAL_KEY] [--title TEXT] [--tags a,b]\n  timds assets backfill-metadata [--root PATH] [--force]\n  timds assets publish [--root PATH]\n  timds assets pull KEY [--output PATH] [--force]\n  timds video --help\n  timds mcp [edit] [--root PATH]\n  timds mcp read [--root PATH | --published URL]\n  timds submit --message "Change summary" [--dry-run] [--no-push] [--no-pr]\n  timds consumer check [--root PATH] [--app NAME] [--base REF]\n  timds consumer sync [--root PATH]\n  timds consumer update [VERSION] [--root PATH]\n  timds consumer migrate [--version VERSION] [--url URL] [--root PATH] [--force] [--skip-sync]\n  timds consumer preview --app NAME [--root PATH] [--base REF] [--output DIR] [--publish] [--pull-request N]\n  timds consumer init [--root PATH] [--system ID] [--version VERSION] [--url URL] [--force] [--skip-install] [--portal-url URL]\n  timds consumer scaffold emdash --root PATH --design-system GIT_URL [--stylesheet PATH]... [--site-url URL] [--skip-install]\n  timds consumer notes [--root PATH] [--app NAME] [--pull-request N] [--all] [--json]\n  timds consumer notes resolve ID [ID...] [--commit SHA] [--dismiss]\n\nCheck and extract derive index.json, tokens.json, brand.json (each font role with the files or font service that provide it), formats.json (from src/formats.json when the system keeps one), llms.txt (the brand essentials and the page directory), llms-full.txt, and per-page Markdown from the built artifact so agents, pipelines, and anyone given the system's public link can read the system without scraping HTML or CSS. Brand prints the derived brand kit in plain language with a fix for every gap. Extract --publish uploads the index, tokens, brand kit, formats, llms.txt, llms-full.txt, the per-page Markdown mirrors, a .timds-artifact.json provenance stamp, and the artifact files the index and the kit reference (logos, imagery, font files) to the system's stable CDN prefix through the portal, so pipelines and agents consume the system from one stable URL. A manifest with bundle.include globs also gets a consumer bundle: the stylesheets, scripts, and assets a website loads, copied into the artifact under their source paths with a bundle.json of digests, and published under the current prefix and an immutable v/<version>/ prefix a website pins. Large public media is copied into ignored media-local/ for authoring. assets add measures timed-media duration and dimensions before upload; backfill-metadata repairs older catalogs from their stable public URLs without re-uploading them. Designs init adds the website-designs contract to an existing Design System: whole pages under src/designs/ in plain HTML on the system's stylesheets, built to /designs/ and checked for portability, so an engineer can port them to any production stack; a fresh scaffold already has it. Starter sync brings a starter-based system up to the installed release's scaffold and opts it into doing so on every upgrade: stock scripts and viewer stylesheets are refreshed while unmodified, new views, planned pages, and asset formats are merged into src/site.json and src/formats.json without touching what the client declared, and the overview fragments the starter mirrors are written for views the sync adds; in a terminal the sync asks about each customized stock script or stylesheet (keep, replace with stock, or see the diff first), otherwise they are reported and replaced only when --force names them one by one (an overview fragment this system wrote is never replaced), the sync refuses to run over uncommitted changes to the files it writes, and it is rolled back if check fails afterwards. Video-enabled systems keep client rules and production data in the Design System while TimDS owns validation, voiceover orchestration, Remotion rendering, and packaging. Mcp serves the Design System editing tools (guide, workspace description, guarded file reads and writes, check, derived layer, media catalog) over stdio for an MCP-capable agent; protected tooling and generated paths stay read-only. Mcp read serves the consumer read tools (brand roles, tokens, guidance search, pages, media catalog, gap reports) over the derived layer of the current checkout or of a published base URL. Submit creates a review branch and draft pull request. Consumer commands run in a product repository that pins a Design System (a published version fetched by npm install into the gitignored design-system directory, or the design-system git submodule) and declares its apps in timds.consumer.json: check validates the manifest, the pin, and that a branch only touches the declared design surface; sync fetches the pinned published bundle, verifying every digest, and update moves the pin to a version or the current release; migrate replaces the submodule with a published pin at the version the checkout declared, removing the gitlink, .gitmodules entry, and checkout, and lists the product files that still mention the submodule; preview captures each app's routes for review; init writes the manifest skeleton (with --system ID, a published pin and the postinstall sync), the consumer skill, the preview and designer-change workflows, and the read MCP entry; scaffold emdash creates a new EmDash CMS site repository that pins a Design System as that submodule, reads its stylesheets and tokens from the pin, and is adopted the way init adopts a product; notes lists the designer's notes on a pull request's preview and resolves them once addressed.`;
 }
 
 export async function runCli(argv) {
   const [command = "help", ...rest] = argv;
+  if (command === 'login') return runCli(['auth', 'login', ...rest]);
   if (command === "consumer") {
     // Consumer subcommands own their flags (see consumer.mjs).
     const { runConsumerCli } = await import("./consumer.mjs");
@@ -1416,6 +1445,15 @@ export async function runCli(argv) {
     return;
   }
   const root = options.root || process.cwd();
+  if (["start", "pull", "update", "status", "history", "sessions"].includes(command)) {
+    if (command === "sessions" && (positional[0] !== "close" || positional.length !== 1)) throw new Error("Usage: timds sessions close [--root PATH]");
+    const operation = command === "sessions" ? "close" : command;
+    const result = await runHostedCommand(operation, { ...options, root: command === "start" && !options.root ? path.resolve(String(positional[0] || "").split("/").at(-1) || ".") : root, systemId: positional[0], note: options.message });
+    if (options.json) output(JSON.stringify(result, null, 2));
+    else if (result.conflicts?.length) output(`Conflicts: ${result.conflicts.join(", ")}. Local files were preserved; edit each file, then run timds update --resolve PATH (repeat per conflict).`);
+    else { output(`TimDS ${operation}: ${result.session?.status || "complete"}${result.session?.id ? ` (${result.session.id})` : ""}`); if (operation === "history") output(JSON.stringify({ commits: result.commits || [], events: result.events || [] }, null, 2)); }
+    return result;
+  }
   if (command === "video") {
     const [videoCommand = "help", videoArgument = "", videoExtra = ""] = positional;
     if (options.help || ["help", "--help", "-h"].includes(videoCommand)) {
@@ -1543,7 +1581,7 @@ export async function runCli(argv) {
         onAuthorization(authorization) {
           output(`Open ${authorization.verificationUrl}`);
           output(`Enter code: ${authorization.userCode}`);
-          output("Waiting for operator approval...");
+          output("Waiting for you to authorize this device...");
         },
       });
       output(`TimDS authorization saved for ${result.portal}.`);
@@ -1573,6 +1611,8 @@ export async function runCli(argv) {
       description: options.description,
       force: options.force,
       standalone: options.standalone,
+      provider: options.provider,
+      portalUrl: options.portalUrl,
     });
     const result = options.json
       ? await runWithOutputSink((line) => process.stderr.write(`${line}\n`), initialize)
@@ -1590,7 +1630,7 @@ export async function runCli(argv) {
     if (result.initializedArtifact) {
       output(`Starter artifact: ${result.initializedArtifact.fileCount} files, ${result.initializedArtifact.totalBytes} bytes.`);
     }
-    output("Run npm install to create the lockfile, then git add --all and commit the validated contract.");
+    output(options.provider === "hosted" ? "Run npm install to create the lockfile; the portal owns source and publication." : "Run npm install to create the lockfile, then git add --all and commit the validated contract.");
     return result;
   }
   if (command === "defaults") {
@@ -1703,6 +1743,24 @@ export async function runCli(argv) {
     return result;
   }
   if (command === "publish") {
+    if (options.submission || (await workspaceProvider(root))?.kind === 'hosted') {
+      const result = await runHostedCommand('publish', { ...options, root,
+        onSummary: summary => {
+          const line = `Submission ${summary.submissionId}: ${summary.systemId} ${summary.version}\nPreview: ${summary.previewUrl || 'not available'}\nChanges: ${typeof summary.diffSummary === 'string' ? summary.diffSummary : JSON.stringify(summary.diffSummary || [])}\n`;
+          if (options.json) process.stderr.write(line); else output(line);
+        },
+        confirm: async () => {
+          if (!process.stdin.isTTY) throw new Error('Publication needs confirmation; review with --dry-run and use --yes in noninteractive sessions.');
+          const { createInterface } = await import('node:readline/promises');
+          const prompt = createInterface({ input: process.stdin, output: process.stderr });
+          try { return /^y(?:es)?$/i.test((await prompt.question('Publish this submission? [y/N] ')).trim()); }
+          finally { prompt.close(); }
+        },
+      });
+      if (options.json) output(JSON.stringify(result, null, 2));
+      else output(options.dryRun ? `Dry run passed for ${result.systemId} ${result.version}.` : `Published: ${result.result?.publicRoot || result.id}`);
+      return result;
+    }
     const workspace = options.skipBuild ? await loadWorkspace(root) : await checkWorkspace(root);
     // The ref push already stamped this exact build; promotion reuses that stamp.
     const stamp = options.skipPush ? undefined : await publishArtifactRef(workspace);
@@ -1838,8 +1896,12 @@ export async function runCli(argv) {
   }
   if (command === "submit") {
     const message = String(options.message || positional.join(" ")).trim();
-    if (!message) throw new Error("submit requires --message \"Change summary\"");
+    if (!message && (await workspaceProvider(root))?.kind !== "hosted") throw new Error("submit requires --message \"Change summary\"");
     const result = await submitWorkspace(root, message, options);
+    if (result.apiVersion === 1) {
+      output(options.json ? JSON.stringify(result, null, 2) : result.dryRun ? "Dry run: hosted change set prepared." : `Submitted ${result.submission?.id || result.session?.id}.${result.submission?.previewUrl ? ` Preview: ${result.submission.previewUrl}` : ""}`);
+      return result;
+    }
     if (result.dryRun) {
       output(`Dry run: would submit branch ${result.branch}`);
       for (const planned of result.commands) output(`  ${planned.join(" ")}`);

@@ -437,6 +437,7 @@ export async function build() {
     await mkdir(path.dirname(path.join(destination, output)), { recursive: true });
     await writeFile(path.join(destination, output), html, "utf8");
   }
+  if (existsSync(path.join(root, "_headers"))) await cp(path.join(root, "_headers"), path.join(destination, "_headers"));
   await writeFile(path.join(destination, "tokens.css"), site.tokenCss, "utf8");
   await writeFile(path.join(destination, "tokens.json"), `${JSON.stringify(site.tokens, null, 2)}\n`, "utf8");
 

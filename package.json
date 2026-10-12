@@ -32,7 +32,9 @@
     "./video/remotion": "./video/remotion.tsx",
     "./runtime": "./src/runtime.mjs",
     "./video/board-layouts": "./video/board-layouts.mjs",
-    "./publish": "./src/publish.mjs"
+    "./publish": "./src/publish.mjs",
+    "./hosted": "./src/hosted.mjs",
+    "./release": "./templates/starter/scripts/prepare-merge-release.mjs"
   },
   "scripts": {
     "test": "npm run typecheck && node --test .github/scripts/*.test.mjs src/*.test.mjs video/*.test.mjs && tsx --test video/*.test.tsx",
@@ -96,7 +98,8 @@
     "src/video-component-loader.mjs",
     "src/publish.mjs",
     "src/artifact-files.mjs",
-    "src/publication-snapshot.mjs"
+    "src/publication-snapshot.mjs",
+    "src/hosted.mjs"
   ],
   "dependencies": {
     "@anthropic-ai/sdk": "0.125.0",
@@ -104,12 +107,13 @@
     "@remotion/cli": "4.0.484",
     "@remotion/media": "4.0.484",
     "@remotion/media-parser": "4.0.484",
+    "ignore": "7.0.5",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "remotion": "4.0.484",
     "tsx": "4.21.0",
-    "zod": "4.3.6",
-    "typescript": "5.9.3"
+    "typescript": "5.9.3",
+    "zod": "4.3.6"
   },
   "devDependencies": {
     "@actions/expressions": "0.3.61",
@@ -124,7 +128,7 @@
     "timds",
     "workflow"
   ],
-  "license": "UNLICENSED",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/dtconceptsnc/timds-toolkit.git"
