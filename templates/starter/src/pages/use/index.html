@@ -36,7 +36,7 @@
       <tr><td><strong>A preview</strong></td><td>A live sample of the thing described. Its sample text is illustration, never a rule.</td></tr>
       <tr><td><strong>Planned</strong></td><td>A page declared in the navigation and not yet written. Nothing is published for it, so no reader receives placeholder guidance.</td></tr>
       <tr><td><strong>The version in the app bar</strong></td><td>The release these pages belong to. Every merged change becomes a new patch release.</td></tr>
-      <tr><td><strong>Markdown</strong></td><td>Every page has a mirror at <code>index.md</code> beside it, the same content as plain text. This page's is <a href="/use/index.md"><code>/use/index.md</code></a>.</td></tr>
+      <tr><td><strong>Markdown</strong></td><td>The check writes a mirror of every page at <code>index.md</code> beside it, the same content as plain text. This page's is <a href="/use/index.md"><code>/use/index.md</code></a>.</td></tr>
     </tbody>
   </table>
 </section>
@@ -59,7 +59,7 @@
 <section class="block" id="machine">
   <div class="block__head">
     <h2 class="h2">The machine-readable layer</h2>
-    <p>The check reads the built HTML and CSS and writes these documents beside the pages. Nothing in them is maintained by hand, so they cannot drift from what the pages say. A script, a render pipeline, or a host reads them directly; the MCP server below serves the same documents.</p>
+    <p>The check (<code>npm run timds -- check</code>) reads the built HTML and CSS and writes these documents beside the pages, and every release publishes them; a plain dev build serves the pages without them. Nothing in them is maintained by hand, so they cannot drift from what the pages say. A script, a render pipeline, or a host reads them directly; the MCP server below serves the same documents.</p>
   </div>
   <table class="spec">
     <thead><tr><th>Document</th><th>Holds</th></tr></thead>

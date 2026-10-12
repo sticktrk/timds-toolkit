@@ -1104,7 +1104,7 @@ test("starter sync adopts a scaffold from before the asset views, and upgrade ke
   assert.deepEqual(result.site, { addedPages: ["web/email", "web/email-templates"], addedViews: ["digital", "social", "print", "use"], advanced: ["web.label", "web.blurb"], kept: [] });
   assert.deepEqual([result.formats.addedGroups, result.formats.addedFormats.length, result.formats.kept, result.formats.skipped], [["print", "digital", "social"], 48, [], []]);
   // Nothing here was customized, so the merged catalogs and refreshed files equal the stock scaffold's byte for byte.
-  for (const relative of ["src/site.json", "src/formats.json", "src/layout.html", "scripts/viewer.mjs", "scripts/check.mjs", "src/styles/canvas.css", "src/pages/print/index.html"]) {
+  for (const relative of ["src/site.json", "src/formats.json", "src/layout.html", "scripts/viewer.mjs", "scripts/check.mjs", "src/styles/canvas.css", "src/pages/print/index.html", "src/pages/use/index.html"]) {
     assert.equal(await read(relative), await fs.readFile(path.join(templatesRoot, "starter", relative), "utf8"), relative);
   }
   assert.doesNotMatch(await read("src/pages/index.html"), /Digital DS/, "the client's own overview fragment is never rewritten");
@@ -1153,6 +1153,54 @@ test("starter sync adopts a scaffold from before the asset views, and upgrade ke
   commitAll(repoRoot, "Drop the record");
   const unadopted = await upgradeRepository(repoRoot);
   assert.deepEqual([unadopted.starter, unadopted.starterAvailable], [null, true]);
+});
+
+test("starter sync adds a view a newer scaffold declares to a system adopted under an earlier release", async (t) => {
+  // A fresh scaffold is adopted at the current release. Rewind its record and
+  // site model to the release before the Use view existed: the baseline site
+  // lacks the view, the record never saw the fragment, and the system has
+  // neither. This is the shape every adopted system has when a release adds a
+  // managed view, so the sync's recorded mode must add it end to end.
+  const repoRoot = await temporaryDirectory(t);
+  gitInit(repoRoot);
+  await initializeRepository(repoRoot, { standalone: true, name: "Client & Co" });
+  const read = (relative) => fs.readFile(path.join(repoRoot, relative), "utf8");
+  const dropUse = (site) => ({ ...site, views: site.views.filter((view) => view.id !== "use") });
+  const record = JSON.parse(await read(".timds/starter.json"));
+  assert.ok(record.files["src/pages/use/index.html"], "a fresh scaffold records the Use fragment");
+  delete record.files["src/pages/use/index.html"];
+  record.baseline.site = dropUse(record.baseline.site);
+  record.version = "0.1.0";
+  await writeJson(path.join(repoRoot, ".timds/starter.json"), record);
+  await writeJson(path.join(repoRoot, "src/site.json"), dropUse(JSON.parse(await read("src/site.json"))));
+  await fs.rm(path.join(repoRoot, "src/pages/use"), { recursive: true });
+  commitAll(repoRoot, "Adopted before the Use view");
+
+  const result = await syncStarterWorkspace(repoRoot);
+  assert.equal(result.adopted, false, "the record was present, so this is a re-sync, not an adoption");
+  assert.deepEqual(result.site, { addedPages: [], addedViews: ["use"], advanced: [], kept: [] }, "a new view is reported as the view; its pages come with it");
+  assert.deepEqual(result.files.filter((file) => file.status !== "current").map((file) => [file.path, file.status]), [
+    ["src/site.json", "updated"],
+    ["src/pages/use/index.html", "created"],
+  ]);
+  const stock = await fs.readFile(path.join(templatesRoot, "starter/src/pages/use/index.html"), "utf8");
+  assert.equal(await read("src/pages/use/index.html"), stock, "the fragment is written byte for byte");
+  assert.equal(await read("src/site.json"), await fs.readFile(path.join(templatesRoot, "starter/src/site.json"), "utf8"), "the view is appended as the scaffold declares it");
+  assert.ok(result.check.machine.pages.map((page) => page.id).includes("use"), "the check that follows builds the page");
+  const after = JSON.parse(await read(".timds/starter.json"));
+  assert.equal(after.version, toolkitVersion);
+  assert.ok(after.files["src/pages/use/index.html"], "the record now carries the fragment so later syncs can refresh it while unmodified");
+  assert.ok(after.baseline.site.views.some((view) => view.id === "use"));
+
+  // A second sync has nothing to do; a fragment the system then edits is its own page and stays.
+  commitAll(repoRoot, "Sync the Use view");
+  const again = await syncStarterWorkspace(repoRoot);
+  assert.deepEqual([again.written, again.check], [[], null]);
+  await fs.appendFile(path.join(repoRoot, "src/pages/use/index.html"), "\n<p class=\"note\">Our own addition.</p>\n");
+  commitAll(repoRoot, "Extend the Use page");
+  const customized = await syncStarterWorkspace(repoRoot);
+  assert.deepEqual(customized.files.find((file) => file.path === "src/pages/use/index.html").status, "customized");
+  assert.match(await read("src/pages/use/index.html"), /Our own addition/);
 });
 
 test("starter sync reports customized files, rolls back when they break the check, and replaces them only with --force", async (t) => {
