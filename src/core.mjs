@@ -1581,7 +1581,7 @@ export async function runCli(argv) {
         onAuthorization(authorization) {
           output(`Open ${authorization.verificationUrl}`);
           output(`Enter code: ${authorization.userCode}`);
-          output("Waiting for operator approval...");
+          output("Waiting for you to authorize this device...");
         },
       });
       output(`TimDS authorization saved for ${result.portal}.`);
