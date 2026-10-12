@@ -97,7 +97,7 @@ test("relative symlinks and executable files round-trip while escape and cycles 
 });
 
 test("hosted files reject traversal, credentials, malformed snapshots and linked metadata before mutation", async (t) => {
-  for (const name of ["../outside", "/absolute", "a/../../bad", ".git/config", ".env.server", "a\\b", SESSION_FILE]) assert.throws(() => hostedPath(name));
+  for (const name of ["../outside", "/absolute", "a/../../bad", ".git/config", ".env.server", "a\\b", ".timds/Session.json", ".timds/Start.json", SESSION_FILE]) assert.throws(() => hostedPath(name));
   const f = await fixture(t);
   f.set(snapshot([file("safe.txt", "new"), file("../outside", "bad")], "next"));
   await assert.rejects(runHostedCommand("pull", f.options), /Unsafe/);
@@ -197,4 +197,14 @@ test("an interrupted start retries the same fork key without storing credentials
   assert.equal(requests[0].idempotencyKey, requests[1].idempotencyKey);
   assert.equal(await fs.stat(path.join(root, ".timds/start.json")).catch(() => null), null);
   assert.equal(await fs.readFile(path.join(root, "note.txt"), "utf8"), "base");
+});
+
+
+test("snapshot refuses paths that collide on a case-insensitive filesystem before writing", async (t) => {
+  const f = await fixture(t);
+  f.set(snapshot([file("Name.txt", "one"), file("name.txt", "two")], "next"));
+  await assert.rejects(runHostedCommand("pull", f.options), /collide/);
+  assert.equal(await fs.stat(path.join(f.root, "Name.txt")).catch(() => null), null);
+  f.set(snapshot([file("Folder", "file"), file("folder/child", "child")], "next"));
+  await assert.rejects(runHostedCommand("pull", f.options), /Conflicting session file path/);
 });

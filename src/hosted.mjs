@@ -17,7 +17,7 @@ const RESERVED = new Set([".git", ".github", "node_modules", "dist", ".env", ".e
 export function hostedPath(value) {
   if (typeof value !== "string" || !value || value.includes("\\") || /[\x00-\x1f\x7f]/.test(value) || path.posix.isAbsolute(value) || /^[A-Za-z]:/.test(value)) throw new Error("Invalid session file path");
   const parts = value.split("/");
-  if (parts.some((part) => !part || part === "." || part === ".." || RESERVED.has(part.toLowerCase()) || (part.toLowerCase().startsWith(".env.") && part.toLowerCase() !== ".env.example")) || /^\.timds\/(?:session|auth|start)(?:[./]|$)/.test(value) || /\.(?:pem|key|p12|pfx)$/i.test(value)) throw new Error(`Unsafe session file path: ${value}`);
+  if (parts.some((part) => !part || part === "." || part === ".." || RESERVED.has(part.toLowerCase()) || (part.toLowerCase().startsWith(".env.") && part.toLowerCase() !== ".env.example")) || /^\.timds\/(?:session|auth|start)(?:[./]|$)/i.test(value) || /\.(?:pem|key|p12|pfx)$/i.test(value)) throw new Error(`Unsafe session file path: ${value}`);
   return value;
 }
 
@@ -81,9 +81,13 @@ export function createHostProvider({ url, token, fetchImpl = fetch }) {
 function decodeFiles(files) {
   if (!Array.isArray(files) || files.length > MAX_FILES) throw new Error("TimDS host returned an invalid file snapshot");
   const decoded = new Map();
+  const portablePaths = new Set();
   let total = 0;
   for (const file of files) {
     const name = hostedPath(file.path);
+    const portablePath = name.normalize("NFC").toLowerCase();
+    if (portablePaths.has(portablePath)) throw new Error(`Session paths collide on this filesystem: ${name}`);
+    portablePaths.add(portablePath);
     if (decoded.has(name) || file.encoding !== "base64" || typeof file.content !== "string" || file.content.length > Math.ceil(MAX_FILE_BYTES / 3) * 4) throw new Error(`Invalid session file: ${name}`);
     const bytes = Buffer.from(file.content, "base64");
     if (bytes.toString("base64") !== file.content) throw new Error(`Invalid session file encoding: ${name}`);
@@ -96,7 +100,7 @@ function decodeFiles(files) {
   }
   for (const name of decoded.keys()) {
     const parts = name.split("/");
-    while (parts.length > 1) { parts.pop(); if (decoded.has(parts.join("/"))) throw new Error(`Conflicting session file path: ${name}`); }
+    while (parts.length > 1) { parts.pop(); if (portablePaths.has(parts.join("/").normalize("NFC").toLowerCase())) throw new Error(`Conflicting session file path: ${name}`); }
   }
   validateLinks(decoded);
   return decoded;
@@ -106,7 +110,7 @@ function safeLinkTarget(name, target) {
   if (!target || target.includes("\0") || target.includes("\\") || path.posix.isAbsolute(target) || /^[A-Za-z]:/.test(target)) throw new Error(`Unsafe session symlink: ${name}`);
   const segments = target.split("/");
   if (segments.includes(".") || segments.includes("") || segments.findIndex((part) => part !== "..") < segments.lastIndexOf("..")) throw new Error(`Unsafe session symlink: ${name}`);
-  if (name === ".timds") throw new Error("Session metadata directory cannot be a symlink");
+  if (name.toLowerCase() === ".timds") throw new Error("Session metadata directory cannot be a symlink");
   const resolved = path.posix.normalize(path.posix.join(path.posix.dirname(name), target));
   hostedPath(resolved);
   return resolved;
