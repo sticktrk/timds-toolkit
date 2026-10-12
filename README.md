@@ -1694,7 +1694,8 @@ expiresAt?}` and `files`. Update conflicts carry `conflicts:[path]` and
 `mainRevision`; successful updates return the merged fork snapshot. Submit
 returns the updated session and a submission with its `previewUrl`, and can
 omit `files` when the submitted local snapshot is unchanged by the host.
-Snapshots are capped at 4,000 files and 10 MiB of raw content. Nested
+Snapshots are capped at 4,000 files and 50 MiB of raw content, with at most
+10 MiB per file. A submitted change set remains capped at 10 MiB total. Nested
 `.gitignore` rules exclude new ignored files while already tracked snapshot
 files remain eligible, matching consumer checks. Traversal, credential files,
 `.git`, unsafe symlinks, and session metadata are excluded. Host storage and

@@ -82,6 +82,19 @@ test("change sets honor nested gitignore and the tracked-file exception without 
   assert.deepEqual(changes.changedFiles.map(({ path }) => path), ["src/new.txt", "tracked.log"]);
 });
 
+test('large existing snapshots materialize while uploaded changes remain capped at 10 MiB', async t => {
+  const asset = Buffer.alloc(6 * 1024 * 1024, 'a');
+  const f = await fixture(t, [file('brand-one.bin', asset), file('brand-two.bin', asset), file('note.txt', 'base')]);
+  assert.equal((await fs.stat(path.join(f.root, 'brand-one.bin'))).size, asset.length);
+  await fs.writeFile(path.join(f.root, 'note.txt'), 'small edit');
+  assert.deepEqual((await sessionChanges(f.root, await f.state())).changes.changedFiles.map(f => f.path), ['note.txt']);
+  await fs.writeFile(path.join(f.root, 'brand-one.bin'), Buffer.alloc(asset.length, 'b'));
+  await fs.writeFile(path.join(f.root, 'brand-two.bin'), Buffer.alloc(asset.length, 'b'));
+  const calls = f.requests.length;
+  await assert.rejects(runHostedCommand('submit', f.options), /Change set exceeds 10 MiB/);
+  assert.equal(f.requests.length, calls, 'oversized changes never reach the host');
+});
+
 test("relative symlinks and executable files round-trip while escape and cycles are refused", async (t) => {
   const f = await fixture(t, [file(".agents/skills/a.md", "skill"), file(".claude/skills", "../.agents/skills", "120000"), file("scripts/task.sh", "#!/bin/sh\n", "100755")]);
   assert.equal(await fs.readlink(path.join(f.root, ".claude/skills")), "../.agents/skills");
