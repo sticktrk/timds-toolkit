@@ -234,8 +234,10 @@ export type ChangelogRelease = {
 export type ChangelogDocument = {
   schemaVersion: 1;
   system: SystemStamp;
-  /** Artifact-relative URL of the rendered changelog page. */
+  /** Artifact-relative URL of the rendered changelog page; `base` prefixes it once published. */
   url: string;
+  /** The published prefix; absent locally. */
+  base?: string;
   releaseCount: number;
   entryCount: number;
   latest: string | null;

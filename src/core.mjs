@@ -30,7 +30,7 @@ import { MAX_ARTIFACT_FILE_BYTES, collectArtifactFiles } from "./artifact-files.
 import { publicStampUrl, publishArtifactRef, publishRelease } from "./publish.mjs";
 import { buildBundle, describeBundle, normalizeBundleConfig } from "./bundle.mjs";
 import { DESIGNS_SOURCE_DIRECTORY, buildDesigns, checkDesigns, declaredClasses, readDesignCatalog, renderDesigns } from "./designs.mjs";
-import { CHANGELOG_FILE, buildChangelog, readUnreleasedNotes, renderChangelog, versionDate } from "./changelog.mjs";
+import { CHANGELOG_FILE, CHANGELOG_OUTPUT_DIRECTORY, buildChangelog, readUnreleasedNotes, renderChangelog, versionDate } from "./changelog.mjs";
 import { STARTER_RECORD_FILE, describeStarterSync, forceReplaceable, isStarterSystem, knownStarterHashes, planStockFile, readStarterRecord, recordFreshStarter, recordStarterFiles, starterPlumbingFiles, starterSyncPaths, syncStarter } from "./starter.mjs";
 import { extractArtifact, normalizeMachineConfig } from "./extract.mjs";
 import { readFormatCatalog } from "./formats.mjs";
@@ -444,8 +444,14 @@ export async function validateArtifact(designSystemRoot, manifest) {
   if (!paths.has(manifest.artifact.entry)) {
     throw new Error(`design-system/dist is missing artifact entry ${manifest.artifact.entry}`);
   }
+  // The changelog page is history: a release note may point at a page a
+  // later release removed, and that is not a broken artifact, so its
+  // references are not checked. Its own chrome is written by the renderer.
+  const entryDirectory = path.posix.dirname(manifest.artifact.entry);
+  const historyDirectory = `${entryDirectory === "." ? "" : `${entryDirectory}/`}${CHANGELOG_OUTPUT_DIRECTORY}/`;
   const broken = [];
   for (const file of artifact.files) {
+    if (file.path.startsWith(historyDirectory)) continue;
     for (const reference of artifactReferences(file)) {
       if (!reference || externalReference(reference)) continue;
       const candidates = referenceCandidates(reference, file.path, manifest.artifact.entry);
@@ -515,7 +521,7 @@ async function buildWorkspaceBundle(workspace) {
 }
 
 /** Harvest the built artifact into its machine-readable companions. */
-export async function extractWorkspace(workspace, { write = true } = {}) {
+export async function extractWorkspace(workspace, { write = true, changelog: renderedChangelog = undefined } = {}) {
   // The board catalog is client source outside the built artifact; the index
   // carries its summary so consumers can show the shelf without the repo.
   const boards = await readVideoBoardCatalog(workspace);
@@ -528,9 +534,11 @@ export async function extractWorkspace(workspace, { write = true } = {}) {
   // The designs are rendered again here rather than read back from dist, so
   // designs.json always matches the source whatever the build script wrote.
   const designs = await renderDesigns({ designSystemRoot: workspace.designSystemRoot, manifest: workspace.manifest });
-  // The changelog is rendered again for the same reason; changelog.json
-  // carries the released history for a product moving its pin.
-  const changelog = await renderChangelog({ designSystemRoot: workspace.designSystemRoot, manifest: workspace.manifest });
+  // The changelog is rendered for the same reason unless the caller just
+  // built it; changelog.json carries the released history for a product moving its pin.
+  const changelog = renderedChangelog === undefined
+    ? await renderChangelog({ designSystemRoot: workspace.designSystemRoot, manifest: workspace.manifest })
+    : renderedChangelog;
   // The asset format catalog is client source like the board catalog; its
   // derived document lets a consumer ask for "the business card" by size.
   const formats = await readFormatCatalog(workspace.designSystemRoot);
@@ -569,7 +577,7 @@ export async function checkWorkspace(repoRootInput, options = {}) {
   const bundle = await buildWorkspaceBundle(workspace);
   // Machine artifacts are part of the published artifact, so they are written
   // before validation counts and links the files.
-  const machine = await extractWorkspace(workspace);
+  const machine = await extractWorkspace(workspace, { changelog: changelog.rendered });
   const artifact = await validateArtifact(workspace.designSystemRoot, workspace.manifest);
   const video = workspace.manifest.video ? await checkVideoWorkspace(workspace) : null;
   if (options.requireCleanDist) await verifyCleanDist(workspace);
@@ -1763,9 +1771,9 @@ export async function runCli(argv) {
     const workspace = await loadWorkspace(root);
     if (!options.skipBuild) await runWorkspaceCommand(workspace, "build");
     await buildWorkspaceDesigns(workspace);
-    await buildWorkspaceChangelog(workspace);
+    const changelog = await buildWorkspaceChangelog(workspace);
     await buildWorkspaceBundle(workspace);
-    const result = await extractWorkspace(workspace);
+    const result = await extractWorkspace(workspace, { changelog: changelog.rendered });
     if (!result.enabled) {
       if (options.publish) throw new Error("Cannot publish the machine index: extraction is disabled by timds.json machine.enabled");
       output("Machine extraction is disabled by timds.json machine.enabled.");

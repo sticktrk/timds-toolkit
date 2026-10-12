@@ -31,6 +31,8 @@ export type RenderedDesigns = {
 export type ManifestLike = { name?: string; description?: string; version?: string; systemId?: string; artifact?: { entry?: string } };
 
 export function readDesignCatalog(designSystemRoot: string): Promise<DesignCatalog>;
+/** The manifest fields the renderers need: `manifest` when given, otherwise timds.json at the root. */
+export function readManifestLike(designSystemRoot: string, manifest?: ManifestLike | null): Promise<ManifestLike>;
 export function renderDesigns(options: { designSystemRoot: string; manifest?: ManifestLike | null }): Promise<RenderedDesigns | null>;
 export function buildDesigns(designSystemRoot: string, options?: { manifest?: ManifestLike | null }): Promise<{ designs: RenderedDesign[]; pageCount: number; stateCount: number; written: string[] }>;
 export function checkDesigns(options: { designSystemRoot: string; manifest?: ManifestLike | null; artifactRoot?: string }): Promise<{ enabled: boolean; designCount: number; pageCount: number; stateCount: number }>;

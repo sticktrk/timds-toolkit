@@ -46,11 +46,16 @@ export const compareVersions = (left, right) => {
 /** Today's date (UTC) as a version prefix, 2026.10.12. */
 export const todayVersion = (now = new Date()) => now.toISOString().slice(0, 10).replaceAll("-", ".");
 
-/** The first release of the day is YYYY.MM.DD-1; another the same UTC day counts up. */
+/**
+ * The first release of the day is YYYY.MM.DD-1; another the same UTC day
+ * counts up. The next version always follows the current one: a current
+ * version dated after today counts up on its own day rather than regressing.
+ */
 export const nextVersion = (current, now = new Date()) => {
   const parsed = parseVersion(current);
   const today = todayVersion(now);
-  if (parsed.kind === "dated" && parsed.date.replaceAll("-", ".") === today) return `${today}-${parsed.build + 1}`;
+  const currentDay = parsed.kind === "dated" ? parsed.date.replaceAll("-", ".") : null;
+  if (currentDay !== null && currentDay >= today) return `${currentDay}-${parsed.build + 1}`;
   return `${today}-1`;
 };
 

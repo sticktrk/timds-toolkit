@@ -59,6 +59,7 @@ import {
 import { syncConsumerBundle } from "./consumer-sync.mjs";
 import { createPreviewServer, execute, loadWorkspace } from "./core.mjs";
 import { buildDesigns } from "./designs.mjs";
+import { escapeHtml } from "./html.mjs";
 import { portalEndpoint } from "./media.mjs";
 
 export const PREVIEW_SCHEMA_VERSION = 1;
@@ -1127,12 +1128,6 @@ async function enforcePreviewLimits(outputDir, routes, limits = PREVIEW_LIMITS) 
 // ---------------------------------------------------------------------------
 // Gallery
 
-const escapeHtml = (value) => String(value ?? "")
-  .replace(/&/g, "&amp;")
-  .replace(/</g, "&lt;")
-  .replace(/>/g, "&gt;")
-  .replace(/"/g, "&quot;")
-  .replace(/'/g, "&#39;");
 
 // Every href/src is a relative path segment list; encode each segment so odd
 // slugs never escape the folder and no link is ever site-absolute.

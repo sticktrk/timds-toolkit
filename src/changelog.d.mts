@@ -51,6 +51,7 @@ export type RenderedChangelog = {
 };
 
 export function renderChangelog(options: { designSystemRoot: string; manifest?: ManifestLike | null }): Promise<RenderedChangelog | null>;
-export function buildChangelog(designSystemRoot: string, options?: { manifest?: ManifestLike | null }): Promise<{ releaseCount: number; entryCount: number; unreleasedCount: number; problems: string[]; written: string[] }>;
+/** `rendered` is the in-memory render the files came from, null for a system without CHANGELOG.md. */
+export function buildChangelog(designSystemRoot: string, options?: { manifest?: ManifestLike | null }): Promise<{ releaseCount: number; entryCount: number; unreleasedCount: number; problems: string[]; written: string[]; rendered: RenderedChangelog | null }>;
 /** The notes under `## Unreleased`, or null when the system keeps no CHANGELOG.md. */
 export function readUnreleasedNotes(designSystemRoot: string): Promise<ParsedEntry[] | null>;

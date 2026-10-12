@@ -26,6 +26,9 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
+import { readManifestLike } from "./designs.mjs";
+import { escapeHtml } from "./html.mjs";
+
 export const CHANGELOG_FILE = "CHANGELOG.md";
 export const CHANGELOG_OUTPUT_DIRECTORY = "changelog";
 export const CHANGELOG_SCHEMA_VERSION = 1;
@@ -38,13 +41,6 @@ export const LEGACY_VERSION = /^\d+\.\d+\.\d+$/;
 
 const MAX_AREA_LENGTH = 48;
 const MAX_AREA_WORDS = 6;
-
-const escapeHtml = (value) => String(value)
-  .replaceAll("&", "&amp;")
-  .replaceAll("<", "&lt;")
-  .replaceAll(">", "&gt;")
-  .replaceAll('"', "&quot;")
-  .replaceAll("'", "&#39;");
 
 /* ── versions ───────────────────────────────────────────────────────────── */
 
@@ -88,13 +84,16 @@ export function versionDate(now = new Date()) {
 /**
  * The version the next release takes: the first release of the day is
  * YYYY.MM.DD-1; another the same UTC day counts up. A legacy current version
- * moves onto the dated scheme.
+ * moves onto the dated scheme. The next version always follows the current
+ * one: a current version dated after today (a hand release dated ahead)
+ * counts up on its own day rather than regressing to today's.
  */
 export function nextDesignSystemVersion(current, now = new Date()) {
   const parsed = parseDesignSystemVersion(current);
   if (!parsed) throw new Error(`Invalid Design System version ${JSON.stringify(current)}`);
   const today = versionDate(now);
-  if (parsed.kind === "dated" && parsed.date.replaceAll("-", ".") === today) return `${today}-${parsed.build + 1}`;
+  const currentDay = parsed.kind === "dated" ? parsed.date.replaceAll("-", ".") : null;
+  if (currentDay !== null && currentDay >= today) return `${currentDay}-${parsed.build + 1}`;
   return `${today}-1`;
 }
 
@@ -343,10 +342,10 @@ function renderPage({ manifest, parsed, basePrefix, stylesheets }) {
   ].join("\n");
 }
 
-async function readManifestLike(designSystemRoot, manifest) {
-  if (manifest) return manifest;
-  const raw = JSON.parse(await fs.readFile(path.join(designSystemRoot, "timds.json"), "utf8"));
-  return { systemId: raw.systemId, name: raw.name, description: raw.description, version: raw.version, artifact: { entry: raw.artifact?.entry || "index.html" } };
+/** Where the page is written under dist/, from the manifest's entry: "changelog" or "<entry-dir>/changelog". */
+function changelogOutputDirectory(manifest) {
+  const entryDirectory = path.posix.dirname(String(manifest.artifact?.entry || "index.html"));
+  return [entryDirectory === "." ? "" : entryDirectory, CHANGELOG_OUTPUT_DIRECTORY].filter(Boolean).join("/");
 }
 
 /**
@@ -371,7 +370,7 @@ export async function renderChangelog({ designSystemRoot, manifest = null }) {
   const stylesheets = [];
   const tokensCss = path.join(designSystemRoot, "dist", ...prefixDirectory.split("/").filter(Boolean), "tokens.css");
   if (await fs.access(tokensCss).then(() => true, () => false)) stylesheets.push(`${basePrefix}/tokens.css`);
-  const outputDirectory = [prefixDirectory, CHANGELOG_OUTPUT_DIRECTORY].filter(Boolean).join("/");
+  const outputDirectory = changelogOutputDirectory(resolved);
   const files = new Map();
   files.set(`${outputDirectory}/index.html`, renderPage({ manifest: resolved, parsed, basePrefix, stylesheets }));
   files.set(`${outputDirectory}/_changelog.css`, await fs.readFile(new URL("../templates/changelog-page.css", import.meta.url), "utf8"));
@@ -392,13 +391,17 @@ export async function renderChangelog({ designSystemRoot, manifest = null }) {
 
 /**
  * Write the rendered changelog into the built artifact, replacing the previous
- * output. A system without CHANGELOG.md writes nothing and reports zero.
+ * output. A system without CHANGELOG.md writes nothing and reports zero; its
+ * previous output still goes, so removing the file does not leave a stale
+ * page in a dist the build did not clear. `rendered` is returned so a caller
+ * that extracts next does not render the same source again.
  */
 export async function buildChangelog(designSystemRoot, { manifest = null } = {}) {
   const rendered = await renderChangelog({ designSystemRoot, manifest });
-  if (!rendered) return { releaseCount: 0, entryCount: 0, unreleasedCount: 0, problems: [], written: [] };
   const artifactRoot = path.join(designSystemRoot, "dist");
-  await fs.rm(path.join(artifactRoot, ...rendered.outputDirectory.split("/")), { force: true, recursive: true });
+  const outputDirectory = rendered?.outputDirectory ?? await previousOutputDirectory(designSystemRoot, manifest);
+  if (outputDirectory) await fs.rm(path.join(artifactRoot, ...outputDirectory.split("/")), { force: true, recursive: true });
+  if (!rendered) return { releaseCount: 0, entryCount: 0, unreleasedCount: 0, problems: [], written: [], rendered: null };
   const written = [];
   for (const [relative, content] of rendered.files) {
     const target = path.join(artifactRoot, ...relative.split("/"));
@@ -406,7 +409,13 @@ export async function buildChangelog(designSystemRoot, { manifest = null } = {})
     await fs.writeFile(target, content, "utf8");
     written.push(target);
   }
-  return { releaseCount: rendered.releaseCount, entryCount: rendered.entryCount, unreleasedCount: rendered.unreleasedCount, problems: rendered.problems, written };
+  return { releaseCount: rendered.releaseCount, entryCount: rendered.entryCount, unreleasedCount: rendered.unreleasedCount, problems: rendered.problems, written, rendered };
+}
+
+/** The output directory a previous build used, or null where no manifest says (a root without timds.json). */
+async function previousOutputDirectory(designSystemRoot, manifest) {
+  if (!manifest && !(await fs.access(path.join(designSystemRoot, "timds.json")).then(() => true, () => false))) return null;
+  return changelogOutputDirectory(await readManifestLike(designSystemRoot, manifest));
 }
 
 /** The notes under `## Unreleased`, for the gates that want one before a change is submitted. */

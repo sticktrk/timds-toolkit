@@ -8,7 +8,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { compareVersions, isVersion, nextVersion } from "./prepare-merge-release.mjs";
+import { compareVersions, nextVersion, parseVersion, todayVersion } from "./prepare-merge-release.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const git = (...args) => execFileSync("git", args, { cwd: root }).toString().trim();
@@ -19,13 +19,21 @@ const push = args.includes("--push");
 const requested = args.find((argument) => !argument.startsWith("--"));
 
 const current = JSON.parse(readText("timds.json")).version;
-if (requested !== undefined && !isVersion(requested)) {
+// A hand release takes a dated version only: the legacy scheme ends with the
+// version the system has, and a release carries the day it is prepared, never
+// a later one, so the automatic releases that follow it keep counting up.
+const explicit = requested === undefined ? null : parseVersion(requested, { throws: false });
+if (requested !== undefined && explicit?.kind !== "dated") {
   console.error(`Usage: npm run release -- [YYYY.MM.DD-N] [--push]\nThe next version is ${nextVersion(current)}.`);
   process.exit(1);
 }
 const version = requested ?? nextVersion(current);
 if (compareVersions(version, current) <= 0) {
   console.error(`timds.json is already ${current}; ${version} does not follow it. The next version is ${nextVersion(current)}.`);
+  process.exit(1);
+}
+if (explicit && explicit.date.replaceAll("-", ".") > todayVersion()) {
+  console.error(`${version} is dated after today (${todayVersion()}); a release carries the day it is prepared. The next version is ${nextVersion(current)}.`);
   process.exit(1);
 }
 if (git("status", "--porcelain")) {

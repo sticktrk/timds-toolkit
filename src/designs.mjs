@@ -38,7 +38,7 @@ import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 
-import { attr, classList, findAll, findOne, parseHtml, textOf, walk } from "./html.mjs";
+import { attr, classList, escapeHtml, findAll, findOne, parseHtml, textOf, walk } from "./html.mjs";
 import { importReferences, stylesheetReferences } from "./tokens.mjs";
 
 export const DESIGNS_SOURCE_DIRECTORY = "src/designs";
@@ -53,13 +53,6 @@ const MAX_REPORTED_PROBLEMS = 30;
 const REFERENCE_ATTRIBUTES = ["href", "src", "action", "poster"];
 // Attributes the publisher uploads alongside designs.json; anchors are routes, not files.
 const FILE_REFERENCE_TAGS = new Set(["link", "img", "source", "video", "audio", "track", "object", "script"]);
-
-const escapeHtml = (value) => String(value)
-  .replaceAll("&", "&amp;")
-  .replaceAll("<", "&lt;")
-  .replaceAll(">", "&gt;")
-  .replaceAll('"', "&quot;")
-  .replaceAll("'", "&#39;");
 
 const isExternal = (value) => /^[a-z][a-z0-9+.-]*:/i.test(value) || value.startsWith("//");
 
@@ -259,10 +252,11 @@ function fileReferences(html) {
   return [...found].sort();
 }
 
-async function readManifestLike(designSystemRoot, manifest) {
+/** The manifest fields the renderers need, from the workspace when given or from timds.json at the root. */
+export async function readManifestLike(designSystemRoot, manifest) {
   if (manifest) return manifest;
   const raw = await readJson(path.join(designSystemRoot, "timds.json"), "timds.json");
-  return { name: raw.name, description: raw.description, version: raw.version, artifact: { entry: raw.artifact?.entry || "index.html" } };
+  return { systemId: raw.systemId, name: raw.name, description: raw.description, version: raw.version, artifact: { entry: raw.artifact?.entry || "index.html" } };
 }
 
 function renderDirectory({ name, basePrefix, designs, stylesheets }) {

@@ -16,6 +16,7 @@ import {
   readUnreleasedNotes,
   renderChangelog,
 } from "./changelog.mjs";
+import { validateArtifact } from "./core.mjs";
 import { extractArtifact } from "./extract.mjs";
 
 const MANIFEST = { systemId: "client/system", name: "Client & Co", description: "The system.", version: "2026.10.12-2", artifact: { entry: "index.html" } };
@@ -71,6 +72,7 @@ test("dated versions parse, order above legacy ones, and count up within a UTC d
   assert.equal(nextDesignSystemVersion("1.3.142", NOW), "2026.10.12-1", "a legacy system moves onto today's date");
   assert.equal(nextDesignSystemVersion("2026.10.12-2", new Date("2026-10-12T23:59:59Z")), "2026.10.12-3");
   assert.equal(nextDesignSystemVersion("2026.10.12-2", new Date("2026-10-13T00:00:00Z")), "2026.10.13-1");
+  assert.equal(nextDesignSystemVersion("2026.10.20-1", NOW), "2026.10.20-2", "a current version dated ahead counts up on its day; the next version never regresses");
 });
 
 test("parseChangelog reads sections, entries, areas, continuation lines, nested items, and paragraphs", () => {
@@ -152,8 +154,11 @@ test("renders the page and document into the artifact, skipped by guidance extra
 
   const built = await buildChangelog(root, { manifest: MANIFEST });
   assert.deepEqual([built.releaseCount, built.entryCount, built.unreleasedCount, built.problems], [3, 5, 1, []]);
+  assert.deepEqual(built.rendered.document, rendered.document, "the render the files came from is returned, so extraction need not render again");
   assert.equal(await fs.readFile(path.join(root, "dist", "changelog", "index.html"), "utf8"), html);
   assert.match(await fs.readFile(path.join(root, "dist", "changelog", "_changelog.css"), "utf8"), /body\.timds-changelog/);
+  // A note links to /brand/color/, which this artifact does not hold: history may point at pages a later release removed, so the page's links are not artifact references.
+  await validateArtifact(root, MANIFEST);
 
   // Extraction skips the page as guidance and writes changelog.json beside index.json.
   const machine = await extractArtifact({ artifactRoot: path.join(root, "dist"), manifest: { ...MANIFEST, machine: { enabled: true } }, changelog: rendered });
@@ -177,8 +182,16 @@ test("renders the page and document into the artifact, skipped by guidance extra
 test("a system without CHANGELOG.md renders nothing, and an empty one renders an empty page", async (t) => {
   const root = await temporaryDirectory(t);
   assert.equal(await renderChangelog({ designSystemRoot: root, manifest: MANIFEST }), null);
-  assert.deepEqual(await buildChangelog(root, { manifest: MANIFEST }), { releaseCount: 0, entryCount: 0, unreleasedCount: 0, problems: [], written: [] });
+  assert.deepEqual(await buildChangelog(root, { manifest: MANIFEST }), { releaseCount: 0, entryCount: 0, unreleasedCount: 0, problems: [], written: [], rendered: null });
+  assert.deepEqual(await buildChangelog(root), { releaseCount: 0, entryCount: 0, unreleasedCount: 0, problems: [], written: [], rendered: null }, "no manifest and no timds.json is still nothing to build");
   assert.equal(await readUnreleasedNotes(root), null);
+  // Removing CHANGELOG.md removes the previous page too, in a dist the build did not clear.
+  await fs.writeFile(path.join(root, "CHANGELOG.md"), "# Changelog\n\n## Unreleased\n\n## 2026.10.12-1\n\n- Brand: x\n");
+  await buildChangelog(root, { manifest: MANIFEST });
+  await fs.access(path.join(root, "dist", "changelog", "index.html"));
+  await fs.rm(path.join(root, "CHANGELOG.md"));
+  assert.equal((await buildChangelog(root, { manifest: MANIFEST })).rendered, null);
+  await assert.rejects(fs.access(path.join(root, "dist", "changelog")), "the stale page is gone");
   await fs.writeFile(path.join(root, "CHANGELOG.md"), "# Changelog\n\n## Unreleased\n");
   assert.deepEqual(await readUnreleasedNotes(root), []);
   const rendered = await renderChangelog({ designSystemRoot: root, manifest: MANIFEST });

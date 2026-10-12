@@ -29,6 +29,19 @@ test("the first merge of a new day starts at -1", () => {
   assert.equal(result.version, "2026.10.13-1");
 });
 
+test("a merge after a release dated ahead counts up on that day instead of regressing", () => {
+  const ahead = "2026.10.20-1";
+  const result = prepareMergeRelease(fixture({
+    previousVersion: ahead,
+    timdsJson: JSON.stringify({ version: ahead }),
+    packageJson: JSON.stringify({ name: "root", version: ahead }),
+    packageLock: JSON.stringify({ version: ahead, packages: { "": { version: ahead } } }),
+    changelog: `# Changelog\n\n## Unreleased\n\n- Added the runtime.\n\n## ${ahead}\n\n- Previous.\n`,
+  }));
+  assert.equal(result.version, "2026.10.20-2");
+  assert.match(result.files["CHANGELOG.md"], /## 2026\.10\.20-2\n\n- Added the runtime\.\n\n## 2026\.10\.20-1\n/);
+});
+
 test("a system still on MAJOR.MINOR.PATCH moves onto today's date at its next merge", () => {
   const result = prepareMergeRelease(fixture({
     previousVersion: "1.3.103",
@@ -76,6 +89,8 @@ test("orders dated versions by day then release, every legacy version below them
   assert.equal(nextVersion("2026.10.12-3", NOW), "2026.10.12-4");
   assert.equal(nextVersion("2026.10.11-3", NOW), "2026.10.12-1");
   assert.equal(nextVersion("0.1.43", NOW), "2026.10.12-1");
+  assert.equal(nextVersion("2026.10.20-1", NOW), "2026.10.20-2", "a current version dated ahead counts up on its day; the next version never regresses");
+  assert.ok(compareVersions(nextVersion("2026.10.20-1", NOW), "2026.10.20-1") > 0);
   assert.deepEqual(["2026.10.12-1", "1.2.3"].map(isVersion), [true, true]);
   assert.deepEqual(["2026.10.12-0", "2026.10.12.1", "2026.13.01-1", "v1"].map(isVersion), [false, false, false, false]);
 });
