@@ -33,7 +33,8 @@
     "./runtime": "./src/runtime.mjs",
     "./video/board-layouts": "./video/board-layouts.mjs",
     "./publish": "./src/publish.mjs",
-    "./hosted": "./src/hosted.mjs"
+    "./hosted": "./src/hosted.mjs",
+    "./release": "./templates/starter/scripts/prepare-merge-release.mjs"
   },
   "scripts": {
     "test": "npm run typecheck && node --test .github/scripts/*.test.mjs src/*.test.mjs video/*.test.mjs && tsx --test video/*.test.tsx",

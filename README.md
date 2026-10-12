@@ -1626,6 +1626,34 @@ with `X-Robots-Tag: noindex`. It emits no GitHub workflows. Local and git
 scaffolds keep their existing automation. `publish --skip-build --skip-push`
 remains available to the host's publication path.
 
+Trusted hosts can reuse the same publication validation in process. Build and
+check the committed source in an isolated worker, then pass its exact artifact
+buffers to the workspace. The callback handles the host's own authorization,
+storage and pointer update; the toolkit reads no CLI credentials on this path.
+
+```js
+import { loadWorkspace } from '@dtconcepts/timds/core';
+import { createPublicationStamp, writePublicationStamp, publishRelease } from '@dtconcepts/timds/publish';
+import { prepareMergeRelease } from '@dtconcepts/timds/release';
+
+// prepareMergeRelease({ previousVersion, timdsJson, packageJson,
+//   packageLock, changelog, fallbackNote }) returns the existing release bump.
+const workspace = await loadWorkspace(committedCheckout);
+workspace.artifact = checkedArtifact; // { files: [{ path, content: Buffer }] }
+const stamp = await createPublicationStamp(workspace);
+await writePublicationStamp(workspace, stamp);
+await publishRelease(workspace, {
+  stamp,
+  publisher: async ({ stamp, files }) => publishAuthorizedRelease(stamp, files),
+});
+```
+
+The callback returns the same publication response as the HTTP endpoint:
+`{status:"published", systemId, version, publicRoot, versionedUrls}` with
+`versionedUrls.{root,llmsTxt,bundleJson,artifact}`. The toolkit still validates
+the response and anonymously verifies the public stamp. Artifact buffers and
+the canonical content digest are unchanged by this hook.
+
 The public provider interface is exported from `@dtconcepts/timds/hosted`:
 `start`, `pull`, `submit`, `update`, `status`, `history`, and `close`. API
 version 1 uses the following relative endpoints with a TimDS Bearer token
