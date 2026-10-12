@@ -134,7 +134,7 @@ test('hosted publish resolves the current submission, confirms, polls and closes
   const fetchImpl = async (url, request) => {
     const body = request.body && JSON.parse(request.body); calls.push({ url, body });
     if (url.endsWith('/status')) return response({ apiVersion: 1, submissions: [{ id: 'submitted', status: 'submitted' }] });
-    if (body?.preflight) return response({ apiVersion: 1, submissionId: 'submitted', sessionId: 'session-1', systemId: 'example/core', version: '1.0.1', previewUrl: 'https://preview.example' });
+    if (body?.preflight) return response({ apiVersion: 1, preflight: { submissionId: 'submitted', sessionId: 'session-1', systemId: 'example/core', version: '1.0.1', previewUrl: 'https://preview.example' } });
     if (url.endsWith('/publish')) { assert(confirmed); return response({ apiVersion: 1, publication: { id: 'publication', status: 'queued' } }); }
     return response({ apiVersion: 1, publication: { id: 'publication', status: 'published', result: { publicRoot: 'https://public.example' } } });
   };

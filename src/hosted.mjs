@@ -310,9 +310,10 @@ export async function runHostedCommand(command, { root = process.cwd(), systemId
       selectedSubmission = status.submissions?.find(item => ['submitted', 'publishing', 'published'].includes(item.status))?.id;
       if (!selectedSubmission) throw new Error('This session has no submission to publish; run timds submit first.');
     }
-    const summary = await host.publish(selectedSubmission, { preflight: !dryRun, dryRun });
+    const checked = await host.publish(selectedSubmission, { preflight: !dryRun, dryRun });
+    const summary = checked.preflight || checked;
     onSummary?.(summary);
-    if (dryRun) return summary;
+    if (dryRun) return { ...summary, apiVersion: HOST_API_VERSION };
     if (!yes && !(confirm && await confirm(summary))) throw new Error('Publication cancelled; use --yes after reviewing the submission to publish without a prompt.');
     const response = await host.publish(selectedSubmission, { dryRun: false });
     let publication = response.publication || response;
