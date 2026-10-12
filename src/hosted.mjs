@@ -9,7 +9,8 @@ export const HOST_API_VERSION = 1;
 export const SESSION_FILE = ".timds/session.json";
 const PENDING_START_FILE = ".timds/start.json";
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
-const MAX_SNAPSHOT_BYTES = 10 * 1024 * 1024;
+const MAX_SNAPSHOT_BYTES = 50 * 1024 * 1024;
+const MAX_CHANGESET_BYTES = 10 * 1024 * 1024;
 const MAX_FILES = 4000;
 const NO_HOST = "No TimDS host configured; use local mode for editing or git mode for pull requests, or configure provider.kind=hosted and provider.url.";
 const RESERVED = new Set([".git", ".github", "node_modules", "dist", ".env", ".env.server"]);
@@ -220,7 +221,7 @@ async function localFiles(root, base) {
   }
   await walk(root);
   validateLinks(files);
-  if (files.size > MAX_FILES || [...files.values()].reduce((total, bytes) => total + bytes.length, 0) > MAX_SNAPSHOT_BYTES) throw new Error("Session snapshot exceeds 4000 files or 10 MiB");
+  if (files.size > MAX_FILES || [...files.values()].reduce((total, bytes) => total + bytes.length, 0) > MAX_SNAPSHOT_BYTES) throw new Error("Session snapshot exceeds 4000 files or 50 MiB");
   return files;
 }
 
@@ -228,6 +229,7 @@ export async function sessionChanges(root, state, note) {
   const base = decodeFiles(state.files);
   const files = await localFiles(root, base);
   const changed = new Map([...files].filter(([name, bytes]) => !same(base.get(name), bytes)));
+  if ([...changed.values()].reduce((total, bytes) => total + bytes.length, 0) > MAX_CHANGESET_BYTES) throw new Error("Change set exceeds 10 MiB; upload media to the asset store");
   return { files, changes: { baseRevision: state.session.baseRevision, changedFiles: encodeFiles(changed), deletedPaths: [...base.keys()].filter((name) => !files.has(name)).sort(), ...(note ? { note } : {}) } };
 }
 
