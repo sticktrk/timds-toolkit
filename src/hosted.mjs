@@ -318,6 +318,7 @@ export async function runHostedCommand(command, { root = process.cwd(), systemId
     let publication = response.publication || response;
     const deadline = Date.now() + timeoutMs;
     while (!['published', 'failed', 'superseded'].includes(publication.status)) {
+      if (publication.status === 'closing' && publication.error) throw new Error(`Publication completed; session cleanup failed: ${publication.error}. Retry the same submission to finish cleanup.`);
       if (!publication.id) throw new Error('TimDS host did not return a publication identity');
       if (Date.now() >= deadline) throw new Error(`Publication ${publication.id} is still running; retry timds publish --submission ${selectedSubmission} --yes to resume.`);
       await wait(pollIntervalMs);

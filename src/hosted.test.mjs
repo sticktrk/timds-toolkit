@@ -164,6 +164,10 @@ test('hosted publication refusal and background build failures surface as errors
     if (body?.preflight) return response({ apiVersion: 1 });
     return response({ apiVersion: 1, publication: { id: 'failure', status: 'failed', error: 'Build failed' } });
   } }), /Build failed/);
+  await assert.rejects(runHostedCommand('publish', { ...options, fetchImpl: async (url, request) => {
+    if (request.body && JSON.parse(request.body).preflight) return response({ apiVersion: 1 });
+    return response({ apiVersion: 1, publication: { id: 'cleanup', status: 'closing', error: 'Preview removal failed' } });
+  } }), /session cleanup failed/);
 });
 
 test("hosted commands without host configuration explain local and git modes", async (t) => {
