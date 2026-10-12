@@ -25,6 +25,7 @@ import {
 } from "./core.mjs";
 import { readDerivedLayer, summarizeBrandKit } from "./derived.mjs";
 import { readMediaCatalog } from "./media.mjs";
+import { runHostedCommand, sessionIgnoredMatcher } from "./hosted.mjs";
 
 export const DESIGN_SYSTEM_MCP_SERVER_NAME = "timds-design-system";
 export const EDITING_GUIDE_URI = "timds://guide";
@@ -306,6 +307,7 @@ async function resolveAuthoredPath(workspace, relativePath) {
   if (isProtectedPath(workspace, repoRelative)) {
     throw new Error(`${repoRelative} is protected; the editing tools cannot read or change it`);
   }
+  if ((await sessionIgnoredMatcher(workspace.repoRoot))(repoRelative)) throw new Error(`${repoRelative} is ignored; the editing tools cannot read or change it`);
   const absolutePath = path.join(workspace.repoRoot, ...repoRelative.split("/"));
   // Belt and braces: the deepest existing ancestor must resolve inside the
   // real Design System root even if the root itself sits behind a link.
@@ -398,7 +400,9 @@ async function authoredFiles(workspace) {
     candidates = await walkFiles(workspace.designSystemRoot, surface === "." ? "" : surface);
   }
   const files = [];
+  const ignored = await sessionIgnoredMatcher(workspace.repoRoot);
   for (const candidate of candidates.sort()) {
+    if (ignored(candidate)) continue;
     if (isProtectedPath(workspace, candidate)) continue;
     let info;
     try {
@@ -813,16 +817,37 @@ async function packageVersion() {
   }
 }
 
+/** Hosted session commands use the identical API and filesystem guards as the CLI. */
+export function registerHostedSessionTools(server, { root = process.cwd() } = {}) {
+  for (const command of ["start", "pull", "submit", "update", "status", "history", "close"]) {
+    server.registerTool(`timds_${command === "close" ? "sessions_close" : command}`, {
+      title: `TimDS session ${command}`,
+      description: `${command} a hosted TimDS design session. Agents can submit a change; publication requires a human in the admin.`,
+      inputSchema: {
+        ...(command === "start" ? { systemId: z.string().min(1), idempotencyKey: z.string().min(1).max(200).optional(), portalUrl: z.string().url().optional() } : {}),
+        ...(command === "update" ? { resolve: z.array(z.string().min(1)).optional().describe("Conflict paths whose local content is the explicit resolution") } : {}),
+        ...(["submit", "update"].includes(command) ? { note: z.string().max(2000).optional() } : {}),
+      },
+      annotations: { readOnlyHint: ["status", "history"].includes(command), destructiveHint: command === "close", openWorldHint: true, idempotentHint: command !== "start" },
+    }, async (args) => {
+      try { return toolResult(await runHostedCommand(command, { root, ...args })); }
+      catch (error) { return toolError(error); }
+    });
+  }
+  return server;
+}
+
 /** An McpServer named `timds-design-system` serving the editing tools for one local checkout. */
 export async function createDesignSystemMcpServer({ root = process.cwd(), hooks = {} } = {}) {
   const repoRoot = await findRepositoryRoot(root);
   // Fail fast on a directory that is not a Design System.
-  await loadWorkspace(repoRoot);
+  if (!process.env.TIMDS_PORTAL_URL) await loadWorkspace(repoRoot);
   const server = new McpServer({ name: DESIGN_SYSTEM_MCP_SERVER_NAME, version: await packageVersion() });
   registerDesignSystemTools(server, {
     resolveWorkspace: () => loadWorkspace(repoRoot),
     hooks: { ...hooks, remote: false },
   });
+  registerHostedSessionTools(server, { root: repoRoot });
   return server;
 }
 

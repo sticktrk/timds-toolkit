@@ -1574,3 +1574,83 @@ npm run timds -- init --standalone --root ./new-system --name "Client Design Sys
 ```
 
 `--json` returns the initialization result with the manifest, layout, exact toolkit package version, created paths, and validation artifact. Existing contracts retain their identity; conflicting explicit inputs are rejected.
+
+### Hosted design sessions
+
+A `provider` setting in `timds.json` selects the workflow. `{ "kind": "local" }`
+keeps authoring on disk; `{ "kind": "git" }` keeps the existing branch and pull
+request submission; `{ "kind": "hosted", "url": "https://timds.com" }` uses the
+host API. Existing manifests without a provider keep their git submission
+behavior. Hosted commands without a configured host fail with one message
+that names local and git modes; they never fall back to git.
+
+```sh
+timds auth login --portal-url https://timds.com
+timds start example/core --root ./example --portal-url https://timds.com
+cd example
+npm install
+timds check
+timds submit --message "Adjust the page spacing"
+timds status
+timds history
+timds update
+timds sessions close
+```
+
+`start` requires an empty directory and materializes plain files, with no
+`.git` directory or git binary dependency. Interrupted starts keep a private
+`.timds/start.json` request key; retrying the same command reuses the same fork.
+If materialization was interrupted after source files were written, use a fresh
+empty directory and `--idempotency-key` with that saved key. `TIMDS_PORTAL_URL` can select the
+host; the session remembers it in `.timds/session.json`, alongside the base
+snapshot. Credentials stay in the existing private TimDS credential file or
+`TIMDS_ACCESS_TOKEN`, never in session metadata. `pull` refreshes from the
+session fork without overwriting local edits. `update` merges with current
+main on the host. Conflicts are per file and preserve the local files; edit
+each conflicted file, then run `timds update --resolve path/to/file` (repeat
+`--resolve` for multiple files). The host checks that main has not changed
+since the conflict was shown. Submissions return the admin submission and
+preview URL; publishing is an explicit human action in the admin.
+
+`timds mcp` exposes `timds_start`, `timds_pull`, `timds_submit`, `timds_update`,
+`timds_status`, `timds_history`, and `timds_sessions_close` through the same
+implementation. Set `TIMDS_PORTAL_URL` to start the MCP server in an empty
+directory before opening the first session. The MCP server has no publish
+tool.
+
+For a new hosted source use `timds init --standalone --provider hosted
+--portal-url https://timds.com`. It emits `wrangler.jsonc` with top-level
+`assets.directory: "./dist"`, an empty `previews` block, Wrangler `^4.135.0`
+as a development dependency, and a root `_headers` file copied into `dist/`
+with `X-Robots-Tag: noindex`. It emits no GitHub workflows. Local and git
+scaffolds keep their existing automation. `publish --skip-build --skip-push`
+remains available to the host's publication path.
+
+The public provider interface is exported from `@dtconcepts/timds/hosted`:
+`start`, `pull`, `submit`, `update`, `status`, `history`, and `close`. API
+version 1 uses the following relative endpoints with a TimDS Bearer token
+and `X-TimDS-API-Version: 1`:
+
+| Method | Path | Request |
+| --- | --- | --- |
+| POST | `/api/timds/sessions` | `{apiVersion:1, systemId}` |
+| GET | `/api/timds/sessions/:id` | Snapshot of the session fork |
+| POST | `/api/timds/sessions/:id/submit` | Change set |
+| POST | `/api/timds/sessions/:id/update` | Change set, optional `resolvedPaths` and `mainRevision` |
+| GET | `/api/timds/sessions/:id/status` | Session and latest submission |
+| GET | `/api/timds/sessions/:id/history` | Commits and publication events |
+| POST | `/api/timds/sessions/:id/close` | `{apiVersion:1}` |
+
+A change set is `{apiVersion:1, baseRevision, changedFiles, deletedPaths,
+note?}`. Files are `{path, encoding:"base64", content, mode?}`; modes are
+`100644`, `100755`, or `120000` (a bounded relative symlink). Responses carry
+`apiVersion:1`; snapshots carry `session:{id,systemId,baseRevision,status,
+expiresAt?}` and `files`. Update conflicts carry `conflicts:[path]` and
+`mainRevision`; successful updates return the merged fork snapshot. Submit
+returns the updated session and a submission with its `previewUrl`, and can
+omit `files` when the submitted local snapshot is unchanged by the host.
+Snapshots are capped at 4,000 files and 10 MiB of raw content. Nested
+`.gitignore` rules exclude new ignored files while already tracked snapshot
+files remain eligible, matching consumer checks. Traversal, credential files,
+`.git`, unsafe symlinks, and session metadata are excluded. Host storage and
+publication remain host responsibilities; no reference host is shipped.

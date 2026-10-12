@@ -380,3 +380,14 @@ roll back without separate authorization.
 Lead with what changed. Include the Design System version, validation and
 preview coverage, branch or pull-request link, and any remaining publication or
 consuming-site update.
+
+## Hosted sessions
+
+When `timds.json` selects the hosted provider, or `.timds/session.json` exists,
+use `timds start`, `check`, `submit`, `pull`, `update`, `status`, `history`, and
+`sessions close` (or the matching `timds_*` MCP tools). Do not run git commands
+in that workspace. The host owns source history. On update conflicts, keep the
+local file, resolve it with the user intent, and use `timds update --resolve
+PATH` for each resolved path. Return the submission preview URL. Agents submit;
+a human publishes in the admin. Never put the access token in source or session
+metadata.
