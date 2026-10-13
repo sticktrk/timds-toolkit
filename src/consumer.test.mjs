@@ -299,6 +299,16 @@ test("checkConsumer passes on an in-scope change", async (t) => {
   assert.equal((await checkConsumer(product)).previewApps, null);
 });
 
+test("required tokens read a submodule working copy and exclude ignored stylesheets", async (t) => {
+  const { product } = await consumerFixture(t);
+  const ds = path.join(product, "design-system");
+  await write(ds, ".gitignore", "ignored.css\n");
+  await write(ds, "ignored.css", ":root { --missing-ring: gold; }");
+  await write(ds, "src/brand.css", ":root { --gold: gold; --focus-ring: var(--gold); }");
+  assert.equal((await checkConsumer(product, { requireTokens: ["--focus-ring"] })).status, "passed");
+  assert.match((await checkConsumer(product, { requireTokens: ["--missing-ring"] })).errors.join("\n"), /Missing required/);
+});
+
 test("checkConsumer names only the apps a branch can change the look of, and the CLI hands them to the workflow", async (t) => {
   const { product } = await consumerFixture(t, baseManifest({ web: staticApp(), admin: staticApp({ cwd: "admin" }) }));
   await write(product, "admin/src/styles/site.css", "body{}\n");

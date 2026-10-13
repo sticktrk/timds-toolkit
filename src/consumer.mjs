@@ -30,6 +30,7 @@ import path from "node:path";
 import process from "node:process";
 import * as z from "zod/v4";
 import { consumerToolkitLockRemedy, planConsumerToolkitLock, PUBLISHED_CONSUMER_MINIMUM_VERSION, toolkitVersionOlderThan } from "./consumer-install.mjs";
+import { parseCssTokens, resolveTokens } from "./tokens.mjs";
 
 export const CONSUMER_MANIFEST_FILE = "timds.consumer.json";
 /** The record `consumer sync` leaves in the bundle directory: which version is there and which files. */
@@ -66,7 +67,7 @@ export const CONSUMER_ALWAYS_ALLOWED = Object.freeze([
 ]);
 
 const CONSUMER_HELP = `Usage:
-  timds consumer check [--root PATH] [--app NAME] [--base REF] [--json]
+  timds consumer check [--root PATH] [--app NAME] [--base REF] [--require-token=--NAME]... [--json]
   timds consumer sync [--root PATH]
   timds consumer update [VERSION] [--root PATH]
   timds consumer migrate [--version VERSION] [--url URL] [--root PATH] [--force] [--skip-sync]
@@ -610,10 +611,52 @@ async function manifestAtBase(repoRoot, base) {
   }
 }
 
-/**
- * Validate a consumer repo: manifest, pinned and present Design System, each
- * app's cwd, and (with `base`) that the branch only touches design surface.
- */
+/** Read only local Design System CSS; never follow a bundle path outside its root. */
+async function checkRequiredTokens(designSystem, required) {
+  if (!Array.isArray(required) || required.some((name) => typeof name !== "string" || !/^--[a-zA-Z_][a-zA-Z0-9_-]*$/.test(name))) {
+    return ["Required tokens must be CSS custom property names, such as --focus-ring"];
+  }
+  if (!required.length) return [];
+  let paths;
+  if (designSystem.mode === "published" && !designSystem.linked) {
+    paths = (designSystem.record?.files || []).map((file) => file.path);
+  } else {
+    const listed = await git(["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "*.css"], designSystem.root);
+    if (listed.code !== 0) return ["Could not read Design System stylesheets for required tokens"];
+    paths = listed.stdout.split("\0").filter(Boolean);
+  }
+  const records = [];
+  const errors = [];
+  const root = await fs.realpath(designSystem.root).catch(() => null);
+  for (const relative of [...new Set(paths)].filter((file) => typeof file === "string" && file.endsWith(".css")).sort()) {
+    if (!isSafeRelativePath(relative)) { errors.push(`Unsafe Design System stylesheet path: ${relative}`); continue; }
+    const target = path.join(designSystem.root, relative);
+    const real = await fs.realpath(target).catch(() => null);
+    if (!root || !real || !real.startsWith(`${root}${path.sep}`)) {
+      errors.push(`Cannot read Design System stylesheet inside the bundle: ${relative}`);
+      continue;
+    }
+    try { records.push(...parseCssTokens(await fs.readFile(real, "utf8"), { source: relative })); }
+    catch { errors.push(`Could not read Design System stylesheet: ${relative}`); }
+  }
+  // Match the parser's scope model; later declarations in a scope replace earlier ones.
+  // This verifies available definitions and aliases, not product imports or browser cascade.
+  const effective = new Map();
+  for (const record of records) effective.set(JSON.stringify([record.condition, record.selector, record.name]), record);
+  const tokens = resolveTokens([...effective.values()]);
+  for (const name of [...new Set(required)]) {
+    const matches = tokens.filter((token) => token.name === name);
+    if (!matches.length) errors.push(`Missing required Design System token ${name}. Report the gap to the designer, then sync the updated draft or release.`);
+    else {
+      const unresolved = [...new Set(matches.flatMap((token) => token.unresolved || (token.resolved.includes("var(") ? token.references : [])))];
+      if (unresolved.length) errors.push(`Required Design System token ${name} has unresolved aliases: ${unresolved.join(", ")}`);
+      if (matches.some((token) => !token.resolved)) errors.push(`Required Design System token ${name} has an empty definition`);
+    }
+  }
+  return errors;
+}
+
+/** Validate the consumer pin, required tokens, app paths, and optional branch scope. */
 export async function checkConsumer(repoRootInput = process.cwd(), options = {}) {
   const errors = [];
   const warnings = [];
@@ -625,6 +668,7 @@ export async function checkConsumer(repoRootInput = process.cwd(), options = {})
   }
   const { designSystem, manifest, repoRoot } = consumer;
   const selected = options.app ? [resolveConsumerApp(consumer, options.app).name] : Object.keys(manifest.apps);
+  errors.push(...await checkRequiredTokens(designSystem, options.requireTokens ?? []));
 
   if (designSystem.mode === "published") {
     try {
@@ -811,7 +855,7 @@ export async function checkConsumer(repoRootInput = process.cwd(), options = {})
 // CLI
 
 const CHECK_BOOLEAN_FLAGS = new Set(["help", "json"]);
-const CHECK_VALUE_FLAGS = new Set(["app", "base", "root"]);
+const CHECK_VALUE_FLAGS = new Set(["app", "base", "root", "requireToken"]);
 
 // Strict on purpose: a mistyped or empty --base would otherwise skip the scope check and pass.
 function parseCheckArguments(argv) {
@@ -827,8 +871,13 @@ function parseCheckArguments(argv) {
     }
     if (!CHECK_VALUE_FLAGS.has(name)) throw new Error(`Unknown option --${rawName}\n${CONSUMER_HELP}`);
     const next = inlineValue ?? argv[index + 1];
-    if (next === undefined || next === "" || String(next).startsWith("-")) throw new Error(`--${rawName} requires a value`);
-    options[name] = next;
+    if (name === "requireToken") {
+      if (!/^--[a-zA-Z_][a-zA-Z0-9_-]*$/.test(next ?? "")) throw new Error("--require-token requires a CSS custom property name, such as --require-token=--focus-ring");
+      (options.requireTokens ??= []).push(next);
+    } else {
+      if (next === undefined || next === "" || String(next).startsWith("-")) throw new Error(`--${rawName} requires a value`);
+      options[name] = next;
+    }
     if (inlineValue === undefined) index += 1;
   }
   return options;
@@ -896,7 +945,7 @@ export async function runConsumerCli(args = [], { env = process.env, output = de
     output(CONSUMER_HELP);
     return;
   }
-  const result = await checkConsumer(options.root || process.cwd(), { app: options.app, base: options.base });
+  const result = await checkConsumer(options.root || process.cwd(), { app: options.app, base: options.base, requireTokens: options.requireTokens });
   if (options.json) output(JSON.stringify(result, null, 2));
   else output(checkReport(result));
   // The stock workflow previews only these apps; written before a scope failure throws.

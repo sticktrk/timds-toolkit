@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.466
+
+- Let consumers explicitly require CSS tokens with repeatable `consumer check --require-token=--NAME` flags. Check actual published or local draft bundle definitions and aliases, report missing tokens as normal check failures, and keep the tracked production pin untouched.
+- Return compact local hosted MCP receipts after snapshot transfer, preserving revisions and exact conflicts without duplicating image bytes beyond the stdio transport limit. The version-1 host HTTP snapshot contract is unchanged.
+
 ## 0.1.465
 
 - Resolve local draft consumer bundles relative to the source artifact entry, so systems published under a nested directory integrate correctly without moving the production pin.
