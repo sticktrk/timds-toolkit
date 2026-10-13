@@ -52,7 +52,7 @@ test("pull preserves local edits, reports both-side conflicts, and never partial
   await fs.writeFile(path.join(f.root, "a.txt"), "ours");
   f.set(snapshot([file("a.txt", "theirs"), file("b.txt", "remote")], "next"));
   const result = await runHostedCommand("pull", f.options);
-  assert.deepEqual(result.conflicts, ["a.txt"]);
+  assert.deepEqual(result.conflicts, [{ path: "a.txt", base: "base", mine: "ours", theirs: "theirs" }]);
   assert.equal(await fs.readFile(path.join(f.root, "b.txt"), "utf8"), "base");
   assert.equal((await f.state()).session.baseRevision, "base");
   await fs.writeFile(path.join(f.root, "a.txt"), "theirs");
@@ -139,7 +139,7 @@ test("hosted scaffold has Wrangler/noindex, no workflows, and check works withou
 test("MCP exposes hosted commands and principal-authorized publication", () => {
   const names = [];
   registerHostedSessionTools({ registerTool(name) { names.push(name); } });
-  assert.deepEqual(names, ["timds_start", "timds_pull", "timds_submit", "timds_update", "timds_status", "timds_history", "timds_sessions_close", "timds_publish"]);
+  assert.deepEqual(names, ["timds_start", "timds_pull", "timds_submit", "timds_update", "timds_status", "timds_history", "timds_sessions_close", "timds_publish", "timds_claim", "timds_active_work", "timds_join", "timds_draft_create", "timds_draft_list", "timds_draft_close"]);
 });
 
 test('hosted publish resolves the current submission, confirms, polls and closes local session metadata', async t => {
@@ -261,4 +261,53 @@ test("snapshot refuses paths that collide on a case-insensitive filesystem befor
   assert.equal(await fs.stat(path.join(f.root, "Name.txt")).catch(() => null), null);
   f.set(snapshot([file("Folder", "file"), file("folder/child", "child")], "next"));
   await assert.rejects(runHostedCommand("pull", f.options), /Conflicting session file path/);
+});
+
+test('key conflicts survive 409 responses and resolutions preserve both path and key', async t => {
+  const f = await fixture(t, [file('tokens/color.json', '{"brand":{"value":"blue"}}')]);
+  await fs.writeFile(path.join(f.root, 'tokens/color.json'), '{"brand":{"value":"navy"}}');
+  const conflict = { path: 'tokens/color.json', key: 'brand.value', base: 'blue', mine: 'navy', theirs: 'red' };
+  const conflictOptions = { ...f.options, fetchImpl: async () => response({ apiVersion: 1, conflicts: [conflict], mainRevision: 'main-2' }, 409) };
+  const result = await runHostedCommand('update', conflictOptions);
+  assert.deepEqual(result.conflicts, [conflict]); assert.equal(result.applied, false);
+  assert.match(await fs.readFile(path.join(f.root, 'tokens/color.json'), 'utf8'), /navy/);
+  f.set(snapshot([file('tokens/color.json', '{"brand":{"value":"red"}}')], 'resolved'));
+  await runHostedCommand('update', { ...f.options, resolve: ['tokens/color.json#brand.value=theirs'], note: 'Keep the director’s blue' });
+  assert.deepEqual(f.requests.at(-1).body.resolvedPaths, ['tokens/color.json#brand.value=theirs']);
+  assert.equal(f.requests.at(-1).body.mainRevision, 'main-2');
+  assert.equal(f.requests.at(-1).body.lastUpdateHash, 'base');
+});
+test('claims, drafts and invite operations target the hosted system without a git credential', async t => {
+  const f = await fixture(t);
+  await runHostedCommand('claim', { ...f.options, patterns: ['tokens/color*'], note: 'Warm the palette' });
+  assert.deepEqual(f.requests.at(-1).body.patterns, ['tokens/color*']);
+  await runHostedCommand('active-work', f.options);
+  assert.match(f.requests.at(-1).url, /design-systems\/example%2Fcore\/active-work$/);
+  await runHostedCommand('draft-create', { ...f.options, name: 'spring-refresh', from: '1.2.3' });
+  assert.equal(f.requests.at(-1).body.from, '1.2.3');
+  await runHostedCommand('join', { ...f.options, sessionId: 'session-1', principalId: 'principal-2' });
+  assert.equal(f.requests.at(-1).body.principalId, 'principal-2');
+});
+test('a stale shared fork uses the server rebase patch and retries exactly once against the new base', async t => {
+  const f = await fixture(t, [file('a.txt', 'base'), file('b.txt', 'base')]);
+  await fs.writeFile(path.join(f.root, 'a.txt'), 'mine');
+  const calls = [];
+  const options = { ...f.options, fetchImpl: async (_url, request) => {
+    calls.push(JSON.parse(request.body));
+    if (calls.length === 1) return response(snapshot([file('a.txt', 'base'), file('b.txt', 'theirs')], 'new-head', { stale: true, conflicts: [], mainRevision: 'new-head', rebasedChanges: { baseRevision: 'new-head', changedFiles: [file('a.txt', 'mine')], deletedPaths: [] } }), 409);
+    return response(snapshot([file('a.txt', 'mine'), file('b.txt', 'theirs')], 'merged', { submission: { id: 'submission' } }));
+  } };
+  await runHostedCommand('submit', { ...options, note: 'Keep independent edits' });
+  assert.equal(calls.length, 2); assert.equal(calls[1].baseRevision, 'new-head');
+  assert.equal(calls[1].lastUpdateHash, 'new-head');
+  assert.deepEqual(calls[1].changedFiles.map(file => file.path), ['a.txt']);
+  assert.equal(await fs.readFile(path.join(f.root, 'b.txt'), 'utf8'), 'theirs');
+});
+test('grouped hosted change sets omit generated aggregate views', async t => {
+  const f = await fixture(t, [file('.timds/contract-layout.json', '{"schemaVersion":1}'), file('tokens/color.json', '{}'), file('tokens.json', '{}'), file('media.json', '{}')]);
+  await fs.writeFile(path.join(f.root, 'tokens/color.json'), '{"brand":{"value":"blue"}}');
+  await fs.writeFile(path.join(f.root, 'tokens.json'), '{"color":{"brand":{"value":"blue"}}}');
+  await fs.writeFile(path.join(f.root, 'media.json'), '{"schemaVersion":2,"assets":[]}');
+  const result = await runHostedCommand('submit', { ...f.options, dryRun: true, note: 'Update brand' });
+  assert.deepEqual(result.changedFiles.map(item => item.path), ['tokens/color.json']);
 });

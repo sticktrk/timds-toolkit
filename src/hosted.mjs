@@ -55,7 +55,7 @@ export async function workspaceProvider(root) {
 
 export function createHostProvider({ url, token, fetchImpl = fetch }) {
   const origin = cleanPortalUrl(url);
-  if (!token) throw new Error("A TimDS token is required; run timds auth login or set TIMDS_ACCESS_TOKEN.");
+  if (!token) throw new Error("A TimDS token is required; run timds login or set TIMDS_ACCESS_TOKEN.");
   async function request(method, suffix, body, resource = 'sessions') {
     const response = await fetchImpl(`${origin}/api/timds/${resource}${suffix}`, {
       method, redirect: "error",
@@ -63,12 +63,23 @@ export function createHostProvider({ url, token, fetchImpl = fetch }) {
       ...(body ? { body: JSON.stringify({ ...body, apiVersion: HOST_API_VERSION }) } : {}),
     });
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(`TimDS host returned ${response.status}: ${String(payload.error || "request failed")}`);
+    if (!response.ok && !(response.status === 409 && Array.isArray(payload.conflicts))) {
+      const error = new Error(`TimDS host returned ${response.status}: ${String(payload.error || "request failed")}`);
+      error.status = response.status; error.details = payload; throw error;
+    }
     if (payload.apiVersion !== HOST_API_VERSION) throw new Error("Unsupported TimDS host API version; update the CLI and host together.");
     return payload;
   }
   const sessionPath = (id) => `/${encodeURIComponent(id)}`;
   return {
+    rollback: (id, input) => request("POST", `/${encodeURIComponent(id)}/rollback`, input, 'design-systems'),
+    activeWork: (id) => request("GET", `/${encodeURIComponent(id)}/active-work`, undefined, 'design-systems'),
+    claim: (id, input) => request("POST", `${sessionPath(id)}/claims`, input),
+    join: (id, input = {}) => request("POST", `${sessionPath(id)}/join`, input),
+    draftCreate: (id, input) => request("POST", `/${encodeURIComponent(id)}/drafts`, input, 'design-systems'),
+    draftList: (id) => request("GET", `/${encodeURIComponent(id)}/drafts`, undefined, 'design-systems'),
+    draftClose: (id, ref) => request("POST", `/${encodeURIComponent(id)}/drafts/${encodeURIComponent(ref)}/close`, {}, 'design-systems'),
+    draftSnapshot: (id, ref) => request("GET", `/${encodeURIComponent(id)}/drafts/${encodeURIComponent(ref)}/snapshot`, undefined, 'design-systems'),
     start: (input) => request("POST", "", input),
     pull: (id) => request("GET", sessionPath(id)),
     submit: (id, input) => request("POST", `${sessionPath(id)}/submit`, input),
@@ -228,9 +239,10 @@ async function localFiles(root, base) {
 export async function sessionChanges(root, state, note) {
   const base = decodeFiles(state.files);
   const files = await localFiles(root, base);
-  const changed = new Map([...files].filter(([name, bytes]) => !same(base.get(name), bytes)));
+  const grouped = files.has(".timds/contract-layout.json");
+  const changed = new Map([...files].filter(([name, bytes]) => !(grouped && ["tokens.json", "media.json"].includes(name)) && !same(base.get(name), bytes)));
   if ([...changed.values()].reduce((total, bytes) => total + bytes.length, 0) > MAX_CHANGESET_BYTES) throw new Error("Change set exceeds 10 MiB; upload media to the asset store");
-  return { files, changes: { baseRevision: state.session.baseRevision, changedFiles: encodeFiles(changed), deletedPaths: [...base.keys()].filter((name) => !files.has(name)).sort(), ...(note ? { note } : {}) } };
+  return { files, changes: { baseRevision: state.session.baseRevision, lastUpdateHash: state.session.lastUpdateHash ?? state.session.baseRevision, changedFiles: encodeFiles(changed), deletedPaths: [...base.keys()].filter((name) => !files.has(name)).sort(), ...(note ? { note } : {}) } };
 }
 
 async function writeState(root, state) {
@@ -252,14 +264,14 @@ async function applySnapshot(root, snapshot, previous, provider, replace = false
   const remote = decodeFiles(snapshot.files);
   const base = previous ? decodeFiles(previous.files) : new Map();
   const local = previous ? await localFiles(root, base) : new Map();
-  const conflicts = new Set(snapshot.conflicts || []);
+  const conflicts = new Map((snapshot.conflicts || []).map(value => [typeof value === "string" ? value : `${value.path}#${value.key || ""}`, value]));
   const writes = [];
   for (const name of new Set([...base.keys(), ...remote.keys(), ...local.keys()])) {
     const before = base.get(name), ours = local.get(name), theirs = remote.get(name);
-    if (!replace && !same(ours, before) && !same(theirs, before) && !same(ours, theirs)) { conflicts.add(name); continue; }
+    if (!replace && !same(ours, before) && !same(theirs, before) && !same(ours, theirs)) { conflicts.set(name, { path: name, base: before?.toString("utf8") ?? null, mine: ours?.toString("utf8") ?? null, theirs: theirs?.toString("utf8") ?? null }); continue; }
     if ((replace || same(ours, before)) && !same(ours, theirs)) writes.push([name, theirs]);
   }
-  if (conflicts.size) return { ...snapshot, conflicts: [...conflicts].sort(), applied: false };
+  if (conflicts.size) return { ...snapshot, conflicts: [...conflicts.values()], applied: false };
   // Validate the complete transition before changing any file. Never remove an
   // untracked file to make room for a directory/file shape change.
   const removing = new Set(writes.filter(([, bytes]) => bytes === undefined).map(([name]) => name));
@@ -294,7 +306,7 @@ async function applySnapshot(root, snapshot, previous, provider, replace = false
 }
 
 /** The same implementation is called by the CLI and the editing MCP server. */
-export async function runHostedCommand(command, { root = process.cwd(), systemId, note, portalUrl, token, fetchImpl, credentialsPath, dryRun = false, resolve = [], idempotencyKey, submission, yes = false, confirm, onSummary, wait = ms => new Promise(resolve => setTimeout(resolve, ms)), pollIntervalMs = 2000, timeoutMs = 30 * 60_000 } = {}) {
+export async function runHostedCommand(command, { root = process.cwd(), systemId, note, on, patterns, draft, name, from = "main", version, sessionId, principalId, portalUrl, token, fetchImpl, credentialsPath, dryRun = false, resolve = [], idempotencyKey, submission, yes = false, confirm, onSummary, wait = ms => new Promise(resolve => setTimeout(resolve, ms)), pollIntervalMs = 2000, timeoutMs = 30 * 60_000, staleRetries = 1 } = {}) {
   const selected = command === "start" ? path.resolve(root) : await findHostedRoot(root);
   const state = await readJson(path.join(selected, SESSION_FILE));
   const configured = await workspaceProvider(selected);
@@ -304,6 +316,35 @@ export async function runHostedCommand(command, { root = process.cwd(), systemId
   const provider = normalizeProvider({ kind: "hosted", url });
   if (state && state.provider.url !== provider.url) throw new Error("Session belongs to a different TimDS host");
   const host = createHostProvider({ url: provider.url, token: await resolveAccessToken(provider.url, { token, credentialsPath }), fetchImpl });
+  const manifest = await readJson(path.join(selected, "timds.json"));
+  const selectedSystem = systemId || state?.session?.systemId || state?.session?.sourceId || manifest?.systemId;
+  if (command === "rollback") {
+    if (!selectedSystem || !version) throw new Error("rollback requires VERSION and a design system (--system-id)");
+    const summary = await host.rollback(selectedSystem, { version, dryRun: true });
+    onSummary?.(summary);
+    if (dryRun) return summary;
+    if (!yes && !(confirm && await confirm(summary))) throw new Error("Rollback cancelled; review --dry-run and pass --yes to confirm");
+    return host.rollback(selectedSystem, { version });
+  }
+  if (["active-work", "draft-create", "draft-list", "draft-close"].includes(command)) {
+    if (!selectedSystem) throw new Error("Provide --system-id or run inside a hosted design system");
+    if (command === "active-work") return host.activeWork(selectedSystem);
+    if (command === "draft-list") return host.draftList(selectedSystem);
+    if (command === "draft-close") return host.draftClose(selectedSystem, sessionId || name);
+    if (!name) throw new Error("draft create requires a name");
+    return host.draftCreate(selectedSystem, { name, from, idempotencyKey });
+  }
+  if (command === "join") {
+    if (!principalId && state && state.session.id !== sessionId) throw new Error("Choose an empty --root for a different session");
+    if (!principalId && !state && (await fs.readdir(selected).catch(() => [])).length) throw new Error("Join requires an empty --root destination");
+    if (!sessionId) throw new Error("join requires a session identifier");
+    const result = await host.join(sessionId, principalId ? { principalId } : {});
+    if (principalId) return result;
+    if (state && state.session.id !== sessionId) throw new Error("Choose an empty --root for a different session");
+    if (!state && (await fs.readdir(selected).catch(() => [])).length) throw new Error("Join requires an empty --root destination");
+    const snapshot = result.files ? result : await host.pull(sessionId);
+    return applySnapshot(selected, snapshot, state, provider);
+  }
   if (command === 'publish') {
     let selectedSubmission = submission;
     if (!selectedSubmission) {
@@ -337,20 +378,21 @@ export async function runHostedCommand(command, { root = process.cwd(), systemId
     const entries = await fs.readdir(selected).catch((error) => { if (error.code === "ENOENT") return []; throw error; });
     const pendingOnly = pending && entries.length === 1 && entries[0] === ".timds" && (await fs.readdir(path.join(selected, ".timds"))).join() === "start.json";
     if (entries.length && !pendingOnly) throw new Error("Start requires an empty destination; choose --root PATH (use --idempotency-key to recover an interrupted start there)");
-    if (pending && (pending.systemId !== systemId || pending.provider?.url !== provider.url || idempotencyKey && idempotencyKey !== pending.idempotencyKey)) throw new Error("An interrupted start here belongs to another system, host, or idempotency key");
+    if (pending && ((pending.draft || null) !== (draft || null) || pending.systemId !== systemId || pending.provider?.url !== provider.url || idempotencyKey && idempotencyKey !== pending.idempotencyKey)) throw new Error("An interrupted start here belongs to another system, host, or idempotency key");
     const key = pending?.idempotencyKey || idempotencyKey || randomUUID();
     if (typeof key !== "string" || !key.trim() || key.length > 200) throw new Error("idempotency-key must contain 1–200 characters");
     await safeDestination(selected, ".timds/start-check");
     if (pending && (await fs.lstat(path.join(selected, PENDING_START_FILE))).isSymbolicLink()) throw new Error("Pending session metadata cannot be a symbolic link");
     await fs.mkdir(path.join(selected, ".timds"), { recursive: true });
-    await fs.writeFile(path.join(selected, PENDING_START_FILE), `${JSON.stringify({ apiVersion: HOST_API_VERSION, systemId, provider, idempotencyKey: key }, null, 2)}\n`, { mode: 0o600 });
-    const snapshot = await host.start({ systemId, idempotencyKey: key });
+    await fs.writeFile(path.join(selected, PENDING_START_FILE), `${JSON.stringify({ apiVersion: HOST_API_VERSION, systemId, draft: draft || null, provider, idempotencyKey: key }, null, 2)}\n`, { mode: 0o600 });
+    const snapshot = await host.start({ systemId, idempotencyKey: key, ...(draft ? { draft } : {}), ...(on ? { on: Array.isArray(on) ? on : on.split(",").map(value => value.trim()).filter(Boolean) } : {}), ...(note ? { note } : {}) });
     decodeFiles(snapshot.files); validateSession(snapshot.session);
     const result = await applySnapshot(selected, snapshot, null, provider);
     await fs.rm(path.join(selected, PENDING_START_FILE));
     return result;
   }
   if (!state || state.apiVersion !== HOST_API_VERSION) throw new Error("No compatible TimDS session here; run timds start first.");
+  if (command === "claim") return host.claim(state.session.id, { patterns: patterns || (Array.isArray(on) ? on : String(on || "").split(",").filter(Boolean)), note });
   if (command === "status" || command === "history") return host[command](state.session.id);
   if (command === "close") {
     const result = await host.close(state.session.id);
@@ -360,9 +402,24 @@ export async function runHostedCommand(command, { root = process.cwd(), systemId
   if (state.session.status === "closed") throw new Error("This TimDS session is closed; start a new session.");
   if (command === "pull") return applySnapshot(selected, await host.pull(state.session.id), state, provider);
   const { files, changes } = await sessionChanges(selected, state, note);
+  async function retryRebased(result) {
+    if (!result.stale || !result.rebasedChanges || staleRetries <= 0) return null;
+    const remote = decodeFiles(result.files), desired = new Map(remote);
+    for (const [name, bytes] of decodeFiles(result.rebasedChanges.changedFiles || [])) desired.set(name, bytes);
+    for (const name of result.rebasedChanges.deletedPaths || []) desired.delete(hostedPath(name));
+    validateLinks(desired);
+    await applySnapshot(selected, { ...result, conflicts: [], files: encodeFiles(desired) }, state, provider, true);
+    await writeState(selected, { apiVersion: HOST_API_VERSION, provider, session: validateSession(result.session), files: result.files });
+    return runHostedCommand(command, { root: selected, note, portalUrl: provider.url, token, fetchImpl, credentialsPath, dryRun, resolve: [], staleRetries: staleRetries - 1 });
+  }
   if (command === "submit") {
     if (dryRun) return { apiVersion: HOST_API_VERSION, dryRun: true, ...changes };
     const result = await host.submit(state.session.id, changes);
+    const retried = await retryRebased(result); if (retried) return retried;
+    if (result.conflicts?.length || result.stale) {
+      await writeState(selected, { ...state, pendingConflicts: { paths: result.conflicts || [], mainRevision: result.mainRevision, session: result.session, files: result.files } });
+      return { ...result, applied: false };
+    }
     validateSession(result.session);
     if (result.files) decodeFiles(result.files);
     await writeState(selected, { apiVersion: HOST_API_VERSION, provider, session: result.session, files: result.files || encodeFiles(files) });
@@ -372,17 +429,27 @@ export async function runHostedCommand(command, { root = process.cwd(), systemId
     const resolvedPaths = typeof resolve === "string" ? [resolve] : resolve;
     if (resolvedPaths.length) {
       if (!state.pendingConflicts?.mainRevision) throw new Error("Run timds update to identify conflicts before resolving paths.");
-      for (const name of resolvedPaths) if (!state.pendingConflicts.paths.includes(name)) throw new Error(`No pending conflict for ${name}`);
+      for (const resolution of resolvedPaths) {
+        const match = /^(.*)#(.+)=(mine|theirs)$/.exec(resolution);
+        const name = hostedPath(match ? match[1] : resolution);
+        if (!state.pendingConflicts.paths.some(conflict => typeof conflict === "string" ? conflict === name : conflict.path === name && (!match || conflict.key === match[2]))) throw new Error(`No pending conflict for ${resolution}`);
+      }
       changes.resolvedPaths = resolvedPaths;
       changes.mainRevision = state.pendingConflicts.mainRevision;
     }
     const result = await host.update(state.session.id, changes);
-    if (result.conflicts?.length) {
-      for (const name of result.conflicts) hostedPath(name);
-      await writeState(selected, { ...state, pendingConflicts: { paths: result.conflicts, mainRevision: result.mainRevision } });
+    const retried = await retryRebased(result); if (retried) return retried;
+    if (result.conflicts?.length || result.stale) {
+      for (const conflict of result.conflicts || []) hostedPath(typeof conflict === "string" ? conflict : conflict.path);
+      await writeState(selected, { ...state, pendingConflicts: { paths: result.conflicts || [], mainRevision: result.mainRevision, session: result.session, files: result.files } });
       return { ...result, applied: false };
     }
     return applySnapshot(selected, result, state, provider, true);
   }
   throw new Error(`Unknown hosted command: ${command}`);
+}
+
+/** Public snapshot materializer reused by the read-only draft consumer. */
+export async function materializeHostedSnapshot(root, snapshot, provider) {
+  return applySnapshot(root, snapshot, null, provider);
 }

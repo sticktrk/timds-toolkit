@@ -109,7 +109,7 @@ change. Work only in the Design System the user gave you.
   \`scripts/viewer.mjs\`, \`src/styles/viewer.css\`, and
   \`src/styles/canvas.css\` are stock starter plumbing that \`upgrade\`
   refreshes while unmodified; a local change leaves that file behind on later
-  upgrades, so prefer \`tokens.json\`, \`system.css\`, and the pages. When a change needs a protected file, say so in your hand-off
+  upgrades, so prefer \`tokens/*.json\`, \`system.css\`, and the pages. When a change needs a protected file, say so in your hand-off
   instead of working around it.
 - Edit authored tokens, source, documentation, components, navigation, and
   lightweight assets. Preserve the framework and visual language unless the
@@ -259,6 +259,7 @@ function protectedByPattern(workspace, dsRelative) {
   if (segments.some((segment) => PROTECTED_SEGMENTS.has(segment))) return true;
   if (PROTECTED_BASENAMES.has(segments.at(-1))) return true;
   if (PROTECTED_DIRECTORIES.includes(segments[0])) return true;
+  if (workspace.contractGroups && ["tokens.json", "media.json"].includes(dsRelative)) return true;
   if (PROTECTED_FILES.includes(dsRelative) || RELEASE_AUTOMATION_FILES.includes(dsRelative)) return true;
   const videoLocal = videoLocalDirectory(workspace);
   if (videoLocal && (dsRelative === videoLocal || dsRelative.startsWith(`${videoLocal}/`))) return true;
@@ -819,17 +820,22 @@ async function packageVersion() {
 
 /** Hosted session commands use the identical API and filesystem guards as the CLI. */
 export function registerHostedSessionTools(server, { root = process.cwd() } = {}) {
-  for (const command of ["start", "pull", "submit", "update", "status", "history", "close", "publish"]) {
-    server.registerTool(`timds_${command === "close" ? "sessions_close" : command}`, {
+  for (const command of ["start", "pull", "submit", "update", "status", "history", "close", "publish", "claim", "active-work", "join", "draft-create", "draft-list", "draft-close"]) {
+    server.registerTool(`timds_${command === "close" ? "sessions_close" : command.replaceAll("-", "_")}`, {
       title: `TimDS session ${command}`,
       description: `${command} a hosted TimDS design session. Publication requires a per-system publisher grant on the authenticated principal.`,
       inputSchema: {
-        ...(command === "start" ? { systemId: z.string().min(1), idempotencyKey: z.string().min(1).max(200).optional(), portalUrl: z.string().url().optional() } : {}),
-        ...(command === "update" ? { resolve: z.array(z.string().min(1)).optional().describe("Conflict paths whose local content is the explicit resolution") } : {}),
+        ...(command === "start" ? { systemId: z.string().min(1), note: z.string().max(2000).optional(), on: z.array(z.string().min(1)).optional(), draft: z.string().min(1).optional(), idempotencyKey: z.string().min(1).max(200).optional(), portalUrl: z.string().url().optional() } : {}),
+        ...(command === "update" ? { resolve: z.array(z.string().min(1)).optional().describe("PATH keeps local content; PATH#KEY=mine|theirs resolves exactly one key") } : {}),
+        ...(["active-work", "draft-create", "draft-list", "draft-close"].includes(command) ? { systemId: z.string().min(1).optional(), portalUrl: z.string().url().optional() } : {}),
+        ...(command === "claim" ? { patterns: z.array(z.string().min(1)).min(1), note: z.string().max(2000).optional() } : {}),
+        ...(command === "join" ? { sessionId: z.string().min(1), principalId: z.string().min(1).optional(), portalUrl: z.string().url().optional() } : {}),
+        ...(command === "draft-create" ? { name: z.string().min(1), from: z.string().default("main"), idempotencyKey: z.string().optional() } : {}),
+        ...(command === "draft-close" ? { name: z.string().min(1) } : {}),
         ...(command === "publish" ? { submission: z.string().min(1).optional(), dryRun: z.boolean().optional(), yes: z.boolean().optional().describe('Explicitly confirm publication after reviewing the dry run') } : {}),
         ...(["submit", "update"].includes(command) ? { note: z.string().max(2000).optional() } : {}),
       },
-      annotations: { readOnlyHint: ["status", "history"].includes(command), destructiveHint: ["close", "publish"].includes(command), openWorldHint: true, idempotentHint: command !== "start" },
+      annotations: { readOnlyHint: ["status", "history", "active-work", "draft-list"].includes(command), destructiveHint: ["close", "publish"].includes(command), openWorldHint: true, idempotentHint: command !== "start" },
     }, async (args) => {
       try { return toolResult(await runHostedCommand(command, { root, ...args })); }
       catch (error) { return toolError(error); }
@@ -842,10 +848,10 @@ export function registerHostedSessionTools(server, { root = process.cwd() } = {}
 export async function createDesignSystemMcpServer({ root = process.cwd(), hooks = {} } = {}) {
   const repoRoot = await findRepositoryRoot(root);
   // Fail fast on a directory that is not a Design System.
-  if (!process.env.TIMDS_PORTAL_URL) await loadWorkspace(repoRoot);
+  if (!process.env.TIMDS_PORTAL_URL) await loadWorkspace(repoRoot, { editing: true });
   const server = new McpServer({ name: DESIGN_SYSTEM_MCP_SERVER_NAME, version: await packageVersion() });
   registerDesignSystemTools(server, {
-    resolveWorkspace: () => loadWorkspace(repoRoot),
+    resolveWorkspace: () => loadWorkspace(repoRoot, { editing: true }),
     hooks: { ...hooks, remote: false },
   });
   registerHostedSessionTools(server, { root: repoRoot });

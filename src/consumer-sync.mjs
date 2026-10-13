@@ -37,6 +37,7 @@ export const BUNDLE_RECORD_SCHEMA_VERSION = 1;
 const SYNC_HELP = `Usage:
   timds consumer sync [--root PATH]
   timds consumer update [VERSION] [--root PATH]
+  timds consumer update --draft NAME [--portal-url URL] [--root PATH]
 
 sync fetches the Design System bundle the product pins (designSystem.version in
 ${CONSUMER_MANIFEST_FILE}) into designSystem.path, verifying every file's digest;
@@ -293,10 +294,10 @@ function parseArguments(argv, { positional = 0 } = {}) {
       options.help = true;
       continue;
     }
-    if (rawName !== "root") throw new Error(`Unknown option --${rawName}\n${SYNC_HELP}`);
+    if (!["root", "draft", "portal-url"].includes(rawName)) throw new Error(`Unknown option --${rawName}\n${SYNC_HELP}`);
     const next = inlineValue ?? argv[index + 1];
     if (next === undefined || next === "" || String(next).startsWith("-")) throw new Error(`--${rawName} requires a value`);
-    options.root = next;
+    options[rawName === "portal-url" ? "portalUrl" : rawName] = next;
     if (inlineValue === undefined) index += 1;
   }
   return options;
@@ -319,5 +320,46 @@ export async function runConsumerUpdate(args = [], { output = defaultOutput } = 
     output(SYNC_HELP);
     return null;
   }
+  if (options.draft) {
+    if (options.positional.length) throw new Error("Choose a published version or --draft, not both");
+    return updateConsumerDraft(options.root || process.cwd(), { draft: options.draft, portalUrl: options.portalUrl, output });
+  }
   return updateConsumerPin(options.root || process.cwd(), { version: options.positional[0] ?? null, output });
+}
+
+/** An explicit local prerelease override. The tracked production pin is untouched. */
+export async function updateConsumerDraft(rootInput, { draft, portalUrl, token, credentialsPath, fetchImpl = fetch, build, output = defaultOutput } = {}) {
+  const consumer = await loadConsumer(rootInput);
+  const { designSystem } = consumer;
+  if (designSystem.mode !== "published" || designSystem.linked || designSystem.commit) throw new Error("Draft integration requires a published consumer with an ordinary bundle directory");
+  const { prepareDraftSource } = await import("./draft-source.mjs");
+  const prepared = await prepareDraftSource({ systemId: designSystem.systemId, draft, portalUrl, token, credentialsPath, fetchImpl, build });
+  try {
+    const manifest = JSON.parse(await fs.readFile(path.join(prepared.root, "dist", BUNDLE_MANIFEST_FILE), "utf8"));
+    if (manifest.system?.id !== designSystem.systemId) throw new Error("Draft bundle belongs to a different design system");
+    const files = [];
+    for (const file of manifest.files || []) {
+      const relative = safeBundlePath(file.path);
+      const data = await fs.readFile(path.join(prepared.root, "dist", BUNDLE_OUTPUT_DIRECTORY, relative));
+      if (sha256Of(data) !== file.sha256) throw new Error(`Draft bundle digest mismatch: ${relative}`);
+      files.push({ ...file, path: relative, data });
+    }
+    const previous = await readBundleRecord(designSystem.root);
+    // Refuse unknown directories and symlink parents rather than overwriting product files.
+    if (existsSync(designSystem.root) && !previous) throw new Error("Existing bundle directory has no TimDS record; run consumer sync first");
+    for (const file of files) {
+      let current = designSystem.root;
+      for (const part of file.path.split('/')) {
+        current = path.join(current, part);
+        if ((await fs.lstat(current).catch(() => null))?.isSymbolicLink()) throw new Error(`Draft destination traverses a symlink: ${file.path}`);
+      }
+    }
+    const wanted = new Set(files.map(file => file.path));
+    for (const file of files) { const target = path.join(designSystem.root, file.path); await fs.mkdir(path.dirname(target), { recursive: true }); await fs.writeFile(target, file.data); }
+    for (const old of previous?.files || []) if (!wanted.has(old.path)) await fs.rm(path.join(designSystem.root, safeBundlePath(old.path)), { force: true });
+    const record = { schemaVersion: BUNDLE_RECORD_SCHEMA_VERSION, systemId: designSystem.systemId, pin: designSystem.version, version: designSystem.version, draft, revision: prepared.snapshot.session.baseRevision, syncedAt: new Date().toISOString(), files: files.map(({ data, ...file }) => file) };
+    await fs.writeFile(path.join(designSystem.root, CONSUMER_BUNDLE_RECORD_FILE), `${JSON.stringify(record, null, 2)}\n`);
+    output(`Integrated draft ${draft} at ${record.revision}. Production pin remains ${designSystem.version}; consumer sync restores it.`);
+    return { draft, revision: record.revision, version: designSystem.version, files: files.length, changed: true };
+  } finally { await prepared.dispose(); }
 }
