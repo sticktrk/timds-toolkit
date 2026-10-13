@@ -646,6 +646,7 @@ export async function checkConsumer(repoRootInput = process.cwd(), options = {})
       errors.push(`${designSystem.path} has no synced Design System bundle. Run: npm run timds -- consumer sync (npm install runs it from postinstall)`);
     } else {
       const record = designSystem.record;
+      if (record.draft) warnings.push(`Local draft ${record.draft} (${record.revision}) overrides published pin ${designSystem.version}; consumer sync restores the production pin.`);
       if (designSystem.version !== "current" && record.version !== designSystem.version) {
         errors.push(`${designSystem.path} holds Design System version ${record.version ?? "unknown"} but ${CONSUMER_MANIFEST_FILE} pins ${designSystem.version}. Run: npm run timds -- consumer sync`);
       }

@@ -45,6 +45,8 @@ const MAPPING = {
   },
   // golden page ids matching these prefixes are excluded wholesale
   excludedPagePrefixes: { "web/archetypes": "superseded by website designs under src/designs/" },
+  // starter pages the toolkit owns, with no golden counterpart by design
+  starterOnlyPages: { "use": "toolkit guidance on every way to consume a system; the golden repository documents it in its README" },
   // golden format id → starter format id, or null with a reason
   formats: {},
   formatReasons: {},
@@ -138,7 +140,7 @@ for (const goldenView of nav.VIEWS) {
   }
 }
 for (const [id, page] of starterPages) {
-  if (matchedStarterPages.has(id)) continue;
+  if (matchedStarterPages.has(id) || Object.hasOwn(MAPPING.starterOnlyPages, id)) continue;
   note("pages", "extra", id, `starter page "${page.title}" has no golden counterpart`);
 }
 

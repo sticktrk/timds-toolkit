@@ -599,3 +599,14 @@ test("refuses, before writing anything, when git ignores a file init would write
   const adopted = await initializeConsumer(tracked, { skipInstall: true, output: quiet });
   assert.ok(adopted.written.includes("package.json"));
 });
+
+test('optional draft preview adds a browser hook after the pinned stylesheet and preserves the version pin', async t => {
+  const product = await createConsumerRepo(t, { submodule: false, nested: false, rootPackage: { name: 'site', private: true, scripts: { dev: 'vite' } } });
+  await fs.writeFile(path.join(product, 'index.html'), '<html><head><link rel="stylesheet" href="/pinned.css"></head><body></body></html>');
+  const result = await initializeConsumer(product, { system: 'acme/core', version: '1.2.3', skipInstall: true, draftPreview: true, output() {} });
+  const html = await fs.readFile(path.join(product, 'index.html'), 'utf8');
+  assert.match(html, /pinned.css[\s\S]*data-timds-draft-preview/);
+  assert.equal(result.manifest.designSystem.version, '1.2.3');
+  const runtime = await fs.readFile(path.join(product, '.timds/draft-preview.mjs'), 'utf8');
+  assert.match(runtime, /timds_draft/); assert.match(runtime, /"source":"acme\/core"/);
+});

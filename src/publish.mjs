@@ -17,7 +17,9 @@ import process from "node:process";
 import { cleanPortalUrl, resolveAccessToken } from "./auth.mjs";
 import { detectSourceCommit } from "./artifact.mjs";
 import { collectArtifactFiles } from "./artifact-files.mjs";
-import { publicationDigest } from "./publication-snapshot.mjs";
+import { createPublicationStampFromFiles, publicationDigest } from "./publication-snapshot.mjs";
+
+export { createPublicationStampFromFiles } from "./publication-snapshot.mjs";
 
 export const PUBLICATION_STAMP = ".timds/cache/.timds-artifact.json";
 const stampFields = ["systemId", "version", "sourceCommit", "contentDigest"];
@@ -188,19 +190,41 @@ export async function publishRelease(workspace, options = {}) {
     throw error;
   });
   if (stamp.schemaVersion !== 1 || !matchesStamp(stamp, current)) throw new Error("The publication stamp differs from the local build or source commit; rebuild and push with timds publish");
-  const portal = cleanPortalUrl(options.portalUrl || workspace.manifest.media?.portalUrl || process.env.TIMDS_PORTAL_URL);
-  const token = await resolveAccessToken(portal, options);
-  if (!token) throw new Error("Publication requires an operator token: run timds auth login or set TIMDS_ACCESS_TOKEN in CI");
   const fetchImpl = options.fetchImpl || fetch;
-  const response = await fetchImpl(new URL("/api/timds/publish", portal).toString(), {
-    method: "POST", signal: AbortSignal.timeout(130_000),
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify(Object.fromEntries(stampFields.map((field) => [field, stamp[field]]))),
-  });
-  const result = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(`TimDS publication returned ${response.status}: ${String(result.error || result.message || "request rejected")}`);
-  const urlsValid = versionedUrlFields.every((field) => typeof result.versionedUrls?.[field] === "string" && result.versionedUrls[field]);
-  if (!["published", "awaiting-operator"].includes(result.status) || result.systemId !== stamp.systemId || result.version !== stamp.version || typeof result.publicRoot !== "string" || !urlsValid) throw new Error("Invalid TimDS publication response");
+  let result;
+  if (options.publisher !== undefined) {
+    if (typeof options.publisher !== "function") throw new Error("publisher must be a function");
+    // A trusted host already authorized publication. Give it the same stamped
+    // bytes without reading CLI credentials or making an authenticated callback.
+    result = await options.publisher({ stamp, files: await artifactFiles(workspace) });
+  } else {
+    const portal = cleanPortalUrl(options.portalUrl || workspace.manifest.media?.portalUrl || process.env.TIMDS_PORTAL_URL);
+    const token = await resolveAccessToken(portal, options);
+    if (!token) throw new Error("Publication requires an operator token: run timds auth login or set TIMDS_ACCESS_TOKEN in CI");
+    const response = await fetchImpl(new URL("/api/timds/publish", portal).toString(), {
+      method: "POST", signal: AbortSignal.timeout(130_000),
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(Object.fromEntries(stampFields.map((field) => [field, stamp[field]]))),
+    });
+    result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(`TimDS publication returned ${response.status}: ${String(result.error || result.message || "request rejected")}`);
+  }
+  return verifyPublicationResult(result, stamp, fetchImpl);
+}
+
+/** Trusted publication without a local checkout or on-disk provenance cache. */
+export async function publishReleaseFromFiles({ stamp, sourceFiles, artifactFiles: files, publisher, fetchImpl = fetch }) {
+  if (typeof publisher !== 'function') throw new Error('publisher must be a function');
+  const actual = createPublicationStampFromFiles({ sourceCommit: stamp?.sourceCommit, sourceFiles, artifactFiles: files, systemId: stamp?.systemId, version: stamp?.version });
+  if (stamp?.schemaVersion !== 1 || !matchesStamp(stamp, actual)) throw new Error('The publication stamp differs from the supplied source and artifact bytes');
+  const buffers = files.map(file => ({ path: file.path, content: file.content instanceof Uint8Array ? Buffer.from(file.content) : Buffer.from(file.content, file.encoding === 'base64' ? 'base64' : 'utf8') }));
+  const result = await publisher({ stamp: actual, files: buffers });
+  return verifyPublicationResult(result, actual, fetchImpl);
+}
+
+async function verifyPublicationResult(result, stamp, fetchImpl) {
+  const urlsValid = versionedUrlFields.every((field) => typeof result?.versionedUrls?.[field] === "string" && result.versionedUrls[field]);
+  if (!["published", "awaiting-operator"].includes(result?.status) || result.systemId !== stamp.systemId || result.version !== stamp.version || typeof result.publicRoot !== "string" || !urlsValid) throw new Error("Invalid TimDS publication response");
   if (result.status === "awaiting-operator") {
     if (!matchesStamp({ ...result.candidate, systemId: result.systemId }, stamp) || !result.operatorUrl) throw new Error("Invalid waiting-candidate response");
     return result;

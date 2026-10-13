@@ -301,3 +301,29 @@ test("the editing guide carries the rules without local-only steps", async (t) =
   assert.equal(annotations.delete_file.destructiveHint, true);
   for (const tool of tools) assert.ok(!Object.hasOwn(tool.inputSchema.properties ?? {}, "draftId"), tool.name);
 });
+
+test("hosted editing refuses ignored files without a Git checkout", async (t) => {
+  const repoRoot = await temporaryDirectory(t);
+  await initializeRepository(repoRoot, { standalone: true, provider: "hosted", portalUrl: "https://host.example" });
+  await fs.appendFile(path.join(repoRoot, ".gitignore"), "scratch.txt\n");
+  const client = await connect(await createDesignSystemMcpServer({ root: repoRoot }));
+  t.after(() => client.close());
+  const result = await call(client, "write_file", { path: "scratch.txt", content: "ignored", note: "Test ignored write" });
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /ignored/);
+  assert.equal(await fs.stat(path.join(repoRoot, "scratch.txt")).catch(() => null), null);
+});
+
+test('group references can be repaired through MCP after a failed check', async t => {
+  const root = await standaloneRepo(t), server = await createDesignSystemMcpServer({ root });
+  const client = await connect(server);
+  t.after(async () => { await client.close(); await server.close(); });
+  const color = JSON.parse(await fs.readFile(path.join(root, 'tokens/color.json')));
+  const previous = color.accent.value;
+  color.accent.value = '{color.missing}';
+  await ok(client, 'write_file', { path: 'tokens/color.json', content: JSON.stringify(color), note: 'Try a brand reference' });
+  assert.equal((await ok(client, 'run_check')).status, 'failed');
+  color.accent.value = previous;
+  await ok(client, 'write_file', { path: 'tokens/color.json', content: JSON.stringify(color), note: 'Repair missing reference' });
+  assert.notEqual((await ok(client, 'run_check')).status, 'failed');
+});

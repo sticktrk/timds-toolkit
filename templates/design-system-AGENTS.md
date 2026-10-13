@@ -56,7 +56,7 @@ repository root, so each one is also a slash command.
 
 | Path | Role | During design work |
 | --- | --- | --- |
-| `tokens.json` | Authored design tokens | Edit |
+| `tokens/*.json` | Authored design tokens | Edit |
 | `src/site.json` | The views and every page in them; the one place that declares which pages exist | Edit |
 | `src/formats.json` | Every print sheet and screen canvas the system produces, each tied to the page that shows it; previews and spec tables read it | Edit |
 | `src/pages/` | One content fragment per authored page | Edit |
@@ -80,7 +80,7 @@ guidance. Its structure is the part to keep: views, a shared shell, and pages
 built from the same few blocks.
 
 - `src/site.json` lists the views (Brand, Web DS, Digital DS, Social DS,
-  Print DS) and the pages in each, in
+  Print DS, Use) and the pages in each, in
   navigation order. A page is `{ "slug", "title", "summary" }` plus an
   optional `group` heading for the sidebar. The page `<view>/<slug>` is
   authored in `src/pages/<view>/<slug>.html` and built to
@@ -201,7 +201,8 @@ replaced on the next upgrade and reported, never kept; a system adopted
 later keeps a changed file as customized (`"recorded"`). It appends views, planned pages, and asset formats a newer scaffold
 declares to `src/site.json` and `src/formats.json` without removing,
 reordering, or retitling anything declared here; writes the Digital, Social,
-and Print overview fragments when it adds or authors their page; and adds a
+and Print overview fragments and the Use page (`use`, every way the system is
+consumed) when it adds or authors their page; and adds a
 missing stock stylesheet link to `src/layout.html`. It never touches other
 fragments, `tokens.json`, `system.css`, or `timds.json`. In the recorded
 mode a file changed here is reported as customized and kept unless the
@@ -284,7 +285,7 @@ them, logos, asset formats), so what reaches the kit reaches every tool.
 1. Collect the approved inputs before designing: brand colors, licensed
    typefaces, logo files, and voice guidance. Ask for what is missing. Never
    invent a client mark, a usage right, or a compliance rule.
-2. Replace the starter values in `tokens.json`. Keep role-friendly token names
+2. Replace the starter values in `tokens/*.json`. Keep role-friendly token names
    or map the roles in `timds.json`.
 3. Rewrite the authored pages (`brand/color`, `brand/typography`,
    `web/spacing`, `web/components`, and the `digital`, `social`, and `print`
@@ -307,7 +308,8 @@ them, logos, asset formats), so what reaches the kit reaches every tool.
    `__TIMDS_CLI__ brand` lists the logo and the voice guidance.
 8. Inspect `__TIMDS_CLI__ preview` at desktop and mobile widths, the designs
    under `/designs/` included.
-9. Record the change under `## Unreleased` in `CHANGELOG.md`: one or two
+9. Append the change after the existing notes under `## Unreleased` in
+   `CHANGELOG.md`, preserving existing notes and their order: one or two
    sentences for the people who use the system, led by the area it touches
    (`Brand · Color: ...`, `Print DS: ...`). `submit` refuses a change
    without one.
@@ -326,7 +328,7 @@ them, logos, asset formats), so what reaches the kit reaches every tool.
 
 - Never commit full-resolution images, video masters, B-roll, source audio, or other large originals to Git or `dist/`.
 - This phase supports public assets only. Put originals under ignored `media-local/` and register them with `__TIMDS_CLI__ assets add FILE --key LOGICAL_KEY`.
-- Run `__TIMDS_CLI__ auth login` once, then `__TIMDS_CLI__ assets publish`. `submit` also publishes changed staged files before validation.
+- Run `__TIMDS_CLI__ login` once, then `__TIMDS_CLI__ assets publish`. `submit` also publishes changed staged files before validation.
 - The starter viewer does not resolve logical keys. Reference a published asset by the `publicUrl` in its `media.json` record; the derived layer joins the asset back to that record by URL. A framework viewer can resolve keys with `resolveMediaSource` and serve staged local files with `localMediaResponse` from `@dtconcepts/timds/media`.
 - Staging records the current catalog checksum. Publication refuses conflicting replacements and asset-ID reuse across logical keys. Keep reviewed derivatives: remove stale entries from `.timds/local-media.json` or restore them with `assets pull KEY --force`. Restage with `assets add` only for a reviewed, intentional replacement, never to push an old original over an optimized key.
 - TimDS measures video and audio metadata with `ffprobe` during `assets add`; use `__TIMDS_CLI__ assets backfill-metadata` to repair older records from stable public URLs without re-uploading them.
@@ -475,3 +477,21 @@ Do not choose an unbounded `latest` or use `--force` without explicit
 authorization. The upgrade removes a legacy `.timds/cli` copy when present;
 the CLI itself comes from `node_modules`. Review and commit the tooling diff
 separately from ordinary design changes.
+
+
+## Multiplayer source contract
+
+Agents author key maps in `tokens/<group>.json` and `media/<group>.json`.
+`tokens.json` and `media.json` are generated compatibility views when
+`.timds/contract-layout.json` exists. `upgrade` migrates the earlier aggregates;
+`check` enforces group layout and reference integrity. Do not edit generated
+views. Token values may reference another key with `{color.brand.600}`.
+
+Humans direct work, inspect status/history, publish and roll back. In hosted
+systems the agent uses `timds_*` MCP tools to claim paths, start or join a
+session, update and submit with the human intent in `note`. Claims are advisory.
+A named draft has members and no expiry; `start --draft NAME` targets it.
+Read active work before editing. Resolve exactly the returned conflict key
+with `PATH#KEY=mine|theirs`; never replace unrelated changes. Return the live
+URL and frozen submission preview to the human. Product repositories remain
+pinned to their published version until the developer changes that pin.

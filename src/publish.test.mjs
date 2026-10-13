@@ -273,3 +273,71 @@ test("upgrade reports the operator token the refreshed release workflow now requ
   await runWithOutputSink((line) => lines.push(line), () => runCli(["upgrade", "--root", root]));
   assert.match(lines.join("\n"), /Managed automation: 1 files updated\nThe release workflow now requires the TIMDS_ACCESS_TOKEN repository secret/);
 });
+
+test("trusted in-process publication receives exact artifact bytes and never resolves CLI credentials", async (t) => {
+  const f = await fixture(t); const stamp = await writePublicationStamp(f.workspace);
+  const credentialFile = path.join(f.root, "invalid-credentials.json");
+  await fs.writeFile(credentialFile, "invalid credentials JSON must not be read");
+  const reads = [];
+  const result = await publishRelease(f.workspace, {
+    portalUrl: "not a portal URL", credentialsPath: credentialFile,
+    publisher: async ({ stamp: received, files }) => {
+      assert.deepEqual(received, stamp);
+      for (const expected of publicationFixture().artifactFiles) assert.deepEqual(files.find(file => file.path === expected.path).content, expected.content);
+      return resultFor(received);
+    },
+    fetchImpl: async (url, options) => { reads.push({ url, options }); return json(stamp); },
+  });
+  assert.equal(result.status, "published");
+  assert.equal(reads.length, 1);
+  assert.equal(reads[0].url, "https://example-ds.timds.com/.timds-artifact.json");
+  assert.equal(reads[0].options.headers.Authorization, undefined);
+  assert.equal((await createPublicationStamp(f.workspace)).contentDigest, stamp.contentDigest);
+});
+
+test("in-process publication keeps stamp, response, and public-byte validation", async (t) => {
+  const f = await fixture(t); const stamp = await writePublicationStamp(f.workspace);
+  let called = false;
+  const publisher = async () => { called = true; return resultFor(stamp); };
+  await f.write("dist/bundle.json", "different bytes");
+  await assert.rejects(publishRelease(f.workspace, { publisher }), /differs from the local/);
+  assert.equal(called, false);
+  await f.write("dist/bundle.json", publicationFixture().artifactFiles.find(file => file.path === "bundle.json").content);
+  await assert.rejects(publishRelease(f.workspace, { publisher: async () => ({ ...resultFor(stamp), version: "wrong" }) }), /Invalid TimDS publication response/);
+  await assert.rejects(publishRelease(f.workspace, { publisher, fetchImpl: async () => json({ ...stamp, contentDigest: "wrong" }) }), /public root does not serve/);
+});
+
+for (const embedded of [false, true]) test(`file-tree provenance equals Git provenance for ${embedded ? 'embedded' : 'standalone'} source`, async t => {
+  const { createPublicationStampFromFiles } = await import('./publish.mjs');
+  const f = await fixture(t, embedded);
+  const prefix = embedded ? 'design-system/' : '';
+  const sourceFiles = f.git('ls-tree', '-r', '-z', 'HEAD').split('\0').filter(Boolean).map(record => {
+    const [header, name] = record.split('\t'), [mode, , oid] = header.split(' ');
+    return { path: name.slice(prefix.length), mode, encoding: 'base64', content: execFileSync('git', ['cat-file', 'blob', oid], { cwd: f.root }).toString('base64') };
+  });
+  sourceFiles.reverse(); // The helper must restore Git tree order itself.
+  const artifactFiles = publicationFixture().artifactFiles;
+  const stamp = createPublicationStampFromFiles({ sourceCommit: f.head(), sourceFiles, artifactFiles });
+  assert.deepEqual(stamp, await createPublicationStamp(f.workspace));
+  assert.throws(() => createPublicationStampFromFiles({ sourceCommit: f.head(), sourceFiles, artifactFiles, version: 'different' }), /identity differs/);
+  assert.throws(() => createPublicationStampFromFiles({ sourceCommit: 'not-a-commit', sourceFiles, artifactFiles }), /committed source revision/);
+});
+
+test('file-tree publication verifies bytes before the publisher and public stamp after it without a workspace', async () => {
+  const { createPublicationStampFromFiles, publishReleaseFromFiles } = await import('./publish.mjs');
+  const input = publicationFixture();
+  const sourceFiles = [
+    ...['manifest', 'tokens', 'media'].map(key => ({ path: key === 'manifest' ? 'timds.json' : `${key}.json`, content: Buffer.from(JSON.stringify(input[key])) })),
+    ...input.sourceFiles.map(file => ({ path: file.path, content: Buffer.from(file.content || 'x'.repeat(file.bytes)) })),
+  ];
+  const stamp = createPublicationStampFromFiles({ sourceCommit: 'a'.repeat(40), sourceFiles, artifactFiles: input.artifactFiles });
+  let calls = 0;
+  const result = await publishReleaseFromFiles({ stamp, sourceFiles, artifactFiles: input.artifactFiles.map(file => ({ path: file.path, encoding: 'base64', content: file.content.toString('base64') })),
+    publisher: async ({ stamp: received, files }) => { calls++; assert.deepEqual(received, stamp); assert.deepEqual(files, input.artifactFiles); return resultFor(stamp); },
+    fetchImpl: async (url, options) => { assert.equal(url, 'https://example-ds.timds.com/.timds-artifact.json'); assert.equal(options.headers.Authorization, undefined); return json(stamp); },
+  });
+  assert.equal(calls, 1); assert.equal(result.status, 'published');
+  assert.throws(() => createPublicationStampFromFiles({ sourceCommit: stamp.sourceCommit, sourceFiles, artifactFiles: input.artifactFiles.map(file => ({ ...file, mode: '120000' })) }), /regular files/);
+  await assert.rejects(publishReleaseFromFiles({ stamp, sourceFiles, artifactFiles: [...input.artifactFiles, { path: 'injected.txt', content: Buffer.from('changed') }], publisher: async () => { calls++; } }), /differs from the supplied/);
+  assert.equal(calls, 1);
+});

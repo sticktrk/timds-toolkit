@@ -114,10 +114,17 @@ pre { margin: var(--space-6) 0 0; padding: var(--space-4) var(--space-6); overfl
   .layout { grid-template-columns: 1fr; }
   .sidenav { position: static; height: auto; padding: var(--space-6) var(--space-4); border-right: 0; border-bottom: var(--size-line) solid var(--color-line); }
   .appbar { gap: var(--space-3); padding: 0 var(--space-4); }
+  /* Six views and the designs link outgrow a phone; the row scrolls sideways instead of running off the edge. */
+  .appbar__views { min-width: 0; overflow-x: auto; scrollbar-width: thin; }
+  .appbar__view { flex-shrink: 0; }
   .appbar__view small, .appbar__version { display: none; }
 }
 
 @media (max-width: 40rem) {
+  /* The views take a row of their own under the brand name, so four or five are in view before the row scrolls. */
+  .appbar { flex-wrap: wrap; row-gap: 0; }
+  .appbar__brand { padding-top: var(--space-3); }
+  .appbar__views { flex-basis: 100%; }
   .content { padding: var(--space-8) var(--space-4); }
   .spec, .spec thead, .spec tbody, .spec tr, .spec th, .spec td { display: block; }
   .spec thead { display: none; }

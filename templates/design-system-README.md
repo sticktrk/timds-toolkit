@@ -46,7 +46,7 @@ static artifact that TimDS will publish.
 
 After committing and pushing source changes, an authorized operator runs
 `__TIMDS_CLI__ publish` to build, push the declared artifact ref and request portal
-publication. Sign in with `__TIMDS_CLI__ auth login`, or configure an unbound
+publication. Sign in with `__TIMDS_CLI__ login`, or configure an unbound
 operator `TIMDS_ACCESS_TOKEN` in CI. Designer/website and consumer tokens cannot
 promote a release.
 The artifact ref must be separate from the remote default branch. Publication
@@ -68,12 +68,12 @@ deterministic Node.js commands under `scripts/`. The starter exists so the
 contract builds and validates immediately; replace its neutral tokens and
 examples with approved client foundations rather than treating them as brand
 guidance. It is organized as views (Brand, Web DS, Digital DS, Social DS,
-Print DS), each a list of pages, all rendered into one shared shell. Some pages are authored from the starter
+Print DS, Use), each a list of pages, all rendered into one shared shell. Some pages are authored from the starter
 tokens; the rest are declared as planned and built once someone writes them.
 
 | Path | Purpose |
 | --- | --- |
-| `tokens.json` | Authored tokens; the build emits each as a `--group-name` CSS custom property in `tokens.css` |
+| `tokens/*.json` | Authored tokens; the build emits each as a `--group-name` CSS custom property in `tokens.css` |
 | `src/site.json` | The views and their pages, authored or planned; drives the navigation and the overview |
 | `src/formats.json` | Every print sheet and screen canvas the system produces, each tied to its page; `{{formats:GROUP}}` tables and `{{canvas:ID}}` previews read it |
 | `src/pages/` | One content fragment per authored page, such as `src/pages/brand/color.html` |
@@ -154,7 +154,7 @@ The authoring viewer reads the ignored local file. Authenticate once and upload
 the staged file to public TimDS object storage:
 
 ```bash
-__TIMDS_CLI__ auth login
+__TIMDS_CLI__ login
 __TIMDS_CLI__ assets publish
 ```
 
@@ -314,3 +314,21 @@ The CLI runs from `node_modules`; do not commit that directory or a copied
 `.timds/cli` tree. The upgrade does not rewrite this Design System's manifest,
 tokens, media catalog, authored source, framework configuration, documentation,
 or generated artifact. Review and commit the tooling diff separately.
+
+
+## Multiplayer source contract
+
+Agents author key maps in `tokens/<group>.json` and `media/<group>.json`.
+`tokens.json` and `media.json` are generated compatibility views when
+`.timds/contract-layout.json` exists. `upgrade` migrates the earlier aggregates;
+`check` enforces group layout and reference integrity. Do not edit generated
+views. Token values may reference another key with `{color.brand.600}`.
+
+Humans direct work, inspect status/history, publish and roll back. In hosted
+systems the agent uses `timds_*` MCP tools to claim paths, start or join a
+session, update and submit with the human intent in `note`. Claims are advisory.
+A named draft has members and no expiry; `start --draft NAME` targets it.
+Read active work before editing. Resolve exactly the returned conflict key
+with `PATH#KEY=mine|theirs`; never replace unrelated changes. Return the live
+URL and frozen submission preview to the human. Product repositories remain
+pinned to their published version until the developer changes that pin.

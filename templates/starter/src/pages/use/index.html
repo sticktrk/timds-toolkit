@@ -1,0 +1,185 @@
+<span class="eyebrow">Use</span>
+<h1 class="page-title">Using the system</h1>
+<p class="lede">{{name}} is published once and read many ways: as these pages in a browser, as one text file an AI tool reads, as a machine-readable layer a script joins, over MCP for an agent, as a pinned bundle a website loads, and as whole-page designs a developer ports. This page lays out each way in, who it is for, and what to take from it. Every way in reads the same published release, so every reader works from the same brand.</p>
+<div class="rule"></div>
+
+<section class="block" id="audiences">
+  <div class="block__head">
+    <h2 class="h2">Who uses it, and how</h2>
+    <p>Each way in serves one kind of reader. Start from the row that describes you; the rest of this page explains each one.</p>
+  </div>
+  <table class="spec">
+    <thead><tr><th>Reader</th><th>Way in</th><th>Start with</th></tr></thead>
+    <tbody>
+      <tr><td><strong>A person</strong>: a designer, writer, marketer, or printer</td><td>These pages, in a browser</td><td>The Brand view, then the view for the surface at hand</td></tr>
+      <tr><td><strong>An AI assistant</strong> that reads a URL</td><td>One text file with the brand essentials and the page index</td><td><a href="/llms.txt"><code>/llms.txt</code></a></td></tr>
+      <tr><td><strong>An agent with MCP</strong></td><td>The <code>timds-design-system-read</code> server</td><td><code>get_consumer_guide</code>, then <code>describe_system</code></td></tr>
+      <tr><td><strong>A script or pipeline</strong></td><td>The machine-readable layer beside the pages</td><td><a href="/index.json"><code>/index.json</code></a>, <a href="/tokens.json"><code>/tokens.json</code></a>, <a href="/brand.json"><code>/brand.json</code></a></td></tr>
+      <tr><td><strong>A website or app</strong></td><td>A pinned release and its consumer bundle</td><td><code>timds.consumer.json</code> at the product's root</td></tr>
+      <tr><td><strong>A developer building a page</strong></td><td>The website designs: whole pages on the system's own stylesheets</td><td>The <code>/designs/</code> directory in the app bar</td></tr>
+      <tr><td><strong>A designer, or an agent changing the system</strong></td><td>The system's repository and its editing tools</td><td><code>AGENTS.md</code> in the repository</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section class="block" id="browser">
+  <div class="block__head">
+    <h2 class="h2">Read it in a browser</h2>
+    <p>These pages are the published artifact itself, built from the system's source on every release. Each view is one audience's slice of the system, and every page follows the same shape: an eyebrow, a title, a summary, then one block per topic.</p>
+  </div>
+  <table class="spec">
+    <thead><tr><th>On the page</th><th>What it is</th></tr></thead>
+    <tbody>
+      <tr><td><strong>A table</strong></td><td>The rules. Each row is one record every other way in can cite, so a specification or a do-and-don't lives in a table, never in prose.</td></tr>
+      <tr><td><strong>A note</strong></td><td>Guidance that is not a row: a reason, a caution, an exception.</td></tr>
+      <tr><td><strong>A code block</strong></td><td>Markup to copy as written.</td></tr>
+      <tr><td><strong>A preview</strong></td><td>A live sample of the thing described. Its sample text is illustration, never a rule.</td></tr>
+      <tr><td><strong>Planned</strong></td><td>A page declared in the navigation and not yet written. Nothing is published for it, so no reader receives placeholder guidance.</td></tr>
+      <tr><td><strong>The version in the app bar</strong></td><td>The release these pages belong to. Every merged change becomes a new patch release.</td></tr>
+      <tr><td><strong>Markdown</strong></td><td>The check writes a mirror of every page at <code>index.md</code> beside it, the same content as plain text. This page's is <a href="/use/index.md"><code>/use/index.md</code></a>.</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section class="block" id="llms">
+  <div class="block__head">
+    <h2 class="h2">One URL for any AI tool</h2>
+    <p>A person who wants an assistant to work on-brand pastes one address. The file opens with how to use it, so the tool needs no other instruction.</p>
+  </div>
+  <table class="spec">
+    <thead><tr><th>File</th><th>Holds</th><th>Use it when</th></tr></thead>
+    <tbody>
+      <tr><td><a href="/llms.txt"><code>/llms.txt</code></a></td><td>How to use the file, then the brand essentials: every role color as hex, every font with its family and the files or service that provide it, every logo by variant with its URL, every asset format with its size, and then the page directory.</td><td>Pasting the system into a chat, or into any tool that reads a URL.</td></tr>
+      <tr><td><a href="/llms-full.txt"><code>/llms-full.txt</code></a></td><td>Every page's Markdown in one file.</td><td>A tool that reads a single URL and needs the whole system, not a directory to follow.</td></tr>
+    </tbody>
+  </table>
+  <p class="note">Both files are generated from the built pages on every check, never written by hand, and the published copies carry absolute URLs, so either one can be handed around on its own.</p>
+</section>
+
+<section class="block" id="machine">
+  <div class="block__head">
+    <h2 class="h2">The machine-readable layer</h2>
+    <p>The check (<code>npm run timds -- check</code>) reads the built HTML and CSS and writes these documents beside the pages, and every release publishes them; a plain dev build serves the pages without them. Nothing in them is maintained by hand, so they cannot drift from what the pages say. A script, a render pipeline, or a host reads them directly; the MCP server below serves the same documents.</p>
+  </div>
+  <table class="spec">
+    <thead><tr><th>Document</th><th>Holds</th></tr></thead>
+    <tbody>
+      <tr><td><a href="/index.json"><code>index.json</code></a></td><td>Every page as structured blocks: rules from its tables, one record per row, notes, code, and assets joined to their media records.</td></tr>
+      <tr><td><a href="/tokens.json"><code>tokens.json</code></a></td><td>Every CSS custom property the pages load, resolved, with the scope and kind of each, and the brand roles they fill.</td></tr>
+      <tr><td><a href="/brand.json"><code>brand.json</code></a></td><td>The brand kit: the role colors and fonts, each font with the files or service that provide it, every logo and image presented as brand material, and the guidance groups.</td></tr>
+      <tr><td><code>formats.json</code></td><td>Every print sheet and screen canvas with its size, bleed, and safe area, when the system keeps a format catalog.</td></tr>
+      <tr><td><code>designs.json</code></td><td>Every website design page and state as HTML, with the files it loads.</td></tr>
+      <tr><td><code>bundle.json</code></td><td>Every file in the consumer bundle with its size and digest, and the immutable copy of this version a website pins.</td></tr>
+      <tr><td><code>index.md</code></td><td>Beside every page, its Markdown mirror.</td></tr>
+    </tbody>
+  </table>
+  <p class="note">Every record carries a stable id, such as <code>brand/voice#principles</code>: the page, then the block, then the row. Cite the id, and a reviewer can resolve it. A block's id is the citation, so it is never renamed casually.</p>
+  <table class="spec">
+    <thead><tr><th>Brand role</th><th>Answers</th></tr></thead>
+    <tbody>
+      <tr><td><code>color.background</code>, <code>color.panel</code></td><td>The page ground and the raised surface on it.</td></tr>
+      <tr><td><code>color.accent</code></td><td>The one color that signals an action or a highlight.</td></tr>
+      <tr><td><code>color.text</code>, <code>color.muted</code></td><td>Body text and secondary text.</td></tr>
+      <tr><td><code>font.display</code>, <code>font.body</code>, <code>font.ui</code></td><td>Headings, running text, and interface labels.</td></tr>
+    </tbody>
+  </table>
+  <p class="note">Ask for a role, not a token name. A role resolves to the token that fills it and that token's value, so a consumer never has to know how this system names things. A role nothing fills is a gap the system reports, never a value to guess.</p>
+</section>
+
+<section class="block" id="mcp">
+  <div class="block__head">
+    <h2 class="h2">Connect an agent over MCP</h2>
+    <p>The <code>timds-design-system-read</code> server serves the layer above to any MCP-capable agent. It is read-only apart from filing a gap, never sees authored source, and serves the current published release by default; <code>version</code> selects an earlier one. Every result names the version it was read from.</p>
+  </div>
+  <table class="spec">
+    <thead><tr><th>Where it runs</th><th>How to connect</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Hosted</strong></td><td>The TimDS portal serves it over HTTP, authorized with an access token. In a product, <code>timds consumer init</code> writes the entry into <code>.mcp.json</code>.</td></tr>
+      <tr><td><strong>Against a checkout</strong></td><td><code>npm run timds -- mcp read</code> in the system's repository, after a check has built the layer.</td></tr>
+      <tr><td><strong>Against the published copy</strong></td><td><code>npm run timds -- mcp read --published URL</code>, with the system's published root.</td></tr>
+    </tbody>
+  </table>
+  <table class="spec">
+    <thead><tr><th>Tool</th><th>Gives</th></tr></thead>
+    <tbody>
+      <tr><td><code>get_consumer_guide</code></td><td>How to use a system to produce on-brand work. Read it first.</td></tr>
+      <tr><td><code>list_design_systems</code>, <code>describe_system</code></td><td>What is in scope; the served, published, and pinned versions; the page directory; the consumer bundle and its immutable copy.</td></tr>
+      <tr><td><code>resolve_role</code></td><td>A brand role to the token that fills it and its value. An unfilled role is a reported gap, never a guess.</td></tr>
+      <tr><td><code>get_tokens</code></td><td>Resolved custom properties by name, kind, or scope, such as a dark theme.</td></tr>
+      <tr><td><code>get_brand</code></td><td>The roles, each font with its sources, the logos, the imagery, and the guidance groups.</td></tr>
+      <tr><td><code>list_formats</code></td><td>The asset format catalog: every sheet and canvas with its size, bleed, and safe margin.</td></tr>
+      <tr><td><code>list_pages</code>, <code>read_page</code></td><td>The page directory, and one page or one block as Markdown or as structured blocks.</td></tr>
+      <tr><td><code>list_designs</code>, <code>read_design</code></td><td>The website designs, and one page state's HTML with the files it loads.</td></tr>
+      <tr><td><code>search_guidance</code></td><td>The blocks that answer a question, guidance groups first, every result cited by page and block.</td></tr>
+      <tr><td><code>list_media</code></td><td>The published media catalog by tag or kind, each with a stable public URL.</td></tr>
+      <tr><td><code>report_gap</code></td><td>Files one gap into the system's request intake, when the host provides one.</td></tr>
+    </tbody>
+  </table>
+  <p class="note">The resources <code>timds://brand.json</code>, <code>timds://tokens.json</code>, <code>timds://index.json</code>, <code>timds://llms.txt</code>, <code>timds://formats.json</code>, <code>timds://bundle.json</code>, and <code>timds://guidance/{group}</code> serve the same documents to a client that reads resources rather than calling tools.</p>
+</section>
+
+<section class="block" id="products">
+  <div class="block__head">
+    <h2 class="h2">Pin it in a website or app</h2>
+    <p>A product never copies the system. It pins a release in <code>timds.consumer.json</code> at its root and installs that release's consumer bundle: the stylesheets, scripts, and small assets the system names in <code>bundle.include</code>, fetched into the product's ignored <code>design-system/</code> directory under the same paths they have here, every digest verified. A clone and an install is all a product, or an agent working in it, needs.</p>
+  </div>
+  <table class="spec">
+    <thead><tr><th>Step</th><th>Command</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Adopt</strong></td><td><code>npm run timds -- consumer init --system ID</code></td><td>Writes the manifest with a published pin, wires the sync into <code>postinstall</code>, and installs the consumer skill, the preview workflows, and the hosted MCP entry.</td></tr>
+      <tr><td><strong>Install</strong></td><td><code>npm ci</code></td><td>Fetches the pinned bundle and verifies it.</td></tr>
+      <tr><td><strong>Move the pin</strong></td><td><code>npm run timds -- consumer update VERSION</code></td><td>Moves to a version, or without one to the current release. A pin of <code>current</code> follows every release at the next install.</td></tr>
+      <tr><td><strong>Check</strong></td><td><code>npm run timds -- consumer check</code></td><td>Validates the manifest and the pin, and that a branch stays inside the product's declared design surface.</td></tr>
+      <tr><td><strong>Review</strong></td><td><code>npm run timds -- consumer preview --app NAME</code></td><td>Captures each route at desktop and phone widths in both color schemes, with the paired design beside it.</td></tr>
+    </tbody>
+  </table>
+  <p class="note">A pin names an immutable copy of the release, so a later release never changes what a pinned product loads. In product CSS use a token by name, never by its literal value, so the product follows the pin. The <code>timds-consume-design-system</code> skill the adoption installs tells an agent how to make a design change in the product; when the system lacks what a change needs, the fix is a pull request to the system, never a product-side workaround.</p>
+</section>
+
+<section class="block" id="designs">
+  <div class="block__head">
+    <h2 class="h2">Port the website designs</h2>
+    <p>The system is designer-owned down to the pages. A designer authors whole pages in HTML on the system's own stylesheets, the build writes them to <code>/designs/</code>, and the app bar links there. A named state is a file beside its page, so every state a developer must build is a page they can open.</p>
+  </div>
+  <table class="spec">
+    <thead><tr><th>Rule</th><th>In practice</th></tr></thead>
+    <tbody>
+      <tr><td><strong>The design is the reference</strong></td><td>A port matches it on the product's own stack with the system's stylesheets. The design file is never copied into the product as a page, and never restyled.</td></tr>
+      <tr><td><strong>Every state is a file</strong></td><td>Port each one. A state the product cannot express is a developer change to raise, not an omission.</td></tr>
+      <tr><td><strong>Pair the route</strong></td><td>In the product's manifest, a route is paired with its design so a review shows the two side by side.</td></tr>
+      <tr><td><strong>Read it as data</strong></td><td><code>designs.json</code>, and <code>list_designs</code> and <code>read_design</code> over MCP, carry every page state's HTML with the files it loads.</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section class="block" id="change">
+  <div class="block__head">
+    <h2 class="h2">Change the system</h2>
+    <p>Nothing above is edited in place. The system is a repository, every change is a pull request there, and merging releases a patch version that every reader above picks up on its next read.</p>
+  </div>
+  <table class="spec">
+    <thead><tr><th>Who</th><th>Where</th><th>How</th></tr></thead>
+    <tbody>
+      <tr><td><strong>A designer, or an agent acting for one</strong></td><td>The system's repository</td><td><code>AGENTS.md</code> is the working contract and the <code>timds-edit-design-system</code> skill holds the procedure. <code>npm run timds -- check</code> validates the change and <code>submit</code> opens the draft pull request.</td></tr>
+      <tr><td><strong>An agent without a checkout</strong></td><td>The <code>timds-design-system</code> editing server, <code>npm run timds -- mcp</code></td><td>Guarded reads and writes of the authored surface, a check as structured findings, and the derived layer. Protected tooling is refused, not merely discouraged.</td></tr>
+      <tr><td><strong>A product that found a gap</strong></td><td><code>report_gap</code> over MCP, or a pull request to the system</td><td>A missing token, role, component, or rule is fixed in the system, and the product waits for the next release.</td></tr>
+      <tr><td><strong>Video, when the system declares it</strong></td><td>The same repository</td><td>The <code>timds-create-video</code> skill and the <code>video</code> commands, on the client's own video contract.</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section class="block" id="versions">
+  <div class="block__head">
+    <h2 class="h2">Versions</h2>
+    <p>Three versions matter to a reader, and every document and tool result says which one it carries.</p>
+  </div>
+  <table class="spec">
+    <thead><tr><th>Version</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Served</strong></td><td>The release a read returned. Every derived document and every MCP result names it.</td></tr>
+      <tr><td><strong>Published</strong></td><td>The current release, and the default for every way in on this page.</td></tr>
+      <tr><td><strong>Pinned</strong></td><td>The release a product is built against. It trails the published release until a developer moves the pin.</td></tr>
+    </tbody>
+  </table>
+  <p class="note">Each merged change becomes a patch release, published to the portal and to the stable address every way in on this page reads from. The number in the app bar is the release these pages belong to; this copy is {{version}}.</p>
+</section>

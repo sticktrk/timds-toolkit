@@ -36,7 +36,9 @@ the pages were built and validated but not viewed.
 
 ## Write the note
 
-Add one entry under `## Unreleased` in `CHANGELOG.md`, in the designer's
+Append one entry after the existing notes under `## Unreleased` in
+`CHANGELOG.md`; preserve the existing notes and their order so concurrent
+additions can merge. Write in the designer's
 language: what changed and where, as someone reading the release notes would
 want it. One or two sentences; no file paths unless a reader needs them.
 Lead with the area the change touches, so the note reads `Brand · Color:

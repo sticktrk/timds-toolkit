@@ -177,6 +177,7 @@ function systemStamp(resolved) {
     pinned: resolved.pinned ?? null,
     ...(layer.stale ? { stale: true } : {}),
     source: layer.source?.kind ?? null,
+    ...(layer.source?.kind === "draft" ? { draft: layer.source.draft, revision: layer.source.revision } : {}),
   };
 }
 
@@ -361,7 +362,7 @@ function normalizeResolved(resolved) {
 /**
  * Register the Design System read tools on an McpServer.
  *
- * `resolveSystem({ systemId, version })` returns `{ layer, media, published,
+ * `resolveSystem({ systemId, version, draft })` returns `{ layer, media, published,
  * pinned }`: `layer` is a derived layer (see `readDerivedLayer` and
  * `fetchDerivedLayer`), `media` an optional media catalog (`{ assets }`),
  * `published` the version label currently published, and `pinned` the version
@@ -379,12 +380,17 @@ export function registerDesignSystemReadTools(server, { resolveSystem, listSyste
   const remote = Boolean(hooks.remote);
   const scopeShape = {
     ...(remote ? { systemId: z.string().min(1).max(300).optional().describe("The Design System's systemId from list_design_systems; may be omitted when only one system is in scope") } : {}),
+    draft: z.string().min(1).max(100).optional().describe("A named prerelease draft; never changes the product pin"),
     version: z.string().min(1).max(100).optional().describe("A specific version label. Defaults to the current published version"),
   };
-  const systemFor = async (args) => normalizeResolved(await resolveSystem({
+  const systemFor = async (args) => {
+    if (args.version && args.draft) throw new Error("Choose a published version or a draft");
+    return normalizeResolved(await resolveSystem({
     systemId: remote ? args.systemId?.trim() || undefined : undefined,
     version: args.version?.trim() || undefined,
+    draft: args.draft?.trim() || undefined,
   }));
+  };
   const tool = (name, config, handler) => {
     server.registerTool(name, { ...config, inputSchema: { ...scopeShape, ...(config.inputSchema ?? {}) } }, async (args) => {
       try {
@@ -799,13 +805,37 @@ function checkVersion(layer, version) {
  * current checkout's derived layer and media catalog, or, with `published`,
  * the derived layer at a published base URL.
  */
-export async function createDesignSystemReadMcpServer({ root = process.cwd(), published = null, fetchImpl = fetch } = {}) {
+export async function createDesignSystemReadMcpServer({ root = process.cwd(), published = null, draft = null, systemId, portalUrl, token, credentialsPath, fetchImpl = fetch, build } = {}) {
   const server = new McpServer({ name: DESIGN_SYSTEM_READ_MCP_SERVER_NAME, version: await packageVersion() });
+  if (draft) {
+    if (published) throw new Error("Choose --published or --draft");
+    const { prepareDraftSource } = await import("./draft-source.mjs");
+    let prepared = null;
+    let reading = Promise.resolve();
+    registerDesignSystemReadTools(server, {
+      resolveSystem: ({ version, draft: requested } = {}) => reading = reading.catch(() => {}).then(async () => {
+        if (version) throw new Error("A draft cannot select a published version");
+        if (requested && requested !== draft) throw new Error(`This read server serves draft ${draft}`);
+        const next = await prepareDraftSource({ systemId, draft, portalUrl, token, credentialsPath, fetchImpl, build, previous: prepared });
+        if (prepared && next !== prepared) await prepared.dispose();
+        prepared = next;
+        const workspace = await loadWorkspace(prepared.root);
+        const layer = await readDerivedLayer(prepared.root, workspace.manifest);
+        layer.source = { kind: "draft", draft, revision: prepared.snapshot.session.baseRevision };
+        const { catalog } = await readMediaCatalog(prepared.root);
+        return { layer, media: catalog, published: null, pinned: null };
+      }), hooks: { remote: false },
+    });
+    const close = server.close.bind(server);
+    server.close = async () => { try { await close(); } finally { if (prepared) await prepared.dispose(); } };
+    return server;
+  }
   if (published) {
     // Fail fast on a base that publishes nothing.
     await fetchDerivedLayer(published, { fetchImpl });
     registerDesignSystemReadTools(server, {
-      resolveSystem: async ({ version } = {}) => {
+      resolveSystem: async ({ version, draft: requestedDraft } = {}) => {
+        if (requestedDraft) throw new Error("Start the read server with --draft NAME --system-id ID to read a draft");
         const layer = await fetchDerivedLayer(published, { fetchImpl });
         checkVersion(layer, version);
         return { layer, media: null, published: layer.system?.version ?? null, pinned: null };
@@ -817,7 +847,8 @@ export async function createDesignSystemReadMcpServer({ root = process.cwd(), pu
   const repoRoot = await findRepositoryRoot(root);
   await loadWorkspace(repoRoot);
   registerDesignSystemReadTools(server, {
-    resolveSystem: async ({ version } = {}) => {
+    resolveSystem: async ({ version, draft: requestedDraft } = {}) => {
+        if (requestedDraft) throw new Error("Start the read server with --draft NAME --system-id ID to read a draft");
       const workspace = await loadWorkspace(repoRoot);
       const layer = await readDerivedLayer(workspace.designSystemRoot, workspace.manifest);
       if (!layer.derived) throw new Error("Nothing has been derived yet; run timds check first");
@@ -831,9 +862,9 @@ export async function createDesignSystemReadMcpServer({ root = process.cwd(), pu
 }
 
 /** `timds mcp read`: serve the read tools over stdio. stdout carries only the protocol. */
-export async function runDesignSystemReadMcp({ root = process.cwd(), published = null } = {}) {
+export async function runDesignSystemReadMcp({ root = process.cwd(), published = null, draft = null, systemId, portalUrl } = {}) {
   setOutputStream(process.stderr);
-  const server = await createDesignSystemReadMcpServer({ root, published });
+  const server = await createDesignSystemReadMcpServer({ root, published, draft, systemId, portalUrl });
   const transport = new StdioServerTransport();
   const closed = new Promise((resolve) => {
     transport.onclose = resolve;
