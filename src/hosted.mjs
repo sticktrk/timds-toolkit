@@ -58,25 +58,36 @@ export async function workspaceProvider(root) {
   return normalizeProvider(manifest?.provider || state?.provider);
 }
 
-export function createHostProvider({ url, token, fetchImpl = fetch, retryClock: clock = retryClock }) {
+export function createHostProvider({ url, token, resolveToken, fetchImpl = fetch, retryClock: clock = retryClock }) {
   const origin = cleanPortalUrl(url);
-  if (!token) throw new Error("A TimDS token is required; run timds login or set TIMDS_ACCESS_TOKEN.");
+  if (!token && !resolveToken) throw new Error("A TimDS token is required; run timds login or set TIMDS_ACCESS_TOKEN.");
   async function request(method, suffix, body, resource = 'sessions') {
     // These two version-1 operations recover a completed request by its original
     // change set. Serialize once: a retry must never reread or append local edits.
     const recoverable = method === "POST" && resource === "sessions" && /\/(?:update|submit)$/.test(suffix);
     const deadline = clock.now() + HOST_RETRY_WINDOW_MS;
+    let authRetried = false;
     const requestOptions = {
       method, redirect: "error",
-      headers: { Accept: "application/json", "Content-Type": "application/json", Authorization: `Bearer ${token}`, "X-TimDS-API-Version": String(HOST_API_VERSION) },
+      headers: { Accept: "application/json", "Content-Type": "application/json", "X-TimDS-API-Version": String(HOST_API_VERSION) },
       ...(body ? { body: JSON.stringify({ ...body, apiVersion: HOST_API_VERSION }) } : {}),
     };
     for (let attempt = 1; ; attempt++) {
+      const accessToken = resolveToken ? await resolveToken() : token;
+      if (!accessToken) throw new Error("A TimDS token is required; run timds login or set TIMDS_ACCESS_TOKEN.");
       const response = await fetchImpl(`${origin}/api/timds/${resource}${suffix}`, {
         ...requestOptions,
+        headers: { ...requestOptions.headers, Authorization: `Bearer ${accessToken}` },
         ...(recoverable ? { signal: AbortSignal.timeout(Math.max(1, deadline - clock.now())) } : {}),
       });
       const payload = await response.json().catch(() => ({}));
+      if (response.status === 401 && resolveToken && !authRetried) {
+        authRetried = true;
+        // Auth rejected this request. Reuse its exact serialized payload only
+        // after the locked credential resolver supplies a different bearer.
+        const refreshed = await resolveToken({ rejectedToken: accessToken });
+        if (refreshed && refreshed !== accessToken) continue;
+      }
       const conflict = response.status === 409 && Array.isArray(payload.conflicts);
       const busy = response.status === 409 && !conflict && (payload.code === "operation_busy" || payload.error === SESSION_BUSY_MESSAGE);
       if (recoverable && attempt < HOST_RETRY_ATTEMPTS && ([502, 524].includes(response.status) || busy)) {
@@ -341,7 +352,8 @@ export async function runHostedCommand(command, { root = process.cwd(), fixedRoo
   if (!url || configured && configured.kind !== "hosted") throw new Error(NO_HOST);
   const provider = normalizeProvider({ kind: "hosted", url });
   if (state && state.provider.url !== provider.url) throw new Error("Session belongs to a different TimDS host");
-  const host = createHostProvider({ url: provider.url, token: await resolveAccessToken(provider.url, { token, credentialsPath, fetchImpl }), fetchImpl });
+  const host = createHostProvider({ url: provider.url, token,
+    resolveToken: options => resolveAccessToken(provider.url, { token, credentialsPath, fetchImpl, ...options }), fetchImpl });
   const manifest = await readJson(path.join(selected, "timds.json"));
   const selectedSystem = systemId || state?.session?.systemId || state?.session?.sourceId || manifest?.systemId;
   if (command === "rollback") {
@@ -387,10 +399,15 @@ export async function runHostedCommand(command, { root = process.cwd(), fixedRoo
     const response = await host.publish(selectedSubmission, { dryRun: false });
     let publication = response.publication || response;
     const deadline = Date.now() + timeoutMs;
+    let pollsRemaining = Math.max(1, Math.ceil(timeoutMs / Math.max(1, pollIntervalMs)));
     while (!['published', 'failed', 'superseded'].includes(publication.status)) {
-      if (publication.status === 'closing' && publication.error) throw new Error(`Publication completed; session cleanup failed: ${publication.error}. Retry the same submission to finish cleanup.`);
       if (!publication.id) throw new Error('TimDS host did not return a publication identity');
-      if (Date.now() >= deadline) throw new Error(`Publication ${publication.id} is still running; retry timds publish --submission ${selectedSubmission} --yes to resume.`);
+      if (Date.now() >= deadline || pollsRemaining-- <= 0) {
+        const pending = publication.status === 'closing'
+          ? `is committed; session cleanup ${publication.error ? `failed on its latest attempt: ${publication.error}; cleanup is still pending` : 'is still pending'}`
+          : 'is still running';
+        throw new Error(`Publication ${publication.id} ${pending}; retry timds publish --submission ${selectedSubmission} --yes to resume.`);
+      }
       await wait(pollIntervalMs);
       const polled = await host.publication(publication.id);
       publication = polled.publication || polled;
