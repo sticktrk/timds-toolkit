@@ -36,7 +36,9 @@
     "./hosted": "./src/hosted.mjs",
     "./release": "./templates/starter/scripts/prepare-merge-release.mjs",
     "./contract-groups": "./src/contract-groups.mjs",
-    "./consumer-draft-preview": "./src/consumer-draft-preview.mjs"
+    "./consumer-draft-preview": "./src/consumer-draft-preview.mjs",
+    "./merge": "./src/merge.mjs",
+    "./publication-snapshot": "./src/publication-snapshot.mjs"
   },
   "scripts": {
     "test": "npm run typecheck && node --test .github/scripts/*.test.mjs src/*.test.mjs video/*.test.mjs && tsx --test video/*.test.tsx",
@@ -104,7 +106,8 @@
     "src/hosted.mjs",
     "src/contract-groups.mjs",
     "src/draft-source.mjs",
-    "src/consumer-draft-preview.mjs"
+    "src/consumer-draft-preview.mjs",
+    "src/merge.mjs"
   ],
   "dependencies": {
     "@anthropic-ai/sdk": "0.125.0",

@@ -1692,33 +1692,62 @@ with `X-Robots-Tag: noindex`. It emits no GitHub workflows. Local and git
 scaffolds keep their existing automation. `publish --skip-build --skip-push`
 remains available to the host's publication path.
 
-Trusted hosts can reuse the same publication validation in process. Build and
-check the committed source in an isolated worker, then pass its exact artifact
-buffers to the workspace. The callback handles the host's own authorization,
-storage and pointer update; the toolkit reads no CLI credentials on this path.
+Hosts share the pure three-way merge exported from `@dtconcepts/timds/merge`.
+It takes complete base, local, and target file trees. Each entry is
+`{path, encoding:"base64", content, mode?}` with canonical base64 bytes and a
+Git file mode (`100644` by default). It has no Git, filesystem, network, or host
+dependencies, so repository adapters can run it locally or in a hosted runtime.
 
 ```js
-import { loadWorkspace } from '@dtconcepts/timds/core';
-import { createPublicationStamp, writePublicationStamp, publishRelease } from '@dtconcepts/timds/publish';
+import { mergeFileTrees } from '@dtconcepts/timds/merge';
+const result = mergeFileTrees(baseFiles, mineFiles, theirFiles, {
+  resolvedPaths: ['tokens/color.json#brand.value=theirs'],
+});
+// result: { files, conflicts, mergedKeys, conflictedKeys }
+// Never commit result.files until result.conflicts is empty.
+```
+
+Token/media group JSON objects merge recursively; arrays are atomic.
+`timds.json` merges tokens, media, components, patterns, typography, icons,
+fonts, metadata, and description by key; other manifest fields and ordinary
+files remain atomic. Missing keys are distinct from JSON null during the
+merge; conflict receipts represent missing values as null. Whole-path choices
+keep the local file, key choices accept dotted paths or escaped JSON Pointers,
+and unused resolutions fail. The merger regenerates compatibility aggregates
+from merged groups. Repository adapters still perform contract checks and
+compare-and-swap the target revision before committing a conflict-free tree.
+
+Trusted hosts can publish without a local checkout. Their repository adapter
+supplies the committed source revision and source tree relative to the Design
+System root; a checked build supplies exact artifact bytes. The callback handles
+the host's authorization, storage and pointer update. No CLI credentials are
+read on this path.
+
+```js
+import { createPublicationStampFromFiles, publishReleaseFromFiles } from '@dtconcepts/timds/publish';
 import { prepareMergeRelease } from '@dtconcepts/timds/release';
 
-// prepareMergeRelease({ previousVersion, timdsJson, packageJson,
-//   packageLock, changelog, fallbackNote }) returns the existing release bump.
-const workspace = await loadWorkspace(committedCheckout);
-workspace.artifact = checkedArtifact; // { files: [{ path, content: Buffer }] }
-const stamp = await createPublicationStamp(workspace);
-await writePublicationStamp(workspace, stamp);
-await publishRelease(workspace, {
+// Source and artifact contents can be Buffer/Uint8Array, UTF-8 text, or
+// canonical base64 with encoding:"base64". Artifacts exclude the root stamp.
+const input = { sourceCommit, sourceFiles, artifactFiles };
+const stamp = createPublicationStampFromFiles(input);
+await publishReleaseFromFiles({
+  ...input,
   stamp,
   publisher: async ({ stamp, files }) => publishAuthorizedRelease(stamp, files),
 });
 ```
 
-The callback returns the same publication response as the HTTP endpoint:
+`createPublicationStampFromFiles` is also available from
+`@dtconcepts/timds/publication-snapshot`. It computes the existing schema-1
+content digest from the full normalized source contract and artifact bytes,
+verifies manifest identity, and preserves committed Git source ordering. The
+release wrapper recomputes the digest before calling the publisher with artifact
+buffers. The callback returns the HTTP publication response:
 `{status:"published", systemId, version, publicRoot, versionedUrls}` with
-`versionedUrls.{root,llmsTxt,bundleJson,artifact}`. The toolkit still validates
-the response and anonymously verifies the public stamp. Artifact buffers and
-the canonical content digest are unchanged by this hook.
+`versionedUrls.{root,llmsTxt,bundleJson,artifact}`. The toolkit validates the
+response and anonymously verifies the public stamp. Git-based callers retain
+`createPublicationStamp`, `writePublicationStamp`, and `publishRelease`.
 
 The public provider interface is exported from `@dtconcepts/timds/hosted`:
 `start`, `pull`, `submit`, `update`, `status`, `history`, `close`, claims, members, drafts and rollback. API

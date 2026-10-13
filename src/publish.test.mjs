@@ -306,3 +306,38 @@ test("in-process publication keeps stamp, response, and public-byte validation",
   await assert.rejects(publishRelease(f.workspace, { publisher: async () => ({ ...resultFor(stamp), version: "wrong" }) }), /Invalid TimDS publication response/);
   await assert.rejects(publishRelease(f.workspace, { publisher, fetchImpl: async () => json({ ...stamp, contentDigest: "wrong" }) }), /public root does not serve/);
 });
+
+for (const embedded of [false, true]) test(`file-tree provenance equals Git provenance for ${embedded ? 'embedded' : 'standalone'} source`, async t => {
+  const { createPublicationStampFromFiles } = await import('./publish.mjs');
+  const f = await fixture(t, embedded);
+  const prefix = embedded ? 'design-system/' : '';
+  const sourceFiles = f.git('ls-tree', '-r', '-z', 'HEAD').split('\0').filter(Boolean).map(record => {
+    const [header, name] = record.split('\t'), [mode, , oid] = header.split(' ');
+    return { path: name.slice(prefix.length), mode, encoding: 'base64', content: execFileSync('git', ['cat-file', 'blob', oid], { cwd: f.root }).toString('base64') };
+  });
+  sourceFiles.reverse(); // The helper must restore Git tree order itself.
+  const artifactFiles = publicationFixture().artifactFiles;
+  const stamp = createPublicationStampFromFiles({ sourceCommit: f.head(), sourceFiles, artifactFiles });
+  assert.deepEqual(stamp, await createPublicationStamp(f.workspace));
+  assert.throws(() => createPublicationStampFromFiles({ sourceCommit: f.head(), sourceFiles, artifactFiles, version: 'different' }), /identity differs/);
+  assert.throws(() => createPublicationStampFromFiles({ sourceCommit: 'not-a-commit', sourceFiles, artifactFiles }), /committed source revision/);
+});
+
+test('file-tree publication verifies bytes before the publisher and public stamp after it without a workspace', async () => {
+  const { createPublicationStampFromFiles, publishReleaseFromFiles } = await import('./publish.mjs');
+  const input = publicationFixture();
+  const sourceFiles = [
+    ...['manifest', 'tokens', 'media'].map(key => ({ path: key === 'manifest' ? 'timds.json' : `${key}.json`, content: Buffer.from(JSON.stringify(input[key])) })),
+    ...input.sourceFiles.map(file => ({ path: file.path, content: Buffer.from(file.content || 'x'.repeat(file.bytes)) })),
+  ];
+  const stamp = createPublicationStampFromFiles({ sourceCommit: 'a'.repeat(40), sourceFiles, artifactFiles: input.artifactFiles });
+  let calls = 0;
+  const result = await publishReleaseFromFiles({ stamp, sourceFiles, artifactFiles: input.artifactFiles.map(file => ({ path: file.path, encoding: 'base64', content: file.content.toString('base64') })),
+    publisher: async ({ stamp: received, files }) => { calls++; assert.deepEqual(received, stamp); assert.deepEqual(files, input.artifactFiles); return resultFor(stamp); },
+    fetchImpl: async (url, options) => { assert.equal(url, 'https://example-ds.timds.com/.timds-artifact.json'); assert.equal(options.headers.Authorization, undefined); return json(stamp); },
+  });
+  assert.equal(calls, 1); assert.equal(result.status, 'published');
+  assert.throws(() => createPublicationStampFromFiles({ sourceCommit: stamp.sourceCommit, sourceFiles, artifactFiles: input.artifactFiles.map(file => ({ ...file, mode: '120000' })) }), /regular files/);
+  await assert.rejects(publishReleaseFromFiles({ stamp, sourceFiles, artifactFiles: [...input.artifactFiles, { path: 'injected.txt', content: Buffer.from('changed') }], publisher: async () => { calls++; } }), /differs from the supplied/);
+  assert.equal(calls, 1);
+});
