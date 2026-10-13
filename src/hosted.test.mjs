@@ -226,7 +226,7 @@ test("hosted scaffold has Wrangler/noindex, no workflows, and check works withou
 test("MCP exposes hosted commands and principal-authorized publication", () => {
   const names = [];
   registerHostedSessionTools({ registerTool(name) { names.push(name); } });
-  assert.deepEqual(names, ["timds_start", "timds_pull", "timds_submit", "timds_update", "timds_status", "timds_history", "timds_sessions_close", "timds_publish", "timds_claim", "timds_active_work", "timds_join", "timds_draft_create", "timds_draft_list", "timds_draft_close"]);
+  assert.deepEqual(names, ["timds_start", "timds_pull", "timds_submit", "timds_update", "timds_status", "timds_history", "timds_sessions_close", "timds_publish", "timds_claim", "timds_active_work", "timds_join", "timds_whoami", "timds_principals", "timds_draft_create", "timds_draft_list", "timds_draft_close"]);
 });
 
 test("MCP submission shares the hosted changelog gate", async (t) => {
@@ -433,4 +433,44 @@ test("start in an empty directory reuses the saved host and explicit overrides",
     assert.ok(called);
     assert.equal(await fs.readFile(path.join(root, "safe.txt"), "utf8"), "hello");
   }
+});
+
+test("whoami reads the signed-in principal from the saved host and principals lists who can be invited", async t => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "timds-whoami-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const credentialsPath = path.join(directory, "credentials.json");
+  await saveAccessToken("https://saved.test", "timds_saved", { credentialsPath });
+  const principal = { id: "11111111-1111-4111-8111-111111111111", type: "user", name: "Example Person", admin: false };
+  const requests = [];
+  const fetchImpl = async (url, options) => {
+    requests.push({ url, method: options.method, authorization: options.headers.Authorization });
+    return response(url.endsWith("/me") ? { apiVersion: 1, principal } : { apiVersion: 1, sourceId: "source", principals: [{ id: principal.id, name: principal.name, type: "user", active: true }] });
+  };
+  // No workspace and no portal flag: the single saved login selects the host.
+  assert.deepEqual(await runHostedCommand("whoami", { root: path.join(directory, "nowhere"), credentialsPath, fetchImpl }), { apiVersion: 1, principal, portal: "https://saved.test" });
+  assert.deepEqual(requests.at(-1), { url: "https://saved.test/api/timds/me", method: "GET", authorization: "Bearer timds_saved" });
+  const listed = await runHostedCommand("principals", { root: directory, credentialsPath, portalUrl: "https://saved.test", systemId: "example/core", fetchImpl });
+  assert.equal(listed.principals[0].id, principal.id);
+  assert.equal(requests.at(-1).url, "https://saved.test/api/timds/design-systems/example%2Fcore/principals");
+  await assert.rejects(runHostedCommand("principals", { root: directory, credentialsPath, portalUrl: "https://saved.test", fetchImpl }), /Provide --system-id/);
+});
+
+test("join attaches an empty folder to an existing session and names a new folder when it cannot", async t => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "timds-join-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const requests = [];
+  const options = { token: "timds_test", portalUrl: "https://host.example", fetchImpl: async (url, request) => { requests.push({ url, method: request.method }); return response(snapshot([file("note.txt", "shared")])); } };
+  const root = path.join(directory, "member");
+  const joined = await runHostedCommand("join", { ...options, root, sessionId: "session-1" });
+  assert.equal(joined.applied, true);
+  assert.deepEqual(requests, [{ url: "https://host.example/api/timds/sessions/session-1/join", method: "POST" }]);
+  assert.equal(await fs.readFile(path.join(root, "note.txt"), "utf8"), "shared");
+  assert.equal(JSON.parse(await fs.readFile(path.join(root, SESSION_FILE), "utf8")).session.id, "session-1");
+  // A workspace that already holds files or another session is never overwritten.
+  await assert.rejects(runHostedCommand("join", { ...options, root, sessionId: "session-2" }), /already holds another one\. Pass --root \.\/NEW-FOLDER/);
+  const occupied = path.join(directory, "occupied");
+  await fs.mkdir(occupied); await fs.writeFile(path.join(occupied, "mine.txt"), "keep");
+  await assert.rejects(runHostedCommand("join", { ...options, root: occupied, sessionId: "session-1" }), /already has files\. Pass --root \.\/NEW-FOLDER/);
+  assert.equal(requests.length, 1);
+  assert.equal(await fs.readFile(path.join(occupied, "mine.txt"), "utf8"), "keep");
 });

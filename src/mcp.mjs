@@ -836,14 +836,18 @@ async function packageVersion() {
 
 /** Hosted session commands use the identical API and filesystem guards as the CLI. */
 export function registerHostedSessionTools(server, { root = process.cwd() } = {}) {
-  for (const command of ["start", "pull", "submit", "update", "status", "history", "close", "publish", "claim", "active-work", "join", "draft-create", "draft-list", "draft-close"]) {
+  for (const command of ["start", "pull", "submit", "update", "status", "history", "close", "publish", "claim", "active-work", "join", "whoami", "principals", "draft-create", "draft-list", "draft-close"]) {
     server.registerTool(`timds_${command === "close" ? "sessions_close" : command.replaceAll("-", "_")}`, {
       title: `TimDS session ${command}`,
-      description: `${command} a hosted TimDS design session. Publication requires a per-system publisher grant on the authenticated principal.`,
+      description: command === "whoami" ? "Report the signed-in TimDS principal (id, name, type) on this host; a session owner invites that id with timds_join."
+        : command === "principals" ? "List the people and agents who can be invited into this hosted TimDS design system's sessions."
+        : command === "join" ? "Attach this empty workspace to an existing hosted TimDS session by sessionId (from timds_active_work or the human), or pass principalId to invite that principal. Use it instead of timds_start when the human names an open session."
+        : `${command} a hosted TimDS design session. Publication requires a per-system publisher grant on the authenticated principal.`,
       inputSchema: {
         ...(command === "start" ? { systemId: z.string().min(1), note: z.string().max(2000).optional(), on: z.array(z.string().min(1)).optional(), draft: z.string().min(1).optional(), idempotencyKey: z.string().min(1).max(200).optional(), portalUrl: z.string().url().optional() } : {}),
         ...(command === "update" ? { resolve: z.array(z.string().min(1)).optional().describe("PATH keeps local content; PATH#KEY=mine|theirs resolves exactly one key") } : {}),
-        ...(["active-work", "draft-create", "draft-list", "draft-close"].includes(command) ? { systemId: z.string().min(1).optional(), portalUrl: z.string().url().optional() } : {}),
+        ...(["active-work", "principals", "draft-create", "draft-list", "draft-close"].includes(command) ? { systemId: z.string().min(1).optional(), portalUrl: z.string().url().optional() } : {}),
+        ...(command === "whoami" ? { portalUrl: z.string().url().optional() } : {}),
         ...(command === "claim" ? { patterns: z.array(z.string().min(1)).min(1), note: z.string().max(2000).optional() } : {}),
         ...(command === "join" ? { sessionId: z.string().min(1), principalId: z.string().min(1).optional(), portalUrl: z.string().url().optional() } : {}),
         ...(command === "draft-create" ? { name: z.string().min(1), from: z.string().default("main"), idempotencyKey: z.string().optional() } : {}),
@@ -851,7 +855,7 @@ export function registerHostedSessionTools(server, { root = process.cwd() } = {}
         ...(command === "publish" ? { submission: z.string().min(1).optional(), dryRun: z.boolean().optional(), yes: z.boolean().optional().describe('Explicitly confirm publication after reviewing the dry run') } : {}),
         ...(["submit", "update"].includes(command) ? { note: z.string().max(2000).optional() } : {}),
       },
-      annotations: { readOnlyHint: ["status", "history", "active-work", "draft-list"].includes(command), destructiveHint: ["close", "publish"].includes(command), openWorldHint: true, idempotentHint: command !== "start" },
+      annotations: { readOnlyHint: ["status", "history", "active-work", "whoami", "principals", "draft-list"].includes(command), destructiveHint: ["close", "publish"].includes(command), openWorldHint: true, idempotentHint: command !== "start" },
     }, async (args) => {
       try { return toolResult(hostedToolReceipt(await runHostedCommand(command, { root, ...args, fixedRoot: true }))); }
       catch (error) { return toolError(error); }

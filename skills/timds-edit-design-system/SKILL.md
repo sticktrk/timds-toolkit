@@ -386,7 +386,20 @@ consuming-site update.
 Agents are the only writers. Humans direct work and use login, status,
 history, publish and rollback in the CLI or Studio. Prefer the hosted MCP:
 `timds_start`, `timds_pull`, `timds_submit`, `timds_update`, `timds_claim`,
-`timds_active_work`, `timds_join`, and `timds_draft_create|list|close`.
+`timds_active_work`, `timds_join`, `timds_whoami`, `timds_principals`, and
+`timds_draft_create|list|close`.
+
+Join before you start. When the human names an open session (a session id, a
+Studio link, or "the session I have open"), attach to it with `timds join
+SESSION --root ./NEW-FOLDER` (`timds_join`) and send work with `update`; do
+not create a second session with `start`. Find the id in `timds active-work`
+when the human did not give it. Join needs an empty folder: never reuse a
+workspace that already holds files or another session. Use `start` only when
+there is no session to join or the human asks for a new one. If the host
+answers `Session not found`, the signed-in principal is not the owner, a
+member or a publisher: report the id from `timds whoami` so the owner can
+invite it, and do not start a separate session as a workaround.
+
 Read active work before editing; claim the intended paths with the human’s
 intent note. Overlap is advisory. Submit and update carry that intent as
 `note` (required for agent principals). Never run git or handle Artifacts
@@ -415,7 +428,9 @@ Further stale changes need a fresh read and explicit retry, never a force push.
 
 A draft is a named non-expiring session. Start `--draft NAME` to target it.
 An owner or publisher invites a second principal with `timds join SESSION
---principal-id ID`; that member uses `timds_join` to attach. Return the live
+--principal-id ID`; that member uses `timds_join` to attach. `timds whoami`
+gives the caller's own principal id and `timds principals` lists who can be
+invited. Return the live
 URL, submission preview and claims with the work receipt. When publication
 is requested, run dry-run, review it, then publish with explicit confirmation.
 Never put access tokens in source or session metadata.

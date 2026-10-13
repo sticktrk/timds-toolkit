@@ -1508,3 +1508,26 @@ test("preview and starter dev explain an occupied port without a stack trace", a
     return true;
   });
 });
+
+test("whoami prints the principal and join prints the workspace and next steps", async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "timds-cli-join-"));
+  const originalFetch = globalThis.fetch;
+  t.after(async () => { globalThis.fetch = originalFetch; await fs.rm(root, { recursive: true, force: true }); });
+  const principal = { id: "11111111-1111-4111-8111-111111111111", type: "user", name: "Example Person", admin: false };
+  const session = { id: "session-1", systemId: "example/core", baseRevision: "base", status: "open" };
+  globalThis.fetch = async url => new Response(JSON.stringify(String(url).endsWith("/me") ? { apiVersion: 1, principal } : { apiVersion: 1, session, files: [{ path: "note.txt", encoding: "base64", content: Buffer.from("shared").toString("base64"), mode: "100644" }] }), { status: 200, headers: { "Content-Type": "application/json" } });
+  const host = ["--portal-url", "https://host.example", "--token", "timds_test"];
+  const lines = [];
+  await runWithOutputSink(line => lines.push(line), () => runCli(["whoami", "--root", root, ...host]));
+  assert.deepEqual(lines, [`https://host.example: signed in as Example Person (user) ${principal.id}`]);
+  lines.length = 0;
+  const member = path.join(root, "member");
+  await runWithOutputSink(line => lines.push(line), () => runCli(["join", "session-1", "--root", member, ...host]));
+  assert.equal(await fs.readFile(path.join(member, "note.txt"), "utf8"), "shared");
+  assert.match(lines.join("\n"), new RegExp(`Workspace: ${member.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+  assert.match(lines.join("\n"), /npm ci[\s\S]*timds dev[\s\S]*timds update --note/);
+  lines.length = 0;
+  await runWithOutputSink(line => lines.push(line), () => runCli(["join", "session-1", "--root", member, "--principal-id", principal.id, ...host]));
+  assert.match(lines.join("\n"), new RegExp(`Invited ${principal.id}\\. They attach with: timds join session-1 --root`));
+  assert.doesNotMatch(lines.join("\n"), /Workspace:/);
+});

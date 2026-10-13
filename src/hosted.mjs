@@ -18,6 +18,8 @@ const HOST_RETRY_ATTEMPTS = 6;
 const SESSION_BUSY_MESSAGE = "This session is busy; retry when its current operation finishes";
 const retryClock = { now: () => Date.now(), sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)) };
 const NO_HOST = "No TimDS host configured. Run timds auth login --portal-url https://YOUR-HOST --oauth, or pass --portal-url URL to timds start.";
+const JOIN_NEEDS_EMPTY = "Join requires an empty --root destination; this folder already has files. Pass --root ./NEW-FOLDER.";
+const JOIN_OTHER_SESSION = "Choose an empty --root for a different session; this workspace already holds another one. Pass --root ./NEW-FOLDER.";
 const RESERVED = new Set([".git", ".github", "node_modules", "dist", ".env", ".env.server"]);
 
 export function hostedPath(value) {
@@ -104,6 +106,8 @@ export function createHostProvider({ url, token, resolveToken, fetchImpl = fetch
   }
   const sessionPath = (id) => `/${encodeURIComponent(id)}`;
   return {
+    me: () => request("GET", "", undefined, 'me'),
+    principals: (id) => request("GET", `/${encodeURIComponent(id)}/principals`, undefined, 'design-systems'),
     rollback: (id, input) => request("POST", `/${encodeURIComponent(id)}/rollback`, input, 'design-systems'),
     activeWork: (id) => request("GET", `/${encodeURIComponent(id)}/active-work`, undefined, 'design-systems'),
     claim: (id, input) => request("POST", `${sessionPath(id)}/claims`, input),
@@ -348,10 +352,12 @@ export async function runHostedCommand(command, { root = process.cwd(), fixedRoo
     ? normalizeProvider((await readJson(path.join(selected, "timds.json")))?.provider || state?.provider)
     : await workspaceProvider(selected);
   const pending = command === "start" ? await readJson(path.join(selected, PENDING_START_FILE)) : null;
-  const url = portalUrl || process.env.TIMDS_PORTAL_URL || configured?.url || pending?.provider?.url || (destination ? await savedPortalUrl({ credentialsPath }) : null);
-  if (!url || configured && configured.kind !== "hosted") throw new Error(NO_HOST);
+  const url = portalUrl || process.env.TIMDS_PORTAL_URL || configured?.url || pending?.provider?.url || (destination || command === "whoami" ? await savedPortalUrl({ credentialsPath }) : null);
+  // whoami reads an identity, not a workspace: it answers for any signed-in host.
+  const identityOnly = command === "whoami";
+  if (!url || !identityOnly && configured && configured.kind !== "hosted") throw new Error(NO_HOST);
   const provider = normalizeProvider({ kind: "hosted", url });
-  if (state && state.provider.url !== provider.url) throw new Error("Session belongs to a different TimDS host");
+  if (!identityOnly && state && state.provider.url !== provider.url) throw new Error("Session belongs to a different TimDS host");
   const host = createHostProvider({ url: provider.url, token,
     resolveToken: options => resolveAccessToken(provider.url, { token, credentialsPath, fetchImpl, ...options }), fetchImpl });
   const manifest = await readJson(path.join(selected, "timds.json"));
@@ -364,22 +370,25 @@ export async function runHostedCommand(command, { root = process.cwd(), fixedRoo
     if (!yes && !(confirm && await confirm(summary))) throw new Error("Rollback cancelled; review --dry-run and pass --yes to confirm");
     return host.rollback(selectedSystem, { version });
   }
-  if (["active-work", "draft-create", "draft-list", "draft-close"].includes(command)) {
+  // The identity a session owner needs before inviting this caller.
+  if (command === "whoami") return { ...await host.me(), portal: provider.url };
+  if (["active-work", "principals", "draft-create", "draft-list", "draft-close"].includes(command)) {
     if (!selectedSystem) throw new Error("Provide --system-id or run inside a hosted design system");
     if (command === "active-work") return host.activeWork(selectedSystem);
+    if (command === "principals") return host.principals(selectedSystem);
     if (command === "draft-list") return host.draftList(selectedSystem);
     if (command === "draft-close") return host.draftClose(selectedSystem, sessionId || name);
     if (!name) throw new Error("draft create requires a name");
     return host.draftCreate(selectedSystem, { name, from, idempotencyKey });
   }
   if (command === "join") {
-    if (!principalId && state && state.session.id !== sessionId) throw new Error("Choose an empty --root for a different session");
-    if (!principalId && !state && (await fs.readdir(selected).catch(() => [])).length) throw new Error("Join requires an empty --root destination");
+    if (!principalId && state && state.session.id !== sessionId) throw new Error(JOIN_OTHER_SESSION);
+    if (!principalId && !state && (await fs.readdir(selected).catch(() => [])).length) throw new Error(JOIN_NEEDS_EMPTY);
     if (!sessionId) throw new Error("join requires a session identifier");
     const result = await host.join(sessionId, principalId ? { principalId } : {});
     if (principalId) return result;
-    if (state && state.session.id !== sessionId) throw new Error("Choose an empty --root for a different session");
-    if (!state && (await fs.readdir(selected).catch(() => [])).length) throw new Error("Join requires an empty --root destination");
+    if (state && state.session.id !== sessionId) throw new Error(JOIN_OTHER_SESSION);
+    if (!state && (await fs.readdir(selected).catch(() => [])).length) throw new Error(JOIN_NEEDS_EMPTY);
     const snapshot = result.files ? result : await host.pull(sessionId);
     return applySnapshot(selected, snapshot, state, provider);
   }
