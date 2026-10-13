@@ -108,3 +108,57 @@ export function publicationSnapshot({ manifest: input, tokens, media, sourceFile
 export function publicationDigest(input) {
   return sha256(JSON.stringify(publicationSnapshot(input)));
 }
+
+/**
+ * Create schema-1 provenance from committed source bytes supplied by a trusted
+ * repository adapter. Paths are relative to the Design System root. This is
+ * pure computation: no checkout, Git subprocess, filesystem or credentials.
+ */
+export function createPublicationStampFromFiles({ sourceCommit, sourceFiles, artifactFiles, systemId, version }) {
+  if (!/^[a-f0-9]{40}$/.test(sourceCommit || '')) throw new Error('Publication requires a committed source revision');
+  if (!Array.isArray(sourceFiles) || !Array.isArray(artifactFiles)) throw new Error('Publication requires source and artifact file trees');
+  const bytesFor = file => {
+    if (file.content instanceof Uint8Array) return Buffer.from(file.content);
+    if (typeof file.content !== 'string') throw new Error(`Publication file has no bytes: ${file.path}`);
+    if (file.encoding === 'base64') {
+      const bytes = Buffer.from(file.content, 'base64');
+      if (bytes.toString('base64') !== file.content) throw new Error(`Publication file has invalid base64: ${file.path}`);
+      return bytes;
+    }
+    if (file.encoding && file.encoding !== 'utf8') throw new Error(`Publication file has unsupported encoding: ${file.path}`);
+    return Buffer.from(file.content, 'utf8');
+  };
+  const checkedPath = input => {
+    if (typeof input !== 'string' || !input || input.startsWith('/') || input.includes('\\') || /[\x00-\x1f\x7f]/.test(input) || input.split('/').some(part => !part || ['.', '..'].includes(part))) throw new Error('Unsafe publication source path');
+    return input;
+  };
+  const seen = new Set(), records = [];
+  const readable = relative => ['timds.json', 'tokens.json', 'media.json'].includes(relative) || /^(docs\/.*\.(md|mdx)|components\/.*\.(json|md|mdx))$/i.test(relative);
+  for (const file of sourceFiles) {
+    const relative = checkedPath(file.path);
+    if (seen.has(relative)) throw new Error(`Duplicate publication source path: ${relative}`);
+    seen.add(relative);
+    if (file.mode && !['100644', '100755'].includes(file.mode)) continue;
+    if (!['timds.json', 'tokens.json', 'media.json'].includes(relative) && !/^(docs|components|assets)\//.test(relative)) continue;
+    const bytes = bytesFor(file);
+    if (readable(relative) && bytes.length > 1_000_000) throw new Error(`Source contract file is too large: ${relative}`);
+    records.push({ path: relative, bytes: bytes.length, ...(readable(relative) ? { content: bytes.toString('utf8') } : {}) });
+  }
+  // Git compares path names by UTF-8 bytes, not locale or JSON insertion order.
+  records.sort((a, b) => Buffer.compare(Buffer.from(a.path), Buffer.from(b.path)));
+  const byPath = new Map(records.map(file => [file.path, file]));
+  if (!byPath.has('timds.json') || !byPath.has('tokens.json')) throw new Error('Publication requires tracked timds.json and tokens.json');
+  const manifest = JSON.parse(byPath.get('timds.json').content);
+  const tokens = JSON.parse(byPath.get('tokens.json').content);
+  const media = byPath.has('media.json') ? JSON.parse(byPath.get('media.json').content) : null;
+  const manifestSystem = String(manifest.systemId || '').trim(), manifestVersion = String(manifest.version || '').trim();
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._/-]{1,159}$/.test(manifestSystem) || !/^[a-zA-Z0-9][a-zA-Z0-9._+-]{0,99}$/.test(manifestVersion)) throw new Error('Publication requires a safe system identity and version label');
+  if (systemId !== undefined && systemId !== manifestSystem || version !== undefined && version !== manifestVersion) throw new Error('Publication identity differs from the committed manifest');
+  const artifacts = artifactFiles.map(file => {
+    if (file.mode && !['100644', '100755'].includes(file.mode)) throw new Error('Publication artifacts must be regular files');
+    return { path: checkedPath(file.path), content: bytesFor(file) };
+  });
+  if (artifacts.some(file => file.path === '.timds-artifact.json')) throw new Error('The root .timds-artifact.json is reserved for publication metadata');
+  return { schemaVersion: 1, systemId: manifestSystem, version: manifestVersion, sourceCommit,
+    contentDigest: publicationDigest({ manifest, tokens, media, sourceFiles: records, artifactFiles: artifacts }) };
+}

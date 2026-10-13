@@ -430,3 +430,25 @@ test("the consumer guide teaches roles, media, guidance, versions, and gaps with
     assert.ok(!guide.includes(editing), editing);
   }
 });
+
+test('draft read server refreshes snapshots but reuses the checked build until the revision changes', async t => {
+  const source = await checkedRepo(t);
+  let builds = 0, reads = 0;
+  const server = await createDesignSystemReadMcpServer({
+    draft: 'spring-refresh', systemId: 'example/core', portalUrl: 'https://host.test', token: 'timds_test',
+    fetchImpl: async () => { reads++; return new Response(JSON.stringify({ apiVersion: 1, session: { id: 'draft', baseRevision: 'head-1', status: 'open' }, files: [] })); },
+    build: async root => {
+      builds++;
+      for (const name of ['timds.json', 'tokens.json', 'media.json']) await fs.copyFile(path.join(source, name), path.join(root, name));
+      await fs.cp(path.join(source, 'dist'), path.join(root, 'dist'), { recursive: true });
+    },
+  });
+  const client = await connect(server);
+  t.after(async () => { await client.close(); await server.close(); });
+  const first = await ok(client, 'get_tokens');
+  assert.equal(first.system.source, 'draft'); assert.equal(first.system.draft, 'spring-refresh'); assert.equal(first.system.revision, 'head-1');
+  await ok(client, 'describe_system');
+  assert.equal(reads, 2); assert.equal(builds, 1);
+  const mismatch = await call(client, 'get_tokens', { draft: 'other' });
+  assert.equal(mismatch.isError, true);
+});

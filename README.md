@@ -348,7 +348,7 @@ Declared `routes` always come first and always stay.
   grouped by page, with the element, its source `file:line` when the dev build
   stamps one, and the designer's words. `timds consumer notes resolve ID...
   [--commit SHA] [--dismiss]` marks them addressed (or dismissed) after the fix
-  is pushed. Both need `TIMDS_ACCESS_TOKEN` or `timds auth login`.
+  is pushed. Both need `TIMDS_ACCESS_TOKEN` or `timds login`.
 
 - `timds consumer scaffold emdash --root PATH --design-system GIT_URL` creates
   a new EmDash CMS site repository that consumes a Design System (see
@@ -1584,54 +1584,105 @@ host API. Existing manifests without a provider keep their git submission
 behavior. Hosted commands without a configured host fail with one message
 that names local and git modes; they never fall back to git.
 
+Humans direct work and use five verbs: `login`, `status`, `history`, `publish`,
+and `rollback`. Agents write through MCP first: `timds_start`, `timds_pull`,
+`timds_submit`, `timds_update`, `timds_sessions_close`, `timds_claim`,
+`timds_active_work`, `timds_join`, and `timds_draft_create|list|close`.
+The CLI exposes the same operations for agent automation.
+
 ```sh
-timds auth login --portal-url https://timds.com
-timds start example/core --root ./example --portal-url https://timds.com
-cd example
-npm install
-timds check
-timds submit --message "Adjust the page spacing"
+# Human controls
+timds login --portal-url https://timds.com
 timds status
 timds history
-timds update
-timds sessions close
-```
-
-`start` requires an empty directory and materializes plain files, with no
-`.git` directory or git binary dependency. Interrupted starts keep a private
-`.timds/start.json` request key; retrying the same command reuses the same fork.
-If materialization was interrupted after source files were written, use a fresh
-empty directory and `--idempotency-key` with that saved key. `TIMDS_PORTAL_URL` can select the
-host; the session remembers it in `.timds/session.json`, alongside the base
-snapshot. Credentials stay in the existing private TimDS credential file or
-`TIMDS_ACCESS_TOKEN`, never in session metadata. `pull` refreshes from the
-session fork without overwriting local edits. `update` merges with current
-main on the host. Conflicts are per file and preserve the local files; edit
-each conflicted file, then run `timds update --resolve path/to/file` (repeat
-`--resolve` for multiple files). The host checks that main has not changed
-since the conflict was shown. Submissions return the admin submission and
-preview URL. A user or agent principal granted publish on the system can
-publish from the admin or the CLI:
-
-```bash
-timds login
 timds publish --dry-run
-timds publish
-timds publish --submission SUBMISSION_ID --yes
+timds publish --yes
+timds rollback 1.2.3 --dry-run
+timds rollback 1.2.3 --yes
+
+# Agent operations
+timds draft create spring-refresh --from main --system-id example/core
+timds start example/core --draft spring-refresh --on 'tokens/color*' --root ./session
+timds active-work
+timds claim --on 'tokens/color*' --note 'Warm the brand palette'
+timds submit --note 'Warm the brand palette'
+timds update --resolve 'tokens/color.json#brand.value=theirs' --note 'Keep the director’s color'
+timds join SESSION --principal-id PRINCIPAL
+timds join SESSION --root ./member-session
+timds draft list
+timds draft close spring-refresh
 ```
 
-No arguments selects the current session's latest submission. Publication
-shows the change summary, preview and proposed version before confirmation;
-`--yes` confirms without a prompt. `--dry-run` checks currency and builds
-without merging or publishing. Grant, conflict and build failures exit
-nonzero. Successful publication closes its session. Publish rights belong
-to the authenticated principal, independently of its session token.
+`start` requires an empty agent workspace and materializes plain files without
+a `.git` directory. Interrupted starts retain their idempotency key under
+`.timds/start.json`; retry the same command, or use its key in a fresh empty
+workspace after a partial download. Credentials remain in the private TimDS
+credential file or `TIMDS_ACCESS_TOKEN`, never source or session metadata.
+`TIMDS_PORTAL_URL` selects a host before a session exists.
 
-`timds mcp` exposes `timds_start`, `timds_pull`, `timds_submit`, `timds_update`,
-`timds_status`, `timds_history`, `timds_sessions_close`, and `timds_publish` through the same
-implementation. Set `TIMDS_PORTAL_URL` to start the MCP server in an empty
-directory before opening the first session. The publish tool has `dryRun`
-and explicit `yes` confirmation options and uses the same principal grants.
+Claims are advisory: overlapping work is visible, never blocked. `status` and
+`active-work` expose members, claims, submissions and live URLs. An owner or
+publisher invites a principal with `join --principal-id`; an invited principal
+attaches to the same fork with `join`. Agent principals must supply the human
+intent as `note` on every update and submission; history retains it and the
+acting principal. Drafts are named sessions with no expiry. A session started
+with `--draft` targets that draft; publishing its head uses the normal main
+publication path.
+
+Each change set carries `baseRevision` and `lastUpdateHash`. A stale shared
+fork response preserves the agent’s changes and returns current files,
+`stale:true`, and key conflicts. When the host returns `rebasedChanges`, the
+client adopts the current baseline, reapplies that patch and retries once.
+Further changes require another explicit call. Conflicts have
+`{path,key?,base,mine,theirs}`. `update --resolve PATH` retains the local file;
+`--resolve PATH#KEY=mine|theirs` resolves only that key. The host verifies
+`mainRevision` so a resolution cannot silently overwrite newer work.
+
+Hosted `submit` freezes a submission and preview; it does not open a pull
+request. `publish` selects the latest submission unless `--submission` is
+provided, rechecks current main and the publisher grant, and requires
+confirmation (`--yes` for automation). `--dry-run` reports conflicts and
+checks without publishing. `rollback VERSION` also requires a publisher
+and confirmation. Humans can do all of this in Studio. Successful publication
+closes the session. Set `TIMDS_PORTAL_URL` to start `timds mcp` in an empty
+agent workspace; the tools share this CLI implementation.
+
+### Mergeable contract groups and consumer drafts
+
+New systems author `tokens/<group>.json` and `media/<group>.json`.
+`timds upgrade` migrates legacy aggregates without changing token values or
+media records and refuses conflicting existing group files. The layout record
+is `.timds/contract-layout.json`; old systems remain readable until upgraded.
+A token group file is a key map such as `{"600":{"value":"#2457d6"}}` in
+`tokens/color.brand.json`. Media maps use full logical asset keys as keys.
+`check` validates group structure, duplicate keys, token references, cycles,
+CSS name collisions, and media references. `{color.brand.600}` is a token
+reference; a token’s optional `media` field names a catalog key.
+
+`tokens.json` and `media.json` become generated compatibility views for existing
+builds and consumers. Never edit those views. The published derived layer and
+bundle schema remain unchanged. Hosted change sets omit generated views, so
+independent group changes do not create aggregate-file conflicts.
+
+A published consumer can opt in with `timds consumer init --draft-preview`.
+It writes `.timds/draft-preview.mjs`; a root HTML entry gains the module after
+its pinned stylesheet, while framework applications import the module from
+the browser entry. `?timds_draft=spring-refresh` appends the draft’s public
+`tokens.css`; without the query the pinned stylesheet is unchanged. For a
+preview hostname, call `installDraftPreview` from
+`@dtconcepts/timds/consumer-draft-preview` with `hostnameDrafts:{hostname:name}`.
+
+`timds consumer update --draft spring-refresh --portal-url https://timds.com`
+fetches an authenticated snapshot, checks an isolated local build and installs
+its digest-verified bundle into the ignored consumer directory. It leaves the
+tracked production version pin untouched. `consumer check` identifies the
+local draft override; `consumer sync` restores the exact published pin.
+
+`timds mcp read --draft spring-refresh --system-id example/core --portal-url
+https://timds.com` serves the checked draft’s derived layer; every read refreshes
+its snapshot and rebuilds only when its revision changed. Hosts registering
+read tools receive optional `draft` alongside `systemId` and `version` in their
+resolver. Report missing guidance through `report_gap`.
 
 For a new hosted source use `timds init --standalone --provider hosted
 --portal-url https://timds.com`. It emits `wrangler.jsonc` with top-level
@@ -1641,36 +1692,65 @@ with `X-Robots-Tag: noindex`. It emits no GitHub workflows. Local and git
 scaffolds keep their existing automation. `publish --skip-build --skip-push`
 remains available to the host's publication path.
 
-Trusted hosts can reuse the same publication validation in process. Build and
-check the committed source in an isolated worker, then pass its exact artifact
-buffers to the workspace. The callback handles the host's own authorization,
-storage and pointer update; the toolkit reads no CLI credentials on this path.
+Hosts share the pure three-way merge exported from `@dtconcepts/timds/merge`.
+It takes complete base, local, and target file trees. Each entry is
+`{path, encoding:"base64", content, mode?}` with canonical base64 bytes and a
+Git file mode (`100644` by default). It has no Git, filesystem, network, or host
+dependencies, so repository adapters can run it locally or in a hosted runtime.
 
 ```js
-import { loadWorkspace } from '@dtconcepts/timds/core';
-import { createPublicationStamp, writePublicationStamp, publishRelease } from '@dtconcepts/timds/publish';
+import { mergeFileTrees } from '@dtconcepts/timds/merge';
+const result = mergeFileTrees(baseFiles, mineFiles, theirFiles, {
+  resolvedPaths: ['tokens/color.json#brand.value=theirs'],
+});
+// result: { files, conflicts, mergedKeys, conflictedKeys }
+// Never commit result.files until result.conflicts is empty.
+```
+
+Token/media group JSON objects merge recursively; arrays are atomic.
+`timds.json` merges tokens, media, components, patterns, typography, icons,
+fonts, metadata, and description by key; other manifest fields and ordinary
+files remain atomic. Missing keys are distinct from JSON null during the
+merge; conflict receipts represent missing values as null. Whole-path choices
+keep the local file, key choices accept dotted paths or escaped JSON Pointers,
+and unused resolutions fail. The merger regenerates compatibility aggregates
+from merged groups. Repository adapters still perform contract checks and
+compare-and-swap the target revision before committing a conflict-free tree.
+
+Trusted hosts can publish without a local checkout. Their repository adapter
+supplies the committed source revision and source tree relative to the Design
+System root; a checked build supplies exact artifact bytes. The callback handles
+the host's authorization, storage and pointer update. No CLI credentials are
+read on this path.
+
+```js
+import { createPublicationStampFromFiles, publishReleaseFromFiles } from '@dtconcepts/timds/publish';
 import { prepareMergeRelease } from '@dtconcepts/timds/release';
 
-// prepareMergeRelease({ previousVersion, timdsJson, packageJson,
-//   packageLock, changelog, fallbackNote }) returns the existing release bump.
-const workspace = await loadWorkspace(committedCheckout);
-workspace.artifact = checkedArtifact; // { files: [{ path, content: Buffer }] }
-const stamp = await createPublicationStamp(workspace);
-await writePublicationStamp(workspace, stamp);
-await publishRelease(workspace, {
+// Source and artifact contents can be Buffer/Uint8Array, UTF-8 text, or
+// canonical base64 with encoding:"base64". Artifacts exclude the root stamp.
+const input = { sourceCommit, sourceFiles, artifactFiles };
+const stamp = createPublicationStampFromFiles(input);
+await publishReleaseFromFiles({
+  ...input,
   stamp,
   publisher: async ({ stamp, files }) => publishAuthorizedRelease(stamp, files),
 });
 ```
 
-The callback returns the same publication response as the HTTP endpoint:
+`createPublicationStampFromFiles` is also available from
+`@dtconcepts/timds/publication-snapshot`. It computes the existing schema-1
+content digest from the full normalized source contract and artifact bytes,
+verifies manifest identity, and preserves committed Git source ordering. The
+release wrapper recomputes the digest before calling the publisher with artifact
+buffers. The callback returns the HTTP publication response:
 `{status:"published", systemId, version, publicRoot, versionedUrls}` with
-`versionedUrls.{root,llmsTxt,bundleJson,artifact}`. The toolkit still validates
-the response and anonymously verifies the public stamp. Artifact buffers and
-the canonical content digest are unchanged by this hook.
+`versionedUrls.{root,llmsTxt,bundleJson,artifact}`. The toolkit validates the
+response and anonymously verifies the public stamp. Git-based callers retain
+`createPublicationStamp`, `writePublicationStamp`, and `publishRelease`.
 
 The public provider interface is exported from `@dtconcepts/timds/hosted`:
-`start`, `pull`, `submit`, `update`, `status`, `history`, and `close`. API
+`start`, `pull`, `submit`, `update`, `status`, `history`, `close`, claims, members, drafts and rollback. API
 version 1 uses the following relative endpoints with a TimDS Bearer token
 and `X-TimDS-API-Version: 1`:
 
@@ -1682,15 +1762,22 @@ and `X-TimDS-API-Version: 1`:
 | POST | `/api/timds/sessions/:id/update` | Change set, optional `resolvedPaths` and `mainRevision` |
 | GET | `/api/timds/sessions/:id/status` | Session and latest submission |
 | GET | `/api/timds/sessions/:id/history` | Commits and publication events |
+| POST | `/api/timds/sessions/:id/join` | `{principalId?}`; invite or attach |
+| POST | `/api/timds/sessions/:id/claims` | `{patterns,note?}` |
+| GET | `/api/timds/design-systems/:id/active-work` | Members, claims, submissions and live URLs |
+| GET/POST | `/api/timds/design-systems/:id/drafts` | List, or create `{name,from,idempotencyKey?}` |
+| GET | `/api/timds/design-systems/:id/drafts/:name/snapshot` | Authenticated draft source |
+| POST | `/api/timds/design-systems/:id/drafts/:name/close` | Close draft and live resources |
+| POST | `/api/timds/design-systems/:id/rollback` | `{version,dryRun?}` |
 | POST | `/api/timds/sessions/:id/close` | `{apiVersion:1}` |
 | POST | `/api/timds/submissions/:id/publish` | `{apiVersion:1, preflight?, dryRun?}` |
 | GET | `/api/timds/publications/:id` | Publication progress and result |
 
-A change set is `{apiVersion:1, baseRevision, changedFiles, deletedPaths,
+A change set is `{apiVersion:1, baseRevision, lastUpdateHash, changedFiles, deletedPaths,
 note?}`. Files are `{path, encoding:"base64", content, mode?}`; modes are
 `100644`, `100755`, or `120000` (a bounded relative symlink). Responses carry
 `apiVersion:1`; snapshots carry `session:{id,systemId,baseRevision,status,
-expiresAt?}` and `files`. Update conflicts carry `conflicts:[path]` and
+expiresAt?}` and `files`. Update/submit conflicts carry `conflicts:[{path,key?,base,mine,theirs}]` and
 `mainRevision`; successful updates return the merged fork snapshot. Submit
 returns the updated session and a submission with its `previewUrl`, and can
 omit `files` when the submitted local snapshot is unchanged by the host.

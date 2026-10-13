@@ -41,7 +41,7 @@ system is ordinary design work:
 
 1. Collect the approved inputs first: brand colors, licensed typefaces, logo
    files, and voice guidance. Ask for what is missing rather than inventing it.
-2. Replace the values in `tokens.json`. The starter build emits each
+2. Replace the values in `tokens/*.json`. The starter build emits each
    `group.name` token as the `--group-name` custom property in `tokens.css`;
    add a token before using a new value in `src/styles/`.
 3. Read `src/site.json`. It declares every view and page; a page marked
@@ -152,7 +152,7 @@ system scaffolded before the record
 existed opts in once with `npm run timds -- starter sync` on a feature
 branch, then reviews the diff and runs `check`. Treat planned pages that
 appear after an upgrade as primitives to author. When a change needs a stock
-script, prefer `tokens.json`, `system.css`, and the pages; a local script
+script, prefer `tokens/*.json`, `system.css`, and the pages; a local script
 change leaves that file behind on every later upgrade.
 
 ## Upgrade protected tooling only when requested
@@ -290,7 +290,7 @@ from `.timds/local-media.json`; a production build resolves it from the stable
 public URL in `media.json`. Authenticate through the operator portal and upload:
 
 ```bash
-npm run timds -- auth login
+npm run timds -- login
 npm run timds -- assets publish
 ```
 
@@ -383,13 +383,27 @@ consuming-site update.
 
 ## Hosted sessions
 
-When `timds.json` selects the hosted provider, or `.timds/session.json` exists,
-use `timds start`, `check`, `submit`, `pull`, `update`, `status`, `history`, `publish`, and
-`sessions close` (or the matching `timds_*` MCP tools). Do not run git commands
-in that workspace. The host owns source history. On update conflicts, keep the
-local file, resolve it with the user intent, and use `timds update --resolve
-PATH` for each resolved path. Return the submission preview URL. When publication
-is requested, run `timds publish --dry-run`, review the summary, then `timds
-publish --yes`. Users and agents require a publisher grant on the system;
-the host records the principal and originating request. Successful publication
-closes the session. Never put the access token in source or session metadata.
+Agents are the only writers. Humans direct work and use login, status,
+history, publish and rollback in the CLI or Studio. Prefer the hosted MCP:
+`timds_start`, `timds_pull`, `timds_submit`, `timds_update`, `timds_claim`,
+`timds_active_work`, `timds_join`, and `timds_draft_create|list|close`.
+Read active work before editing; claim the intended paths with the human’s
+intent note. Overlap is advisory. Submit and update carry that intent as
+`note` (required for agent principals). Never run git or handle Artifacts
+credentials in a hosted agent workspace.
+
+Author token key maps under `tokens/` and media key maps under `media/`.
+`tokens.json` and `media.json` are generated views after upgrade. Run check
+for reference integrity and build validation. Key conflicts return exactly
+`path`, `key`, `base`, `mine`, `theirs`; resolve with
+`timds update --resolve 'PATH#KEY=mine|theirs' --note INTENT`. A plain PATH
+keeps the local file. A stale shared session preserves edits and current
+content; the toolkit reapplies a clean server rebase patch and retries once.
+Further stale changes need a fresh read and explicit retry, never a force push.
+
+A draft is a named non-expiring session. Start `--draft NAME` to target it.
+An owner or publisher invites a second principal with `timds join SESSION
+--principal-id ID`; that member uses `timds_join` to attach. Return the live
+URL, submission preview and claims with the work receipt. When publication
+is requested, run dry-run, review it, then publish with explicit confirmation.
+Never put access tokens in source or session metadata.

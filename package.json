@@ -1,6 +1,6 @@
 {
   "name": "@dtconcepts/timds",
-  "version": "0.1.463",
+  "version": "0.1.464",
   "description": "Versioned CLI, contracts, templates, and AI skill for repository-owned TimDS design systems.",
   "type": "module",
   "bin": {
@@ -34,7 +34,11 @@
     "./video/board-layouts": "./video/board-layouts.mjs",
     "./publish": "./src/publish.mjs",
     "./hosted": "./src/hosted.mjs",
-    "./release": "./templates/starter/scripts/prepare-merge-release.mjs"
+    "./release": "./templates/starter/scripts/prepare-merge-release.mjs",
+    "./contract-groups": "./src/contract-groups.mjs",
+    "./consumer-draft-preview": "./src/consumer-draft-preview.mjs",
+    "./merge": "./src/merge.mjs",
+    "./publication-snapshot": "./src/publication-snapshot.mjs"
   },
   "scripts": {
     "test": "npm run typecheck && node --test .github/scripts/*.test.mjs src/*.test.mjs video/*.test.mjs && tsx --test video/*.test.tsx",
@@ -99,7 +103,11 @@
     "src/publish.mjs",
     "src/artifact-files.mjs",
     "src/publication-snapshot.mjs",
-    "src/hosted.mjs"
+    "src/hosted.mjs",
+    "src/contract-groups.mjs",
+    "src/draft-source.mjs",
+    "src/consumer-draft-preview.mjs",
+    "src/merge.mjs"
   ],
   "dependencies": {
     "@anthropic-ai/sdk": "0.125.0",

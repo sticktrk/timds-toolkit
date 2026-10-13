@@ -81,8 +81,8 @@ const SURFACE_CANDIDATES = ["src/styles", "src/components", "src/pages", "src/ap
 const SKIPPED_DIRECTORIES = new Set(["node_modules"]);
 
 const INIT_HELP = `Usage:
-  timds consumer init [--root PATH] [--force] [--skip-install] [--portal-url URL]
-  timds consumer init --system ID [--version VERSION] [--url URL] [--root PATH] [--force] [--skip-install] [--portal-url URL]
+  timds consumer init [--root PATH] [--force] [--skip-install] [--portal-url URL] [--draft-preview]
+  timds consumer init --system ID [--version VERSION] [--url URL] [--root PATH] [--force] [--skip-install] [--portal-url URL] [--draft-preview]
 
 Writes timds.consumer.json (apps discovered from package.json files one
 directory down, and the root package.json when it has a dev, start, preview,
@@ -734,7 +734,7 @@ async function resolvePublishedPin({ system, version, url, fetchImpl }) {
  * on a conflicting toolkit declaration, when git ignores a file it would
  * write, or on customized managed files unless `force`.
  */
-export async function initializeConsumer(rootInput = process.cwd(), { force = false, skipInstall = false, portalUrl = DEFAULT_PORTAL_URL, system = null, version = null, url = null, fetchImpl = fetch, runNpm = runConsumerNpm, output = () => {} } = {}) {
+export async function initializeConsumer(rootInput = process.cwd(), { force = false, skipInstall = false, portalUrl = DEFAULT_PORTAL_URL, system = null, version = null, url = null, draftPreview = false, fetchImpl = fetch, runNpm = runConsumerNpm, output = () => {} } = {}) {
   const repoRoot = await findGitRoot(rootInput);
   const manifestPath = path.join(repoRoot, CONSUMER_MANIFEST_FILE);
   const existingRaw = await readJsonFile(manifestPath, CONSUMER_MANIFEST_FILE);
@@ -758,11 +758,31 @@ export async function initializeConsumer(rootInput = process.cwd(), { force = fa
   let general = [];
   if (!keepManifest) ({ manifest, todos, general } = await buildConsumerManifest(repoRoot, designSystemPath, published));
 
+  let previewPlan = null;
+  if (draftPreview) {
+    if (!published) throw new Error("--draft-preview requires a published consumer");
+    const modulePath = ".timds/draft-preview.mjs";
+    const runtime = await fs.readFile(path.join(packageRoot, "src/consumer-draft-preview.mjs"), "utf8");
+    const moduleContent = `${runtime}\ninstallDraftPreview(${JSON.stringify({ source: published.systemId, portalUrl })});\n`;
+    const indexPath = path.join(repoRoot, "index.html");
+    const html = await fs.readFile(indexPath, "utf8").catch(error => { if (error.code === "ENOENT") return null; throw error; });
+    if (html !== null && !html.includes('data-timds-draft-preview') && !html.includes('</head>')) throw new Error("index.html has no </head> for the optional draft preview module");
+    previewPlan = { modulePath, moduleContent, html: html !== null && !html.includes('data-timds-draft-preview') ? html.replace('</head>', `<script type="module" data-timds-draft-preview src="/${modulePath}"></script>\n</head>`) : null };
+    const old = await fs.readFile(path.join(repoRoot, modulePath), 'utf8').catch(() => null);
+    if (old && old !== moduleContent && !force) throw new Error(`${modulePath} already exists; use --force to replace this preview module`);
+    await refuseIgnoredPaths(repoRoot, [modulePath, ...(previewPlan.html ? ['index.html'] : [])], 'timds consumer init');
+  }
   const plan = await planConsumerInstallation(repoRoot, manifest, { force, portalUrl });
   const { defaultBranch, launchPlan, mcpPlan, packagePlan } = plan;
   await prepareConsumerInstallation(repoRoot, plan, { skipInstall, runNpm, output });
 
   const written = [];
+  if (previewPlan) {
+    await writeFile(path.join(repoRoot, previewPlan.modulePath), previewPlan.moduleContent);
+    written.push(previewPlan.modulePath);
+    if (previewPlan.html) { await writeFile(path.join(repoRoot, "index.html"), previewPlan.html); written.push("index.html"); }
+    else output(`Import ${previewPlan.modulePath} from the browser entry to enable ?timds_draft=NAME overrides after pinned styles.`);
+  }
   if (!keepManifest) {
     await writeFile(manifestPath, toJson(manifest));
     written.push(CONSUMER_MANIFEST_FILE);
@@ -941,7 +961,7 @@ function parseInitArguments(argv) {
     if (!value.startsWith("-")) throw new Error(`Unexpected argument ${value}\n${INIT_HELP}`);
     const [rawName, inlineValue] = value.replace(/^--?/, "").split("=", 2);
     const name = rawName.replace(/-([a-z])/g, (_match, letter) => letter.toUpperCase());
-    if (["force", "help", "skipInstall"].includes(name)) {
+    if (["force", "help", "skipInstall", "draftPreview"].includes(name)) {
       options[name] = true;
       continue;
     }
@@ -955,7 +975,7 @@ function parseInitArguments(argv) {
   return options;
 }
 
-/** `timds consumer init [--root PATH] [--system ID] [--version VERSION] [--url URL] [--force] [--skip-install] [--portal-url URL]` */
+/** `timds consumer init [--root PATH] [--system ID] [--version VERSION] [--url URL] [--force] [--skip-install] [--portal-url URL] [--draft-preview]` */
 export async function runConsumerInit(args = [], { output = (message = "") => process.stdout.write(`${message}\n`) } = {}) {
   const options = parseInitArguments(args);
   if (options.help) {
@@ -965,6 +985,7 @@ export async function runConsumerInit(args = [], { output = (message = "") => pr
   return initializeConsumer(options.root || process.cwd(), {
     force: Boolean(options.force),
     skipInstall: Boolean(options.skipInstall),
+    draftPreview: options.draftPreview,
     ...(options.portalUrl ? { portalUrl: options.portalUrl } : {}),
     ...(options.system ? { system: options.system } : {}),
     ...(options.version ? { version: options.version } : {}),

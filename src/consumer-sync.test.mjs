@@ -380,3 +380,30 @@ test("check requires the root package and lockfile a published pin is installed 
   assert.match(missing.errors.join("\n"), /^package\.json is missing\. A published pin is fetched by npm install/m);
   assert.match(missing.errors.join("\n"), /^package-lock\.json is missing[^]*timds consumer init --system acme\/core/m);
 });
+
+test('draft update integrates a verified local bundle without moving the production pin, and sync restores it', async t => {
+  const { updateConsumerDraft } = await import('./consumer-sync.mjs');
+  const product = await productRepo(t), published = publishedSystem();
+  await syncConsumerBundle(product, { fetchImpl: published.fetchImpl });
+  const before = await fs.readFile(path.join(product, CONSUMER_MANIFEST_FILE), 'utf8');
+  const draftCss = '.brand{color:teal}', relative = 'src/styles/ds/brand.css';
+  const result = await updateConsumerDraft(product, {
+    draft: 'spring-refresh', portalUrl: 'https://host.test', token: 'timds_test', output() {},
+    fetchImpl: async (url, options) => {
+      assert.match(url, /acme%2Fcore\/drafts\/spring-refresh\/snapshot$/);
+      assert.equal(options.headers.Authorization, 'Bearer timds_test');
+      return new Response(JSON.stringify({ apiVersion: 1, session: { id: 'draft-1', baseRevision: 'draft-head', status: 'open' }, files: [] }));
+    },
+    build: async root => {
+      await write(root, `dist/bundle/${relative}`, draftCss);
+      await write(root, 'dist/bundle.json', { system: { id: 'acme/core' }, files: [{ path: relative, sha256: sha256(draftCss), bytes: draftCss.length }] });
+    },
+  });
+  assert.equal(result.revision, 'draft-head');
+  assert.equal(await fs.readFile(path.join(product, CONSUMER_MANIFEST_FILE), 'utf8'), before);
+  assert.equal(await fs.readFile(path.join(product, 'design-system', relative), 'utf8'), draftCss);
+  assert.equal((await readBundleRecord(path.join(product, 'design-system'))).draft, 'spring-refresh');
+  await syncConsumerBundle(product, { fetchImpl: published.fetchImpl });
+  assert.equal(await fs.readFile(path.join(product, 'design-system', relative), 'utf8'), '.brand{color:navy}');
+  assert.equal((await readBundleRecord(path.join(product, 'design-system'))).draft, undefined);
+});

@@ -235,3 +235,14 @@ Wrangler preview configuration and `_headers` instead of GitHub workflows.
 Local/git initialization keeps its existing release automation. Session API
 version 1 is implemented in `src/hosted.mjs`; CLI and MCP commands must share
 that implementation and keep files/token boundaries covered by tests.
+
+
+The multiplayer contract migration is an explicit exception to the authored
+aggregate boundary above: fresh init and upgrade split tokens/media into
+key maps, recording `.timds/contract-layout.json`, and keep generated root
+`tokens.json`/`media.json` compatibility views. Group files are authored;
+upgrades never replace them. Reference validation and aggregate generation
+live in `src/contract-groups.mjs`. Consumer `init --draft-preview` explicitly
+adds its browser module and, when available, the root HTML hook; ordinary
+upgrade never edits either product-owned file. Draft consumer updates replace
+only the ignored bundle and never the tracked published pin.

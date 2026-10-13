@@ -1,3 +1,4 @@
+import { hasContractGroups, readContractGroups, writeGroupedMedia } from "./contract-groups.mjs";
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { constants as fsConstants, createReadStream, promises as fs } from "node:fs";
@@ -171,9 +172,10 @@ export function validateMediaCatalog(input) {
   return { assets, schemaVersion };
 }
 
-export async function readMediaCatalog(designSystemRoot, { required = false } = {}) {
+export async function readMediaCatalog(designSystemRoot, { required = false, grouped = true } = {}) {
   const catalogPath = path.join(designSystemRoot, "media.json");
   try {
+    if (grouped && await hasContractGroups(designSystemRoot)) return { catalog: validateMediaCatalog((await readContractGroups(designSystemRoot)).media), catalogPath };
     return { catalog: validateMediaCatalog(JSON.parse(await fs.readFile(catalogPath, "utf8"))), catalogPath };
   } catch (caught) {
     if (!required && caught?.code === "ENOENT") return { catalog: { assets: [], schemaVersion: 2 }, catalogPath };
@@ -464,7 +466,7 @@ async function writeCatalog(catalogPath, catalog, asset) {
   assets.push(asset);
   assets.sort((left, right) => left.key.localeCompare(right.key));
   const next = validateMediaCatalog({ assets, schemaVersion: 2 });
-  await fs.writeFile(catalogPath, `${JSON.stringify(next, null, 2)}\n`, "utf8");
+  await writeGroupedMedia(path.dirname(catalogPath), next);
   return next;
 }
 
@@ -587,7 +589,7 @@ export async function backfillMediaMetadata(workspace, options = {}) {
     updated.push(nextAsset);
   }
   const nextCatalog = validateMediaCatalog({ assets, schemaVersion: catalog.schemaVersion });
-  await fs.writeFile(catalogPath, `${JSON.stringify(nextCatalog, null, 2)}\n`, "utf8");
+  await writeGroupedMedia(path.dirname(catalogPath), nextCatalog);
   return { catalogPath, updated, unchanged };
 }
 

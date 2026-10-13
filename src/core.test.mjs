@@ -1014,7 +1014,7 @@ test("designs init adopts website designs in a system scaffolded without them", 
   const tokens = JSON.parse(await read("tokens.json"));
   tokens.spacing = tokens.space;
   delete tokens.space;
-  await writeJson(path.join(repoRoot, "tokens.json"), tokens);
+  await fs.rename(path.join(repoRoot, "tokens/space.json"), path.join(repoRoot, "tokens/spacing.json"));
   const renamed = await initializeDesigns(repoRoot);
   assert.equal(renamed.stylesheet, "untouched");
   assert.deepEqual(renamed.missingClasses, ["form", "hero", "notice", "section", "site-footer", "site-header", "site-header__brand", "site-nav", "wrap"]);
