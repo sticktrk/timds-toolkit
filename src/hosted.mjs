@@ -13,6 +13,10 @@ const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_SNAPSHOT_BYTES = 50 * 1024 * 1024;
 const MAX_CHANGESET_BYTES = 10 * 1024 * 1024;
 const MAX_FILES = 4000;
+const HOST_RETRY_WINDOW_MS = 5 * 60 * 1000;
+const HOST_RETRY_ATTEMPTS = 6;
+const SESSION_BUSY_MESSAGE = "This session is busy; retry when its current operation finishes";
+const retryClock = { now: () => Date.now(), sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)) };
 const NO_HOST = "No TimDS host configured; use local mode for editing or git mode for pull requests, or configure provider.kind=hosted and provider.url.";
 const RESERVED = new Set([".git", ".github", "node_modules", "dist", ".env", ".env.server"]);
 
@@ -54,22 +58,38 @@ export async function workspaceProvider(root) {
   return normalizeProvider(manifest?.provider || state?.provider);
 }
 
-export function createHostProvider({ url, token, fetchImpl = fetch }) {
+export function createHostProvider({ url, token, fetchImpl = fetch, retryClock: clock = retryClock }) {
   const origin = cleanPortalUrl(url);
   if (!token) throw new Error("A TimDS token is required; run timds login or set TIMDS_ACCESS_TOKEN.");
   async function request(method, suffix, body, resource = 'sessions') {
-    const response = await fetchImpl(`${origin}/api/timds/${resource}${suffix}`, {
+    // These two version-1 operations recover a completed request by its original
+    // change set. Serialize once: a retry must never reread or append local edits.
+    const recoverable = method === "POST" && resource === "sessions" && /\/(?:update|submit)$/.test(suffix);
+    const deadline = clock.now() + HOST_RETRY_WINDOW_MS;
+    const requestOptions = {
       method, redirect: "error",
       headers: { Accept: "application/json", "Content-Type": "application/json", Authorization: `Bearer ${token}`, "X-TimDS-API-Version": String(HOST_API_VERSION) },
       ...(body ? { body: JSON.stringify({ ...body, apiVersion: HOST_API_VERSION }) } : {}),
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok && !(response.status === 409 && Array.isArray(payload.conflicts))) {
-      const error = new Error(`TimDS host returned ${response.status}: ${String(payload.error || "request failed")}`);
-      error.status = response.status; error.details = payload; throw error;
+    };
+    for (let attempt = 1; ; attempt++) {
+      const response = await fetchImpl(`${origin}/api/timds/${resource}${suffix}`, {
+        ...requestOptions,
+        ...(recoverable ? { signal: AbortSignal.timeout(Math.max(1, deadline - clock.now())) } : {}),
+      });
+      const payload = await response.json().catch(() => ({}));
+      const conflict = response.status === 409 && Array.isArray(payload.conflicts);
+      const busy = response.status === 409 && !conflict && (payload.code === "operation_busy" || payload.error === SESSION_BUSY_MESSAGE);
+      if (recoverable && attempt < HOST_RETRY_ATTEMPTS && ([502, 524].includes(response.status) || busy)) {
+        const delay = Math.min(2000 * 2 ** (attempt - 1), 30_000);
+        if (clock.now() + delay < deadline) { await clock.sleep(delay); continue; }
+      }
+      if (!response.ok && !conflict) {
+        const error = new Error(`TimDS host returned ${response.status}: ${String(payload.error || "request failed")}`);
+        error.status = response.status; error.details = payload; throw error;
+      }
+      if (payload.apiVersion !== HOST_API_VERSION) throw new Error("Unsupported TimDS host API version; update the CLI and host together.");
+      return payload;
     }
-    if (payload.apiVersion !== HOST_API_VERSION) throw new Error("Unsupported TimDS host API version; update the CLI and host together.");
-    return payload;
   }
   const sessionPath = (id) => `/${encodeURIComponent(id)}`;
   return {

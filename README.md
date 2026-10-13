@@ -1627,6 +1627,13 @@ workspace after a partial download. Credentials remain in the private TimDS
 credential file or `TIMDS_ACCESS_TOKEN`, never source or session metadata.
 `TIMDS_PORTAL_URL` selects a host before a session exists.
 
+Hosted `update` and `submit` recover HTTP 502/524 timeouts and explicit session
+operation-busy responses by resending the identical serialized change set, up
+to six attempts within five minutes. This allows the host to return a completed
+operation's receipt without duplicating its changes. CLI and MCP share this
+behavior. Key conflicts, stale revisions, publication conflicts, and other
+commands are not transport retries; they retain their normal resolution flow.
+
 Claims are advisory: overlapping work is visible, never blocked. `status` and
 `active-work` expose members, claims, submissions and live URLs. An owner or
 publisher invites a principal with `join --principal-id`; an invited principal

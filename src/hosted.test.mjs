@@ -5,13 +5,80 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import test from "node:test";
-import { HOST_API_VERSION, SESSION_FILE, runHostedCommand, sessionChanges, hostedPath } from "./hosted.mjs";
+import { HOST_API_VERSION, SESSION_FILE, runHostedCommand, sessionChanges, hostedPath, createHostProvider } from "./hosted.mjs";
 import { initializeRepository } from "./core.mjs";
 import { registerHostedSessionTools } from "./mcp.mjs";
 
 const file = (name, content, mode = "100644") => ({ path: name, encoding: "base64", content: Buffer.from(content).toString("base64"), mode });
 const snapshot = (files, revision = "base", extra = {}) => ({ apiVersion: 1, session: { id: "session-1", systemId: "example/core", baseRevision: revision, status: "open" }, files, ...extra });
 const response = (payload, status = 200) => new Response(JSON.stringify(payload), { status, headers: { "Content-Type": "application/json" } });
+function testRetryClock() {
+  let time = 0;
+  const delays = [];
+  return { now: () => time, sleep: async (ms) => { delays.push(ms); time += ms; }, advance: (ms) => { time += ms; }, delays };
+}
+
+test("update and submit recover edge timeouts with the exact original payload and receipt", async () => {
+  for (const operation of ["update", "submit"]) {
+    const clock = testRetryClock();
+    const requests = [];
+    const original = { baseRevision: "before", changedFiles: [file("tokens/color.json", '{"brand":"warm"}')], deletedPaths: [], note: "Warm the brand" };
+    const expected = JSON.stringify({ ...original, apiVersion: 1 });
+    const receipt = snapshot([file("tokens/color.json", '{"brand":"warm"}')], "after", { submission: { id: "same-submission" } });
+    const outcomes = [new Response("<html>edge timeout</html>", { status: 524 }), response({ error: "This session is busy; retry when its current operation finishes" }, 409), response({}, 502), response(receipt)];
+    const provider = createHostProvider({ url: "https://host.example", token: "timds_test", retryClock: clock, fetchImpl: async (url, options) => {
+      requests.push({ url, ...options });
+      // A later filesystem/input change must not alter an in-flight request.
+      original.changedFiles[0].content = Buffer.from("later edit").toString("base64");
+      original.note = "Do not append this during recovery";
+      assert.ok(options.signal instanceof AbortSignal);
+      return outcomes.shift();
+    } });
+    assert.deepEqual(await provider[operation]("session-1", original), receipt);
+    assert.equal(requests.length, 4);
+    assert.ok(requests.every((request) => request.body === expected));
+    assert.ok(requests.every((request) => request.url.endsWith(`/session-1/${operation}`)));
+    assert.deepEqual(clock.delays, [2000, 4000, 8000]);
+  }
+});
+
+test("host retry recognizes explicit busy codes but immediately returns semantic conflicts and other failures", async () => {
+  const clock = testRetryClock();
+  let calls = 0;
+  const provider = createHostProvider({ url: "https://host.example", token: "timds_test", retryClock: clock, fetchImpl: async () => ++calls === 1 ? response({ code: "operation_busy", error: "Still running" }, 409) : response(snapshot([])) });
+  await provider.update("session-1", {});
+  assert.equal(calls, 2);
+  for (const [status, payload] of [
+    [409, { apiVersion: 1, conflicts: [], stale: true }],
+    [409, { apiVersion: 1, conflicts: [{ path: "tokens/color.json", key: "brand", mine: "red", theirs: "blue" }] }],
+    [409, { error: "Publication is in progress; start a new session for further edits" }],
+    [409, { error: "Different lease conflict" }],
+    [401, { error: "Unauthorized" }],
+    [500, { error: "Unknown error" }],
+  ]) {
+    let attempts = 0;
+    const host = createHostProvider({ url: "https://host.example", token: "timds_test", retryClock: testRetryClock(), fetchImpl: async () => { attempts++; return response(payload, status); } });
+    if (Array.isArray(payload.conflicts)) assert.deepEqual(await host.update("session-1", {}), payload);
+    else await assert.rejects(host.update("session-1", {}), (error) => error.status === status);
+    assert.equal(attempts, 1);
+  }
+});
+
+test("host recovery has an attempt and elapsed-time bound and never retries unrelated operations", async () => {
+  for (const slow of [false, true]) {
+    const clock = testRetryClock();
+    let calls = 0;
+    const host = createHostProvider({ url: "https://host.example", token: "timds_test", retryClock: clock, fetchImpl: async () => { calls++; if (slow) clock.advance(150_000); return response({}, 524); } });
+    await assert.rejects(host.submit("session-1", {}), (error) => error.status === 524);
+    assert.equal(calls, slow ? 2 : 6);
+  }
+  for (const operation of ["start", "join", "claim", "publish", "close", "draftCreate", "rollback", "pull"]) {
+    let calls = 0;
+    const host = createHostProvider({ url: "https://host.example", token: "timds_test", retryClock: testRetryClock(), fetchImpl: async () => { calls++; return response({}, 524); } });
+    await assert.rejects(host[operation]("session-1", {}), (error) => error.status === 524);
+    assert.equal(calls, 1, `${operation} is not an idempotent change-set recovery`);
+  }
+});
 async function fixture(t, files = [file("note.txt", "base")]) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "timds-hosted-test-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
