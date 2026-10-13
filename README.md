@@ -1597,6 +1597,34 @@ and `rollback`. Agents write through MCP first: `timds_start`, `timds_pull`,
 `timds_active_work`, `timds_join`, and `timds_draft_create|list|close`.
 The CLI exposes the same operations for agent automation.
 
+`timds auth login` (also `timds login`) selects `--portal-url` first, then the
+nearest workspace's hosted `provider.url`, then `TIMDS_PORTAL_URL` or
+`https://timds.com`. Status and logout select the same host. A host advertising
+`/.well-known/oauth-authorization-server` uses authorization code with PKCE S256
+and a temporary `127.0.0.1` callback. The CLI registers a public client when the
+host permits it; otherwise supply its registered `--client-id`. It requests the
+host's advertised `timds:read`, `timds:write` and `offline_access` scopes for
+`<host-origin>/api/timds`; publication still requires a publisher grant.
+
+Interactive login opens the browser and always prints the authorization URL.
+Use `--no-browser` to open that URL yourself on the same machine; a remote shell
+needs loopback port forwarding or `--device` on a portal supporting device login.
+`--oauth` requires OAuth discovery; `--device` explicitly keeps the portal flow.
+Automatic fallback uses device login only when discovery is unavailable with
+HTTP 404, 405 or 501. Invalid metadata or a failed OAuth request never switches
+flows. OAuth requires HTTPS except for local loopback development hosts.
+Use `--timeout-seconds N` for the OAuth wait (default 600, maximum 3600), or
+Ctrl-C to cancel.
+
+Credentials remain outside the repository in the owner-only TimDS credentials
+file, keyed by host origin. OAuth refresh tokens rotate when saved access tokens
+near expiry. Concurrent CLI and MCP processes serialize refresh, login and logout
+with a credentials-file lock, reload after locking, and atomically replace the
+file. A crashed owner's lock expires; waiting for a live owner is bounded.
+No token, code verifier or refresh token is printed. `auth logout`
+removes the local credential; it does not revoke the host-side authorization.
+`--token` and `TIMDS_ACCESS_TOKEN` retain the existing explicit-token paths.
+
 ```sh
 # Human controls
 timds login --portal-url https://timds.com

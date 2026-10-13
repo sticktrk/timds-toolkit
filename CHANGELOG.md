@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Let `timds auth login` discover an independent host's OAuth authorization, use a public PKCE loopback client, and refresh origin-bound credentials. Keep the portal device flow, add explicit flow and headless controls, and select the workspace host consistently for login, status and logout.
 - Validate and retain the optional native live-preview HMR contract, with exact restart paths and unchanged full-restart defaults. Preserve the authored declaration through checks, upgrades, and release preparation.
 
 ## 0.1.469

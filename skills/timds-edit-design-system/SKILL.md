@@ -392,6 +392,13 @@ intent note. Overlap is advisory. Submit and update carry that intent as
 `note` (required for agent principals). Never run git or handle Artifacts
 credentials in a hosted agent workspace.
 
+`timds auth login` selects the workspace's hosted provider unless `--portal-url`
+explicitly selects another host. Independent hosts use OAuth with a temporary
+loopback callback; portals keep device login. Let the human complete sign-in.
+`--no-browser` prints the link, and a remote shell needs loopback forwarding or
+the portal's `--device` flow. Credentials and refresh tokens stay outside the
+workspace; never copy them into a prompt, source file or session metadata.
+
 Author token key maps under `tokens/` and media key maps under `media/`.
 `tokens.json` and `media.json` are generated views after upgrade. Run check
 for reference integrity and build validation. Key conflicts return exactly

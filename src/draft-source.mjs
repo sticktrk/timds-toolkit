@@ -10,7 +10,7 @@ import { cleanPortalUrl, resolveAccessToken } from './auth.mjs';
 export async function prepareDraftSource({ systemId, draft, portalUrl = process.env.TIMDS_PORTAL_URL || 'https://timds.com', token, credentialsPath, fetchImpl = fetch, build, previous = null } = {}) {
   if (!systemId || !draft) throw new Error('A draft source requires systemId and draft');
   const url = cleanPortalUrl(portalUrl);
-  const host = createHostProvider({ url, token: await resolveAccessToken(url, { token, credentialsPath }), fetchImpl });
+  const host = createHostProvider({ url, token: await resolveAccessToken(url, { token, credentialsPath, fetchImpl }), fetchImpl });
   const snapshot = await host.draftSnapshot(systemId, draft);
   if (previous && previous.snapshot.session.baseRevision === snapshot.session.baseRevision) return previous;
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'timds-draft-'));

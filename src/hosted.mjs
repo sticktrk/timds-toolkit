@@ -341,7 +341,7 @@ export async function runHostedCommand(command, { root = process.cwd(), fixedRoo
   if (!url || configured && configured.kind !== "hosted") throw new Error(NO_HOST);
   const provider = normalizeProvider({ kind: "hosted", url });
   if (state && state.provider.url !== provider.url) throw new Error("Session belongs to a different TimDS host");
-  const host = createHostProvider({ url: provider.url, token: await resolveAccessToken(provider.url, { token, credentialsPath }), fetchImpl });
+  const host = createHostProvider({ url: provider.url, token: await resolveAccessToken(provider.url, { token, credentialsPath, fetchImpl }), fetchImpl });
   const manifest = await readJson(path.join(selected, "timds.json"));
   const selectedSystem = systemId || state?.session?.systemId || state?.session?.sourceId || manifest?.systemId;
   if (command === "rollback") {
