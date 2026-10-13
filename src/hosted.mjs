@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import ignore from "ignore";
-import { cleanPortalUrl, resolveAccessToken } from "./auth.mjs";
+import { cleanPortalUrl, resolveAccessToken, savedPortalUrl } from "./auth.mjs";
 import { readUnreleasedNotes } from "./changelog.mjs";
 
 export const HOST_API_VERSION = 1;
@@ -17,7 +17,7 @@ const HOST_RETRY_WINDOW_MS = 5 * 60 * 1000;
 const HOST_RETRY_ATTEMPTS = 6;
 const SESSION_BUSY_MESSAGE = "This session is busy; retry when its current operation finishes";
 const retryClock = { now: () => Date.now(), sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)) };
-const NO_HOST = "No TimDS host configured; use local mode for editing or git mode for pull requests, or configure provider.kind=hosted and provider.url.";
+const NO_HOST = "No TimDS host configured. Run timds auth login --portal-url https://YOUR-HOST --oauth, or pass --portal-url URL to timds start.";
 const RESERVED = new Set([".git", ".github", "node_modules", "dist", ".env", ".env.server"]);
 
 export function hostedPath(value) {
@@ -348,7 +348,7 @@ export async function runHostedCommand(command, { root = process.cwd(), fixedRoo
     ? normalizeProvider((await readJson(path.join(selected, "timds.json")))?.provider || state?.provider)
     : await workspaceProvider(selected);
   const pending = command === "start" ? await readJson(path.join(selected, PENDING_START_FILE)) : null;
-  const url = portalUrl || process.env.TIMDS_PORTAL_URL || configured?.url || pending?.provider?.url;
+  const url = portalUrl || process.env.TIMDS_PORTAL_URL || configured?.url || pending?.provider?.url || (destination ? await savedPortalUrl({ credentialsPath }) : null);
   if (!url || configured && configured.kind !== "hosted") throw new Error(NO_HOST);
   const provider = normalizeProvider({ kind: "hosted", url });
   if (state && state.provider.url !== provider.url) throw new Error("Session belongs to a different TimDS host");

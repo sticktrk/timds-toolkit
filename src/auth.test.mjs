@@ -9,6 +9,7 @@ import {
   removeAccessToken,
   resolveAccessToken,
   saveAccessToken,
+  savedPortalUrl,
 } from "./auth.mjs";
 
 async function temporaryCredentials(t) {
@@ -58,4 +59,21 @@ test("completes the TimDS account device authorization flow", async (t) => {
   assert.equal(result.portal, "https://timds.test");
   assert.equal(await resolveAccessToken("https://timds.test", { credentialsPath }), "timds_device_secret");
   assert.equal(calls.length, 2);
+});
+
+
+test("remembers the last login portal and removes it on logout", async t => {
+  const credentialsPath = await temporaryCredentials(t);
+  const options = { credentialsPath };
+  assert.equal(await savedPortalUrl(options), null);
+  await saveAccessToken("https://first.test", "timds_first", options);
+  await saveAccessToken("https://second.test/path", "timds_second", options);
+  assert.equal(await savedPortalUrl(options), "https://second.test");
+  await removeAccessToken("https://second.test", options);
+  assert.equal(await savedPortalUrl(options), "https://first.test");
+  await fs.writeFile(credentialsPath, JSON.stringify({ portals: {
+    "https://first.test": { accessToken: "timds_first" },
+    "https://second.test": { accessToken: "timds_second" }
+  } }));
+  assert.equal(await savedPortalUrl(options), null);
 });

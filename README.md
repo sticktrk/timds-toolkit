@@ -11,6 +11,35 @@ from `node_modules`; client Git repositories do not carry a copied `.timds/cli`
 tree. TimDS also installs a small repository-local skill for AI-agent discovery
 and `.timds/installation.json` for fleet/version inspection.
 
+## Getting started with a hosted system
+
+Use the host URL supplied by your Studio installation. Sign in once, then start an editing workspace:
+
+```sh
+npm install --global @dtconcepts/timds@0.1.x
+timds auth login --portal-url https://YOUR-HOST --oauth
+timds start example/core --root ./core
+cd core
+npm ci
+timds doctor
+timds dev
+# After editing:
+timds check
+timds submit --note "Describe the change"
+```
+
+If the workspace has no lockfile, use `npm install` instead of `npm ci`.
+Login reuses an existing credential (refreshing OAuth when needed); use
+`--force` to authorize again or switch accounts. The last successful login
+remembers the host outside your repository, so `start` needs no repeated portal
+flag. An older credential file with exactly one signed-in portal also works;
+multiple portals without a saved selection require `--portal-url` or
+`TIMDS_PORTAL_URL`. Explicit flags and workspace configuration take precedence.
+Hosted `doctor` checks the contract without requiring Git. If the local dev
+port is busy, use `timds dev --port 4322`; this supplies `PORT` to the workspace's
+dev command. Frameworks that do not read `PORT` need their own port configuration.
+For a static review, use `timds preview --port 4401`.
+
 ## Add TimDS to a repository
 
 Create a preferred standalone Design System repository:

@@ -393,7 +393,12 @@ intent note. Overlap is advisory. Submit and update carry that intent as
 credentials in a hosted agent workspace.
 
 `timds auth login` selects the workspace's hosted provider unless `--portal-url`
-explicitly selects another host. Independent hosts use OAuth with a temporary
+explicitly selects another host. Existing credentials are reused; `--force`
+authorizes again. Outside a workspace, the last successful login host is
+remembered, so `timds start SYSTEM --root PATH` can reuse it without another
+portal flag. Install the materialized workspace dependencies before `dev`.
+Hosted `doctor` needs no Git; a busy local port can be changed with
+`timds dev --port PORT` (sets `PORT` for the declared dev command). Independent hosts use OAuth with a temporary
 loopback callback; portals keep device login. Let the human complete sign-in.
 `--no-browser` prints the link, and a remote shell needs loopback forwarding or
 the portal's `--device` flow. Credentials and refresh tokens stay outside the

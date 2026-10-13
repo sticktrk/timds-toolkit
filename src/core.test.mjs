@@ -9,6 +9,8 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
   checkWorkspace,
+  runCli,
+  runWithOutputSink,
   createPlumbingPrompt,
   createPreviewServer,
   initializeDesigns,
@@ -1455,4 +1457,54 @@ test("a later scaffold advances starter fields the client never changed and keep
   const reverted = await syncStarterWorkspace(repoRoot);
   assert.equal(reverted.files.find((file) => file.path === "scripts/check.mjs").status, "updated");
   assert.equal(await read("scripts/check.mjs"), await fs.readFile(path.join(templatesRoot, "starter/scripts/check.mjs"), "utf8"));
+});
+
+
+test("login reuses saved credentials without opening an authorization flow", async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "timds-cli-login-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const credentialsPath = path.join(root, "credentials.json");
+  const { saveAccessToken } = await import("./auth.mjs");
+  await saveAccessToken("https://saved.test", "timds_saved", { credentialsPath });
+  await saveAccessToken("https://other.test", "timds_other", { credentialsPath });
+  const lines = [];
+  const result = await runWithOutputSink(line => lines.push(line), () => runCli(["auth", "login", "--root", root, "--credentials-path", credentialsPath, "--portal-url", "https://saved.test", "--oauth"]));
+  assert.equal(result.reused, true);
+  assert.equal(result.portal, "https://saved.test");
+  const { savedPortalUrl } = await import("./auth.mjs");
+  assert.equal(await savedPortalUrl({ credentialsPath }), "https://saved.test");
+  assert.match(lines.join("\n"), /Already signed in/);
+  assert.doesNotMatch(lines.join("\n"), /timds_saved/);
+});
+
+test("dev --port passes PORT to the workspace command and rejects invalid ports", async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "timds-cli-dev-port-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await initializeRepository(root, { standalone: true, provider: "hosted", portalUrl: "https://host.test" });
+  const manifestPath = path.join(root, "timds.json");
+  const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
+  manifest.workspace.dev = [process.execPath, "-e", "require('fs').writeFileSync('received-port.txt', process.env.PORT)"];
+  await fs.writeFile(manifestPath, JSON.stringify(manifest));
+  await runCli(["dev", "--root", root, "--port", "4327"]);
+  assert.equal(await fs.readFile(path.join(root, "received-port.txt"), "utf8"), "4327");
+  await assert.rejects(runCli(["dev", "--root", root, "--port", "70000"]), /Dev port must/);
+});
+
+
+test("preview and starter dev explain an occupied port without a stack trace", async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "timds-cli-busy-port-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await initializeRepository(root, { standalone: true, provider: "hosted", portalUrl: "https://host.test" });
+  const server = http.createServer();
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const port = server.address().port;
+  await assert.rejects(runCli(["preview", "--root", root, "--no-build", "--port", String(port)]), /already in use.*timds preview --port/);
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  await assert.rejects(promisify(execFile)(process.execPath, ["scripts/dev.mjs"], { cwd: root, env: { ...process.env, PORT: String(port) } }), error => {
+    assert.match(error.stderr, /already in use.*timds dev --port/);
+    assert.doesNotMatch(error.stderr, /Unhandled|at Server/);
+    return true;
+  });
 });

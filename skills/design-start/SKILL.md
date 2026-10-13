@@ -14,8 +14,10 @@ they can complete.
 
 1. Read the repository's `AGENTS.md` completely. It holds the rules; the
    `timds-edit-design-system` skill holds the editing procedure. Follow both.
-2. Run `git status --short`. Keep every pre-existing change. If the checkout
-   is on the default branch, create `design-system/<change>` named for what
+2. If `timds.json` has a hosted provider or `.timds/session.json` exists,
+   use `timds status` and keep the hosted session; do not run Git commands.
+   For a Git checkout, run `git status --short` and keep every pre-existing
+   change. If it is on the default branch, create `design-system/<change>` named for what
    the designer wants to do (`design-system/pricing-page`). If it is already
    on a `design-system/` branch, stay on it unless the designer is starting
    something unrelated.
@@ -28,8 +30,9 @@ they can complete.
    `brand/voice` page and no annotated logo).
 5. Start the authoring server with `npm run timds -- dev` in the background
    and give the designer the URL it prints (the starter serves
-   `http://127.0.0.1:4321`, with website designs under `/designs/`). The
-   starter server does not watch files: after every edit you make, rerun
+   `http://127.0.0.1:4321`, with website designs under `/designs/`). If that
+   port is busy, use `npm run timds -- dev --port 4322`; do not stop another
+   workspace's server. The starter server does not watch files: after every edit you make, rerun
    `npm run timds -- check` and tell the designer to reload.
 
 ## Tell the designer where things stand

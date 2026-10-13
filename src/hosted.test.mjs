@@ -6,6 +6,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import test from "node:test";
 import { HOST_API_VERSION, SESSION_FILE, runHostedCommand, sessionChanges, hostedPath, createHostProvider } from "./hosted.mjs";
+import { saveAccessToken } from "./auth.mjs";
 import { initializeRepository } from "./core.mjs";
 import { registerHostedSessionTools } from "./mcp.mjs";
 
@@ -216,6 +217,9 @@ test("hosted scaffold has Wrangler/noindex, no workflows, and check works withou
   const bin = path.join(root, "local-bin");
   await fs.mkdir(bin); await fs.symlink(process.execPath, path.join(bin, "node"));
   const cli = new URL("../bin/timds.mjs", import.meta.url).pathname;
+  const doctor = await promisify(execFile)(process.execPath, [cli, "doctor", "--root", root], { env: { ...process.env, PATH: bin }, maxBuffer: 2_000_000 });
+  assert.match(doctor.stdout, /Source history: hosted/);
+  assert.match(doctor.stdout, /Contract: valid/);
   await promisify(execFile)(process.execPath, [cli, "check", "--root", root], { env: { ...process.env, PATH: bin }, maxBuffer: 2_000_000 });
 });
 
@@ -278,10 +282,10 @@ test('hosted publication refusal and background build failures surface as errors
   } }), /session cleanup failed/);
 });
 
-test("hosted commands without host configuration explain local and git modes", async (t) => {
+test("hosted commands without host configuration give an actionable login command", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "timds-no-host-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
-  await assert.rejects(runHostedCommand("start", { root, systemId: "example/core", token: "timds_test" }), /local mode.*git mode/);
+  await assert.rejects(runHostedCommand("start", { root, systemId: "example/core", token: "timds_test", credentialsPath: path.join(root, "credentials.json") }), /auth login --portal-url.*--oauth/);
 });
 
 test("explicit conflict resolution keeps ours and binds the retry to the main revision shown", async (t) => {
@@ -405,4 +409,28 @@ test('grouped hosted change sets omit generated aggregate views', async t => {
   await fs.writeFile(path.join(f.root, 'media.json'), '{"schemaVersion":2,"assets":[]}');
   const result = await runHostedCommand('submit', { ...f.options, dryRun: true, note: 'Update brand' });
   assert.deepEqual(result.changedFiles.map(item => item.path), ['tokens/color.json']);
+});
+
+
+test("start in an empty directory reuses the saved host and explicit overrides", async t => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "timds-start-login-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const credentialsPath = path.join(directory, "credentials.json");
+  await saveAccessToken("https://saved.test", "timds_saved", { credentialsPath });
+  await saveAccessToken("https://override.test", "timds_override", { credentialsPath });
+  await saveAccessToken("https://saved.test", "timds_saved", { credentialsPath });
+  for (const [name, portalUrl, expected] of [["saved", undefined, "https://saved.test"], ["explicit", "https://override.test", "https://override.test"]]) {
+    const root = path.join(directory, name);
+    let called = false;
+    await runHostedCommand("start", { root, credentialsPath, systemId: "example/core", portalUrl,
+      fetchImpl: async (url, options) => {
+        called = true;
+        assert.equal(url, `${expected}/api/timds/sessions`);
+        assert.equal(options.headers.Authorization, expected === "https://saved.test" ? "Bearer timds_saved" : "Bearer timds_override");
+        return response(snapshot([file("safe.txt", "hello")]));
+      }
+    });
+    assert.ok(called);
+    assert.equal(await fs.readFile(path.join(root, "safe.txt"), "utf8"), "hello");
+  }
 });
