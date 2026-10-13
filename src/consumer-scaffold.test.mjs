@@ -22,10 +22,18 @@ import { initializeRepository } from "./core.mjs";
 const toolkitPackage = JSON.parse(await fs.readFile(new URL("../package.json", import.meta.url), "utf8"));
 const releaseLine = toolkitPackage.version.replace(/^(\d+\.\d+)\.\d+.*$/, "$1.x");
 
-// The scaffold adds the submodule itself; let its git read the local fixture.
-process.env.GIT_CONFIG_COUNT = "1";
+// Exercise Git's file transport, not its local hardlink/copy optimization.
+// Each clone gets its own object store, independent of source fixture cleanup.
+// Ephemeral repositories should not launch background maintenance either.
+process.env.GIT_CONFIG_COUNT = "4";
 process.env.GIT_CONFIG_KEY_0 = "protocol.file.allow";
 process.env.GIT_CONFIG_VALUE_0 = "always";
+process.env.GIT_CONFIG_KEY_1 = "url.file:///.insteadOf";
+process.env.GIT_CONFIG_VALUE_1 = "/";
+process.env.GIT_CONFIG_KEY_2 = "maintenance.auto";
+process.env.GIT_CONFIG_VALUE_2 = "false";
+process.env.GIT_CONFIG_KEY_3 = "gc.auto";
+process.env.GIT_CONFIG_VALUE_3 = "0";
 
 const quiet = () => {};
 

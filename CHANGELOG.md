@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.467
+
+- Make release validation's local Git fixtures use independent object transfers and bounded cleanup, avoiding runner-specific local clone and background-maintenance races while retaining the full test gate.
+
 ## 0.1.466
 
 - Let consumers explicitly require CSS tokens with repeatable `consumer check --require-token=--NAME` flags. Check actual published or local draft bundle definitions and aliases, report missing tokens as normal check failures, and keep the tracked production pin untouched.

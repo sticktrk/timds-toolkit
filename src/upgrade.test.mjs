@@ -28,8 +28,10 @@ test("the locked graph rejects duplicate and mismatched React, Remotion, and too
 
 async function repository(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "timds-upgrade-"));
-  t.after(() => fs.rm(root, {recursive: true, force: true}));
+  t.after(() => fs.rm(root, {recursive: true, force: true, maxRetries: 5, retryDelay: 50}));
   execFileSync("git", ["init", "-b", "main"], {cwd: root, stdio: "ignore"});
+  execFileSync("git", ["config", "maintenance.auto", "false"], {cwd: root});
+  execFileSync("git", ["config", "gc.auto", "0"], {cwd: root});
   execFileSync("git", ["config", "user.name", "TimDS Test"], {cwd: root});
   execFileSync("git", ["config", "user.email", "test@example.com"], {cwd: root});
   await initializeRepository(root, {standalone: true});
