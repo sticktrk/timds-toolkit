@@ -381,7 +381,7 @@ test("check requires the root package and lockfile a published pin is installed 
   assert.match(missing.errors.join("\n"), /^package-lock\.json is missing[^]*timds consumer init --system acme\/core/m);
 });
 
-test('draft update integrates a verified local bundle without moving the production pin, and sync restores it', async t => {
+for (const prefix of ['', 'reference/design-system/']) test(`draft update integrates ${prefix || 'root'} artifact bundle without moving the production pin, and sync restores it`, async t => {
   const { updateConsumerDraft } = await import('./consumer-sync.mjs');
   const product = await productRepo(t), published = publishedSystem();
   await syncConsumerBundle(product, { fetchImpl: published.fetchImpl });
@@ -392,11 +392,12 @@ test('draft update integrates a verified local bundle without moving the product
     fetchImpl: async (url, options) => {
       assert.match(url, /acme%2Fcore\/drafts\/spring-refresh\/snapshot$/);
       assert.equal(options.headers.Authorization, 'Bearer timds_test');
-      return new Response(JSON.stringify({ apiVersion: 1, session: { id: 'draft-1', baseRevision: 'draft-head', status: 'open' }, files: [] }));
+      const manifest = { systemId: 'acme/core', version: '1.0.0', artifact: { entry: `${prefix}index.html` } };
+      return new Response(JSON.stringify({ apiVersion: 1, session: { id: 'draft-1', baseRevision: 'draft-head', status: 'open' }, files: [{ path: 'timds.json', encoding: 'base64', content: Buffer.from(JSON.stringify(manifest)).toString('base64') }] }));
     },
     build: async root => {
-      await write(root, `dist/bundle/${relative}`, draftCss);
-      await write(root, 'dist/bundle.json', { system: { id: 'acme/core' }, files: [{ path: relative, sha256: sha256(draftCss), bytes: draftCss.length }] });
+      await write(root, `dist/${prefix}bundle/${relative}`, draftCss);
+      await write(root, `dist/${prefix}bundle.json`, { system: { id: 'acme/core' }, files: [{ path: relative, sha256: sha256(draftCss), bytes: draftCss.length }] });
     },
   });
   assert.equal(result.revision, 'draft-head');
