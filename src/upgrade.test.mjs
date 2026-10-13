@@ -35,6 +35,10 @@ async function repository(t) {
   execFileSync("git", ["config", "user.name", "TimDS Test"], {cwd: root});
   execFileSync("git", ["config", "user.email", "test@example.com"], {cwd: root});
   await initializeRepository(root, {standalone: true});
+  const manifestPath = path.join(root, "timds.json");
+  const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
+  manifest.live = {strategy: "hmr", restartOn: ["scripts/dev.mjs"]};
+  await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   await fs.writeFile(path.join(root, "package-lock.json"), JSON.stringify(makeLock()));
   execFileSync("git", ["add", "--all"], {cwd: root});
   execFileSync("git", ["commit", "-m", "Initialize"], {cwd: root, stdio: "ignore"});
@@ -81,6 +85,7 @@ test("explicit dependency selection keeps the bounded line and synchronizes usin
 
 test("adopted automation follows package releases and preserves authored source and defaults", async (t) => {
   const root = await repository(t);
+  const manifestBefore = await fs.readFile(path.join(root, "timds.json"), "utf8");
   await fs.mkdir(path.join(root, "video"));
   await fs.writeFile(path.join(root, "video", "remotion.tsx"), "// Client source\n");
   await fs.writeFile(path.join(root, ".timds", "defaults.json"), '{"overrides":["publishing.targetDefaults.shortBridge"]}\n');
@@ -94,6 +99,7 @@ test("adopted automation follows package releases and preserves authored source 
   execFileSync("git", ["add", "--all"], {cwd: root});
   execFileSync("git", ["commit", "-m", "Adopt automation"], {cwd: root, stdio: "ignore"});
   await upgradeRepository(root);
+  assert.equal(await fs.readFile(path.join(root, "timds.json"), "utf8"), manifestBefore);
   assert.equal(await fs.readFile(path.join(root, "video", "remotion.tsx"), "utf8"), "// Client source\n");
   assert.equal(await fs.readFile(path.join(root, ".timds", "defaults.json"), "utf8"), '{"overrides":["publishing.targetDefaults.shortBridge"]}\n');
   const workflow = path.join(root, ".github", "workflows", "timds-upgrade.yml");

@@ -21,6 +21,7 @@ import {
   validateManifest,
 } from "./core.mjs";
 import { describeStarterSync, forceReplaceable, starterManagedFragments, starterPlumbingFiles } from "./starter.mjs";
+import { prepareMergeRelease } from "../templates/starter/scripts/prepare-merge-release.mjs";
 import {
   addMediaFile,
   backfillMediaMetadata,
@@ -120,6 +121,50 @@ test("validates brand roles in the manifest and defaults them to empty", () => {
   assert.throws(() => validateManifest({ ...base, brand: "roles" }), /timds\.json brand must be/);
   assert.deepEqual(validateManifest({ ...base, brand: { guidance: { voice: "brand/voice" } } }).brand.guidance, { voice: ["brand/voice"] });
   assert.throws(() => validateManifest({ ...base, brand: { guidance: { voice: ["brand/voice#a b"] } } }), /must be page or page#block/);
+});
+
+test("validates explicit native HMR without adding a workspace command", () => {
+  const base = { name: "Live preview", systemId: "example/core", version: "1.0.0", workspace: { dev: ["npm", "run", "dev"] } };
+  assert.equal(validateManifest(base).live, null);
+  assert.equal(validateManifest({ ...base, live: null }).live, null);
+  const live = { strategy: "hmr", restartOn: ["astro.config.mjs", "scripts/contract-tokens.mjs", "astro.config.mjs"] };
+  const normalized = validateManifest({ ...base, live });
+  assert.deepEqual(normalized.live, { strategy: "hmr", restartOn: ["astro.config.mjs", "scripts/contract-tokens.mjs"] });
+  assert.deepEqual(normalized.workspace.dev, ["npm", "run", "dev"]);
+  assert.equal(normalized.workspace.live, undefined);
+  assert.equal(live.restartOn.length, 3, "normalization never mutates authored configuration");
+  assert.deepEqual(validateManifest({ ...base, live: { strategy: "hmr", restartOn: [] } }).live.restartOn, []);
+  for (const value of [true, [], "hmr", {}, { strategy: "restart", restartOn: [] }, { strategy: "hmr" }, { strategy: "hmr", restartOn: "config.mjs" }, { strategy: "hmr", restartOn: Array(101).fill("config.mjs") }]) {
+    assert.throws(() => validateManifest({ ...base, live: value }), /timds\.json live/);
+  }
+  for (const relative of ["", null, 2, "/tmp/config", "../config", "src/../config", "./config", "src//config", "src/", "C:/config", "src\\config", "src/*.json", "config?.mjs", "[config].mjs", "{a,b}.mjs", "bad\0path", "bad\npath", "bad\u007fpath", "a".repeat(501)]) {
+    assert.throws(() => validateManifest({ ...base, live: { strategy: "hmr", restartOn: [relative] } }), /exact relative paths/, String(relative));
+  }
+});
+
+test("workspace checks retain live configuration and leave the source manifest byte exact", async (t) => {
+  const root = await createDesignSystemRepo(t);
+  const manifestPath = path.join(root, "design-system", "timds.json");
+  const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
+  manifest.live = { strategy: "hmr", restartOn: ["scripts/contract-tokens.mjs"] };
+  await writeJson(manifestPath, manifest);
+  const before = await fs.readFile(manifestPath, "utf8");
+  assert.deepEqual((await loadWorkspace(root)).manifest.live, manifest.live);
+  await checkWorkspace(root, { skipBuild: true });
+  assert.equal(await fs.readFile(manifestPath, "utf8"), before);
+});
+
+test("release preparation preserves the raw live declaration while advancing only the manifest version", () => {
+  const timdsJson = '{\n  "version": "1.0.0",\n  "live": { "strategy": "hmr", "restartOn": ["scripts/compiler.mjs"] }\n}\n';
+  const result = prepareMergeRelease({
+    timdsJson,
+    previousVersion: "1.0.0",
+    packageJson: '{"version":"1.0.0"}',
+    packageLock: '{"version":"1.0.0","packages":{"":{"version":"1.0.0"}}}',
+    changelog: "# Changelog\n\n## Unreleased\n\n- Enable native preview updates.\n\n## 1.0.0\n\n- Initial.\n",
+    now: new Date("2026-10-13T00:00:00Z"),
+  });
+  assert.equal(result.files["timds.json"], timdsJson.replace('"1.0.0"', '"2026.10.13-1"'));
 });
 
 test("rejects shell-string workspace commands", () => {

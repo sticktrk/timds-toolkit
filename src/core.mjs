@@ -281,6 +281,23 @@ function normalizeWorkspaceCommand(value, label) {
   return value.map((part) => part.trim());
 }
 
+function normalizeLive(value) {
+  if (value === undefined || value === null) return null;
+  const live = objectValue(value, "timds.json live");
+  if (live.strategy !== "hmr") throw new Error('timds.json live.strategy must be "hmr"');
+  if (!Array.isArray(live.restartOn) || live.restartOn.length > 100) {
+    throw new Error("timds.json live.restartOn must be an array of at most 100 exact relative paths");
+  }
+  for (const relative of live.restartOn) {
+    if (typeof relative !== "string" || !relative.length || relative.length > 500
+      || /[\x00-\x1f\x7f\\:*?\[\]{}]/u.test(relative)
+      || relative.split("/").some((segment) => !segment || segment === "." || segment === "..")) {
+      throw new Error("timds.json live.restartOn entries must be exact relative paths without globs, backslashes, or traversal");
+    }
+  }
+  return { strategy: "hmr", restartOn: [...new Set(live.restartOn)] };
+}
+
 function normalizeConsumer(value) {
   if (value === undefined || value === null) return null;
   const consumer = objectValue(value, "timds.json consumer");
@@ -368,6 +385,7 @@ export function validateManifest(input) {
     consumer: normalizeConsumer(manifest.consumer),
     provider: normalizeProvider(manifest.provider),
     description: String(manifest.description || "").trim(),
+    live: normalizeLive(manifest.live),
     machine,
     name,
     media: { portalUrl: mediaPortalUrl },
