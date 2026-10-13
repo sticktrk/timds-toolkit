@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Validate and retain the optional native live-preview HMR contract, with exact restart paths and unchanged full-restart defaults. Preserve the authored declaration through checks, upgrades, and release preparation.
+
 ## 0.1.469
 
 - Keep hosted MCP bootstrap in its requested empty or interrupted workspace, including inside another repository. Bind session tools to that workspace and prevent pre-bootstrap editing from reaching ancestor files.

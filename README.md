@@ -1665,6 +1665,39 @@ and confirmation. Humans can do all of this in Studio. Successful publication
 closes the session. Set `TIMDS_PORTAL_URL` to start `timds mcp` in an empty
 agent workspace; the tools share this CLI implementation.
 
+### Native live preview updates
+
+Hosted live previews restart the dev server on source changes by default.
+A system whose dev server already watches and recompiles its authored inputs
+can explicitly opt into native hot module replacement in `timds.json`:
+
+```json
+{
+  "live": {
+    "strategy": "hmr",
+    "restartOn": ["astro.config.mjs", "scripts/contract-tokens.mjs"]
+  }
+}
+```
+
+`live` is a top-level preview contract, separate from the argv commands in
+`workspace`. Missing or null `live` keeps the default full restart behavior.
+The only supported strategy is `hmr`. `restartOn` is a required array of up to
+100 exact paths relative to the Design System root; duplicates are removed.
+Each path must be 1–500 characters with forward slashes, without absolute
+paths, traversal, empty segments, control characters, colons, or glob syntax.
+An empty array is allowed. Hosts still restart on manifest, dependency, and
+framework configuration changes; declarations add paths such as custom
+compiler scripts to that mandatory set. Paths are data, never shell commands.
+
+The system must provide working watchers for token groups and other generated
+inputs before opting in. For example, a compiler that runs only during Astro
+configuration will not respond to later token edits; it needs a dev watcher
+that regenerates the imported stylesheet. Hosts may support this optional
+contract independently; the CLI's local `dev` command keeps running the
+declared `workspace.dev` command. Checks and upgrades preserve the authored
+manifest, and release preparation changes only its version.
+
 ### Mergeable contract groups and consumer drafts
 
 New systems author `tokens/<group>.json` and `media/<group>.json`.
