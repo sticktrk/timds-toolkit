@@ -853,21 +853,32 @@ export function registerHostedSessionTools(server, { root = process.cwd() } = {}
       },
       annotations: { readOnlyHint: ["status", "history", "active-work", "draft-list"].includes(command), destructiveHint: ["close", "publish"].includes(command), openWorldHint: true, idempotentHint: command !== "start" },
     }, async (args) => {
-      try { return toolResult(hostedToolReceipt(await runHostedCommand(command, { root, ...args }))); }
+      try { return toolResult(hostedToolReceipt(await runHostedCommand(command, { root, ...args, fixedRoot: true }))); }
       catch (error) { return toolError(error); }
     });
   }
   return server;
 }
 
+async function resolveMcpRoot(root) {
+  const requestedRoot = path.resolve(root);
+  const entries = await fs.readdir(requestedRoot).catch((error) => { if (error.code === "ENOENT") return []; throw error; });
+  const awaitingSession = Boolean(process.env.TIMDS_PORTAL_URL) && (entries.length === 0 || entries.length === 1 && entries[0] === ".timds" && await fs.stat(path.join(requestedRoot, ".timds/start.json")).then(() => true, () => false));
+  return { repoRoot: awaitingSession ? requestedRoot : await findRepositoryRoot(requestedRoot), awaitingSession };
+}
+
 /** An McpServer named `timds-design-system` serving the editing tools for one local checkout. */
 export async function createDesignSystemMcpServer({ root = process.cwd(), hooks = {} } = {}) {
-  const repoRoot = await findRepositoryRoot(root);
+  const { repoRoot, awaitingSession } = await resolveMcpRoot(root);
   // Fail fast on a directory that is not a Design System.
   if (!process.env.TIMDS_PORTAL_URL) await loadWorkspace(repoRoot, { editing: true });
   const server = new McpServer({ name: DESIGN_SYSTEM_MCP_SERVER_NAME, version: await packageVersion() });
   registerDesignSystemTools(server, {
-    resolveWorkspace: () => loadWorkspace(repoRoot, { editing: true }),
+    resolveWorkspace: async () => {
+      // Until bootstrap completes, editing must not escape into an ancestor.
+      if (awaitingSession && !await fs.stat(path.join(repoRoot, ".timds/session.json")).then(() => true, () => false)) throw new Error("Start or join a hosted session in this workspace before editing");
+      return loadWorkspace(repoRoot, { editing: true });
+    },
     hooks: { ...hooks, remote: false },
   });
   registerHostedSessionTools(server, { root: repoRoot });
@@ -877,12 +888,13 @@ export async function createDesignSystemMcpServer({ root = process.cwd(), hooks 
 /** `timds mcp`: serve the editing tools over stdio. stdout carries only the protocol. */
 export async function runDesignSystemMcp({ root = process.cwd(), hooks = {} } = {}) {
   setOutputStream(process.stderr);
-  const server = await createDesignSystemMcpServer({ root, hooks });
+  const { repoRoot: selectedRoot } = await resolveMcpRoot(root);
+  const server = await createDesignSystemMcpServer({ root: selectedRoot, hooks });
   const transport = new StdioServerTransport();
   const closed = new Promise((resolve) => {
     transport.onclose = resolve;
   });
   await server.connect(transport);
-  process.stderr.write(`TimDS MCP server ${DESIGN_SYSTEM_MCP_SERVER_NAME} ready on stdio for ${await findRepositoryRoot(root)}\n`);
+  process.stderr.write(`TimDS MCP server ${DESIGN_SYSTEM_MCP_SERVER_NAME} ready on stdio for ${selectedRoot}\n`);
   await closed;
 }

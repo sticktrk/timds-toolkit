@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.469
+
+- Keep hosted MCP bootstrap in its requested empty or interrupted workspace, including inside another repository. Bind session tools to that workspace and prevent pre-bootstrap editing from reaching ancestor files.
+
 ## 0.1.468
 
 - Recover hosted update and submission edge timeouts with bounded retries of the exact original payload. Preserve ordinary conflict handling and avoid retrying unrelated operations.
