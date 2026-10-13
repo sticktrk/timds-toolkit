@@ -1626,6 +1626,10 @@ a `.git` directory. Interrupted starts retain their idempotency key under
 workspace after a partial download. Credentials remain in the private TimDS
 credential file or `TIMDS_ACCESS_TOKEN`, never source or session metadata.
 `TIMDS_PORTAL_URL` selects a host before a session exists.
+With that host configured, `timds mcp --root PATH` keeps an empty, missing, or
+interrupted destination at the exact requested path, even within another
+repository. Start or join the session there before using editing tools; its
+ancestor's files and session are outside that MCP workspace.
 
 Hosted `update` and `submit` recover HTTP 502/524 timeouts and explicit session
 operation-busy responses by resending the identical serialized change set, up

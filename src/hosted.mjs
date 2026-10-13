@@ -327,10 +327,15 @@ async function applySnapshot(root, snapshot, previous, provider, replace = false
 }
 
 /** The same implementation is called by the CLI and the editing MCP server. */
-export async function runHostedCommand(command, { root = process.cwd(), systemId, note, on, patterns, draft, name, from = "main", version, sessionId, principalId, portalUrl, token, fetchImpl, credentialsPath, dryRun = false, resolve = [], idempotencyKey, submission, yes = false, confirm, onSummary, wait = ms => new Promise(resolve => setTimeout(resolve, ms)), pollIntervalMs = 2000, timeoutMs = 30 * 60_000, staleRetries = 1 } = {}) {
-  const selected = command === "start" ? path.resolve(root) : await findHostedRoot(root);
+export async function runHostedCommand(command, { root = process.cwd(), fixedRoot = false, systemId, note, on, patterns, draft, name, from = "main", version, sessionId, principalId, portalUrl, token, fetchImpl, credentialsPath, dryRun = false, resolve = [], idempotencyKey, submission, yes = false, confirm, onSummary, wait = ms => new Promise(resolve => setTimeout(resolve, ms)), pollIntervalMs = 2000, timeoutMs = 30 * 60_000, staleRetries = 1 } = {}) {
+  // Materialization destinations are literal, even inside another repository.
+  // Inviting a principal still acts on the current enclosing session.
+  const destination = fixedRoot || command === "start" || command === "join" && !principalId;
+  const selected = destination ? path.resolve(root) : await findHostedRoot(root);
   const state = await readJson(path.join(selected, SESSION_FILE));
-  const configured = await workspaceProvider(selected);
+  const configured = destination
+    ? normalizeProvider((await readJson(path.join(selected, "timds.json")))?.provider || state?.provider)
+    : await workspaceProvider(selected);
   const pending = command === "start" ? await readJson(path.join(selected, PENDING_START_FILE)) : null;
   const url = portalUrl || process.env.TIMDS_PORTAL_URL || configured?.url || pending?.provider?.url;
   if (!url || configured && configured.kind !== "hosted") throw new Error(NO_HOST);
