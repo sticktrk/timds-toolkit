@@ -54,6 +54,12 @@ const server = createServer(async (request, response) => {
   }
 });
 
+server.on("error", (error) => {
+  if (error.code !== "EADDRINUSE") throw error;
+  console.error(`Starter viewer port ${port} is already in use. Run timds dev --port ${port < 65535 ? port + 1 : 4321}.`);
+  process.exitCode = 1;
+});
+
 server.listen(port, "127.0.0.1", () => {
   console.log(`Starter viewer: http://127.0.0.1:${port}`);
 });

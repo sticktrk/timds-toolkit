@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add `timds whoami` and `timds principals` (and the matching MCP tools) so a caller can report its own principal id and an owner can find who to invite. Let `timds join` take a Studio invite link: it uses the link's host, signs in there when needed and attaches in a new session folder. Print the workspace and next steps after `join`, name a new `--root` when the destination is not empty, and tell editing agents to join a named open session instead of starting another.
+- Make hosted setup reuse saved authentication and remember the login host for new workspaces. Show workspace-fetch progress and next steps, support Git-free hosted doctor checks and `dev --port`, and explain busy preview ports.
+
 - Let `timds auth login` discover an independent host's OAuth authorization, use a public PKCE loopback client, and refresh origin-bound credentials. Keep the portal device flow, add explicit flow and headless controls, and select the workspace host consistently for login, status and logout.
 - Validate and retain the optional native live-preview HMR contract, with exact restart paths and unchanged full-restart defaults. Preserve the authored declaration through checks, upgrades, and release preparation.
 

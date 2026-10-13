@@ -11,6 +11,35 @@ from `node_modules`; client Git repositories do not carry a copied `.timds/cli`
 tree. TimDS also installs a small repository-local skill for AI-agent discovery
 and `.timds/installation.json` for fleet/version inspection.
 
+## Getting started with a hosted system
+
+Use the host URL supplied by your Studio installation. Sign in once, then start an editing workspace:
+
+```sh
+npm install --global @dtconcepts/timds@0.1.x
+timds auth login --portal-url https://YOUR-HOST --oauth
+timds start example/core --root ./core
+cd core
+npm ci
+timds doctor
+timds dev
+# After editing:
+timds check
+timds submit --note "Describe the change"
+```
+
+If the workspace has no lockfile, use `npm install` instead of `npm ci`.
+Login reuses an existing credential (refreshing OAuth when needed); use
+`--force` to authorize again or switch accounts. The last successful login
+remembers the host outside your repository, so `start` needs no repeated portal
+flag. An older credential file with exactly one signed-in portal also works;
+multiple portals without a saved selection require `--portal-url` or
+`TIMDS_PORTAL_URL`. Explicit flags and workspace configuration take precedence.
+Hosted `doctor` checks the contract without requiring Git. If the local dev
+port is busy, use `timds dev --port 4322`; this supplies `PORT` to the workspace's
+dev command. Frameworks that do not read `PORT` need their own port configuration.
+For a static review, use `timds preview --port 4401`.
+
 ## Add TimDS to a repository
 
 Create a preferred standalone Design System repository:
@@ -1596,7 +1625,8 @@ that names local and git modes; they never fall back to git.
 Humans direct work and use five verbs: `login`, `status`, `history`, `publish`,
 and `rollback`. Agents write through MCP first: `timds_start`, `timds_pull`,
 `timds_submit`, `timds_update`, `timds_sessions_close`, `timds_claim`,
-`timds_active_work`, `timds_join`, and `timds_draft_create|list|close`.
+`timds_active_work`, `timds_join`, `timds_whoami`, `timds_principals`, and
+`timds_draft_create|list|close`.
 The CLI exposes the same operations for agent automation.
 
 `timds auth login` (also `timds login`) selects `--portal-url` first, then the
@@ -1648,8 +1678,11 @@ timds active-work
 timds claim --on 'tokens/color*' --note 'Warm the brand palette'
 timds submit --note 'Warm the brand palette'
 timds update --resolve 'tokens/color.json#brand.value=theirs' --note 'Keep the director’s color'
+timds whoami
+timds principals
 timds join SESSION --principal-id PRINCIPAL
 timds join SESSION --root ./member-session
+timds join "https://YOUR-HOST/studio/#source=SOURCE&view=studio&session=SESSION&join=1"
 timds draft list
 timds draft close spring-refresh
 ```
@@ -1681,7 +1714,18 @@ commands are not transport retries; they retain their normal resolution flow.
 Claims are advisory: overlapping work is visible, never blocked. `status` and
 `active-work` expose members, claims, submissions and live URLs. An owner or
 publisher invites a principal with `join --principal-id`; an invited principal
-attaches to the same fork with `join`. Agent principals must supply the human
+attaches to the same fork with `join`. `whoami` prints the signed-in
+principal's id, name and type for the selected host, and `principals` lists
+the people and agents who can be invited into the Design System's sessions.
+`join` materializes the session into an empty `--root`, selects the host the
+same way `start` does, and prints the workspace and next steps; it refuses a
+folder that already has files or another session and names `--root
+./NEW-FOLDER` as the fix. `join` also accepts the Studio invite link in place
+of the session id: the link's origin selects the host unless `--portal-url`
+does, the CLI signs in to that host first when this machine has no credential
+for it, and without `--root` the session lands in a new `./session-<first 8
+characters of the id>` folder instead of the current one. A member sends work
+to the shared session with `update` and freezes it for review with `submit`. Agent principals must supply the human
 intent as `note` on every update and submission; history retains it and the
 acting principal. Drafts are named sessions with no expiry. A session started
 with `--draft` targets that draft; publishing its head uses the normal main
@@ -1866,6 +1910,8 @@ and `X-TimDS-API-Version: 1`:
 | POST | `/api/timds/sessions/:id/join` | `{principalId?}`; invite or attach |
 | POST | `/api/timds/sessions/:id/claims` | `{patterns,note?}` |
 | GET | `/api/timds/design-systems/:id/active-work` | Members, claims, submissions and live URLs |
+| GET | `/api/timds/design-systems/:id/principals` | People and agents who can be invited |
+| GET | `/api/timds/me` | The signed-in principal `{id,type,name,admin}` |
 | GET/POST | `/api/timds/design-systems/:id/drafts` | List, or create `{name,from,idempotencyKey?}` |
 | GET | `/api/timds/design-systems/:id/drafts/:name/snapshot` | Authenticated draft source |
 | POST | `/api/timds/design-systems/:id/drafts/:name/close` | Close draft and live resources |

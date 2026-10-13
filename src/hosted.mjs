@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import ignore from "ignore";
-import { cleanPortalUrl, resolveAccessToken } from "./auth.mjs";
+import { cleanPortalUrl, resolveAccessToken, savedPortalUrl } from "./auth.mjs";
 import { readUnreleasedNotes } from "./changelog.mjs";
 
 export const HOST_API_VERSION = 1;
@@ -17,7 +17,9 @@ const HOST_RETRY_WINDOW_MS = 5 * 60 * 1000;
 const HOST_RETRY_ATTEMPTS = 6;
 const SESSION_BUSY_MESSAGE = "This session is busy; retry when its current operation finishes";
 const retryClock = { now: () => Date.now(), sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)) };
-const NO_HOST = "No TimDS host configured; use local mode for editing or git mode for pull requests, or configure provider.kind=hosted and provider.url.";
+const NO_HOST = "No TimDS host configured. Run timds auth login --portal-url https://YOUR-HOST --oauth, or pass --portal-url URL to timds start.";
+const JOIN_NEEDS_EMPTY = "Join requires an empty --root destination; this folder already has files. Pass --root ./NEW-FOLDER.";
+const JOIN_OTHER_SESSION = "Choose an empty --root for a different session; this workspace already holds another one. Pass --root ./NEW-FOLDER.";
 const RESERVED = new Set([".git", ".github", "node_modules", "dist", ".env", ".env.server"]);
 
 export function hostedPath(value) {
@@ -38,6 +40,16 @@ export function normalizeProvider(value) {
 async function readJson(file) {
   try { return JSON.parse(await fs.readFile(file, "utf8")); }
   catch (error) { if (error.code === "ENOENT") return null; throw error; }
+}
+
+/** A Studio invite link names both the session and the host that owns it. */
+export function sessionReference(value) {
+  if (!/^https?:\/\//i.test(String(value || ""))) return { sessionId: value };
+  let url;
+  try { url = new URL(value); } catch { throw new Error("That Studio link is not a valid URL"); }
+  const sessionId = new URLSearchParams(url.hash.slice(1)).get("session") || url.searchParams.get("session");
+  if (!sessionId) throw new Error("That Studio link names no session; copy the link from the session's Invite dialog.");
+  return { sessionId, portalUrl: cleanPortalUrl(url.href) };
 }
 
 export async function findHostedRoot(start = process.cwd()) {
@@ -104,6 +116,8 @@ export function createHostProvider({ url, token, resolveToken, fetchImpl = fetch
   }
   const sessionPath = (id) => `/${encodeURIComponent(id)}`;
   return {
+    me: () => request("GET", "", undefined, 'me'),
+    principals: (id) => request("GET", `/${encodeURIComponent(id)}/principals`, undefined, 'design-systems'),
     rollback: (id, input) => request("POST", `/${encodeURIComponent(id)}/rollback`, input, 'design-systems'),
     activeWork: (id) => request("GET", `/${encodeURIComponent(id)}/active-work`, undefined, 'design-systems'),
     claim: (id, input) => request("POST", `${sessionPath(id)}/claims`, input),
@@ -339,6 +353,11 @@ async function applySnapshot(root, snapshot, previous, provider, replace = false
 
 /** The same implementation is called by the CLI and the editing MCP server. */
 export async function runHostedCommand(command, { root = process.cwd(), fixedRoot = false, systemId, note, on, patterns, draft, name, from = "main", version, sessionId, principalId, portalUrl, token, fetchImpl, credentialsPath, dryRun = false, resolve = [], idempotencyKey, submission, yes = false, confirm, onSummary, wait = ms => new Promise(resolve => setTimeout(resolve, ms)), pollIntervalMs = 2000, timeoutMs = 30 * 60_000, staleRetries = 1 } = {}) {
+  if (command === "join") {
+    // A link's origin selects the host only when nothing explicit does.
+    const reference = sessionReference(sessionId);
+    sessionId = reference.sessionId; portalUrl ||= reference.portalUrl;
+  }
   // Materialization destinations are literal, even inside another repository.
   // Inviting a principal still acts on the current enclosing session.
   const destination = fixedRoot || command === "start" || command === "join" && !principalId;
@@ -348,10 +367,12 @@ export async function runHostedCommand(command, { root = process.cwd(), fixedRoo
     ? normalizeProvider((await readJson(path.join(selected, "timds.json")))?.provider || state?.provider)
     : await workspaceProvider(selected);
   const pending = command === "start" ? await readJson(path.join(selected, PENDING_START_FILE)) : null;
-  const url = portalUrl || process.env.TIMDS_PORTAL_URL || configured?.url || pending?.provider?.url;
-  if (!url || configured && configured.kind !== "hosted") throw new Error(NO_HOST);
+  const url = portalUrl || process.env.TIMDS_PORTAL_URL || configured?.url || pending?.provider?.url || (destination || command === "whoami" ? await savedPortalUrl({ credentialsPath }) : null);
+  // whoami reads an identity, not a workspace: it answers for any signed-in host.
+  const identityOnly = command === "whoami";
+  if (!url || !identityOnly && configured && configured.kind !== "hosted") throw new Error(NO_HOST);
   const provider = normalizeProvider({ kind: "hosted", url });
-  if (state && state.provider.url !== provider.url) throw new Error("Session belongs to a different TimDS host");
+  if (!identityOnly && state && state.provider.url !== provider.url) throw new Error("Session belongs to a different TimDS host");
   const host = createHostProvider({ url: provider.url, token,
     resolveToken: options => resolveAccessToken(provider.url, { token, credentialsPath, fetchImpl, ...options }), fetchImpl });
   const manifest = await readJson(path.join(selected, "timds.json"));
@@ -364,22 +385,25 @@ export async function runHostedCommand(command, { root = process.cwd(), fixedRoo
     if (!yes && !(confirm && await confirm(summary))) throw new Error("Rollback cancelled; review --dry-run and pass --yes to confirm");
     return host.rollback(selectedSystem, { version });
   }
-  if (["active-work", "draft-create", "draft-list", "draft-close"].includes(command)) {
+  // The identity a session owner needs before inviting this caller.
+  if (command === "whoami") return { ...await host.me(), portal: provider.url };
+  if (["active-work", "principals", "draft-create", "draft-list", "draft-close"].includes(command)) {
     if (!selectedSystem) throw new Error("Provide --system-id or run inside a hosted design system");
     if (command === "active-work") return host.activeWork(selectedSystem);
+    if (command === "principals") return host.principals(selectedSystem);
     if (command === "draft-list") return host.draftList(selectedSystem);
     if (command === "draft-close") return host.draftClose(selectedSystem, sessionId || name);
     if (!name) throw new Error("draft create requires a name");
     return host.draftCreate(selectedSystem, { name, from, idempotencyKey });
   }
   if (command === "join") {
-    if (!principalId && state && state.session.id !== sessionId) throw new Error("Choose an empty --root for a different session");
-    if (!principalId && !state && (await fs.readdir(selected).catch(() => [])).length) throw new Error("Join requires an empty --root destination");
+    if (!principalId && state && state.session.id !== sessionId) throw new Error(JOIN_OTHER_SESSION);
+    if (!principalId && !state && (await fs.readdir(selected).catch(() => [])).length) throw new Error(JOIN_NEEDS_EMPTY);
     if (!sessionId) throw new Error("join requires a session identifier");
     const result = await host.join(sessionId, principalId ? { principalId } : {});
     if (principalId) return result;
-    if (state && state.session.id !== sessionId) throw new Error("Choose an empty --root for a different session");
-    if (!state && (await fs.readdir(selected).catch(() => [])).length) throw new Error("Join requires an empty --root destination");
+    if (state && state.session.id !== sessionId) throw new Error(JOIN_OTHER_SESSION);
+    if (!state && (await fs.readdir(selected).catch(() => [])).length) throw new Error(JOIN_NEEDS_EMPTY);
     const snapshot = result.files ? result : await host.pull(sessionId);
     return applySnapshot(selected, snapshot, state, provider);
   }

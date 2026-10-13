@@ -5,7 +5,8 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import test from "node:test";
-import { HOST_API_VERSION, SESSION_FILE, runHostedCommand, sessionChanges, hostedPath, createHostProvider } from "./hosted.mjs";
+import { HOST_API_VERSION, SESSION_FILE, runHostedCommand, sessionChanges, sessionReference, hostedPath, createHostProvider } from "./hosted.mjs";
+import { saveAccessToken } from "./auth.mjs";
 import { initializeRepository } from "./core.mjs";
 import { registerHostedSessionTools } from "./mcp.mjs";
 
@@ -216,13 +217,16 @@ test("hosted scaffold has Wrangler/noindex, no workflows, and check works withou
   const bin = path.join(root, "local-bin");
   await fs.mkdir(bin); await fs.symlink(process.execPath, path.join(bin, "node"));
   const cli = new URL("../bin/timds.mjs", import.meta.url).pathname;
+  const doctor = await promisify(execFile)(process.execPath, [cli, "doctor", "--root", root], { env: { ...process.env, PATH: bin }, maxBuffer: 2_000_000 });
+  assert.match(doctor.stdout, /Source history: hosted/);
+  assert.match(doctor.stdout, /Contract: valid/);
   await promisify(execFile)(process.execPath, [cli, "check", "--root", root], { env: { ...process.env, PATH: bin }, maxBuffer: 2_000_000 });
 });
 
 test("MCP exposes hosted commands and principal-authorized publication", () => {
   const names = [];
   registerHostedSessionTools({ registerTool(name) { names.push(name); } });
-  assert.deepEqual(names, ["timds_start", "timds_pull", "timds_submit", "timds_update", "timds_status", "timds_history", "timds_sessions_close", "timds_publish", "timds_claim", "timds_active_work", "timds_join", "timds_draft_create", "timds_draft_list", "timds_draft_close"]);
+  assert.deepEqual(names, ["timds_start", "timds_pull", "timds_submit", "timds_update", "timds_status", "timds_history", "timds_sessions_close", "timds_publish", "timds_claim", "timds_active_work", "timds_join", "timds_whoami", "timds_principals", "timds_draft_create", "timds_draft_list", "timds_draft_close"]);
 });
 
 test("MCP submission shares the hosted changelog gate", async (t) => {
@@ -278,10 +282,10 @@ test('hosted publication refusal and background build failures surface as errors
   } }), /session cleanup failed/);
 });
 
-test("hosted commands without host configuration explain local and git modes", async (t) => {
+test("hosted commands without host configuration give an actionable login command", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "timds-no-host-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
-  await assert.rejects(runHostedCommand("start", { root, systemId: "example/core", token: "timds_test" }), /local mode.*git mode/);
+  await assert.rejects(runHostedCommand("start", { root, systemId: "example/core", token: "timds_test", credentialsPath: path.join(root, "credentials.json") }), /auth login --portal-url.*--oauth/);
 });
 
 test("explicit conflict resolution keeps ours and binds the retry to the main revision shown", async (t) => {
@@ -405,4 +409,85 @@ test('grouped hosted change sets omit generated aggregate views', async t => {
   await fs.writeFile(path.join(f.root, 'media.json'), '{"schemaVersion":2,"assets":[]}');
   const result = await runHostedCommand('submit', { ...f.options, dryRun: true, note: 'Update brand' });
   assert.deepEqual(result.changedFiles.map(item => item.path), ['tokens/color.json']);
+});
+
+
+test("start in an empty directory reuses the saved host and explicit overrides", async t => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "timds-start-login-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const credentialsPath = path.join(directory, "credentials.json");
+  await saveAccessToken("https://saved.test", "timds_saved", { credentialsPath });
+  await saveAccessToken("https://override.test", "timds_override", { credentialsPath });
+  await saveAccessToken("https://saved.test", "timds_saved", { credentialsPath });
+  for (const [name, portalUrl, expected] of [["saved", undefined, "https://saved.test"], ["explicit", "https://override.test", "https://override.test"]]) {
+    const root = path.join(directory, name);
+    let called = false;
+    await runHostedCommand("start", { root, credentialsPath, systemId: "example/core", portalUrl,
+      fetchImpl: async (url, options) => {
+        called = true;
+        assert.equal(url, `${expected}/api/timds/sessions`);
+        assert.equal(options.headers.Authorization, expected === "https://saved.test" ? "Bearer timds_saved" : "Bearer timds_override");
+        return response(snapshot([file("safe.txt", "hello")]));
+      }
+    });
+    assert.ok(called);
+    assert.equal(await fs.readFile(path.join(root, "safe.txt"), "utf8"), "hello");
+  }
+});
+
+test("whoami reads the signed-in principal from the saved host and principals lists who can be invited", async t => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "timds-whoami-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const credentialsPath = path.join(directory, "credentials.json");
+  await saveAccessToken("https://saved.test", "timds_saved", { credentialsPath });
+  const principal = { id: "11111111-1111-4111-8111-111111111111", type: "user", name: "Example Person", admin: false };
+  const requests = [];
+  const fetchImpl = async (url, options) => {
+    requests.push({ url, method: options.method, authorization: options.headers.Authorization });
+    return response(url.endsWith("/me") ? { apiVersion: 1, principal } : { apiVersion: 1, sourceId: "source", principals: [{ id: principal.id, name: principal.name, type: "user", active: true }] });
+  };
+  // No workspace and no portal flag: the single saved login selects the host.
+  assert.deepEqual(await runHostedCommand("whoami", { root: path.join(directory, "nowhere"), credentialsPath, fetchImpl }), { apiVersion: 1, principal, portal: "https://saved.test" });
+  assert.deepEqual(requests.at(-1), { url: "https://saved.test/api/timds/me", method: "GET", authorization: "Bearer timds_saved" });
+  const listed = await runHostedCommand("principals", { root: directory, credentialsPath, portalUrl: "https://saved.test", systemId: "example/core", fetchImpl });
+  assert.equal(listed.principals[0].id, principal.id);
+  assert.equal(requests.at(-1).url, "https://saved.test/api/timds/design-systems/example%2Fcore/principals");
+  await assert.rejects(runHostedCommand("principals", { root: directory, credentialsPath, portalUrl: "https://saved.test", fetchImpl }), /Provide --system-id/);
+});
+
+test("join attaches an empty folder to an existing session and names a new folder when it cannot", async t => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "timds-join-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const requests = [];
+  const options = { token: "timds_test", portalUrl: "https://host.example", fetchImpl: async (url, request) => { requests.push({ url, method: request.method }); return response(snapshot([file("note.txt", "shared")])); } };
+  const root = path.join(directory, "member");
+  const joined = await runHostedCommand("join", { ...options, root, sessionId: "session-1" });
+  assert.equal(joined.applied, true);
+  assert.deepEqual(requests, [{ url: "https://host.example/api/timds/sessions/session-1/join", method: "POST" }]);
+  assert.equal(await fs.readFile(path.join(root, "note.txt"), "utf8"), "shared");
+  assert.equal(JSON.parse(await fs.readFile(path.join(root, SESSION_FILE), "utf8")).session.id, "session-1");
+  // A workspace that already holds files or another session is never overwritten.
+  await assert.rejects(runHostedCommand("join", { ...options, root, sessionId: "session-2" }), /already holds another one\. Pass --root \.\/NEW-FOLDER/);
+  const occupied = path.join(directory, "occupied");
+  await fs.mkdir(occupied); await fs.writeFile(path.join(occupied, "mine.txt"), "keep");
+  await assert.rejects(runHostedCommand("join", { ...options, root: occupied, sessionId: "session-1" }), /already has files\. Pass --root \.\/NEW-FOLDER/);
+  assert.equal(requests.length, 1);
+  assert.equal(await fs.readFile(path.join(occupied, "mine.txt"), "utf8"), "keep");
+});
+
+test("join accepts a Studio invite link, which names the session and its host", async t => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "timds-join-link-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const link = "https://host.example/studio/#source=11111111-1111-4111-8111-111111111111&view=studio&session=22222222-2222-4222-8222-222222222222&join=1";
+  assert.deepEqual(sessionReference(link), { sessionId: "22222222-2222-4222-8222-222222222222", portalUrl: "https://host.example" });
+  assert.deepEqual(sessionReference("session-1"), { sessionId: "session-1" });
+  assert.throws(() => sessionReference("https://host.example/studio/#view=sessions"), /names no session/);
+  assert.throws(() => sessionReference("https://user:secret@host.example/studio/#session=x"), /without embedded credentials/);
+  const urls = [];
+  const fetchImpl = async url => { urls.push(url); return response(snapshot([file("note.txt", "shared")])); };
+  await runHostedCommand("join", { root: path.join(directory, "linked"), token: "timds_test", sessionId: link, fetchImpl });
+  // An explicit host still wins over the link's origin.
+  await runHostedCommand("join", { root: path.join(directory, "explicit"), token: "timds_test", sessionId: link, portalUrl: "https://override.example", fetchImpl });
+  assert.deepEqual(urls, ["https://host.example/api/timds/sessions/22222222-2222-4222-8222-222222222222/join", "https://override.example/api/timds/sessions/22222222-2222-4222-8222-222222222222/join"]);
+  assert.equal(await fs.readFile(path.join(directory, "linked", "note.txt"), "utf8"), "shared");
 });

@@ -37,7 +37,7 @@ export async function readCredentials(options = {}) {
     const portals = parsed?.portals && typeof parsed.portals === "object" && !Array.isArray(parsed.portals)
       ? parsed.portals
       : {};
-    return { filePath, portals, schemaVersion: 1 };
+    return { filePath, portals, defaultPortal: parsed.defaultPortal, schemaVersion: 1 };
   } catch (caught) {
     if (caught?.code === "ENOENT") return { filePath, portals: {}, schemaVersion: 1 };
     if (caught instanceof SyntaxError) throw new Error("TimDS credentials file is invalid JSON");
@@ -79,12 +79,13 @@ async function withCredentialsLock(options, task) {
 }
 
 async function saveCredential(portal, credential, options) {
-  return withCredentialsLock(options, (locked, assertHeld) => saveLockedCredential(portal, credential, locked, assertHeld));
+  return withCredentialsLock(options, (locked, assertHeld) => saveLockedCredential(portal, credential, { ...locked, selectPortal: true }, assertHeld));
 }
 
 async function saveLockedCredential(portal, credential, options, assertHeld) {
   const credentials = await readCredentials(options);
   const next = {
+    defaultPortal: options.selectPortal ? portal : credentials.defaultPortal,
     portals: {
       ...credentials.portals,
       [portal]: {
@@ -122,7 +123,7 @@ export async function removeAccessToken(portalUrl, options = {}) {
     if (!credentials.portals[portal]) return { filePath: credentials.filePath, portal, removed: false };
     const portals = { ...credentials.portals };
     delete portals[portal];
-    await writeCredentials(credentials.filePath, { portals, schemaVersion: 1 }, assertHeld);
+    await writeCredentials(credentials.filePath, { portals, defaultPortal: credentials.defaultPortal === portal ? undefined : credentials.defaultPortal, schemaVersion: 1 }, assertHeld);
     return { filePath: credentials.filePath, portal, removed: true };
   });
 }
@@ -231,3 +232,21 @@ export async function loginWithHost(portalUrl, options = {}) {
 }
 
 export { cleanPortalUrl };
+
+/** Resolve only an unambiguous saved origin; never guess between accounts. */
+export async function savedPortalUrl(options = {}) {
+  const credentials = await readCredentials(options);
+  if (credentials.defaultPortal && credentials.portals[credentials.defaultPortal]?.accessToken) return cleanPortalUrl(credentials.defaultPortal);
+  const portals = Object.keys(credentials.portals).filter(portal => credentials.portals[portal]?.accessToken);
+  return portals.length === 1 ? cleanPortalUrl(portals[0]) : null;
+}
+
+/** Selecting an existing login must not replace credentials or rotate tokens. */
+export async function selectSavedPortal(portalUrl, options = {}) {
+  const portal = cleanPortalUrl(portalUrl);
+  return withCredentialsLock(options, async (locked, assertHeld) => {
+    const credentials = await readCredentials(locked);
+    if (!credentials.portals[portal]?.accessToken) return;
+    await writeCredentials(credentials.filePath, { portals: credentials.portals, defaultPortal: portal, schemaVersion: 1 }, assertHeld);
+  });
+}

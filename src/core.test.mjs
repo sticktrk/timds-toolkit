@@ -9,6 +9,8 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
   checkWorkspace,
+  runCli,
+  runWithOutputSink,
   createPlumbingPrompt,
   createPreviewServer,
   initializeDesigns,
@@ -1455,4 +1457,103 @@ test("a later scaffold advances starter fields the client never changed and keep
   const reverted = await syncStarterWorkspace(repoRoot);
   assert.equal(reverted.files.find((file) => file.path === "scripts/check.mjs").status, "updated");
   assert.equal(await read("scripts/check.mjs"), await fs.readFile(path.join(templatesRoot, "starter/scripts/check.mjs"), "utf8"));
+});
+
+
+test("login reuses saved credentials without opening an authorization flow", async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "timds-cli-login-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const credentialsPath = path.join(root, "credentials.json");
+  const { saveAccessToken } = await import("./auth.mjs");
+  await saveAccessToken("https://saved.test", "timds_saved", { credentialsPath });
+  await saveAccessToken("https://other.test", "timds_other", { credentialsPath });
+  const lines = [];
+  const result = await runWithOutputSink(line => lines.push(line), () => runCli(["auth", "login", "--root", root, "--credentials-path", credentialsPath, "--portal-url", "https://saved.test", "--oauth"]));
+  assert.equal(result.reused, true);
+  assert.equal(result.portal, "https://saved.test");
+  const { savedPortalUrl } = await import("./auth.mjs");
+  assert.equal(await savedPortalUrl({ credentialsPath }), "https://saved.test");
+  assert.match(lines.join("\n"), /Already signed in/);
+  assert.doesNotMatch(lines.join("\n"), /timds_saved/);
+});
+
+test("dev --port passes PORT to the workspace command and rejects invalid ports", async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "timds-cli-dev-port-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await initializeRepository(root, { standalone: true, provider: "hosted", portalUrl: "https://host.test" });
+  const manifestPath = path.join(root, "timds.json");
+  const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
+  manifest.workspace.dev = [process.execPath, "-e", "require('fs').writeFileSync('received-port.txt', process.env.PORT)"];
+  await fs.writeFile(manifestPath, JSON.stringify(manifest));
+  await runCli(["dev", "--root", root, "--port", "4327"]);
+  assert.equal(await fs.readFile(path.join(root, "received-port.txt"), "utf8"), "4327");
+  await assert.rejects(runCli(["dev", "--root", root, "--port", "70000"]), /Dev port must/);
+});
+
+
+test("preview and starter dev explain an occupied port without a stack trace", async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "timds-cli-busy-port-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await initializeRepository(root, { standalone: true, provider: "hosted", portalUrl: "https://host.test" });
+  const server = http.createServer();
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const port = server.address().port;
+  await assert.rejects(runCli(["preview", "--root", root, "--no-build", "--port", String(port)]), /already in use.*timds preview --port/);
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  await assert.rejects(promisify(execFile)(process.execPath, ["scripts/dev.mjs"], { cwd: root, env: { ...process.env, PORT: String(port) } }), error => {
+    assert.match(error.stderr, /already in use.*timds dev --port/);
+    assert.doesNotMatch(error.stderr, /Unhandled|at Server/);
+    return true;
+  });
+});
+
+test("whoami prints the principal and join prints the workspace and next steps", async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "timds-cli-join-"));
+  const originalFetch = globalThis.fetch;
+  t.after(async () => { globalThis.fetch = originalFetch; await fs.rm(root, { recursive: true, force: true }); });
+  const principal = { id: "11111111-1111-4111-8111-111111111111", type: "user", name: "Example Person", admin: false };
+  const session = { id: "session-1", systemId: "example/core", baseRevision: "base", status: "open" };
+  globalThis.fetch = async url => new Response(JSON.stringify(String(url).endsWith("/me") ? { apiVersion: 1, principal } : { apiVersion: 1, session, files: [{ path: "note.txt", encoding: "base64", content: Buffer.from("shared").toString("base64"), mode: "100644" }] }), { status: 200, headers: { "Content-Type": "application/json" } });
+  const host = ["--portal-url", "https://host.example", "--token", "timds_test"];
+  const lines = [];
+  await runWithOutputSink(line => lines.push(line), () => runCli(["whoami", "--root", root, ...host]));
+  assert.deepEqual(lines, [`https://host.example: signed in as Example Person (user) ${principal.id}`]);
+  lines.length = 0;
+  const member = path.join(root, "member");
+  await runWithOutputSink(line => lines.push(line), () => runCli(["join", "session-1", "--root", member, ...host]));
+  assert.equal(await fs.readFile(path.join(member, "note.txt"), "utf8"), "shared");
+  assert.match(lines.join("\n"), new RegExp(`Workspace: ${member.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+  assert.match(lines.join("\n"), /npm ci[\s\S]*timds dev[\s\S]*timds update --note/);
+  lines.length = 0;
+  await runWithOutputSink(line => lines.push(line), () => runCli(["join", "session-1", "--root", member, "--principal-id", principal.id, ...host]));
+  assert.match(lines.join("\n"), new RegExp(`Invited ${principal.id}\\. They attach with: timds join session-1 --root`));
+  assert.doesNotMatch(lines.join("\n"), /Workspace:/);
+});
+
+test("joining from a Studio link attaches in a new session folder without another sign-in", async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "timds-cli-join-link-"));
+  const originalFetch = globalThis.fetch, originalDirectory = process.cwd();
+  t.after(async () => { globalThis.fetch = originalFetch; process.chdir(originalDirectory); await fs.rm(root, { recursive: true, force: true }); });
+  // The current folder already has files, as a terminal usually does.
+  await fs.writeFile(path.join(root, "mine.txt"), "keep");
+  const credentialsPath = path.join(root, "credentials.json");
+  const { saveAccessToken } = await import("./auth.mjs");
+  await saveAccessToken("https://host.example", "timds_saved", { credentialsPath });
+  const sessionId = "22222222-2222-4222-8222-222222222222", requests = [];
+  globalThis.fetch = async (url, options) => {
+    requests.push({ url: String(url), authorization: options.headers.Authorization });
+    return new Response(JSON.stringify({ apiVersion: 1, session: { id: sessionId, systemId: "example/core", baseRevision: "base", status: "open" }, files: [{ path: "note.txt", encoding: "base64", content: Buffer.from("shared").toString("base64"), mode: "100644" }] }), { status: 200, headers: { "Content-Type": "application/json" } });
+  };
+  process.chdir(root);
+  const workspace = path.join(process.cwd(), "session-22222222");
+  const lines = [];
+  await runWithOutputSink(line => lines.push(line), () => runCli(["join", `https://host.example/studio/#source=11111111-1111-4111-8111-111111111111&view=studio&session=${sessionId}&join=1`, "--credentials-path", credentialsPath]));
+  assert.deepEqual(requests, [{ url: `https://host.example/api/timds/sessions/${sessionId}/join`, authorization: "Bearer timds_saved" }]);
+  assert.equal(await fs.readFile(path.join(workspace, "note.txt"), "utf8"), "shared");
+  assert.equal(await fs.readFile(path.join(root, "mine.txt"), "utf8"), "keep");
+  assert.equal(lines[0], "TimDS join: fetching workspace from https://host.example...");
+  assert.ok(lines.includes(`Workspace: ${workspace}`));
+  assert.doesNotMatch(lines.join("\n"), /authoriz|Already signed in/i);
 });
