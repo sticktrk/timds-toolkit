@@ -84,6 +84,7 @@ async function loopbackCallback(state, signal) {
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("Content-Type", "text/plain; charset=utf-8");
     res.setHeader("Referrer-Policy", "no-referrer");
+    res.setHeader("Connection", "close");
     const expected = new URL(redirectUri);
     let url;
     try { url = new URL(req.url, redirectUri); } catch { res.writeHead(400).end("Invalid callback."); return; }
@@ -100,15 +101,22 @@ async function loopbackCallback(state, signal) {
     }
     if (url.searchParams.has("error")) {
       consumed = true;
+      const declined = () => rejectCode(failure("authorization was not granted"));
+      res.once("finish", declined);
+      res.once("close", declined);
       res.writeHead(400).end("Authorization was not granted. Return to the terminal.");
-      rejectCode(failure("authorization was not granted")); return;
+      return;
     }
     if (url.searchParams.getAll("code").length !== 1 || !secretString(url.searchParams.get("code"))) {
       res.writeHead(400).end("Invalid authorization code."); return;
     }
     consumed = true;
+    // Complete only after handing the landing response to the socket, or after
+    // the browser disconnects. A valid callback still succeeds if its tab closes.
+    const receivedCode = () => resolveCode({ code: url.searchParams.get("code"), issuer: url.searchParams.get("iss") });
+    res.once("finish", receivedCode);
+    res.once("close", receivedCode);
     res.end("Authorization received. You can close this tab and return to the terminal.");
-    resolveCode({ code: url.searchParams.get("code"), issuer: url.searchParams.get("iss") });
   });
   server.requestTimeout = 5000;
   server.headersTimeout = 5000;
@@ -120,7 +128,15 @@ async function loopbackCallback(state, signal) {
   const cancel = () => rejectCode(failure("authorization cancelled or expired"));
   signal.addEventListener("abort", cancel, { once: true });
   if (signal.aborted) cancel();
-  return { redirectUri, code, close() { signal.removeEventListener("abort", cancel); server.close(); server.closeAllConnections(); } };
+  return { redirectUri, code, close() {
+    signal.removeEventListener("abort", cancel);
+    return new Promise((resolve) => {
+      // Let active responses drain; force-close only a connection that stalls.
+      const deadline = setTimeout(() => server.closeAllConnections(), 5000);
+      deadline.unref();
+      server.close(() => { clearTimeout(deadline); resolve(); });
+    });
+  } };
 }
 
 /** Launch a URL as one argument, without a shell; headless callers can print it. */
@@ -168,7 +184,7 @@ export async function authorizeOAuth(host, metadata, options = {}) {
     const received = await listener.code;
     if (received.issuer && received.issuer !== metadata.issuer) throw failure("callback issuer does not match the selected host");
     return await tokenRequest({ issuer: metadata.issuer, tokenEndpoint: metadata.tokenEndpoint, clientId, resource, scopes }, { grant_type: "authorization_code", client_id: clientId, redirect_uri: listener.redirectUri, code: received.code, code_verifier: verifier, resource }, context);
-  } finally { listener.close(); }
+  } finally { await listener.close(); }
 }
 
 export async function refreshOAuth(host, credential, options = {}) {
