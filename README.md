@@ -1569,9 +1569,11 @@ the GitHub Release. Publishing to npm is left to
 publisher. Never run `npm publish` by hand: it beats CI to the registry and
 leaves that run failing on a version conflict.
 
-Release tags must match `package.json` as `v<version>`. The npm package is
-public; this repository remains `UNLICENSED` until DT Concepts selects an
-open-source license.
+Release tags must match `package.json` as `v<version>`. The npm package is public.
+Original toolkit code is licensed under the Apache License 2.0; see
+[LICENSE](LICENSE) and [NOTICE](NOTICE). Third-party dependencies retain their
+respective licenses. Previously published versions retain the license
+distributed with that version; `0.1.471` was published with MIT metadata.
 
 
 Portal provisioning can pass immutable identity explicitly:

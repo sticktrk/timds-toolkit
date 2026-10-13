@@ -50,6 +50,7 @@
     "golden-drift": "node scripts/golden-drift.mjs"
   },
   "files": [
+    "NOTICE",
     "bin",
     "scripts/publish-artifact.mjs",
     "skills",
@@ -141,7 +142,7 @@
     "timds",
     "workflow"
   ],
-  "license": "MIT",
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/dtconceptsnc/timds-toolkit.git"
