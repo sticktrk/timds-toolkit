@@ -1531,3 +1531,29 @@ test("whoami prints the principal and join prints the workspace and next steps",
   assert.match(lines.join("\n"), new RegExp(`Invited ${principal.id}\\. They attach with: timds join session-1 --root`));
   assert.doesNotMatch(lines.join("\n"), /Workspace:/);
 });
+
+test("joining from a Studio link attaches in a new session folder without another sign-in", async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "timds-cli-join-link-"));
+  const originalFetch = globalThis.fetch, originalDirectory = process.cwd();
+  t.after(async () => { globalThis.fetch = originalFetch; process.chdir(originalDirectory); await fs.rm(root, { recursive: true, force: true }); });
+  // The current folder already has files, as a terminal usually does.
+  await fs.writeFile(path.join(root, "mine.txt"), "keep");
+  const credentialsPath = path.join(root, "credentials.json");
+  const { saveAccessToken } = await import("./auth.mjs");
+  await saveAccessToken("https://host.example", "timds_saved", { credentialsPath });
+  const sessionId = "22222222-2222-4222-8222-222222222222", requests = [];
+  globalThis.fetch = async (url, options) => {
+    requests.push({ url: String(url), authorization: options.headers.Authorization });
+    return new Response(JSON.stringify({ apiVersion: 1, session: { id: sessionId, systemId: "example/core", baseRevision: "base", status: "open" }, files: [{ path: "note.txt", encoding: "base64", content: Buffer.from("shared").toString("base64"), mode: "100644" }] }), { status: 200, headers: { "Content-Type": "application/json" } });
+  };
+  process.chdir(root);
+  const workspace = path.join(process.cwd(), "session-22222222");
+  const lines = [];
+  await runWithOutputSink(line => lines.push(line), () => runCli(["join", `https://host.example/studio/#source=11111111-1111-4111-8111-111111111111&view=studio&session=${sessionId}&join=1`, "--credentials-path", credentialsPath]));
+  assert.deepEqual(requests, [{ url: `https://host.example/api/timds/sessions/${sessionId}/join`, authorization: "Bearer timds_saved" }]);
+  assert.equal(await fs.readFile(path.join(workspace, "note.txt"), "utf8"), "shared");
+  assert.equal(await fs.readFile(path.join(root, "mine.txt"), "utf8"), "keep");
+  assert.equal(lines[0], "TimDS join: fetching workspace from https://host.example...");
+  assert.ok(lines.includes(`Workspace: ${workspace}`));
+  assert.doesNotMatch(lines.join("\n"), /authoriz|Already signed in/i);
+});

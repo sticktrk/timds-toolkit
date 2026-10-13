@@ -390,15 +390,18 @@ history, publish and rollback in the CLI or Studio. Prefer the hosted MCP:
 `timds_draft_create|list|close`.
 
 Join before you start. When the human names an open session (a session id, a
-Studio link, or "the session I have open"), attach to it with `timds join
-SESSION --root ./NEW-FOLDER` (`timds_join`) and send work with `update`; do
-not create a second session with `start`. Find the id in `timds active-work`
-when the human did not give it. Join needs an empty folder: never reuse a
-workspace that already holds files or another session. Use `start` only when
-there is no session to join or the human asks for a new one. If the host
-answers `Session not found`, the signed-in principal is not the owner, a
-member or a publisher: report the id from `timds whoami` so the owner can
-invite it, and do not start a separate session as a workaround.
+Studio link, or "the session I have open"), attach to it and send work with
+`update`; do not create a second session with `start`. A Studio link is the
+whole invitation: `timds join "LINK"` uses the link's host, signs in there if
+this machine has not, and attaches in a new `./session-ID` folder. With a
+bare id, use `timds join SESSION --root ./NEW-FOLDER` (`timds_join`), and find
+the id in `timds active-work` when the human did not give it. Join needs an
+empty folder: never reuse a workspace that already holds files or another
+session. Use `start` only when there is no session to join or the human asks
+for a new one. If the host refuses the join (`Session not found` or a 403),
+the signed-in principal has no access to that session: report the id from
+`timds whoami` so the owner can invite it, and do not start a separate
+session as a workaround.
 
 Read active work before editing; claim the intended paths with the human’s
 intent note. Overlap is advisory. Submit and update carry that intent as

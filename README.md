@@ -1682,6 +1682,7 @@ timds whoami
 timds principals
 timds join SESSION --principal-id PRINCIPAL
 timds join SESSION --root ./member-session
+timds join "https://YOUR-HOST/studio/#source=SOURCE&view=studio&session=SESSION&join=1"
 timds draft list
 timds draft close spring-refresh
 ```
@@ -1719,8 +1720,12 @@ the people and agents who can be invited into the Design System's sessions.
 `join` materializes the session into an empty `--root`, selects the host the
 same way `start` does, and prints the workspace and next steps; it refuses a
 folder that already has files or another session and names `--root
-./NEW-FOLDER` as the fix. A member sends work to the shared session with
-`update` and freezes it for review with `submit`. Agent principals must supply the human
+./NEW-FOLDER` as the fix. `join` also accepts the Studio invite link in place
+of the session id: the link's origin selects the host unless `--portal-url`
+does, the CLI signs in to that host first when this machine has no credential
+for it, and without `--root` the session lands in a new `./session-<first 8
+characters of the id>` folder instead of the current one. A member sends work
+to the shared session with `update` and freezes it for review with `submit`. Agent principals must supply the human
 intent as `note` on every update and submission; history retains it and the
 acting principal. Drafts are named sessions with no expiry. A session started
 with `--draft` targets that draft; publishing its head uses the normal main

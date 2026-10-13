@@ -5,7 +5,7 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import test from "node:test";
-import { HOST_API_VERSION, SESSION_FILE, runHostedCommand, sessionChanges, hostedPath, createHostProvider } from "./hosted.mjs";
+import { HOST_API_VERSION, SESSION_FILE, runHostedCommand, sessionChanges, sessionReference, hostedPath, createHostProvider } from "./hosted.mjs";
 import { saveAccessToken } from "./auth.mjs";
 import { initializeRepository } from "./core.mjs";
 import { registerHostedSessionTools } from "./mcp.mjs";
@@ -473,4 +473,21 @@ test("join attaches an empty folder to an existing session and names a new folde
   await assert.rejects(runHostedCommand("join", { ...options, root: occupied, sessionId: "session-1" }), /already has files\. Pass --root \.\/NEW-FOLDER/);
   assert.equal(requests.length, 1);
   assert.equal(await fs.readFile(path.join(occupied, "mine.txt"), "utf8"), "keep");
+});
+
+test("join accepts a Studio invite link, which names the session and its host", async t => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "timds-join-link-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const link = "https://host.example/studio/#source=11111111-1111-4111-8111-111111111111&view=studio&session=22222222-2222-4222-8222-222222222222&join=1";
+  assert.deepEqual(sessionReference(link), { sessionId: "22222222-2222-4222-8222-222222222222", portalUrl: "https://host.example" });
+  assert.deepEqual(sessionReference("session-1"), { sessionId: "session-1" });
+  assert.throws(() => sessionReference("https://host.example/studio/#view=sessions"), /names no session/);
+  assert.throws(() => sessionReference("https://user:secret@host.example/studio/#session=x"), /without embedded credentials/);
+  const urls = [];
+  const fetchImpl = async url => { urls.push(url); return response(snapshot([file("note.txt", "shared")])); };
+  await runHostedCommand("join", { root: path.join(directory, "linked"), token: "timds_test", sessionId: link, fetchImpl });
+  // An explicit host still wins over the link's origin.
+  await runHostedCommand("join", { root: path.join(directory, "explicit"), token: "timds_test", sessionId: link, portalUrl: "https://override.example", fetchImpl });
+  assert.deepEqual(urls, ["https://host.example/api/timds/sessions/22222222-2222-4222-8222-222222222222/join", "https://override.example/api/timds/sessions/22222222-2222-4222-8222-222222222222/join"]);
+  assert.equal(await fs.readFile(path.join(directory, "linked", "note.txt"), "utf8"), "shared");
 });

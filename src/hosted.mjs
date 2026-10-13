@@ -42,6 +42,16 @@ async function readJson(file) {
   catch (error) { if (error.code === "ENOENT") return null; throw error; }
 }
 
+/** A Studio invite link names both the session and the host that owns it. */
+export function sessionReference(value) {
+  if (!/^https?:\/\//i.test(String(value || ""))) return { sessionId: value };
+  let url;
+  try { url = new URL(value); } catch { throw new Error("That Studio link is not a valid URL"); }
+  const sessionId = new URLSearchParams(url.hash.slice(1)).get("session") || url.searchParams.get("session");
+  if (!sessionId) throw new Error("That Studio link names no session; copy the link from the session's Invite dialog.");
+  return { sessionId, portalUrl: cleanPortalUrl(url.href) };
+}
+
 export async function findHostedRoot(start = process.cwd()) {
   let current = path.resolve(start);
   while (true) {
@@ -343,6 +353,11 @@ async function applySnapshot(root, snapshot, previous, provider, replace = false
 
 /** The same implementation is called by the CLI and the editing MCP server. */
 export async function runHostedCommand(command, { root = process.cwd(), fixedRoot = false, systemId, note, on, patterns, draft, name, from = "main", version, sessionId, principalId, portalUrl, token, fetchImpl, credentialsPath, dryRun = false, resolve = [], idempotencyKey, submission, yes = false, confirm, onSummary, wait = ms => new Promise(resolve => setTimeout(resolve, ms)), pollIntervalMs = 2000, timeoutMs = 30 * 60_000, staleRetries = 1 } = {}) {
+  if (command === "join") {
+    // A link's origin selects the host only when nothing explicit does.
+    const reference = sessionReference(sessionId);
+    sessionId = reference.sessionId; portalUrl ||= reference.portalUrl;
+  }
   // Materialization destinations are literal, even inside another repository.
   // Inviting a principal still acts on the current enclosing session.
   const destination = fixedRoot || command === "start" || command === "join" && !principalId;
