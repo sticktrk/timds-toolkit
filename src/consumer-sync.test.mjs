@@ -98,6 +98,51 @@ test("resolvePublishedBundle reads a pinned version directly and the current rel
   await assert.rejects(resolvePublishedBundle({ url: BASE, version: "9.9.9", fetchImpl }), /version 9\.9\.9's bundle is not published at .*v\/9\.9\.9\/bundle\.json/);
 });
 
+test("consumer required tokens fail before a draft fix, resolve aliases after sync, and preserve the published pin", async (t) => {
+  const product = await productRepo(t);
+  await syncConsumerBundle(product, { fetchImpl: publishedSystem().fetchImpl, output: () => {} });
+  const manifestBefore = await fs.readFile(path.join(product, CONSUMER_MANIFEST_FILE), "utf8");
+  const cssPath = "src/styles/ds/brand.css";
+  const cssFile = path.join(product, "design-system", cssPath);
+  await fs.writeFile(cssFile, "/* --focus-card-ring: gold; */ .card { outline-color: var(--focus-card-ring); content: '--focus-card-ring: gold'; }");
+  const lines = [];
+  await assert.rejects(runConsumerCli(["check", "--root", product, "--require-token=--focus-card-ring"], { output: (line) => lines.push(line) }), /consumer check failed/);
+  assert.match(lines.join("\n"), /Missing required Design System token --focus-card-ring/);
+  const record = await readBundleRecord(path.join(product, "design-system"));
+  await write(product, `design-system/${CONSUMER_BUNDLE_RECORD_FILE}`, { ...record, draft: "spring-refresh", revision: "draft-revision" });
+  await fs.writeFile(cssFile, ":root { --gold: #8a6a2e; --focus-card-ring: var(--gold); --space-1: 4px; } .dark { --focus-card-ring: var(--gold); }");
+  const passed = await runConsumerCli(["check", "--root", product, "--require-token", "--focus-card-ring", "--require-token=--space-1"], { output: () => {} });
+  assert.equal(passed.status, "passed");
+  assert.match(passed.warnings.join("\n"), /Local draft spring-refresh/);
+  assert.equal(await fs.readFile(path.join(product, CONSUMER_MANIFEST_FILE), "utf8"), manifestBefore);
+
+  await fs.writeFile(cssFile, ":root { --focus-card-ring: var(--missing); }");
+  const brokenAlias = await checkConsumer(product, { requireTokens: ["--focus-card-ring"] });
+  assert.match(brokenAlias.errors.join("\n"), /unresolved aliases: --missing/);
+  await fs.writeFile(cssFile, ":root { --focus-card-ring: var(--missing, #8a6a2e); }");
+  assert.equal((await checkConsumer(product, { requireTokens: ["--focus-card-ring"] })).status, "passed");
+  await fs.writeFile(cssFile, ":root { --focus-card-ring: var(--other); --other: var(--focus-card-ring); }");
+  assert.match((await checkConsumer(product, { requireTokens: ["--focus-card-ring"] })).errors.join("\n"), /unresolved aliases/);
+  await fs.writeFile(cssFile, ":root { --focus-card-ring: var(--missing); --focus-card-ring: gold; }");
+  assert.equal((await checkConsumer(product, { requireTokens: ["--focus-card-ring"] })).status, "passed");
+});
+
+test("required tokens only read recorded bundle CSS and refuse symlink escape and malformed names", async (t) => {
+  const product = await productRepo(t);
+  await syncConsumerBundle(product, { fetchImpl: publishedSystem().fetchImpl, output: () => {} });
+  await write(product, "design-system/extra.css", ":root { --focus-card-ring: gold; }");
+  assert.match((await checkConsumer(product, { requireTokens: ["--focus-card-ring"] })).errors.join("\n"), /Missing required/);
+  const cssFile = path.join(product, "design-system/src/styles/ds/brand.css");
+  await fs.rm(cssFile);
+  await fs.symlink(path.join(product, "outside.css"), cssFile);
+  await write(product, "outside.css", ":root { --focus-card-ring: gold; }");
+  assert.match((await checkConsumer(product, { requireTokens: ["--focus-card-ring"] })).errors.join("\n"), /Cannot read Design System stylesheet inside/);
+  assert.match((await checkConsumer(product, { requireTokens: ["focus-card-ring"] })).errors.join("\n"), /CSS custom property names/);
+  for (const argument of ["--require-token", "--require-token=focus-ring", "--require-token="]) {
+    await assert.rejects(runConsumerCli(["check", "--root", product, argument], { output: () => {} }), /requires a CSS custom property/);
+  }
+});
+
 test("a raw artifact manifest at the versioned prefix resolves its files beside itself, never at the current release", async () => {
   const { fetchImpl, served } = publishedSystem();
   // The portal serves the artifact's own bundle.json at v/<version>/: no base,

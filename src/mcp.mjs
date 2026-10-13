@@ -584,6 +584,22 @@ function toolResult(value) {
   };
 }
 
+// Hosted commands transfer snapshot bytes over HTTP and keep their baseline in
+// local session state. Echoing binary files twice through MCP exceeds the stdio
+// transport limit for ordinary image libraries. Keep the receipt and conflicts;
+// authored file contents remain available through read_file after application.
+function hostedToolReceipt(result) {
+  if (!Array.isArray(result?.files)) return result;
+  const { files, rebasedChanges, ...receipt } = result;
+  return {
+    ...receipt,
+    files: files.map(({ path, mode }) => ({ path, ...(mode ? { mode } : {}) })),
+    fileCount: files.length,
+    filesMaterialized: result.applied === true,
+    ...(rebasedChanges ? { rebasedChanges: { ...rebasedChanges, changedFiles: (rebasedChanges.changedFiles || []).map(({ path, mode }) => ({ path, ...(mode ? { mode } : {}) })) } } : {}),
+  };
+}
+
 function toolError(caught) {
   return {
     content: [{ type: "text", text: caught instanceof Error ? caught.message : String(caught || "Design System tool failed") }],
@@ -837,7 +853,7 @@ export function registerHostedSessionTools(server, { root = process.cwd() } = {}
       },
       annotations: { readOnlyHint: ["status", "history", "active-work", "draft-list"].includes(command), destructiveHint: ["close", "publish"].includes(command), openWorldHint: true, idempotentHint: command !== "start" },
     }, async (args) => {
-      try { return toolResult(await runHostedCommand(command, { root, ...args })); }
+      try { return toolResult(hostedToolReceipt(await runHostedCommand(command, { root, ...args }))); }
       catch (error) { return toolError(error); }
     });
   }

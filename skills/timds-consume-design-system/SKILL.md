@@ -68,6 +68,12 @@ __DERIVED_LAYER__
   developer change; say so.
 - An unfilled role or missing token is a gap, not something to invent. Report
   it, and file it with `report_gap` when the user agrees.
+- Validate newly consumed CSS tokens with `npm run timds -- consumer check
+  --require-token=--focus-ring` (repeat the flag for each required token).
+  It checks the local bundle, including a draft override, for definitions and
+  resolvable aliases. After the designer fixes a reported gap, sync the draft
+  or release and run the same check again. Still verify imports, cascade,
+  keyboard focus, and contrast in the product's browser preview.
 - Compliance guidance is binding. When requested copy conflicts with it, say
   so instead of complying silently.
 

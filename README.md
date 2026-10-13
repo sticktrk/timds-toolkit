@@ -296,11 +296,17 @@ path), skipping query strings, non-page files, and `exclude` URL path globs
 such as `"/admin/**"`, until `limit` routes (default 40, at most 200) are found.
 Declared `routes` always come first and always stay.
 
-- `timds consumer check [--app NAME] [--base REF]` validates the manifest and
+- `timds consumer check [--app NAME] [--base REF] [--require-token=--NAME]...` validates the manifest and
   the pin: for a published pin, that the synced bundle is present and at the
   pinned version; for a submodule, that it is pinned and checked out (warning
   when the checkout drifts from the pin). It also checks that every app's
-  `cwd` exists. With `--base`, it
+  `cwd` exists. Repeat `--require-token=--focus-ring` for each CSS custom
+  property the product needs. The check reads the actual synced bundle,
+  including a local draft override, or the checkout's tracked and unignored
+  CSS. Missing definitions, empty values, and unresolved aliases in the same
+  selector or document scope fail the check. This checks token availability;
+  verify product stylesheet imports, browser cascade, and contrast in the
+  actual product preview. With `--base`, it
   fails when the branch or working tree changes anything outside a declared
   design surface or inside a protected path, or moves the Design System pin
   (the gitlink, or `designSystem` in the manifest),
@@ -1684,6 +1690,13 @@ https://timds.com` serves the checked draft’s derived layer; every read refres
 its snapshot and rebuilds only when its revision changed. Hosts registering
 read tools receive optional `draft` alongside `systemId` and `version` in their
 resolver. Report missing guidance through `report_gap`.
+
+Local hosted editing MCP commands return snapshot file paths and counts, session
+revisions, and exact conflicts. They do not echo binary snapshot contents through
+stdio. `filesMaterialized` identifies a successfully applied snapshot; use the
+editing `read_file` tool for authored local files. A conflict leaves local files
+unchanged and can be resolved with `timds_update`. The version-1 host HTTP
+snapshot API continues to transfer full file contents.
 
 For a new hosted source use `timds init --standalone --provider hosted
 --portal-url https://timds.com`. It emits `wrangler.jsonc` with top-level
