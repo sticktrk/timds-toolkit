@@ -69,6 +69,7 @@
     "src/starter.mjs",
     "src/artifact.mjs",
     "src/auth.mjs",
+    "src/oauth.mjs",
     "src/extract.mjs",
     "src/formats.mjs",
     "src/formats.d.mts",
