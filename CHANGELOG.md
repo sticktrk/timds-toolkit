@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.468
+
+- Recover hosted update and submission edge timeouts with bounded retries of the exact original payload. Preserve ordinary conflict handling and avoid retrying unrelated operations.
+
 ## 0.1.467
 
 - Make release validation's local Git fixtures use independent object transfers and bounded cleanup, avoiding runner-specific local clone and background-maintenance races while retaining the full test gate.
