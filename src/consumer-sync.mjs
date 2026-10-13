@@ -28,7 +28,7 @@ import { existsSync, promises as fs } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 
-import { BUNDLE_MANIFEST_FILE, BUNDLE_OUTPUT_DIRECTORY, BUNDLE_VERSION_PREFIX } from "./bundle.mjs";
+import { BUNDLE_MANIFEST_FILE, BUNDLE_OUTPUT_DIRECTORY, BUNDLE_VERSION_PREFIX, bundleOutputDirectory } from "./bundle.mjs";
 import { CONSUMER_BUNDLE_RECORD_FILE, CONSUMER_MANIFEST_FILE, loadConsumer, publishedBaseUrl } from "./consumer.mjs";
 import { PROVENANCE_FILE } from "./derived.mjs";
 
@@ -335,12 +335,15 @@ export async function updateConsumerDraft(rootInput, { draft, portalUrl, token, 
   const { prepareDraftSource } = await import("./draft-source.mjs");
   const prepared = await prepareDraftSource({ systemId: designSystem.systemId, draft, portalUrl, token, credentialsPath, fetchImpl, build });
   try {
-    const manifest = JSON.parse(await fs.readFile(path.join(prepared.root, "dist", BUNDLE_MANIFEST_FILE), "utf8"));
+    const sourceManifest = JSON.parse(await fs.readFile(path.join(prepared.root, "timds.json"), "utf8"));
+    const outputDirectory = bundleOutputDirectory(safeBundlePath(sourceManifest.artifact?.entry || "index.html"));
+    const artifactRoot = path.join(prepared.root, "dist");
+    const manifest = JSON.parse(await fs.readFile(path.join(artifactRoot, path.posix.dirname(outputDirectory), BUNDLE_MANIFEST_FILE), "utf8"));
     if (manifest.system?.id !== designSystem.systemId) throw new Error("Draft bundle belongs to a different design system");
     const files = [];
     for (const file of manifest.files || []) {
       const relative = safeBundlePath(file.path);
-      const data = await fs.readFile(path.join(prepared.root, "dist", BUNDLE_OUTPUT_DIRECTORY, relative));
+      const data = await fs.readFile(path.join(artifactRoot, outputDirectory, relative));
       if (sha256Of(data) !== file.sha256) throw new Error(`Draft bundle digest mismatch: ${relative}`);
       files.push({ ...file, path: relative, data });
     }
