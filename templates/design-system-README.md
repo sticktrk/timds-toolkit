@@ -19,7 +19,8 @@ toolkit: the skills under `.agents/skills/` (and, for Claude Code, the
 | "It's done" | `design-ship` | Validated, reviewed at both widths, changelog note written, draft pull request open |
 | "Give it to the developers" | `design-handoff` | A brief naming the version to pin and the designs to port |
 
-Merging a pull request releases a patch version. The production product
+Merging a pull request releases a dated version (`2026.10.12-1`: the day
+and the release number that day). The production product
 pins a release and a developer carries it across there, with its own
 `timds-update-design-system` skill. `AGENTS.md` names the product under
 "Handing a release to production".
@@ -81,7 +82,7 @@ tokens; the rest are declared as planned and built once someone writes them.
 | `src/styles/system.css`, `src/styles/canvas.css`, `src/styles/viewer.css` | The system's own styles, the format previews, and the documentation chrome |
 | `src/assets/` | Small optimized assets such as logos, copied into the artifact |
 | `scripts/build.mjs`, `dev.mjs`, `check.mjs`, `viewer.mjs` | The `workspace` commands declared in `timds.json` and the renderer they share |
-| `CHANGELOG.md` | Change notes; add to `## Unreleased` |
+| `CHANGELOG.md` | Release notes, rendered at `/changelog/`; add to `## Unreleased`, leading with the area the change touches |
 | `media.json`, `media-local/` | Published media catalog and ignored originals |
 
 The starter `dev` server builds once and serves on `http://127.0.0.1:4321`. It
@@ -239,13 +240,13 @@ __TIMDS_CLI__ submit --message "Describe the design-system change"
 ```
 
 Submission creates a draft pull request. In a standalone repository, an
-operator's merge accepts the change for automatic patch publication; rollback
+operator's merge accepts the change for automatic publication; rollback
 remains a separate operator decision.
 
 ## Linked consumer repository
 
 When `timds.json` declares a `consumer`, every accepted change on `main`
-becomes a patch release. CI synchronizes the version, publishes that exact
+becomes a release. CI synchronizes the version, publishes that exact
 commit, then opens or refreshes a pull request that advances the consumer's
 pinned `design-system` gitlink. Configure a `TIMDS_CONSUMER_TOKEN` repository
 secret with contents and pull-request access to that consumer repository.
@@ -254,11 +255,16 @@ The consumer owns only its `.gitmodules` record and reviewed gitlink. Prefer a
 same-host relative URL such as `../client-design-system.git`, so authenticated
 HTTPS and SSH clones both resolve within the organization.
 
-Day-to-day changes go under `## Unreleased` in `CHANGELOG.md`. Merging an
-accepted change rolls those notes into the next patch automatically. Use
-`./scripts/release.sh` only when intentionally preparing an explicit minor,
-major, or selected version. Publication and the consumer update remain
-separate, ordered CI work.
+Day-to-day changes go under `## Unreleased` in `CHANGELOG.md`, each note
+led by the area it touches (`Brand · Color: ...`, `Print DS: ...`). Merging
+an accepted change rolls those notes into the next version automatically:
+the UTC day of the release and its number that day (`2026.10.12-1`, then
+`2026.10.12-2`). The built system shows the history at `/changelog/`,
+linked from the version in the app bar, and publishes it as
+`changelog.json` for products moving their pin. Use `./scripts/release.sh`
+only when intentionally releasing at a chosen moment or under a chosen
+later version. Publication and the consumer update remain separate,
+ordered CI work.
 
 ## Toolkit upgrades
 

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mergeFileTrees, mergeContractValues, parseSessionResolution } from './merge.mjs';
+import { prepareMergeRelease } from '../templates/starter/scripts/prepare-merge-release.mjs';
 const file = (path, content, mode = '100644') => ({ path, encoding: 'base64', content: Buffer.from(content).toString('base64'), mode });
 const json = (value, name = 'tokens/color.brand.json') => [file(name, JSON.stringify(value))];
 const value = (result, name = 'tokens/color.brand.json') => JSON.parse(Buffer.from(result.files.find(file => file.path === name).content, 'base64'));
@@ -121,4 +122,94 @@ test('whole-path JSON resolutions retain the exact local file and cannot mix wit
   const result = clean(mergeFileTrees(base, mine, theirs, { resolvedPaths: ['tokens/color.brand.json'] }));
   assert.deepEqual(result.files, mine);
   assert.throws(() => mergeFileTrees(base, mine, theirs, { resolvedPaths: ['tokens/color.brand.json', 'tokens/color.brand.json#x=theirs'] }), /mix whole-file and key/);
+});
+
+const changelogHeader = '# Design System Changelog\n\nClient-owned release notes.\n\n## Unreleased\n';
+const changelogHistory = '## 2026.10.12-1\n\n- Initial release.\n';
+const changelog = (notes = '', history = changelogHistory) => `${changelogHeader}\n${notes ? `${notes}\n\n` : ''}${history}`;
+const textFile = (result, path = 'CHANGELOG.md') => Buffer.from(result.files.find(file => file.path === path).content, 'base64').toString();
+const mergeNotes = (base, mine, theirs, options) => mergeFileTrees([file('CHANGELOG.md', base)], [file('CHANGELOG.md', mine)], [file('CHANGELOG.md', theirs)], options);
+
+test('Unreleased notes merge append-only entries with continuations and shared additions exactly once', () => {
+  const base = changelog('- Existing note.');
+  const mine = changelog('- Existing note.\n\n- Shared addition.\n- Mine.\n  More context.\n\n  - A nested item.');
+  const theirs = changelog('- Existing note.\n\n- Shared addition.\n\nA new paragraph note.');
+  const result = clean(mergeNotes(base, mine, theirs));
+  assert.equal(textFile(result), changelog('- Existing note.\n\n- Shared addition.\n\nA new paragraph note.\n\n- Mine.\n  More context.\n\n  - A nested item.'));
+  assert.deepEqual(result.mergedKeys, [{ path: 'CHANGELOG.md', key: 'Unreleased' }]);
+  assert.deepEqual(result.conflictedKeys, []);
+});
+
+test('changelog rewrites, deleted notes, reordering, malformed sections, and mode changes remain explicit conflicts', () => {
+  const base = changelog('- First.\n\n- Second.');
+  const incoming = changelog('- First.\n\n- Second.\n\n- Incoming.');
+  for (const mine of [
+    changelog('- Edited.\n\n- Second.'),
+    changelog('- Second.'),
+    changelog('- Second.\n\n- First.'),
+    changelog('- First.\n\n- Second.\n  Changed its meaning.'),
+    changelog('- First.\n\n- Second.\n\n- Mine.').replace('Initial release.', 'Edited history.'),
+    changelog('- First.\n\n- Second.\n\n- Mine.').replace('Client-owned', 'Changed'),
+    `${base}\n## Unreleased\n\n- Duplicate.\n`,
+    base.replace('## Unreleased', '## Next'),
+    base.replaceAll('\n', '\r\n'),
+  ]) {
+    const result = mergeNotes(base, mine, incoming);
+    assert.deepEqual(result.conflicts.map(conflict => conflict.path), ['CHANGELOG.md']);
+    assert.equal(textFile(clean(mergeNotes(base, mine, incoming, { resolvedPaths: ['CHANGELOG.md'] }))), mine);
+  }
+  const changedMode = mergeFileTrees([file('CHANGELOG.md', base)], [file('CHANGELOG.md', `${base}\n`, '100755')], [file('CHANGELOG.md', incoming)]);
+  assert.equal(changedMode.conflicts.length, 1);
+});
+
+function releaseTree(files) {
+  const read = path => Buffer.from(files.find(file => file.path === path).content, 'base64').toString();
+  const result = prepareMergeRelease({
+    timdsJson: read('timds.json'), packageJson: read('package.json'), packageLock: read('package-lock.json'),
+    changelog: read('CHANGELOG.md'), previousVersion: JSON.parse(read('timds.json')).version,
+    now: new Date('2026-10-12T20:00:00Z'),
+  });
+  return files.map(entry => Object.hasOwn(result.files, entry.path) ? file(entry.path, result.files[entry.path]) : entry);
+}
+
+test('ten stale sessions merge independent keys and notes across consecutive dated release rolls', () => {
+  const version = '2026.10.12-1';
+  const baseValues = Object.fromEntries(Array.from({ length: 10 }, (_, index) => [`key${index}`, 'old']));
+  const base = [
+    ...json(baseValues), file('CHANGELOG.md', changelog('- Previously pending note.')),
+    ...json({ systemId: 'test', version }, 'timds.json'), ...json({ name: 'test', version }, 'package.json'),
+    ...json({ version, packages: { '': { version } } }, 'package-lock.json'),
+    file('.timds/contract-layout.json', '{"schemaVersion":1}'), ...json({}, 'tokens.json'), ...json({}, 'media.json'),
+  ];
+  let main = base;
+  for (let index = 0; index < 10; index++) {
+    const local = base.map(entry => entry.path === 'tokens/color.brand.json' ? json({ ...baseValues, [`key${index}`]: 'new' })[0]
+      : entry.path === 'CHANGELOG.md' ? file(entry.path, changelog(`- Previously pending note.\n\n- Session ${index}.`)) : entry);
+    const merged = clean(mergeFileTrees(base, local, main));
+    const notes = textFile(merged).split('## 2026.10.12-')[0];
+    assert.ok(notes.includes(`- Session ${index}.`));
+    assert.equal(notes.includes('- Previously pending note.'), index === 0);
+    main = releaseTree(merged.files);
+    assert.equal(value({ files: main }, 'timds.json').version, `2026.10.12-${index + 2}`);
+    const log = textFile({ files: main });
+    assert.equal(log.match(/Previously pending note/g).length, 1);
+    assert.ok(log.endsWith(changelogHistory));
+    for (let previous = 0; previous <= index; previous++) {
+      assert.equal(log.match(new RegExp(`Session ${previous}\\.`, 'g')).length, 1);
+      assert.equal(value({ files: main })[`key${previous}`], 'new');
+      assert.equal(value({ files: main }, 'tokens.json')['color.brand'][`key${previous}`], 'new');
+    }
+  }
+});
+
+test('release extensions must preserve old notes and history; diverging releases cannot merge', () => {
+  const base = changelog('- Pending.');
+  const mine = changelog('- Pending.\n\n- Mine.');
+  const rolled = changelog('', `## 2026.10.12-2\n\n- Pending.\n\n- Published.\n\n${changelogHistory}`);
+  assert.equal(textFile(clean(mergeNotes(base, mine, rolled))), changelog('- Mine.', rolled.slice(rolled.indexOf('## 2026.10.12-2'))));
+  assert.equal(textFile(clean(mergeNotes(base, rolled, mine))), textFile(clean(mergeNotes(base, mine, rolled))));
+  assert.equal(mergeNotes(base, mine, rolled.replace('- Pending.', '- Removed pending.')).conflicts.length, 1);
+  assert.equal(mergeNotes(base, mine, rolled.replace('- Initial release.', '- History rewrite.')).conflicts.length, 1);
+  const divergent = rolled.replace('- Published.', '- A different release.');
+  assert.equal(mergeNotes(base, divergent, rolled).conflicts.length, 1);
 });

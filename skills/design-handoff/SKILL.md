@@ -37,7 +37,11 @@ Between the pinned release commit and the current release (or the working
 tree, when the designer wants a preview of unreleased work), gather:
 
 - The `CHANGELOG.md` sections for every version in between, which carry the
-  designer's own description of each change.
+  designer's own description of each change. The published system carries
+  the same history as `changelog.json` beside `index.json` and as the
+  `/changelog/` page, so a developer without this checkout reads it there.
+  A version is its UTC release day and number that day (`2026.10.12-1`);
+  older releases may carry `MAJOR.MINOR.PATCH`.
 - Website designs: `git diff --stat <pinned>..HEAD -- src/designs/` lists
   the routes and states that changed or were added, and `design.json` any
   renamed titles. A route is the file's path; a state is the `.state.html`

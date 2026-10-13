@@ -249,7 +249,7 @@ export function rewriteLlmsForPublish(text, publicBase) {
   const base = String(publicBase).replace(/\/+$/, "");
   return String(text)
     .replace(/\]\(\/(?!\/)/g, `](${base}/`)
-    .replace(/^(Machine-readable index: |Full text: |Design tokens: |Brand kit: |Asset formats: |Website designs: |Consumer bundle: )(\/(?!\/)\S+)/gm, (_match, label, target) => `${label}${base}${target}`)
+    .replace(/^(Machine-readable index: |Full text: |Design tokens: |Brand kit: |Asset formats: |Website designs: |Consumer bundle: |Changelog: )(\/(?!\/)\S+)/gm, (_match, label, target) => `${label}${base}${target}`)
     // Logo and font file lines in the essentials name site-absolute files after a colon.
     .replace(/^(\s*- .*?: )(\/(?!\/)\S+)$/gm, (_match, label, target) => `${label}${base}${target}`)
     .replace(/^(<!-- source: )(\/(?!\/)\S*)/gm, (_match, label, target) => `${label}${base}${target}`);
@@ -369,6 +369,11 @@ export async function publishExtractedIndex(workspace, options = {}) {
   const designsSource = await fs.readFile(path.join(artifactRoot, ...designsRelative.split("/")), "utf8").catch(() => null);
   const designs = designsSource === null ? null : JSON.parse(designsSource);
   if (designs) await collectDesignReferenceFiles(designs, artifactRoot, files);
+  // The changelog publishes as written: its URLs are artifact-relative like
+  // the index's, and a product reads the releases between its pin and the current one.
+  const changelogRelative = entryDirectory === "." ? "changelog.json" : `${entryDirectory}/changelog.json`;
+  const changelogSource = await fs.readFile(path.join(artifactRoot, ...changelogRelative.split("/")), "utf8").catch(() => null);
+  const changelog = changelogSource === null ? null : JSON.parse(changelogSource);
   // The consumer bundle publishes under the current prefix and an immutable
   // versioned one; a system whose manifest declares no bundle has no file.
   const bundleRelative = entryDirectory === "." ? "bundle.json" : `${entryDirectory}/bundle.json`;
@@ -451,6 +456,9 @@ export async function publishExtractedIndex(workspace, options = {}) {
       ...(designs === null
         ? []
         : [{ body: Buffer.from(`${JSON.stringify({ ...designs, base: publicBase }, null, 2)}\n`), contentType: "application/json", path: designsRelative }]),
+      ...(changelog === null
+        ? []
+        : [{ body: Buffer.from(`${JSON.stringify({ ...changelog, base: publicBase }, null, 2)}\n`), contentType: "application/json", path: changelogRelative }]),
       // bundle.json at the current prefix names the versioned copy; the copy's own manifest points at itself.
       ...(bundle === null
         ? []
@@ -491,13 +499,14 @@ export async function publishExtractedIndex(workspace, options = {}) {
     await fs.rm(staging, { force: true, recursive: true });
   }
 
-  const total = files.size + 2 + [llmsSource, llmsFullSource, tokensSource, brandKit, formats, designs, bundle, bundle].filter((document) => document !== null).length;
+  const total = files.size + 2 + [llmsSource, llmsFullSource, tokensSource, brandKit, formats, designs, changelog, bundle, bundle].filter((document) => document !== null).length;
   const publishedBundle = bundle === null ? null : rewriteBundleForPublish(bundle, { publicBase, entryDirectory, version });
   return {
     brandUrl: brandKit === null ? null : `${publicBase}/${brandRelative}`,
     bundleUrl: publishedBundle?.url ?? null,
     bundleVersionedUrl: publishedBundle?.versioned ?? null,
     bundleFiles: publishedBundle?.fileCount ?? 0,
+    changelogUrl: changelog === null ? null : `${publicBase}/${changelogRelative}`,
     designsUrl: designs === null ? null : `${publicBase}/${designsRelative}`,
     docCount: docs.length,
     formatsUrl: formats === null ? null : `${publicBase}/${formatsRelative}`,

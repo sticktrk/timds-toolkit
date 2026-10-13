@@ -30,7 +30,11 @@ while removing it during migration. `init` and `upgrade` also create the
 `.claude/skills -> ../.agents/skills` link (`src/agent-skills.mjs`) when
 nothing is at that path, so Claude Code sees the same skills as slash
 commands; an existing path there is never touched. Standalone
-initialization also owns the stock release workflows and preparation scripts.
+initialization also owns the stock release workflows and preparation scripts
+(`scripts/release.mjs`, `release.sh`, `check-versions.mjs`,
+`prepare-merge-release.mjs` and its test). `CHANGELOG.md` is the client's;
+the toolkit only reads it, renders it into the artifact, and refuses a
+`submit` without an Unreleased note.
 Existing standalone repos enter that expanded boundary only through the
 explicit `upgrade --auto-release` migration; refuse customized files unless
 replacement is forced. Package and lockfile changes select the resolved package
@@ -93,7 +97,7 @@ removed, reordered, or retitled; and the overview
 fragments the starter mirrors from the golden system
 (`starterManagedFragments`), written when the sync adds or authors their page
 and refreshed only while unmodified. `src/layout.html` only gains a missing
-stock stylesheet link. Every other fragment, `tokens.json`, `system.css`, and
+stock stylesheet link and the changelog link on its version chip. Every other fragment, `tokens.json`, `system.css`, and
 the rest of authored source stay outside the boundary. Recorded plumbing
 that was customized is asked about file by file when the sync or upgrade runs
 in a terminal, and otherwise reported and replaced only by an explicit

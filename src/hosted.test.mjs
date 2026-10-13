@@ -71,6 +71,22 @@ test("update uses the host merge and permits submitting a fork with no further l
   assert.deepEqual(f.requests.at(-1).body.changedFiles, []);
 });
 
+test("hosted submission requires release notes while editing updates remain available", async (t) => {
+  const empty = "# Changelog\n\n## Unreleased\n\n## 2026.10.12-1\n\n- Initial version.\n";
+  const f = await fixture(t, [file("CHANGELOG.md", empty), file("note.txt", "base")]);
+  await fs.writeFile(path.join(f.root, "note.txt"), "new content");
+  const before = f.requests.length;
+  await assert.rejects(runHostedCommand("submit", { ...f.options, note: "Update content" }), /CHANGELOG.md has no note/);
+  await assert.rejects(runHostedCommand("submit", { ...f.options, dryRun: true }), /CHANGELOG.md has no note/);
+  assert.equal(f.requests.length, before, "invalid submissions never reach the host");
+  f.set(snapshot([file("CHANGELOG.md", empty), file("note.txt", "new content")], "updated"));
+  await runHostedCommand("update", f.options);
+  await fs.writeFile(path.join(f.root, "CHANGELOG.md"), empty.replace("## Unreleased\n", "## Unreleased\n\n- Content: clarify the introduction.\n"));
+  await runHostedCommand("submit", { ...f.options, note: "Update content" });
+  assert.match(f.requests.at(-1).url, /\/submit$/);
+  assert.deepEqual(f.requests.at(-1).body.changedFiles.map(({ path }) => path), ["CHANGELOG.md"]);
+});
+
 test("change sets honor nested gitignore and the tracked-file exception without git", async (t) => {
   const f = await fixture(t, [file(".gitignore", "*.log\nnode_modules/\n"), file("tracked.log", "tracked"), file("src/.gitignore", "private.txt\n"), file("src/keep.txt", "keep")]);
   await fs.writeFile(path.join(f.root, "ignored.log"), "ignored");
@@ -140,6 +156,18 @@ test("MCP exposes hosted commands and principal-authorized publication", () => {
   const names = [];
   registerHostedSessionTools({ registerTool(name) { names.push(name); } });
   assert.deepEqual(names, ["timds_start", "timds_pull", "timds_submit", "timds_update", "timds_status", "timds_history", "timds_sessions_close", "timds_publish", "timds_claim", "timds_active_work", "timds_join", "timds_draft_create", "timds_draft_list", "timds_draft_close"]);
+});
+
+test("MCP submission shares the hosted changelog gate", async (t) => {
+  const f = await fixture(t, [file("CHANGELOG.md", "# Changelog\n\n## Unreleased\n")]);
+  const previous = process.env.TIMDS_ACCESS_TOKEN;
+  process.env.TIMDS_ACCESS_TOKEN = "timds_test";
+  t.after(() => { if (previous === undefined) delete process.env.TIMDS_ACCESS_TOKEN; else process.env.TIMDS_ACCESS_TOKEN = previous; });
+  let submit;
+  registerHostedSessionTools({ registerTool(name, _definition, handler) { if (name === "timds_submit") submit = handler; } }, { root: f.root });
+  const result = await submit({ note: "Improve the introduction" });
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /CHANGELOG.md has no note/);
 });
 
 test('hosted publish resolves the current submission, confirms, polls and closes local session metadata', async t => {

@@ -39,7 +39,8 @@ npx --yes @dtconcepts/timds@0.1.x init --standalone \
 Add the Design System to that consumer with a same-host relative URL (for
 example `../client-design-system.git`), then configure the Design System
 repository secret `TIMDS_CONSUMER_TOKEN` with contents and pull-request access
-to the consumer. Every accepted change on `main` becomes a patch release: TimDS
+to the consumer. Every accepted change on `main` becomes a dated release
+(`YYYY.MM.DD-N`, the UTC day and the release number that day): TimDS
 synchronizes the version, publishes that exact commit, then opens or refreshes
 a gitlink-update pull request in the consumer. This flow pins the commit SHA and
 does not depend on a release tag.
@@ -1514,7 +1515,7 @@ productions, legacy publishing fields, brand, components, and media are untouche
 Client-specific CTAs and legal/disclosure requirements remain local overrides.
 
 Standalone repositories created by older TimDS releases can adopt the managed
-merge-to-patch automation explicitly:
+merge-to-release automation explicitly:
 
 ```bash
 npm run timds -- upgrade --root . --auto-release
@@ -1710,7 +1711,10 @@ const result = mergeFileTrees(baseFiles, mineFiles, theirFiles, {
 Token/media group JSON objects merge recursively; arrays are atomic.
 `timds.json` merges tokens, media, components, patterns, typography, icons,
 fonts, metadata, and description by key; other manifest fields and ordinary
-files remain atomic. Missing keys are distinct from JSON null during the
+files remain atomic. Root `CHANGELOG.md` also combines appended Unreleased
+notes, including when the target has rolled earlier notes into dated releases.
+Existing notes and released history must remain unchanged; rewrites conflict.
+Missing keys are distinct from JSON null during the
 merge; conflict receipts represent missing values as null. Whole-path choices
 keep the local file, key choices accept dotted paths or escaped JSON Pointers,
 and unused resolutions fail. The merger regenerates compatibility aggregates

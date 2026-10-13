@@ -44,6 +44,14 @@ const NAMED_ENTITIES = {
   times: "×", deg: "°", le: "≤", ge: "≥", copy: "©",
 };
 
+/** Text or an attribute value with the five characters HTML reserves escaped. */
+export const escapeHtml = (value) => String(value ?? "")
+  .replaceAll("&", "&amp;")
+  .replaceAll("<", "&lt;")
+  .replaceAll(">", "&gt;")
+  .replaceAll('"', "&quot;")
+  .replaceAll("'", "&#39;");
+
 export function decodeEntities(value) {
   return value.replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);/g, (match, body) => {
     if (body[0] === "#") {

@@ -11,6 +11,7 @@ import {
   formatSiteJson,
   insertStylesheetLinks,
   legacyStarterFileHashes,
+  linkVersionChip,
   mergeFormatCatalog,
   mergeSiteModel,
   planStockFile,
@@ -173,6 +174,20 @@ test("insertStylesheetLinks adds a missing stock link beside its neighbours and 
   assert.deepEqual([insertStylesheetLinks(busted, stock).html === busted, insertStylesheetLinks(busted, stock).inserted], [true, []]);
   const bustedOnly = "<head>\n<link rel=\"stylesheet\" href=\"/styles/viewer.css?v=3\">\n</head>";
   assert.equal(insertStylesheetLinks(bustedOnly, stock).html, "<head>\n<link rel=\"stylesheet\" href=\"/styles/canvas.css\">\n<link rel=\"stylesheet\" href=\"/styles/viewer.css?v=3\">\n</head>");
+});
+
+test("linkVersionChip turns the plain version chip into the changelog link and leaves any other chip alone", async () => {
+  const stock = await template("starter/src/layout.html");
+  const plain = stock.replace('<a class="appbar__version" href="/changelog/" title="Changelog">v{{version}}</a>', '<span class="appbar__version">v{{version}}</span>');
+  assert.notEqual(plain, stock);
+  assert.deepEqual(linkVersionChip(plain), { html: stock, linked: true });
+  assert.deepEqual(linkVersionChip(stock), { html: stock, linked: false });
+  const spaced = '<span class="appbar__version"> {{ version }} </span>';
+  assert.equal(linkVersionChip(spaced).html, '<a class="appbar__version" href="/changelog/" title="Changelog"> {{ version }} </a>');
+  // A chip the client rewrote (its own text, another class) is theirs.
+  for (const own of ['<span class="appbar__version">Release {{version}}</span>', '<span class="version">v{{version}}</span>', ""]) {
+    assert.deepEqual(linkVersionChip(own), { html: own, linked: false });
+  }
 });
 
 test("planStockFile recognizes stock files by hash and replaces a customized one only with force", async (t) => {

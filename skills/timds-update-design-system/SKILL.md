@@ -10,7 +10,7 @@ this product follows a pinned version and a developer carries each release
 across. The Design System's website designs are the reference the product's
 routes must match, never pages to copy in. You are doing the developer's
 part. Work only in the repository the user supplied, on a branch named for
-the release, such as `design-system/update-1.4.0`.
+the release, such as `design-system/update-2026.10.12-1`.
 
 The product's brand lives in the system `__SYSTEM_ID__`, pinned at
 `__DESIGN_SYSTEM_PATH__/`. `timds.consumer.json` declares each app, its
@@ -36,9 +36,13 @@ never do it inside a design-only change.
 
 ## Read what changed
 
-- Read the Design System's `CHANGELOG.md` for every version between the old
-  pin and the new one (in a sibling checkout of the system, or on its
-  repository). It is the designers' own description of each change.
+- Read the releases between the old pin and the new one: `changelog.json`
+  at the published prefix (or the `/changelog/` page there) lists every
+  release with its notes, newest first, and `describe_system` returns the
+  recent ones; a sibling checkout has the same in `CHANGELOG.md`. It is the
+  designers' own description of each change. A version is its UTC release
+  day and number that day (`2026.10.12-1`); older releases may carry
+  `MAJOR.MINOR.PATCH`.
 - When the `timds-design-system-read` MCP tools are connected, run
   `describe_system`, then `list_designs` and `read_design` for each route
   the product pairs with a design in `timds.consumer.json` or the brief
@@ -89,7 +93,7 @@ npm run timds -- consumer check --base origin/__DEFAULT_BRANCH__
 ## Open the pull request
 
 Commit the pin and the port together, push, and open a pull request against
-`__DEFAULT_BRANCH__` titled for the release (`Adopt Design System 1.4.0`).
+`__DEFAULT_BRANCH__` titled for the release (`Adopt Design System 2026.10.12-1`).
 Describe what was ported route by route, what was left out and why, and
 the review routes. Never merge, deploy, or publish without separate
 authorization; production publication is a decision this skill does not

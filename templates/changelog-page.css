@@ -1,0 +1,56 @@
+/* Toolkit-owned changelog chrome. The page reads the system's custom properties when its tokens are linked. */
+body.timds-changelog {
+  --changelog-canvas: var(--color-canvas, var(--color-background, #f6f7f9));
+  --changelog-surface: var(--color-surface, var(--color-panel, #fff));
+  --changelog-ink: var(--color-ink, var(--color-text, #20242c));
+  --changelog-muted: var(--color-muted, #626976);
+  --changelog-line: var(--color-line, #dce0e6);
+  --changelog-accent: var(--color-accent, #3158b5);
+  margin: 0;
+  min-height: 100vh;
+  background: var(--changelog-canvas);
+  color: var(--changelog-ink);
+  font: 400 1rem/1.6 var(--font-sans, var(--font-body, system-ui, sans-serif));
+}
+.timds-changelog *, .timds-changelog *::before, .timds-changelog *::after { box-sizing: border-box; }
+.timds-changelog :where(h1, h2, p, ul, section) { margin: 0; padding: 0; }
+.timds-changelog a { color: inherit; text-decoration: none; }
+.timds-changelog a:hover { text-decoration: underline; text-underline-offset: .2em; }
+.timds-changelog a:focus-visible { outline: 2px solid var(--changelog-accent); outline-offset: 4px; }
+.timds-changelog .td-changelog-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: .5rem 2rem;
+  padding: 1rem max(1.25rem, calc((100vw - 70rem) / 2));
+  border-bottom: 1px solid var(--changelog-line);
+  background: var(--changelog-surface);
+}
+.timds-changelog .td-changelog-brand { font-size: .875rem; font-weight: 650; overflow-wrap: anywhere; }
+.timds-changelog .td-changelog-back { color: var(--changelog-muted); font-size: .875rem; }
+.timds-changelog .td-changelog-main { display: block; width: min(100% - 2.5rem, 46rem); margin: 0 auto; padding: 3.5rem 0 5rem; }
+.timds-changelog .td-changelog-intro { margin-bottom: 2.5rem; }
+.timds-changelog .td-changelog-eyebrow { margin-bottom: .75rem; color: var(--changelog-muted); font-size: .75rem; font-weight: 650; letter-spacing: .1em; text-transform: uppercase; }
+.timds-changelog h1 { font-family: inherit; font-size: clamp(2rem, 5vw, 3rem); font-weight: 600; line-height: 1.15; letter-spacing: -.035em; }
+.timds-changelog .td-changelog-lede { margin-top: 1rem; color: var(--changelog-muted); }
+.timds-changelog .td-changelog-release { position: relative; margin-top: 1.5rem; padding: 1.5rem; border: 1px solid var(--changelog-line); border-radius: .75rem; background: var(--changelog-surface); }
+.timds-changelog .td-changelog-release:target { border-color: var(--changelog-accent); }
+.timds-changelog .td-changelog-release-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: .25rem 1rem; padding-bottom: 1rem; border-bottom: 1px solid var(--changelog-line); }
+.timds-changelog h2 { font: 600 1.125rem/1.4 var(--font-mono, ui-monospace, monospace); letter-spacing: -.01em; }
+.timds-changelog .td-changelog-current { display: inline-block; margin-left: .5rem; padding: .0625rem .5rem; border-radius: 1rem; background: var(--changelog-accent); color: var(--changelog-surface); font: 650 .6875rem/1.6 var(--font-sans, system-ui, sans-serif); letter-spacing: .06em; text-transform: uppercase; vertical-align: middle; }
+.timds-changelog .td-changelog-meta { color: var(--changelog-muted); font-size: .875rem; }
+.timds-changelog .td-changelog-entries { margin-top: 1rem; list-style: none; }
+.timds-changelog .td-changelog-entries > li { position: relative; padding: .5rem 0 .5rem 1.25rem; font-size: .9375rem; }
+.timds-changelog .td-changelog-entries > li::before { content: ""; position: absolute; top: 1.1rem; left: 0; width: .375rem; height: .375rem; border-radius: 50%; background: var(--changelog-accent); }
+.timds-changelog .td-changelog-entries > li + li { border-top: 1px solid var(--changelog-line); }
+.timds-changelog .td-changelog-entries ul { margin: .375rem 0 0 1rem; padding: 0; color: var(--changelog-muted); font-size: .875rem; }
+.timds-changelog .td-changelog-area { display: inline-block; margin-right: .25rem; padding: 0 .5rem; border: 1px solid var(--changelog-line); border-radius: .25rem; color: var(--changelog-muted); font-size: .75rem; font-weight: 650; letter-spacing: .02em; white-space: nowrap; vertical-align: .0625rem; }
+.timds-changelog .td-changelog-area.is-maintenance { border-style: dashed; }
+.timds-changelog code { font: .8125rem/1.6 var(--font-mono, ui-monospace, monospace); color: var(--changelog-muted); }
+.timds-changelog .td-changelog-empty { padding: 1.5rem; border: 1px dashed var(--changelog-line); border-radius: .75rem; color: var(--changelog-muted); }
+.timds-changelog .td-changelog-release .td-changelog-empty { margin-top: 1rem; padding: .75rem 0 0; border: 0; border-radius: 0; font-size: .875rem; }
+@media (max-width: 40rem) {
+  .timds-changelog .td-changelog-main { padding-top: 2rem; }
+  .timds-changelog .td-changelog-release { padding: 1.25rem; }
+}

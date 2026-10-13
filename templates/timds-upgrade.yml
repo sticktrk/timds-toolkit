@@ -66,7 +66,7 @@ jobs:
           import {existsSync} from 'node:fs';
           const prefix = existsSync('timds.json') ? '' : 'design-system/';
           const changed = execFileSync('git', ['status', '--porcelain', '--untracked-files=all'], {encoding: 'utf8'}).trimEnd().split('\n').filter(Boolean).map(line => line.slice(3));
-          const allowed = file => ['package.json', 'package-lock.json', '.github/workflows/timds-upgrade.yml', '.github/workflows/timds-design-system.yml', '.github/workflows/update-consumer-submodule.yml', 'scripts/release.mjs', 'scripts/prepare-merge-release.mjs', 'scripts/prepare-merge-release.test.mjs'].includes(file) || file === `${prefix}.timds/installation.json` || ['.agents/skills/timds-edit-design-system/', '.agents/skills/timds-create-video/', `${prefix}dist/`].some(root => file.startsWith(root));
+          const allowed = file => ['package.json', 'package-lock.json', '.github/workflows/timds-upgrade.yml', '.github/workflows/timds-design-system.yml', '.github/workflows/update-consumer-submodule.yml', 'scripts/release.mjs', 'scripts/release.sh', 'scripts/check-versions.mjs', 'scripts/prepare-merge-release.mjs', 'scripts/prepare-merge-release.test.mjs'].includes(file) || file === `${prefix}.timds/installation.json` || ['.agents/skills/timds-edit-design-system/', '.agents/skills/timds-create-video/', `${prefix}dist/`].some(root => file.startsWith(root));
           const unexpected = changed.filter(file => !allowed(file));
           if (unexpected.length) throw new Error(`Checks changed authored files: ${unexpected.join(', ')}. Review this migration manually.`);
           JS

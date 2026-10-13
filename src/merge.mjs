@@ -127,6 +127,80 @@ function regenerateViews(tree) {
   } catch { /* Invalid source will fail the separate contract check. */ }
 }
 
+// Notes are indivisible Markdown entries: a bullet and its continuation lines,
+// or a paragraph. Editing an existing entry is never an append-only change.
+function changelogNotes(body) {
+  const notes = [], lines = body.split('\n');
+  let start = 0, end = lines.length;
+  while (start < end && !lines[start].trim()) start++;
+  while (end > start && !lines[end - 1].trim()) end--;
+  let current = [];
+  const finish = () => {
+    while (current.length && !current.at(-1).trim()) current.pop();
+    if (current.length) notes.push(current.join('\n'));
+    current = [];
+  };
+  for (let index = start; index < end; index++) {
+    const line = lines[index];
+    if (current.length && (/^[-*] +\S/.test(line) || (/^\S/.test(line) && !current.at(-1).trim()))) finish();
+    current.push(line);
+  }
+  finish();
+  return notes;
+}
+
+function changelogParts(text) {
+  if (typeof text !== 'string' || /[\r\0\ufffd]/.test(text)) return null;
+  const headings = [...text.matchAll(/^## (.*)$/gm)];
+  if (!headings.length || headings[0][1] !== 'Unreleased' || text[headings[0].index + headings[0][0].length] !== '\n') return null;
+  const versions = new Set();
+  for (const heading of headings.slice(1)) {
+    if (!/^(?:\d{4}\.\d{2}\.\d{2}-[1-9]\d*|\d+\.\d+\.\d+)$/.test(heading[1]) || versions.has(heading[1])) return null;
+    versions.add(heading[1]);
+  }
+  const bodyStart = headings[0].index + headings[0][0].length + 1;
+  const historyStart = headings[1]?.index ?? text.length;
+  const sections = headings.slice(1).map((heading, index) => {
+    const end = headings[index + 2]?.index ?? text.length;
+    return { raw: text.slice(heading.index, end), notes: changelogNotes(text.slice(heading.index + heading[0].length, end)) };
+  });
+  return { prefix: text.slice(0, bodyStart), notes: changelogNotes(text.slice(bodyStart, historyStart)), history: text.slice(historyStart), sections };
+}
+
+const notePrefix = (notes, prefix) => notes.length >= prefix.length && prefix.every((note, index) => note === notes[index]);
+
+function changelogChanges(base, branch) {
+  if (branch.prefix !== base.prefix) return null;
+  if (branch.history === base.history) return notePrefix(branch.notes, base.notes) ? { added: branch.notes.slice(base.notes.length), released: [] } : null;
+  // A release can only prepend complete sections, leaving every previous byte
+  // intact. The oldest new release must contain the old Unreleased entries.
+  const count = branch.sections.length - base.sections.length;
+  if (count <= 0 || branch.sections.slice(count).map(section => section.raw).join('') !== base.history) return null;
+  const releases = branch.sections.slice(0, count);
+  if (!notePrefix(releases.at(-1).notes, base.notes)) return null;
+  return { added: branch.notes, released: releases.flatMap(section => section.notes) };
+}
+
+function mergeChangelog(baseText, mineText, theirText) {
+  const base = changelogParts(baseText), mine = changelogParts(mineText), theirs = changelogParts(theirText);
+  if (!base || !mine || !theirs) return null;
+  const ours = changelogChanges(base, mine), incoming = changelogChanges(base, theirs);
+  if (!ours || !incoming) return null;
+  // Two different rewritten release histories still require human resolution.
+  // Matching histories, or one history extending the other, are safe to keep.
+  const target = mine.history.length > theirs.history.length ? mine : theirs;
+  const other = target === mine ? theirs : mine;
+  const extra = target.sections.length - other.sections.length;
+  if (extra < 0 || target.sections.slice(extra).map(section => section.raw).join('') !== other.history) return null;
+  const released = new Set([...ours.released, ...incoming.released]);
+  const notes = released.size || target.history !== base.history ? [] : [...base.notes];
+  const seen = new Set(notes);
+  for (const note of [...incoming.added, ...ours.added]) {
+    if (!released.has(note) && !seen.has(note)) { notes.push(note); seen.add(note); }
+  }
+  return `${base.prefix}\n${notes.length ? `${notes.join('\n\n')}\n\n` : ''}${target.history}`;
+}
+
 /**
  * Inputs: three complete arrays of {path,encoding:'base64',content,mode?}.
  * Returns a candidate tree even with conflicts; callers MUST NOT commit that
@@ -145,6 +219,14 @@ export function mergeFileTrees(baseFiles, mineFiles, theirFiles, { resolvedPaths
     if (generated && ['tokens.json', 'media.json'].includes(path)) { const entry = c || a; if (entry) merged.set(path, entry); continue; }
     if (!sameFile(a, b) && !sameFile(c, b) && !sameFile(a, c)) {
       const values = [fileText(b), fileText(a), fileText(c)];
+      if (path === 'CHANGELOG.md' && b && a && c && a.mode === b.mode && c.mode === b.mode && b.mode !== '120000') {
+        const changelog = mergeChangelog(...values);
+        if (changelog !== null) {
+          merged.set(path, { ...a, content: encode(encoder.encode(changelog)) });
+          mergedKeys.push({ path, key: 'Unreleased' });
+          continue;
+        }
+      }
       if ((/^(tokens|media)\/.+\.json$/.test(path) || path === 'timds.json') && a && c && a.mode === c.mode && a.mode !== '120000' && (!b || b.mode === a.mode)) {
         let parsed;
         try { parsed = values.map((value, index) => index === 0 && !b ? MISSING : JSON.parse(value)); } catch { /* Invalid JSON is an atomic file conflict. */ }

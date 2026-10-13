@@ -4,6 +4,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import ignore from "ignore";
 import { cleanPortalUrl, resolveAccessToken } from "./auth.mjs";
+import { readUnreleasedNotes } from "./changelog.mjs";
 
 export const HOST_API_VERSION = 1;
 export const SESSION_FILE = ".timds/session.json";
@@ -413,6 +414,10 @@ export async function runHostedCommand(command, { root = process.cwd(), systemId
     return runHostedCommand(command, { root: selected, note, portalUrl: provider.url, token, fetchImpl, credentialsPath, dryRun, resolve: [], staleRetries: staleRetries - 1 });
   }
   if (command === "submit") {
+    const unreleased = await readUnreleasedNotes(selected);
+    if (unreleased !== null && !unreleased.length) {
+      throw new Error("CHANGELOG.md has no note under ## Unreleased. Add one line saying what changed and where, then submit again.");
+    }
     if (dryRun) return { apiVersion: HOST_API_VERSION, dryRun: true, ...changes };
     const result = await host.submit(state.session.id, changes);
     const retried = await retryRebased(result); if (retried) return retried;
