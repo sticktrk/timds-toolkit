@@ -84,7 +84,7 @@ test('hosted MCP keeps empty, missing and interrupted destinations inside an unr
   await new Promise((resolve) => host.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise((resolve) => { host.closeAllConnections(); host.close(resolve); }));
   const portalUrl = `http://127.0.0.1:${host.address().port}`;
-  for (const kind of ['empty', 'missing', 'interrupted']) {
+  for (const kind of ['empty', 'missing', 'interrupted', 'partial']) {
     if (kind !== 'empty') {
       await fs.writeFile(path.join(ancestor, 'timds.json'), JSON.stringify({ ...manifest, provider: { kind: 'hosted', url: portalUrl } }));
       await fs.writeFile(path.join(ancestor, '.timds/session.json'), JSON.stringify({ apiVersion: 1, provider: { kind: 'hosted', url: portalUrl }, session: { id: 'ancestor-session', systemId: manifest.systemId, baseRevision: 'ancestor-revision', status: 'open' }, files: [] }));
@@ -93,9 +93,14 @@ test('hosted MCP keeps empty, missing and interrupted destinations inside an unr
     const ancestorBefore = await Promise.all(parentNames.map(async (name) => [name, await fs.readFile(path.join(ancestor, name))]));
     const root = path.join(ancestor, kind);
     if (kind !== 'missing') await fs.mkdir(root);
-    if (kind === 'interrupted') {
+    if (['interrupted', 'partial'].includes(kind)) {
       await fs.mkdir(path.join(root, '.timds'));
       await fs.writeFile(path.join(root, '.timds/start.json'), JSON.stringify({ apiVersion: 1, provider: { kind: 'hosted', url: portalUrl }, systemId: manifest.systemId, idempotencyKey: 'original-key' }));
+    }
+    if (kind === 'partial') {
+      await fs.mkdir(path.join(root, 'src'));
+      await fs.mkdir(path.join(root, '.agents'));
+      await fs.writeFile(path.join(root, 'src/partial.txt'), 'Retain partially downloaded content');
     }
     const transport = new StdioClientTransport({ command: process.execPath, args: [fileURLToPath(new URL('../bin/timds.mjs', import.meta.url)), 'mcp', '--root', root], env: { PATH: process.env.PATH, TIMDS_PORTAL_URL: portalUrl, TIMDS_ACCESS_TOKEN: 'timds_test_fixture' }, stderr: 'pipe' });
     let stderr = '';
@@ -113,6 +118,19 @@ test('hosted MCP keeps empty, missing and interrupted destinations inside an unr
     }
     const operation = kind === 'missing' ? ['timds_join', { sessionId: 'session-child' }] : ['timds_start', { systemId: manifest.systemId }];
     const result = await client.callTool({ name: operation[0], arguments: operation[1] });
+    if (kind === 'partial') {
+      // The CLI requires a fresh destination + saved key for partial transfers;
+      // MCP must report that recovery path here, never act on the ancestor.
+      assert.equal(result.isError, true);
+      assert.match(result.content[0].text, /empty destination.*idempotency-key/);
+      assert.equal(requests.length, requestCount);
+      assert.equal(await fs.readFile(path.join(root, 'src/partial.txt'), 'utf8'), 'Retain partially downloaded content');
+      assert.equal(JSON.parse(await fs.readFile(path.join(root, '.timds/start.json'), 'utf8')).idempotencyKey, 'original-key');
+      assert.ok(stderr.includes(`ready on stdio for ${root}`));
+      await client.close();
+      for (const [name, content] of ancestorBefore) assert.deepEqual(await fs.readFile(path.join(ancestor, name)), content, `${name} in the ancestor is unchanged after partial recovery`);
+      continue;
+    }
     assert.ok(!result.isError, result.content?.[0]?.text);
     assert.equal(await fs.readFile(path.join(root, 'note.txt'), 'utf8'), 'Session content');
     assert.equal(JSON.parse(await fs.readFile(path.join(root, '.timds/session.json'), 'utf8')).session.id, 'session-child');

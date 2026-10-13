@@ -863,7 +863,7 @@ export function registerHostedSessionTools(server, { root = process.cwd() } = {}
 async function resolveMcpRoot(root) {
   const requestedRoot = path.resolve(root);
   const entries = await fs.readdir(requestedRoot).catch((error) => { if (error.code === "ENOENT") return []; throw error; });
-  const awaitingSession = Boolean(process.env.TIMDS_PORTAL_URL) && (entries.length === 0 || entries.length === 1 && entries[0] === ".timds" && await fs.stat(path.join(requestedRoot, ".timds/start.json")).then(() => true, () => false));
+  const awaitingSession = Boolean(process.env.TIMDS_PORTAL_URL) && (entries.length === 0 || await fs.stat(path.join(requestedRoot, ".timds/start.json")).then(() => true, () => false));
   return { repoRoot: awaitingSession ? requestedRoot : await findRepositoryRoot(requestedRoot), awaitingSession };
 }
 
