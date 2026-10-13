@@ -1626,6 +1626,10 @@ file. A crashed owner's lock expires; waiting for a live owner is bounded.
 No token, code verifier or refresh token is printed. `auth logout`
 removes the local credential; it does not revoke the host-side authorization.
 `--token` and `TIMDS_ACCESS_TOKEN` retain the existing explicit-token paths.
+Hosted commands reload the credential before each request. After an HTTP 401,
+they retry the exact serialized request once only if the locked OAuth refresh
+or another process supplies a different access token; explicit tokens are not
+refreshed. Other authentication or permission failures remain errors.
 
 ```sh
 # Human controls
@@ -1649,6 +1653,12 @@ timds join SESSION --root ./member-session
 timds draft list
 timds draft close spring-refresh
 ```
+
+Publication waits for the host's final result, including automatic retries
+while session cleanup is `closing`. A cleanup error records the latest attempt
+and does not end polling early. The wait is bounded to 30 minutes; if cleanup
+remains pending, the CLI reports that the publication committed and gives the
+same-submission command to resume waiting without creating another publication.
 
 `start` requires an empty agent workspace and materializes plain files without
 a `.git` directory. Interrupted starts retain their idempotency key under

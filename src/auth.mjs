@@ -134,12 +134,13 @@ export async function resolveAccessToken(portalUrl, options = {}) {
   const portal = cleanPortalUrl(portalUrl);
   const credentials = await readCredentials(options);
   const credential = credentials.portals[portal];
-  if (needsRefresh(credential, options)) {
+  const rejected = current => options.rejectedToken && current?.accessToken === options.rejectedToken && current?.oauth?.refreshToken;
+  if (needsRefresh(credential, options) || rejected(credential)) {
     return withCredentialsLock(options, async (locked, assertHeld) => {
       // Another CLI may already have rotated the token, logged in, or logged
       // out while we waited. Never exchange the pre-lock refresh credential.
       const current = (await readCredentials(locked)).portals[portal];
-      if (!needsRefresh(current, options)) return String(current?.accessToken || "").trim();
+      if (!needsRefresh(current, options) && !rejected(current)) return String(current?.accessToken || "").trim();
       const next = await refreshOAuth(portal, current, locked);
       await saveLockedCredential(portal, next, locked, assertHeld);
       return next.accessToken;
