@@ -1618,7 +1618,10 @@ Ctrl-C to cancel.
 
 Credentials remain outside the repository in the owner-only TimDS credentials
 file, keyed by host origin. OAuth refresh tokens rotate when saved access tokens
-near expiry. No token, code verifier or refresh token is printed. `auth logout`
+near expiry. Concurrent CLI and MCP processes serialize refresh, login and logout
+with a credentials-file lock, reload after locking, and atomically replace the
+file. A crashed owner's lock expires; waiting for a live owner is bounded.
+No token, code verifier or refresh token is printed. `auth logout`
 removes the local credential; it does not revoke the host-side authorization.
 `--token` and `TIMDS_ACCESS_TOKEN` retain the existing explicit-token paths.
 

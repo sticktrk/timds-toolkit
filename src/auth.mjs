@@ -3,6 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { randomUUID } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
+import lockfile from "proper-lockfile";
 import { authorizeOAuth, discoverOAuthServer, refreshOAuth } from "./oauth.mjs";
 
 const DEFAULT_PORTAL_URL = "https://timds.com";
@@ -43,7 +45,44 @@ export async function readCredentials(options = {}) {
   }
 }
 
+// One lock covers all host records because they share one JSON file. Its mtime
+// heartbeat recovers crashed owners; every process uses the same stale policy.
+async function withCredentialsLock(options, task) {
+  const requested = credentialsPath(options), timeout = options.lockTimeoutMs ?? 45_000;
+  if (!Number.isInteger(timeout) || timeout < 1 || timeout > 60_000) throw new Error("Invalid credentials lock timeout");
+  await fs.mkdir(path.dirname(requested), { mode: 0o700, recursive: true });
+  const filePath = await fs.realpath(requested).catch(async error => {
+    if (error.code !== "ENOENT") throw error;
+    return path.join(await fs.realpath(path.dirname(requested)), path.basename(requested));
+  });
+  const controller = new AbortController(), signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
+  let compromised = false, release;
+  const assertHeld = () => {
+    if (compromised) throw new Error("TimDS credentials lock was lost; retry authorization");
+    if (signal.aborted) throw new Error("TimDS authorization cancelled or expired");
+  };
+  const deadline = Date.now() + timeout;
+  while (!release) {
+    assertHeld();
+    try {
+      release = await lockfile.lock(filePath, { realpath: false, retries: 0, stale: 10_000, update: 2_000,
+        onCompromised() { compromised = true; controller.abort(); },
+      });
+    } catch (error) {
+      if (error.code !== "ELOCKED") throw new Error("TimDS credentials lock could not be acquired");
+      if (Date.now() >= deadline) throw new Error("TimDS credentials are busy in another process; retry shortly");
+      await delay(Math.min(100, deadline - Date.now()), undefined, { signal });
+    }
+  }
+  try { assertHeld(); return await task({ ...options, credentialsPath: filePath, signal }, assertHeld); }
+  finally { await release().catch(error => { if (!compromised) throw error; }); }
+}
+
 async function saveCredential(portal, credential, options) {
+  return withCredentialsLock(options, (locked, assertHeld) => saveLockedCredential(portal, credential, locked, assertHeld));
+}
+
+async function saveLockedCredential(portal, credential, options, assertHeld) {
   const credentials = await readCredentials(options);
   const next = {
     portals: {
@@ -55,15 +94,16 @@ async function saveCredential(portal, credential, options) {
     },
     schemaVersion: 1,
   };
-  await writeCredentials(credentials.filePath, next);
+  await writeCredentials(credentials.filePath, next, assertHeld);
   return { filePath: credentials.filePath, portal };
 }
 
-async function writeCredentials(filePath, value) {
+async function writeCredentials(filePath, value, assertHeld) {
   await fs.mkdir(path.dirname(filePath), { mode: 0o700, recursive: true });
   const temporary = `${filePath}.${randomUUID()}.tmp`;
   try {
     await fs.writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
+    assertHeld();
     await fs.rename(temporary, filePath);
   } finally { await fs.rm(temporary, { force: true }); }
 }
@@ -77,32 +117,33 @@ export async function saveAccessToken(portalUrl, accessToken, options = {}) {
 
 export async function removeAccessToken(portalUrl, options = {}) {
   const portal = cleanPortalUrl(portalUrl);
-  const credentials = await readCredentials(options);
-  if (!credentials.portals[portal]) return { filePath: credentials.filePath, portal, removed: false };
-  const portals = { ...credentials.portals };
-  delete portals[portal];
-  await writeCredentials(credentials.filePath, { portals, schemaVersion: 1 });
-  return { filePath: credentials.filePath, portal, removed: true };
+  return withCredentialsLock(options, async (locked, assertHeld) => {
+    const credentials = await readCredentials(locked);
+    if (!credentials.portals[portal]) return { filePath: credentials.filePath, portal, removed: false };
+    const portals = { ...credentials.portals };
+    delete portals[portal];
+    await writeCredentials(credentials.filePath, { portals, schemaVersion: 1 }, assertHeld);
+    return { filePath: credentials.filePath, portal, removed: true };
+  });
 }
 
-const refreshes = new Map();
+const needsRefresh = (credential, options) => credential?.oauth?.expiresAt && Date.parse(credential.oauth.expiresAt) <= (options.now?.() ?? Date.now()) + 30_000;
 export async function resolveAccessToken(portalUrl, options = {}) {
   const explicit = String(options.token || process.env.TIMDS_ACCESS_TOKEN || "").trim();
   if (explicit) return explicit;
   const portal = cleanPortalUrl(portalUrl);
   const credentials = await readCredentials(options);
   const credential = credentials.portals[portal];
-  if (credential?.oauth?.expiresAt && Date.parse(credential.oauth.expiresAt) <= (options.now?.() ?? Date.now()) + 30_000) {
-    const key = `${credentials.filePath}:${portal}`;
-    if (!refreshes.has(key)) {
-      const pending = (async () => {
-        const next = await refreshOAuth(portal, credential, options);
-        await saveCredential(portal, next, options);
-        return next.accessToken;
-      })().finally(() => refreshes.delete(key));
-      refreshes.set(key, pending);
-    }
-    return refreshes.get(key);
+  if (needsRefresh(credential, options)) {
+    return withCredentialsLock(options, async (locked, assertHeld) => {
+      // Another CLI may already have rotated the token, logged in, or logged
+      // out while we waited. Never exchange the pre-lock refresh credential.
+      const current = (await readCredentials(locked)).portals[portal];
+      if (!needsRefresh(current, options)) return String(current?.accessToken || "").trim();
+      const next = await refreshOAuth(portal, current, locked);
+      await saveLockedCredential(portal, next, locked, assertHeld);
+      return next.accessToken;
+    });
   }
   return String(credential?.accessToken || "").trim();
 }
