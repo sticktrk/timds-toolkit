@@ -145,12 +145,12 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/dtconceptsnc/timds-toolkit.git"
+    "url": "git+https://github.com/sticktrk/timds-toolkit.git"
   },
   "bugs": {
-    "url": "https://github.com/dtconceptsnc/timds-toolkit/issues"
+    "url": "https://github.com/sticktrk/timds-toolkit/issues"
   },
-  "homepage": "https://github.com/dtconceptsnc/timds-toolkit#readme",
+  "homepage": "https://github.com/sticktrk/timds-toolkit#readme",
   "publishConfig": {
     "access": "public"
   }

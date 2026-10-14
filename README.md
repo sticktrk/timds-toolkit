@@ -1569,7 +1569,7 @@ npm run pack:check
 ```
 
 To release the latest `master` from GitHub, open
-[Actions → Publish npm package](https://github.com/dtconceptsnc/timds-toolkit/actions/workflows/release.yml),
+[Actions → Publish npm package](https://github.com/sticktrk/timds-toolkit/actions/workflows/release.yml),
 click **Run workflow**, leave the branch set to **master**, and click **Run workflow**
 again. No version input is needed: the workflow checks out the latest `master`,
 runs the checks above, bumps the patch version in `package.json` and the lockfile,
