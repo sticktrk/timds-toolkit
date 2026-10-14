@@ -2,6 +2,11 @@ name: Publish npm package
 
 on:
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Only check npm trusted publishing with a verbose dry run; no release, no publish.
+        type: boolean
+        default: false
   release:
     types:
       - published
@@ -14,8 +19,27 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # A dry run exchanges the workflow's OIDC token with npm exactly as publish
+  # does and prints npm's answer, so a trusted-publisher mismatch is readable.
+  check-trusted-publishing:
+    if: github.event_name == 'workflow_dispatch' && inputs.dry_run
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+          registry-url: https://registry.npmjs.org
+      - run: npm ci
+      - run: npm publish --dry-run --loglevel verbose 2>&1 | grep -iE 'oidc|provenance|publishing to' || true
+
   create-release:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && !inputs.dry_run
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
