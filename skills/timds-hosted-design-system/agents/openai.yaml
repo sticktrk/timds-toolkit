@@ -1,0 +1,4 @@
+interface:
+  display_name: "Contribute to __SYSTEM_NAME__ on TimDS"
+  short_description: "Edit the hosted design system with the TimDS CLI and submit for review"
+  default_prompt: "Use $__SKILL_NAME__ to make this change to __SYSTEM_NAME__ and submit it for review."

@@ -16,7 +16,7 @@ and `.timds/installation.json` for fleet/version inspection.
 Use the host URL supplied by your Studio installation. Sign in once, then start an editing workspace:
 
 ```sh
-npm install --global @dtconcepts/timds@0.1.x
+npm install --global @dtconcepts/timds@latest
 timds auth login --portal-url https://YOUR-HOST --oauth
 timds start example/core --root ./core
 cd core
@@ -39,6 +39,37 @@ Hosted `doctor` checks the contract without requiring Git. If the local dev
 port is busy, use `timds dev --port 4322`; this supplies `PORT` to the workspace's
 dev command. Frameworks that do not read `PORT` need their own port configuration.
 For a static review, use `timds preview --port 4401`.
+
+### Give your agent the skills
+
+Designers work through Studio and an AI agent (Claude Code, Codex, Cursor,
+Gemini CLI) that runs this CLI for them. Install the skills that teach the
+agent the workflow once, in the folder the agent works from:
+
+```sh
+npx --yes @dtconcepts/timds@latest skills install --portal-url https://YOUR-HOST --system-id example/core
+```
+
+This writes the designer skills (`timds-edit-design-system`, `design-start`,
+`design-media`, `design-ship`, `design-handoff`) and, for the named system,
+the hosted skill (`timds-<system>`, rendered from
+`skills/timds-hosted-design-system/` with the host, system and Studio link
+filled in) into `.agents/skills/`, `.claude/skills/` and `.cursor/skills/`.
+Then tell the agent what to change. Without `--portal-url` and
+`--system-id` only the system-independent skills are installed.
+`--global` installs under the home folder instead; `--system-name` and
+`--studio-url` override the names the skill shows. A folder that is a link
+to another of the three is written once.
+
+Every written file's digest is recorded in `.timds/skills.json` (with
+`--global`, in `skills.json` beside the TimDS credentials file). Rerun the
+same command at `@latest` to refresh: unmodified files are replaced, systems
+installed earlier are rendered again without their flags, files a release no
+longer ships are removed, and a file someone edited is kept and reported
+unless `--force`. The command refuses to run in a Design System repository
+or a consumer repository, whose skills `init`, `consumer init` and
+`upgrade` manage, and in a hosted session workspace, where the files would
+be submitted with the system.
 
 ## Add TimDS to a repository
 
@@ -1623,11 +1654,12 @@ behavior. Hosted commands without a configured host fail with one message
 that names local and git modes; they never fall back to git.
 
 Humans direct work and use five verbs: `login`, `status`, `history`, `publish`,
-and `rollback`. Agents write through MCP first: `timds_start`, `timds_pull`,
-`timds_submit`, `timds_update`, `timds_sessions_close`, `timds_claim`,
-`timds_active_work`, `timds_join`, `timds_whoami`, `timds_principals`, and
-`timds_draft_create|list|close`.
-The CLI exposes the same operations for agent automation.
+and `rollback`. Agents write with the CLI commands below, which the hosted
+skill (`timds skills install`) teaches them. The MCP tools `timds_start`,
+`timds_pull`, `timds_submit`, `timds_update`, `timds_sessions_close`,
+`timds_claim`, `timds_active_work`, `timds_join`, `timds_whoami`,
+`timds_principals`, and `timds_draft_create|list|close` expose the same
+operations for hosts and MCP clients.
 
 `timds auth login` (also `timds login`) selects `--portal-url` first, then the
 nearest workspace's hosted `provider.url`, then `TIMDS_PORTAL_URL` or
