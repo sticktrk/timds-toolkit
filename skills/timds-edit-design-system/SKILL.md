@@ -384,29 +384,37 @@ consuming-site update.
 ## Hosted sessions
 
 Agents are the only writers. Humans direct work and use login, status,
-history, publish and rollback in the CLI or Studio. Prefer the hosted MCP:
-`timds_start`, `timds_pull`, `timds_submit`, `timds_update`, `timds_claim`,
-`timds_active_work`, `timds_join`, `timds_whoami`, `timds_principals`, and
-`timds_draft_create|list|close`.
+history, publish and rollback in the CLI or Studio. Drive hosted sessions with
+the TimDS CLI only. Inside a Design System repository run it as
+`npm run timds -- <command>`. A hosted workspace, or any folder without that
+npm script, runs `npx --yes @dtconcepts/timds@latest <command>` (or a global
+install of `@dtconcepts/timds@latest`); always `@latest`, never a pinned
+version. Below, `timds` stands for whichever applies. The session commands
+are `timds start`, `join`, `pull`, `update`, `submit`, `claim`,
+`active-work`, `whoami`, `principals`, `draft create|list|close`, and
+`sessions close`.
 
 Join before you start. When the human names an open session (a session id, a
 Studio link, or "the session I have open"), attach to it and send work with
-`update`; do not create a second session with `start`. A Studio link is the
-whole invitation: `timds join "LINK"` uses the link's host, signs in there if
-this machine has not, and attaches in a new `./session-ID` folder. With a
-bare id, use `timds join SESSION --root ./NEW-FOLDER` (`timds_join`), and find
+`timds update`; do not create a second session with `timds start`. A Studio
+link is the whole invitation: `timds join "LINK"` uses the link's host, signs
+in there if this machine has not, and attaches in a new `./session-ID`
+folder. With a bare id, use `timds join SESSION --root ./NEW-FOLDER`, and find
 the id in `timds active-work` when the human did not give it. Join needs an
 empty folder: never reuse a workspace that already holds files or another
-session. Use `start` only when there is no session to join or the human asks
-for a new one. If the host refuses the join (`Session not found` or a 403),
-the signed-in principal has no access to that session: report the id from
-`timds whoami` so the owner can invite it, and do not start a separate
-session as a workaround.
+session. Use `timds start SYSTEM --root ./NEW-FOLDER` only when there is no
+session to join or the human asks for a new one. If the host refuses the join
+(`Session not found` or a 403), the signed-in principal has no access to that
+session: report the id from `timds whoami` so the owner can invite it, and do
+not start a separate session as a workaround.
 
-Read active work before editing; claim the intended paths with the human’s
-intent note. Overlap is advisory. Submit and update carry that intent as
-`note` (required for agent principals). Never run git or handle Artifacts
-credentials in a hosted agent workspace.
+Read active work with `timds active-work` before editing, then claim the
+intended paths with the human's intent:
+`timds claim --on "GLOB,GLOB" --note INTENT`. Overlap is advisory; do not
+edit paths another agent has claimed, tell the human about the overlap
+instead. `timds update --note INTENT` and `timds submit --note INTENT` carry
+that intent (required for agent principals). Never run git or handle
+Artifacts credentials in a hosted agent workspace.
 
 `timds auth login` selects the workspace's hosted provider unless `--portal-url`
 explicitly selects another host. Existing credentials are reused; `--force`
@@ -422,18 +430,23 @@ workspace; never copy them into a prompt, source file or session metadata.
 
 Author token key maps under `tokens/` and media key maps under `media/`.
 `tokens.json` and `media.json` are generated views after upgrade. Run check
-for reference integrity and build validation. Key conflicts return exactly
-`path`, `key`, `base`, `mine`, `theirs`; resolve with
+for reference integrity and build validation. When the session moved while
+you worked, `timds pull` brings its current files into the workspace and
+keeps your edits. Key conflicts return exactly `path`, `key`, `base`, `mine`,
+`theirs`; resolve with
 `timds update --resolve 'PATH#KEY=mine|theirs' --note INTENT`. A plain PATH
 keeps the local file. A stale shared session preserves edits and current
 content; the toolkit reapplies a clean server rebase patch and retries once.
 Further stale changes need a fresh read and explicit retry, never a force push.
 
-A draft is a named non-expiring session. Start `--draft NAME` to target it.
-An owner or publisher invites a second principal with `timds join SESSION
---principal-id ID`; that member uses `timds_join` to attach. `timds whoami`
-gives the caller's own principal id and `timds principals` lists who can be
-invited. Return the live
-URL, submission preview and claims with the work receipt. When publication
-is requested, run dry-run, review it, then publish with explicit confirmation.
+A draft is a named non-expiring session: `timds draft create NAME`, then
+`timds start SYSTEM --draft NAME --root ./NEW-FOLDER` to target it;
+`timds draft list` shows the open drafts and `timds draft close NAME` ends
+one. An owner or publisher invites a second principal with
+`timds join SESSION --principal-id ID`; that member runs `timds join SESSION`
+to attach. `timds whoami` gives the caller's own principal id and
+`timds principals` lists who can be invited. `timds sessions close` closes the
+workspace's session, only when the human asks. Return the live URL,
+submission preview and claims with the work receipt. When publication is
+requested, run dry-run, review it, then publish with explicit confirmation.
 Never put access tokens in source or session metadata.

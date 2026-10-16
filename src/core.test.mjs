@@ -1532,6 +1532,21 @@ test("whoami prints the principal and join prints the workspace and next steps",
   assert.doesNotMatch(lines.join("\n"), /Workspace:/);
 });
 
+test("the edit skill steers hosted sessions to the CLI, never MCP", async () => {
+  const skill = await fs.readFile(fileURLToPath(new URL("../skills/timds-edit-design-system/SKILL.md", import.meta.url)), "utf8");
+  const hosted = skill.slice(skill.indexOf("## Hosted sessions"));
+  assert.doesNotMatch(hosted, /\bMCP\b|timds_[a-z]/);
+  assert.match(hosted, /npx --yes @dtconcepts\/timds@latest <command>/);
+  assert.match(hosted, /`npm run timds -- <command>`/);
+  for (const command of ["timds start", "timds join", "timds pull", "timds update", "timds submit", "timds claim", "timds active-work", "timds whoami", "timds principals", "timds draft create", "timds draft list", "timds draft close", "timds sessions close"]) {
+    assert.ok(hosted.includes(command), command);
+  }
+  assert.match(hosted, /Join before you start/);
+  assert.match(hosted, /--note INTENT/);
+  assert.match(hosted, /--resolve 'PATH#KEY=mine\|theirs'/);
+  assert.match(hosted, /Never put access tokens in source or session metadata/);
+});
+
 test("joining from a Studio link attaches in a new session folder without another sign-in", async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "timds-cli-join-link-"));
   const originalFetch = globalThis.fetch, originalDirectory = process.cwd();

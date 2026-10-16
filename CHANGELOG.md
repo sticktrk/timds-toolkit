@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Steer the edit skill's hosted sessions to the TimDS CLI only: `timds start`, `join`, `pull`, `update`, `submit`, `claim`, `active-work`, `whoami`, `principals`, `draft create|list|close` and `sessions close`, run as `npm run timds --` in a Design System repository and as `@dtconcepts/timds@latest` elsewhere. The join, claim, intent, conflict, draft and credential rules are unchanged.
 - Add the `timds-hosted-design-system` skill template under `skills/`: how an agent connects to a TimDS host's MCP server, joins or starts a hosted session, edits, checks and submits for review. A host serves it filled in through its `get_skill` MCP tool.
 - Add `timds whoami` and `timds principals` (and the matching MCP tools) so a caller can report its own principal id and an owner can find who to invite. Let `timds join` take a Studio invite link: it uses the link's host, signs in there when needed and attaches in a new session folder. Print the workspace and next steps after `join`, name a new `--root` when the destination is not empty, and tell editing agents to join a named open session instead of starting another.
 - Make hosted setup reuse saved authentication and remember the login host for new workspaces. Show workspace-fetch progress and next steps, support Git-free hosted doctor checks and `dev --port`, and explain busy preview ports.
