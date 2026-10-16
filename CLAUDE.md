@@ -205,7 +205,13 @@ procedures plus the four designer skills (`design-start`, `design-media`,
 `src/core.mjs`), and for consumer repos `timds-consume-design-system` and
 `timds-update-design-system` (names in `CONSUMER_SKILL_NAMES` in
 `src/consumer-init.mjs`, rendered per manifest). `src/agent-skills.mjs`
-links `.claude/skills` to `.agents/skills` in both repository kinds. `upgrade` compares managed files by hash against
+links `.claude/skills` to `.agents/skills` in both repository kinds.
+`src/skills-install.mjs` is `timds skills install`, for the folder a
+designer's agent works from (never a Design System, consumer, or session
+workspace): the designer skills plus `skills/timds-hosted-design-system`
+rendered per system (`hostedSkillPlaceholders` must match the host's fill),
+into `.agents/`, `.claude/` and `.cursor/skills/`, tracked by digest in
+`.timds/skills.json`. `upgrade` compares managed files by hash against
 `.timds/installation.json` and refuses locally modified files without
 `--force`; `legacyStandaloneAutomationHashes` in core pins the recognized stock
 release files for the `--auto-release` migration. When a template or skill
