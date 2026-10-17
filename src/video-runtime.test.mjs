@@ -37,7 +37,7 @@ test('CommonJS workspaces load relative TSX exports and helper edits with author
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   await fs.writeFile(path.join(root, 'package.json'), '{}');
   const entry = path.join(root, 'components.tsx'), helper = path.join(root, 'helper.tsx');
-  await fs.writeFile(entry, 'import type {NeverLoaded} from "./absent-types"; export {value, source} from "./helper";');
+  await fs.writeFile(entry, 'import type {NeverLoaded} from "./absent-types"; import {type InlineType} from "./missing.d.ts"; import {InferredType} from "./also-missing.d.ts"; export type Shape = InferredType; export {value, source} from "./helper";');
   await fs.writeFile(helper, 'export const value = "before"; export const source = import.meta.url;');
   const before = await loadVideoComponentModule(entry, path.join(root, 'local'));
   assert.equal(before.value, 'before');

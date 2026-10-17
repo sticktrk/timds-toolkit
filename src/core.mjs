@@ -423,10 +423,10 @@ async function readJsonObject(filePath, label, { required = true } = {}) {
   }
 }
 
-export async function loadWorkspace(repoRootInput = process.cwd(), { editing = false, allowVersionMismatch = false } = {}) {
+export async function loadWorkspace(repoRootInput = process.cwd(), { editing = false, allowVersionMismatch = false, allowNpm = false } = {}) {
   const repoRoot = await findRepositoryRoot(repoRootInput);
   const { designSystemRoot, layout, scopePath } = resolveDesignSystemRoot(repoRoot);
-  await assertBinaryInstallation(designSystemRoot, { allowMismatch: allowVersionMismatch, allowNpm: allowVersionMismatch });
+  await assertBinaryInstallation(designSystemRoot, { allowMismatch: allowVersionMismatch, allowNpm: allowNpm || allowVersionMismatch });
   const manifestPath = path.join(designSystemRoot, "timds.json");
   const manifest = validateManifest(await readJsonObject(manifestPath, "timds.json"));
   const contractGroups = editing ? await hasContractGroups(designSystemRoot) : await syncContractViews(designSystemRoot);
@@ -834,6 +834,8 @@ async function upgradeBinaryRepository(root, options) {
   return withBinarySelection(() => withFileRollback(binaryRollbackPaths(workspace), async () => {
     const result = await upgradeRepository(root, {autoRelease: options.autoRelease, decideCustomized: terminalPlumbingPrompt(), force: options.force});
     await checkWorkspace(root);
+    const defaults = await syncDefaults(result);
+    if (defaults.changed.length) output(`Publishing defaults: ${defaults.changed.length} change(s) available. Run timds-cli defaults to review, then timds-cli defaults --apply.`);
     output(`TimDS binary selection: ${previous.version} -> ${runtimeIdentity.version}. Review and commit the managed changes.`);
     for (const line of result.starter ? describeStarterSync(result.starter) : []) output(line);
     return result;

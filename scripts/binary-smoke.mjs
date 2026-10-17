@@ -65,8 +65,19 @@ async function mcp(args) {
     const { tools } = await request('tools/list', {});
     assert.ok(tools.length > 0);
     const tool = tools.find(tool => /describe.*system|describe.*workspace/.test(tool.name));
-    if (tool) { const result = await request('tools/call', { name: tool.name, arguments: {} }); assert.ok(!result.isError); }
-  } finally { child.kill('SIGTERM'); await new Promise(resolve => child.once('exit', resolve)); }
+    assert.ok(tool, 'MCP must expose a workspace/system read so the smoke exercises its data source');
+    const result = await request('tools/call', { name: tool.name, arguments: {} });
+    assert.ok(!result.isError, JSON.stringify(result));
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) {
+      const exited = new Promise((resolve, reject) => {
+        const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error('MCP did not terminate')); }, 10000);
+        child.once('exit', () => { clearTimeout(timer); resolve(); });
+      });
+      child.kill('SIGTERM');
+      await exited;
+    }
+  }
 }
 async function server(command) {
   const reservation = createServer();

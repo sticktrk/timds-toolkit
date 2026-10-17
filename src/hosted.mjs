@@ -5,6 +5,7 @@ import path from "node:path";
 import ignore from "ignore";
 import { cleanPortalUrl, resolveAccessToken, savedPortalUrl } from "./auth.mjs";
 import { readUnreleasedNotes } from "./changelog.mjs";
+import { assertBinaryInstallation } from "./binary-installation.mjs";
 
 export const HOST_API_VERSION = 1;
 export const SESSION_FILE = ".timds/session.json";
@@ -362,6 +363,10 @@ export async function runHostedCommand(command, { root = process.cwd(), fixedRoo
   // Inviting a principal still acts on the current enclosing session.
   const destination = fixedRoot || command === "start" || command === "join" && !principalId;
   const selected = destination ? path.resolve(root) : await findHostedRoot(root);
+  const manifest = await readJson(path.join(selected, "timds.json"));
+  // Empty start/join destinations and identity lookups have no selected
+  // workspace. Every operation on an existing workspace shares the CLI guard.
+  if (manifest && !["whoami", "principals"].includes(command)) await assertBinaryInstallation(selected);
   const state = await readJson(path.join(selected, SESSION_FILE));
   const configured = destination
     ? normalizeProvider((await readJson(path.join(selected, "timds.json")))?.provider || state?.provider)
@@ -375,7 +380,6 @@ export async function runHostedCommand(command, { root = process.cwd(), fixedRoo
   if (!identityOnly && state && state.provider.url !== provider.url) throw new Error("Session belongs to a different TimDS host");
   const host = createHostProvider({ url: provider.url, token,
     resolveToken: options => resolveAccessToken(provider.url, { token, credentialsPath, fetchImpl, ...options }), fetchImpl });
-  const manifest = await readJson(path.join(selected, "timds.json"));
   const selectedSystem = systemId || state?.session?.systemId || state?.session?.sourceId || manifest?.systemId;
   if (command === "rollback") {
     if (!selectedSystem || !version) throw new Error("rollback requires VERSION and a design system (--system-id)");

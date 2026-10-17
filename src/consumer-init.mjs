@@ -61,7 +61,7 @@ import { planConsumerToolkitLock, resolveConsumerToolkitLock, runConsumerNpm } f
 import { acceptsToolkitReleaseRange, runtimeIdentity, toolkitReleaseRange } from "./runtime.mjs";
 import { linkClaudeSkills } from "./agent-skills.mjs";
 import { isBinaryRuntime } from "./executable.mjs";
-import { binaryInstallationRecord, readBinaryInstallation } from "./binary-installation.mjs";
+import { assertBinaryInstallation, binaryInstallationRecord, readBinaryInstallation } from "./binary-installation.mjs";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -706,6 +706,7 @@ async function refuseIgnoredPaths(repoRoot, paths, command) {
  * removing the submodule; force applies only to the installation's files.
  */
 export async function planConsumerInstallation(repoRoot, manifest, { force = false, portalUrl = null, command = "timds consumer init", mode = null } = {}) {
+  await assertBinaryInstallation(repoRoot, { allowNpm: true });
   const validated = validateConsumerManifest(manifest);
   const installationPath = path.join(repoRoot, CONSUMER_INSTALLATION_PATH);
   let installation = (await readJsonFile(installationPath, CONSUMER_INSTALLATION_PATH)) ?? {};
@@ -939,6 +940,7 @@ async function installedPortalUrl(repoRoot) {
  */
 export async function upgradeConsumer(rootInput = process.cwd(), { force = false, output = () => {} } = {}) {
   const repoRoot = await findGitRoot(rootInput);
+  await assertBinaryInstallation(repoRoot);
   const manifest = await readJsonFile(path.join(repoRoot, CONSUMER_MANIFEST_FILE), CONSUMER_MANIFEST_FILE);
   if (!manifest) throw new Error(`No ${CONSUMER_MANIFEST_FILE} at ${repoRoot}. Run timds consumer init to adopt TimDS in this product repository.`);
   validateConsumerManifest(manifest);
