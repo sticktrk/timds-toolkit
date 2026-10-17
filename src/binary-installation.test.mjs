@@ -70,6 +70,56 @@ test('npm adoption plans before writing, preserves package pins/docs, and is ide
   assert.deepEqual(await fs.readFile(path.join(root, '.timds/installation.json')), after);
 });
 
+test('binary adoption leaves stale committed aggregates untouched until apply', async t => {
+  const root = await fixture(t, false);
+  const names = ['tokens.json', 'media.json'];
+  const expected = await Promise.all(names.map(name => fs.readFile(path.join(root, name), 'utf8')));
+  const stale = ['{}\n', '{"schemaVersion":2,"assets":[]}\n'];
+  for (let index = 0; index < names.length; index++) await fs.writeFile(path.join(root, names[index]), stale[index]);
+  git(root, 'add', '.'); git(root, 'commit', '-qm', 'Stale generated views');
+  run(root, ['installation', 'adopt', '--binary']);
+  assert.deepEqual(await Promise.all(names.map(name => fs.readFile(path.join(root, name), 'utf8'))), stale);
+  assert.equal(git(root, 'status', '--porcelain').trim(), '');
+  const skill = '.agents/skills/design-start/SKILL.md';
+  await fs.appendFile(path.join(root, skill), '\nCustom instruction\n');
+  git(root, 'add', '.'); git(root, 'commit', '-qm', 'Custom skill');
+  assert.match(run(root, ['installation', 'adopt', '--binary', '--apply'], {fail: true}).stderr, /customized managed skill/);
+  assert.deepEqual(await Promise.all(names.map(name => fs.readFile(path.join(root, name), 'utf8'))), stale);
+  assert.equal(git(root, 'status', '--porcelain').trim(), '');
+  run(root, ['installation', 'adopt', '--binary', '--apply', '--force']);
+  assert.deepEqual(await Promise.all(names.map(name => fs.readFile(path.join(root, name), 'utf8'))), expected);
+});
+
+test('binary upgrade refusals and failed checks preserve stale aggregate views', async t => {
+  const root = await fixture(t);
+  const names = ['tokens.json', 'media.json'];
+  const expected = await Promise.all(names.map(name => fs.readFile(path.join(root, name), 'utf8')));
+  const stale = ['{}\n', '{"schemaVersion":2,"assets":[]}\n'];
+  for (let index = 0; index < names.length; index++) await fs.writeFile(path.join(root, names[index]), stale[index]);
+  const record = await read(root, '.timds/installation.json'); record.version = '0.1.1';
+  await fs.writeFile(path.join(root, '.timds/installation.json'), JSON.stringify(record));
+  git(root, 'add', '.'); git(root, 'commit', '-qm', 'Stale selected release');
+  assert.match(run(root, ['upgrade'], {fail: true}).stderr, /install the verified timds-cli 0\.1\.1/);
+  assert.deepEqual(await Promise.all(names.map(name => fs.readFile(path.join(root, name), 'utf8'))), stale);
+  assert.equal(git(root, 'status', '--porcelain').trim(), '');
+  await fs.appendFile(path.join(root, 'README.md'), '\nUncommitted work\n');
+  assert.match(run(root, ['upgrade', '--version', runtimeIdentity.version], {fail: true}).stderr, /require a clean working tree/);
+  assert.deepEqual(await Promise.all(names.map(name => fs.readFile(path.join(root, name), 'utf8'))), stale);
+  git(root, 'restore', 'README.md');
+  const manifest = await read(root, 'timds.json');
+  manifest.workspace.check = ['missing-custom-check'];
+  await fs.writeFile(path.join(root, 'timds.json'), JSON.stringify(manifest));
+  git(root, 'add', '.'); git(root, 'commit', '-qm', 'Failing custom checker');
+  assert.match(run(root, ['upgrade', '--version', runtimeIdentity.version], {fail: true}).stderr, /Required command "missing-custom-check" is unavailable/);
+  assert.deepEqual(await Promise.all(names.map(name => fs.readFile(path.join(root, name), 'utf8'))), stale);
+  assert.equal(git(root, 'status', '--porcelain').trim(), '');
+  manifest.workspace.check = stockWorkspaceCommands.check;
+  await fs.writeFile(path.join(root, 'timds.json'), JSON.stringify(manifest));
+  git(root, 'add', '.'); git(root, 'commit', '-qm', 'Restore stock checker');
+  run(root, ['upgrade', '--version', runtimeIdentity.version]);
+  assert.deepEqual(await Promise.all(names.map(name => fs.readFile(path.join(root, name), 'utf8'))), expected);
+});
+
 test('binary adoption refuses customized skills, rolls back failed custom checks, keeps custom commands', async t => {
   const root = await fixture(t, false);
   const skill = '.agents/skills/design-start/SKILL.md'; await fs.appendFile(path.join(root, skill), '\nCustom instruction\n');

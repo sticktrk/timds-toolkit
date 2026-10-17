@@ -790,7 +790,7 @@ async function runInstallationCommand(root, positional, options) {
     return adoptConsumerBinary(consumerRoot, {apply: Boolean(options.apply && !options.dryRun), force: Boolean(options.force), output});
   }
   return withBinarySelection(async () => {
-    const workspace = await loadWorkspace(root);
+    const workspace = await loadWorkspace(root, {editing: true});
     const previous = await readInstallation(workspace.designSystemRoot) || {};
     if (previous.mode === 'binary') {
       await readBinaryInstallation(workspace.designSystemRoot);
@@ -824,7 +824,7 @@ async function runInstallationCommand(root, positional, options) {
   });
 }
 async function upgradeBinaryRepository(root, options) {
-  const workspace = await loadWorkspace(root, {allowVersionMismatch: true});
+  const workspace = await loadWorkspace(root, {editing: true, allowVersionMismatch: true});
   const previous = await readBinaryInstallation(workspace.designSystemRoot);
   requireBinaryRelease(options.version || previous.version);
   if (options.ownRuntime) throw new Error('--own-runtime is an npm dependency migration; binary execution uses its packaged graph.');
