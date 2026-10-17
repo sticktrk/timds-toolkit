@@ -130,7 +130,11 @@ real rendering, client TSX overrides and the two-brand visual comparisons.
 The ordinary suite also exercises extraction concurrency, dead initializer
 recovery, traversal rejection, migration, pins, and sanitized environments.
 
-PR CI and release CI run both native targets through these checks. A successful
+PR CI and release CI delete the build's source `node_modules` after packaging,
+then run both builtins-only smoke drivers from the runner's temporary directory.
+The driver uses Node to orchestrate assertions; all tested TimDS commands and
+their children use the moved executable with no JavaScript toolchain on PATH.
+Both native targets run through these checks. A successful
 local macOS proof is not Linux evidence: the Linux job must pass before the
 release can publish. The binary pipeline gates npm publication, and both the
 published-release event and the manual release path use the exact same release

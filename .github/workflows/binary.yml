@@ -76,10 +76,14 @@ jobs:
             fi
           fi
       - run: npm run binary:build
+      - name: Remove source dependencies before clean-machine proof
+        run: rm -rf node_modules
       - name: Stock workflow with no external JavaScript toolchain
-        run: npm run binary:smoke
+        working-directory: ${{ runner.temp }}
+        run: node "$GITHUB_WORKSPACE/scripts/binary-smoke.mjs"
       - name: Video, TSX overrides and two-brand visual comparison
-        run: npm run binary:smoke:video
+        working-directory: ${{ runner.temp }}
+        run: node "$GITHUB_WORKSPACE/scripts/binary-video-smoke.mjs"
         env:
           TIMDS_VISUAL_OUTPUT: ${{ runner.temp }}/timds-binary-visuals
       - uses: actions/upload-artifact@v4
