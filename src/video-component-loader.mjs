@@ -20,10 +20,14 @@ export async function loadVideoComponentModule(componentsPath, localRoot) {
     const key = createHash("sha256").update(file).update(source).digest("hex");
     const entry = path.join(directory, `${key}.mjs`);
     entries.set(file, entry);
-    const parsed = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+    const compilerOptions = {module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX};
+    // Follow only imports that survive compilation. Type-only imports include
+    // inline `import {type T}` and ordinary imports used solely as types; their
+    // declaration files need not exist at runtime and must never be executed.
+    const emitted = ts.transpileModule(source, {fileName: file, compilerOptions}).outputText;
+    const parsed = ts.createSourceFile(file, emitted, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
     const imports = new Set();
     const collect = (node) => {
-      if (ts.isImportDeclaration(node) && node.importClause?.isTypeOnly || ts.isExportDeclaration(node) && node.isTypeOnly) return;
       const specifier = ts.isImportDeclaration(node) || ts.isExportDeclaration(node) ? node.moduleSpecifier
         : ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword ? node.arguments[0] : null;
       if (specifier && ts.isStringLiteral(specifier) && specifier.text.startsWith(".")) imports.add(specifier.text);
@@ -50,7 +54,7 @@ export async function loadVideoComponentModule(componentsPath, localRoot) {
       };
       return (sourceFile) => ts.visitNode(sourceFile, visit);
     };
-    const compiled = ts.transpileModule(source, {fileName: file, compilerOptions: {module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX}, transformers: {before: [relocate]}}).outputText;
+    const compiled = ts.transpileModule(source, {fileName: file, compilerOptions, transformers: {before: [relocate]}}).outputText;
     await fs.writeFile(entry, compiled);
     return entry;
   }

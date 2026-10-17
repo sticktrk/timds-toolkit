@@ -447,6 +447,7 @@ async function consumerCommittedFiles(repoRoot, mode, binary = false) {
  */
 export async function loadConsumer(repoRootInput = process.cwd()) {
   const repoRoot = await findConsumerRoot(repoRootInput);
+  await assertBinaryInstallation(repoRoot);
   const manifestPath = path.join(repoRoot, CONSUMER_MANIFEST_FILE);
   let text;
   try {

@@ -33,6 +33,7 @@ export async function prepareDraftSource({ systemId, draft, portalUrl = process.
   if (previous && previous.snapshot.session.baseRevision === snapshot.session.baseRevision) return previous;
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'timds-draft-'));
   try {
+    let binaryStock = false;
     await materializeHostedSnapshot(root, snapshot, { kind: 'hosted', url, apiVersion: 1 });
     if (build) await build(root);
     else {
@@ -43,6 +44,7 @@ export async function prepareDraftSource({ systemId, draft, portalUrl = process.
         const manifest = JSON.parse(await fs.readFile(path.join(root, 'timds.json'), 'utf8'));
         if (!await isStockWorkspace(root, manifest)) throw new Error('This hosted draft uses custom workspace commands or scripts. Build it with its declared Node/npm toolchain; the standalone binary only bypasses dependency installation for verified stock drafts.');
         env.TIMDS_BINARY_STOCK_DRAFT = '1';
+        binaryStock = true;
       } else {
         const hasLock = await fs.access(path.join(root, 'package-lock.json')).then(() => true, () => false);
         await draftSubprocess('npm', [hasLock ? 'ci' : 'install', '--ignore-scripts', '--no-audit', '--no-fund'], { root, env, label: 'Draft dependency installation', limit: 4000 });
@@ -50,6 +52,6 @@ export async function prepareDraftSource({ systemId, draft, portalUrl = process.
       const [command, ...args] = cliCommand(['check', '--root', root]);
       await draftSubprocess(command, args, { root, env, label: 'Draft checks', limit: 8000 });
     }
-    return { root, snapshot, dispose: () => fs.rm(root, { recursive: true, force: true }) };
+    return { root, snapshot, binaryStock, dispose: () => fs.rm(root, { recursive: true, force: true }) };
   } catch (error) { await fs.rm(root, { recursive: true, force: true }); throw error; }
 }

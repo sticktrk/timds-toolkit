@@ -7,7 +7,8 @@ import path from 'node:path';
 import test from 'node:test';
 import { parse } from 'yaml';
 import { adoptConsumerBinary, consumerWorkflow, initializeConsumer, upgradeConsumer } from './consumer-init.mjs';
-import { checkConsumer, runConsumerCli } from './consumer.mjs';
+import { checkConsumer, loadConsumer, runConsumerCli } from './consumer.mjs';
+import { syncConsumerBundle } from './consumer-sync.mjs';
 import { packageRoot } from './executable.mjs';
 import { runtimeIdentity } from './runtime.mjs';
 
@@ -149,6 +150,13 @@ test('standalone runtime selects binary init by default and rejects mismatched c
     assert.equal(installation.mode, 'binary');
     installation.version = '0.1.0';
     await write(root, '.timds/installation.json', installation);
+    const before = git(root, 'diff', '--stat');
+    await assert.rejects(upgradeConsumer(root), /Workspace selects TimDS 0\.1\.0/);
+    await assert.rejects(initializeConsumer(root, { skipInstall: true }), /Workspace selects TimDS 0\.1\.0/);
+    await assert.rejects(loadConsumer(root), /Workspace selects TimDS 0\.1\.0/);
+    await assert.rejects(syncConsumerBundle(root, { fetchImpl: () => { throw new Error('Must not fetch'); } }), /Workspace selects TimDS 0\.1\.0/);
+    assert.equal((await readJson(root, '.timds/installation.json')).version, '0.1.0');
+    assert.equal(git(root, 'diff', '--stat'), before);
     for (const command of ['check', 'sync', 'update', 'migrate', 'preview', 'notes', 'init']) {
       await assert.rejects(runConsumerCli([command, '--root', root]), /Workspace selects TimDS 0\.1\.0/);
     }

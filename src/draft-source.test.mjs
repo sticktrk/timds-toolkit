@@ -24,3 +24,13 @@ test('a failed draft build cleans the materialized snapshot and keeps auth on th
   }, build: async directory => { root = directory; assert.equal(await fs.readFile(`${root}/note.txt`, 'utf8'), 'draft source'); throw new Error('build failed'); } }), /build failed/);
   assert.equal(await fs.stat(root).catch(() => null), null);
 });
+
+test('a custom draft build cannot claim the verified binary stock exception', async t => {
+  const values = { TIMDS_BINARY_EXECUTABLE: '/runtime/timds-cli', TIMDS_RUNTIME_ROOT: '/runtime', TIMDS_RUNTIME_PACKAGE: packageRoot };
+  const before = Object.fromEntries(Object.keys(values).map(key => [key, process.env[key]]));
+  Object.assign(process.env, values);
+  t.after(() => { for (const [key, value] of Object.entries(before)) if (value === undefined) delete process.env[key]; else process.env[key] = value; });
+  const prepared = await prepareDraftSource({ systemId: 'example/core', draft: 'test', portalUrl: 'https://host.test', token: 'secret', fetchImpl: async () => Response.json({ apiVersion: 1, session: { id: 'test', baseRevision: 'one', status: 'open' }, files: [] }), build: async () => {} });
+  try { assert.equal(prepared.binaryStock, false); }
+  finally { await prepared.dispose(); }
+});

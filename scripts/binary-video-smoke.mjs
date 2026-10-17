@@ -84,7 +84,17 @@ try {
     await execute(git, ['init', '-b', 'main'], { cwd: root, env });
     await run(root, 'init', '--standalone', '--name', `Binary ${name}`, '--system-id', `example/${name}`);
     // Capture a stock hosted draft before adding the video authoring fixtures.
-    if (name === 'north') await writeJson(path.join(scratch, 'snapshot.json'), { apiVersion: 1, session: { id: 'binary-draft', systemId: `example/${name}`, baseRevision: 'fixture', status: 'open' }, files: await files(root) });
+    if (name === 'north') {
+      const snapshotFiles = await files(root);
+      for (const file of snapshotFiles) {
+        if (!['timds.json', '.timds/installation.json'].includes(file.path)) continue;
+        const value = JSON.parse(Buffer.from(file.content, 'base64').toString('utf8'));
+        if (file.path === 'timds.json') value.workspace = Object.fromEntries(['build', 'check', 'dev'].map(command => [command, ['node', `scripts/${command}.mjs`]]));
+        else { value.schemaVersion = 1; delete value.mode; delete value.executable; }
+        file.content = Buffer.from(JSON.stringify(value)).toString('base64');
+      }
+      await writeJson(path.join(scratch, 'snapshot.json'), { apiVersion: 1, session: { id: 'binary-draft', systemId: `example/${name}`, baseRevision: 'fixture', status: 'open' }, files: snapshotFiles });
+    }
     await run(root, 'video', 'init');
     const contractPath = path.join(root, 'video/contract.json'), contract = await readJson(contractPath);
     contract.brand.colors = { background: color, panel: color, accent: '#f4c75b', text: '#ffffff', muted: '#dae1ea' };
@@ -146,7 +156,7 @@ const base = import.meta.resolve('@dtconcepts/timds/core');
 const {prepareDraftSource} = await import(new URL('./draft-source.mjs',base));
 const snapshot = JSON.parse(await readFile(${JSON.stringify(path.join(scratch, 'snapshot.json'))},'utf8'));
 const draft = await prepareDraftSource({systemId:'example/north',draft:'binary',portalUrl:'https://fixture.test',token:'fixture-secret',fetchImpl:async (_url,options)=>{assert.equal(options.headers.Authorization,'Bearer fixture-secret');return Response.json(snapshot);}});
-try {assert.ok((await stat(draft.root+'/dist/index.html')).size);assert.equal(await stat(draft.root+'/node_modules').catch(()=>null),null);}finally{await draft.dispose();}
+try {assert.equal(draft.binaryStock,true);const {loadWorkspace}=await import('@dtconcepts/timds/core');await loadWorkspace(draft.root,{allowNpm:draft.binaryStock});assert.ok((await stat(draft.root+'/dist/index.html')).size);assert.equal(await stat(draft.root+'/node_modules').catch(()=>null),null);}finally{await draft.dispose();}
 const {launchBrowser} = await import(new URL('./consumer-browser.mjs',base));
 const browser = await launchBrowser();
 try {const capture = await browser.capture({url:${JSON.stringify(`http://127.0.0.1:${server.address().port}`)},width:320,height:180});assert.ok(capture.png.length>100);}finally{await browser.close();}
