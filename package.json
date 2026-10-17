@@ -48,7 +48,10 @@
     "pack:check": "npm pack --dry-run",
     "release": "./scripts/release.sh",
     "test:shared-upgrades": "node scripts/check-shared-upgrades.mjs",
-    "golden-drift": "node scripts/golden-drift.mjs"
+    "golden-drift": "node scripts/golden-drift.mjs",
+    "binary:build": "node scripts/binary-build.mjs",
+    "binary:smoke": "node scripts/binary-smoke.mjs",
+    "binary:smoke:video": "node scripts/binary-video-smoke.mjs"
   },
   "files": [
     "NOTICE",
@@ -114,7 +117,12 @@
     "src/contract-groups.mjs",
     "src/draft-source.mjs",
     "src/consumer-draft-preview.mjs",
-    "src/merge.mjs"
+    "src/merge.mjs",
+    "src/executable.mjs",
+    "src/executable-register.mjs",
+    "src/executable-loader.mjs",
+    "src/binary-installation.mjs",
+    "src/video-runtime.mjs"
   ],
   "dependencies": {
     "@anthropic-ai/sdk": "0.125.0",
@@ -134,6 +142,7 @@
   "devDependencies": {
     "@actions/expressions": "0.3.61",
     "@types/react": "19.2.18",
+    "postject": "1.0.0-alpha.6",
     "yaml": "2.9.1"
   },
   "engines": {

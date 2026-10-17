@@ -89,7 +89,7 @@ __DERIVED_LAYER__
 3. Never add dependencies or change the product's framework configuration.
 4. Never commit media masters, video, audio, or full-resolution photography.
    Shared imagery belongs to the Design System and is published with
-   `npm run timds -- assets add` and `assets publish` from that repository;
+   `assets add` and `assets publish` using that repository's selected toolkit;
    reference its stable URL or media key here. Small optimized images may
    live in the product only where its rules allow them.
 5. Keep light and dark schemes, desktop and phone widths, focus states, and

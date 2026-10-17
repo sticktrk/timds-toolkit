@@ -1,7 +1,6 @@
 import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, promises as fs } from "node:fs";
-import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
@@ -15,6 +14,8 @@ import { adjacentFootageRepeats, sceneAssetKeys, truncatedHeadline } from "../vi
 import { DEFAULT_BOARD_KINDS } from "../video/boards.mjs";
 import { assertRuntimeCompatibility, assertVideoContractRuntime, sharedRuntimeRequirements } from "./runtime.mjs";
 import {loadVideoComponentModule} from "./video-component-loader.mjs";
+import { remotionCommand } from "./video-runtime.mjs";
+import { isBinaryRuntime, runtimeEnvironment } from "./executable.mjs";
 import {
   COMPILER_OWNED_BOARD_KINDS,
   boardCatalogSummary,
@@ -26,7 +27,6 @@ import {
 } from "./video-boards.mjs";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const require = createRequire(import.meta.url);
 const VIDEO_SCHEMA_VERSION = 1;
 const PUBLISHING_TARGETS = ["youtube_short", "facebook_reel", "instagram_reel"];
 const productionFiles = ["request.json", "script.json", "publishing.json", "captions.json", "production.json"];
@@ -1186,17 +1186,16 @@ export async function runVideoLab(workspace, requestedName, options = {}) {
   const lines = [describeVideoLabPlan(prepared.lab), `Entry ${path.relative(workspace.designSystemRoot, prepared.entryPath)} (${prepared.video.componentsPath ? path.relative(workspace.designSystemRoot, prepared.video.componentsPath) : "TimDS default components"})`];
   for (const line of lines) log(line);
   if (options.prepare) return { ...prepared, lines };
-  const remotion = path.join(path.dirname(require.resolve("@remotion/cli/package.json")), "remotion-cli.js");
   const common = ["--public-dir", prepared.publicRoot];
   if (options.render) {
     const onLine = options.captureOutput ? log : undefined;
     await fs.mkdir(prepared.outputRoot, { recursive: true });
-    await run(process.execPath, [remotion, "render", prepared.entryPath, "TimDSVideo", path.join(prepared.outputRoot, `${prepared.lab.name}.mp4`), "--codec=h264", ...common, "--log=error"], { cwd: workspace.designSystemRoot, onLine });
-    await run(process.execPath, [remotion, "still", prepared.entryPath, "TimDSCover", path.join(prepared.outputRoot, "thumbnail.jpg"), "--image-format=jpeg", "--jpeg-quality=90", ...common, "--log=error"], { cwd: workspace.designSystemRoot, onLine });
+    await runRemotion(["render", prepared.entryPath, "TimDSVideo", path.join(prepared.outputRoot, `${prepared.lab.name}.mp4`), "--codec=h264", ...common, "--log=error"], { cwd: workspace.designSystemRoot, onLine });
+    await runRemotion(["still", prepared.entryPath, "TimDSCover", path.join(prepared.outputRoot, "thumbnail.jpg"), "--image-format=jpeg", "--jpeg-quality=90", ...common, "--log=error"], { cwd: workspace.designSystemRoot, onLine });
     log(`Rendered ${path.relative(workspace.designSystemRoot, prepared.outputRoot)}`);
     return { ...prepared, lines };
   }
-  await run(process.execPath, [remotion, "studio", prepared.entryPath, ...common], { cwd: workspace.designSystemRoot });
+  await runRemotion(["studio", prepared.entryPath, ...common], { cwd: workspace.designSystemRoot });
   return { ...prepared, lines };
 }
 
@@ -1586,6 +1585,15 @@ export async function prepareVideoWorkspace(workspace, selectedSlug) {
   return { ...loaded, entryPath, project, projectPath, publicRoot, production };
 }
 
+function runRemotion(args, options) {
+  const [command, ...arguments_] = remotionCommand(args);
+  const env = runtimeEnvironment();
+  // Authored remotion.config.js can use CommonJS require. NODE_PATH is a
+  // fallback only for this package-owned worker, after local module lookup.
+  if (isBinaryRuntime()) env.NODE_PATH = [path.join(packageRoot, "node_modules"), env.NODE_PATH].filter(Boolean).join(path.delimiter);
+  return run(command, arguments_, { ...options, env });
+}
+
 function run(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     // With an `onLine` sink (the video lab server) the child's output is captured
@@ -1593,6 +1601,10 @@ function run(command, args, options = {}) {
     // terminal as before.
     const capture = typeof options.onLine === "function";
     const child = spawn(command, args, { cwd: options.cwd, env: options.env || process.env, stdio: capture ? ["ignore", "pipe", "pipe"] : "inherit" });
+    const forwardInt = () => child.kill("SIGINT"), forwardTerm = () => child.kill("SIGTERM");
+    process.on("SIGINT", forwardInt);
+    process.on("SIGTERM", forwardTerm);
+    child.once("close", () => { process.off("SIGINT", forwardInt); process.off("SIGTERM", forwardTerm); });
     const tail = [];
     if (capture) {
       for (const stream of [child.stdout, child.stderr]) {
@@ -1612,8 +1624,10 @@ function run(command, args, options = {}) {
         stream.on("end", () => { if (buffered.trim()) { tail.push(buffered); options.onLine(buffered); } });
       }
     }
-    child.on("error", reject);
-    child.on("close", (code) => {
+    child.on("error", (error) => reject(error.code === "ENOENT"
+      ? new Error(`Required external tool ${command} was not found. Install it or configure its executable path before running this video command.`, { cause: error }) : error));
+    child.on("close", (code, signal) => {
+      if (signal) return reject(Object.assign(new Error(`${path.basename(command)} stopped by ${signal}`), { signal }));
       if (code === 0) return resolve();
       const detail = tail.length ? `\n${tail.slice(-12).join("\n")}` : "";
       reject(new Error(`${path.basename(command)} ${args[1] || args[0] || ""} failed with exit code ${code}${detail}`));
@@ -1645,8 +1659,7 @@ function renderPaths(prepared, date = localDate(prepared.video.contract.package.
 
 export async function runVideoStudio(workspace, selectedSlug) {
   const prepared = await prepareVideoWorkspace(workspace, selectedSlug);
-  const remotion = path.join(path.dirname(require.resolve("@remotion/cli/package.json")), "remotion-cli.js");
-  await run(process.execPath, [remotion, "studio", prepared.entryPath, "--public-dir", prepared.publicRoot], { cwd: workspace.designSystemRoot });
+  await runRemotion(["studio", prepared.entryPath, "--public-dir", prepared.publicRoot], { cwd: workspace.designSystemRoot });
   return prepared;
 }
 
@@ -1715,19 +1728,18 @@ async function writeVideoPublishing(prepared, paths) {
 export async function renderVideoWorkspace(workspace, selectedSlug, options = {}) {
   const prepared = await prepareVideoWorkspace(workspace, selectedSlug);
   await assertVideoProjectStaged(prepared.project, prepared.publicRoot);
-  const remotion = path.join(path.dirname(require.resolve("@remotion/cli/package.json")), "remotion-cli.js");
   const prefix = pascal(prepared.production.production.slug);
   const paths = renderPaths(prepared, options.date);
   await fs.mkdir(paths.longform, { recursive: true });
   const common = ["--public-dir", prepared.publicRoot, "--log=error"];
-  await run(process.execPath, [remotion, "still", prepared.entryPath, `${prefix}Cover`, path.join(paths.longform, "thumbnail.jpg"), "--image-format=jpeg", "--jpeg-quality=90", ...common], { cwd: workspace.designSystemRoot });
-  await run(process.execPath, [remotion, "render", prepared.entryPath, `${prefix}Long`, path.join(paths.longform, `${prepared.production.production.slug}-longform.mp4`), "--codec=h264", ...common], { cwd: workspace.designSystemRoot });
+  await runRemotion(["still", prepared.entryPath, `${prefix}Cover`, path.join(paths.longform, "thumbnail.jpg"), "--image-format=jpeg", "--jpeg-quality=90", ...common], { cwd: workspace.designSystemRoot });
+  await runRemotion(["render", prepared.entryPath, `${prefix}Long`, path.join(paths.longform, `${prepared.production.production.slug}-longform.mp4`), "--codec=h264", ...common], { cwd: workspace.designSystemRoot });
   for (let index = 0; index < prepared.production.production.shorts.length; index += 1) {
     const short = prepared.production.production.shorts[index];
     const directory = paths.shorts[index];
     await fs.mkdir(directory, { recursive: true });
-    await run(process.execPath, [remotion, "still", prepared.entryPath, `${prefix}Short${index + 1}Cover`, path.join(directory, "thumbnail.jpg"), "--image-format=jpeg", "--jpeg-quality=90", ...common], { cwd: workspace.designSystemRoot });
-    await run(process.execPath, [remotion, "render", prepared.entryPath, `${prefix}Short${index + 1}`, path.join(directory, `${short.id}.mp4`), "--codec=h264", ...common], { cwd: workspace.designSystemRoot });
+    await runRemotion(["still", prepared.entryPath, `${prefix}Short${index + 1}Cover`, path.join(directory, "thumbnail.jpg"), "--image-format=jpeg", "--jpeg-quality=90", ...common], { cwd: workspace.designSystemRoot });
+    await runRemotion(["render", prepared.entryPath, `${prefix}Short${index + 1}`, path.join(directory, `${short.id}.mp4`), "--codec=h264", ...common], { cwd: workspace.designSystemRoot });
   }
   const lock = {
     schemaVersion: 1,

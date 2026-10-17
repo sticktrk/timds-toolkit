@@ -11,6 +11,21 @@ from `node_modules`; client Git repositories do not carry a copied `.timds/cli`
 tree. TimDS also installs a small repository-local skill for AI-agent discovery
 and `.timds/installation.json` for fleet/version inspection.
 
+## Standalone executable
+
+The `timds-cli` release download includes its JavaScript runtime and production
+dependencies. Stock Design Systems build, check, preview, serve MCP and render
+video without separately installing Node, npm, npx or Bun. Native macOS arm64
+and Linux x64 releases are gated by clean-machine smoke tests. Custom product
+builds keep their declared tools; browser and media operations retain their
+listed platform prerequisites.
+
+Follow the [download and installation guide](docs/binary-installation.md) for
+checksums, PATH setup, an exact workspace pin, explicit npm adoption, upgrades
+and rollback. [Packaging details](docs/binary-packaging.md) cover runtime pins,
+cache integrity, platform requirements and signing. Existing npm installations
+and package imports keep their current contract.
+
 ## Getting started with a hosted system
 
 Use the host URL supplied by your Studio installation. Sign in once, then start an editing workspace:
