@@ -1,4 +1,4 @@
-name: Publish npm package
+name: Publish TimDS package and executables
 
 on:
   workflow_dispatch:
@@ -78,13 +78,24 @@ jobs:
           echo "tag=v$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-  # Releases created with GITHUB_TOKEN do not trigger another release workflow.
-  # Publish here as well as for releases created by the local release command.
-  publish:
+  binaries:
     needs: create-release
     if: >-
       ${{ !cancelled() &&
           (github.event_name == 'release' || needs.create-release.result == 'success') }}
+    uses: ./.github/workflows/binary.yml
+    secrets: inherit
+    with:
+      ref: ${{ needs.create-release.outputs.sha || github.ref }}
+
+  # Releases created with GITHUB_TOKEN do not trigger another release workflow.
+  # Publish here as well as for releases created by the local release command.
+  publish:
+    needs: [create-release, binaries]
+    if: >-
+      ${{ !cancelled() &&
+          (github.event_name == 'release' || needs.create-release.result == 'success') &&
+          needs.binaries.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -106,3 +117,34 @@ jobs:
         env:
           RELEASE_TAG: ${{ needs.create-release.outputs.tag || github.event.release.tag_name }}
       - run: npm publish
+
+  attach-binaries:
+    needs: [create-release, binaries, publish]
+    if: >-
+      ${{ !cancelled() && needs.binaries.result == 'success' && needs.publish.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.create-release.outputs.sha || github.ref }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.22.0
+          package-manager-cache: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: timds-native-*
+          path: dist/binary
+          merge-multiple: true
+      - name: Verify release identities and create the checksum manifest
+        run: node scripts/binary-release.mjs
+        env:
+          RELEASE_TAG: ${{ needs.create-release.outputs.tag || github.event.release.tag_name }}
+      - name: Attach tested executables to this release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.create-release.outputs.tag || github.event.release.tag_name }}
+        run: gh release upload "$RELEASE_TAG" dist/binary/timds-cli-* dist/binary/SHA256SUMS --clobber

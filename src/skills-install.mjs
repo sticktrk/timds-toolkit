@@ -35,6 +35,8 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
+import { isBinaryRuntime } from "./executable.mjs";
+import { renderBinaryInstructions } from "./binary-installation.mjs";
 import { runtimeIdentity } from "./runtime.mjs";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -125,7 +127,7 @@ async function bundledSkillFiles(name) {
     }
   }
   await walk(skillRoot);
-  return files;
+  return isBinaryRuntime() ? files.map(file => ({...file, content: renderBinaryInstructions(file.content)})) : files;
 }
 
 /**

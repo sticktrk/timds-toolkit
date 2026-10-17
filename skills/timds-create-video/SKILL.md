@@ -9,6 +9,16 @@ Use the client Design System as the complete production workspace. TimDS owns
 the engine and commands; the repository owns all client-specific creative,
 content, media, compliance, and publishing decisions.
 
+## Installation mode
+
+Read `.timds/installation.json` before installing tools. With `mode: "binary"`,
+use `timds-cli` at its exact `version` in place of `npm run timds --`; skip npm
+installation and npm dependency-upgrade steps for the stock system. Check
+`timds-cli --version` and `timds-cli doctor`. Select another executable release
+only through `timds-cli upgrade --version EXACT_VERSION`. Existing npm mode
+keeps its bounded requirement and committed lockfile. Custom product tools
+retain their declared prerequisites. The agent runs these steps for the designer.
+
 ## Resolve the contract
 
 1. Read the repository instructions and preserve existing work.

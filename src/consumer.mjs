@@ -31,6 +31,7 @@ import process from "node:process";
 import * as z from "zod/v4";
 import { consumerToolkitLockRemedy, planConsumerToolkitLock, PUBLISHED_CONSUMER_MINIMUM_VERSION, toolkitVersionOlderThan } from "./consumer-install.mjs";
 import { parseCssTokens, resolveTokens } from "./tokens.mjs";
+import { assertBinaryInstallation, readBinaryInstallation } from "./binary-installation.mjs";
 
 export const CONSUMER_MANIFEST_FILE = "timds.consumer.json";
 /** The record `consumer sync` leaves in the bundle directory: which version is there and which files. */
@@ -420,10 +421,10 @@ async function readBundleRecord(root) {
  * and recorded in `.timds/installation.json`. `required` names the ones whose
  * absence alone breaks a clone.
  */
-async function consumerCommittedFiles(repoRoot, mode) {
+async function consumerCommittedFiles(repoRoot, mode, binary = false) {
   const lockFile = existsSync(path.join(repoRoot, "npm-shrinkwrap.json")) ? "npm-shrinkwrap.json" : "package-lock.json";
   const files = new Set([CONSUMER_MANIFEST_FILE, "package.json", lockFile, CONSUMER_INSTALLATION_PATH]);
-  const required = new Set(mode === "published" ? ["package.json", lockFile] : []);
+  const required = new Set(binary ? [CONSUMER_INSTALLATION_PATH] : mode === "published" ? ["package.json", lockFile] : []);
   let record = null;
   try {
     record = JSON.parse(await fs.readFile(path.join(repoRoot, CONSUMER_INSTALLATION_PATH), "utf8"))?.consumer;
@@ -479,7 +480,7 @@ export async function loadConsumer(repoRootInput = process.cwd()) {
     linked,
     present: mode === "published" && !linked ? record !== null : existsSync(path.join(designSystemRoot, "timds.json")),
   };
-  return { repoRoot, manifestPath, manifest, apps: manifest.apps, designSystem };
+  return { repoRoot, manifestPath, manifest, apps: manifest.apps, designSystem, binaryInstallation: await readBinaryInstallation(repoRoot) };
 }
 
 /** The app entry named `name` (or the only app when `name` is omitted), with its absolute `cwd`. */
@@ -667,12 +668,14 @@ export async function checkConsumer(repoRootInput = process.cwd(), options = {})
     return { status: "failed", errors: [error.message], warnings, apps: [], repoRoot: null, designSystem: null, changes: [], previewApps: null };
   }
   const { designSystem, manifest, repoRoot } = consumer;
+  const binary = Boolean(consumer.binaryInstallation);
+  const invocation = binary ? "timds-cli" : "npm run timds --";
   const selected = options.app ? [resolveConsumerApp(consumer, options.app).name] : Object.keys(manifest.apps);
   errors.push(...await checkRequiredTokens(designSystem, options.requireTokens ?? []));
 
   if (designSystem.mode === "published") {
     try {
-      const locked = await planConsumerToolkitLock(repoRoot);
+      const locked = binary ? { version: null } : await planConsumerToolkitLock(repoRoot);
       if (locked.version && toolkitVersionOlderThan(locked.version, PUBLISHED_CONSUMER_MINIMUM_VERSION)) {
         errors.push(`${locked.path} locks @dtconcepts/timds@${locked.version}, which predates designSystem.version/url and consumer sync (requires ${PUBLISHED_CONSUMER_MINIMUM_VERSION} or newer). Refresh the lock before npm ci runs postinstall. Run: ${consumerToolkitLockRemedy()}`);
       }
@@ -681,18 +684,18 @@ export async function checkConsumer(repoRootInput = process.cwd(), options = {})
     }
     // A published pin keeps no Design System bytes in git: the sync record says what was fetched.
     if (designSystem.commit) {
-      errors.push(`${designSystem.path} is still a git submodule but ${CONSUMER_MANIFEST_FILE} pins a published version. Remove the submodule (git rm -r --cached ${designSystem.path}, drop it from .gitmodules) so npm install can fetch the bundle.`);
+      errors.push(`${designSystem.path} is still a git submodule but ${CONSUMER_MANIFEST_FILE} pins a published version. Remove the submodule (git rm -r --cached ${designSystem.path}, drop it from .gitmodules) so ${invocation} consumer sync can fetch the bundle.`);
     }
     if (designSystem.linked) {
       if (!designSystem.present) errors.push(`${designSystem.path} is a symbolic link but its target has no timds.json; point it at a Design System checkout.`);
       else warnings.push(`${designSystem.path} is a local Design System checkout; checking the working copy instead of published pin ${designSystem.version}.`);
     } else if (!designSystem.record) {
-      errors.push(`${designSystem.path} has no synced Design System bundle. Run: npm run timds -- consumer sync (npm install runs it from postinstall)`);
+      errors.push(`${designSystem.path} has no synced Design System bundle. Run: ${invocation} consumer sync${binary ? "" : " (npm install runs it from postinstall)"}`);
     } else {
       const record = designSystem.record;
       if (record.draft) warnings.push(`Local draft ${record.draft} (${record.revision}) overrides published pin ${designSystem.version}; consumer sync restores the production pin.`);
       if (designSystem.version !== "current" && record.version !== designSystem.version) {
-        errors.push(`${designSystem.path} holds Design System version ${record.version ?? "unknown"} but ${CONSUMER_MANIFEST_FILE} pins ${designSystem.version}. Run: npm run timds -- consumer sync`);
+        errors.push(`${designSystem.path} holds Design System version ${record.version ?? "unknown"} but ${CONSUMER_MANIFEST_FILE} pins ${designSystem.version}. Run: ${invocation} consumer sync`);
       }
       if (record.systemId && record.systemId !== designSystem.systemId) {
         warnings.push(`${CONSUMER_MANIFEST_FILE} designSystem.systemId is ${designSystem.systemId} but the synced bundle belongs to ${record.systemId}`);
@@ -700,7 +703,7 @@ export async function checkConsumer(repoRootInput = process.cwd(), options = {})
       for (const file of Array.isArray(record.files) ? record.files : []) {
         if (typeof file?.path !== "string" || file.path.split("/").some((segment) => !segment || segment === "..")) continue;
         if (!existsSync(path.join(designSystem.root, ...file.path.split("/")))) {
-          errors.push(`${designSystem.path}/${file.path} is missing from the synced bundle. Run: npm run timds -- consumer sync`);
+          errors.push(`${designSystem.path}/${file.path} is missing from the synced bundle. Run: ${invocation} consumer sync`);
           break;
         }
       }
@@ -732,10 +735,10 @@ export async function checkConsumer(repoRootInput = process.cwd(), options = {})
   // ignore pattern excludes exists locally, so every local command passes,
   // while the commit leaves it out and CI fails on the install. An untracked
   // file is the same hazard one step earlier, so it is named too.
-  const committed = await consumerCommittedFiles(repoRoot, designSystem.mode);
+  const committed = await consumerCommittedFiles(repoRoot, designSystem.mode, binary);
   const present = committed.files.filter((file) => existsSync(path.join(repoRoot, file)));
   for (const file of committed.required) {
-    if (!present.includes(file)) errors.push(`${file} is missing. A published pin is fetched by npm install (postinstall timds consumer sync), so the root package.json and its lockfile must be committed. Run timds consumer init --system ${designSystem.systemId} and commit what it writes.`);
+    if (!present.includes(file)) errors.push(binary ? `${file} is missing. Commit the exact binary installation record before using this consumer.` : `${file} is missing. A published pin is fetched by npm install (postinstall timds consumer sync), so the root package.json and its lockfile must be committed. Run timds consumer init --system ${designSystem.systemId} and commit what it writes.`);
   }
   const ignored = await gitIgnoredPaths(repoRoot, present);
   for (const entry of ignored) {
@@ -758,7 +761,7 @@ export async function checkConsumer(repoRootInput = process.cwd(), options = {})
       if (Array.isArray(recorded)) {
         designCatalog = { exists: true, designs: recorded.map((design) => ({ id: design.id, pages: (design.routes ?? []).map((route) => ({ route })) })) };
       } else {
-        warnings.push(`${designSystem.path} has no recorded website designs; republish the pinned release with the current toolkit and run npm run timds -- consumer sync to check the preview.designs pairings`);
+        warnings.push(`${designSystem.path} has no recorded website designs; republish the pinned release with the current toolkit and run ${invocation} consumer sync to check the preview.designs pairings`);
       }
     } else {
       const { readDesignCatalog } = await import("./designs.mjs");
@@ -914,6 +917,18 @@ export async function runConsumerCli(args = [], { env = process.env, output = de
   if (["help", "--help", "-h"].includes(subcommand)) {
     output(CONSUMER_HELP);
     return;
+  }
+  // Each subcommand still owns argument validation. Resolve just the shared
+  // root before dispatch so a globally installed CLI cannot silently move
+  // a consumer's selected release (including sync/update and preview).
+  if (["check", "sync", "update", "migrate", "preview", "notes", "init"].includes(subcommand) && !rest.some(value => ["--help", "-h"].includes(value))) {
+    const rootFlag = rest.findLastIndex(value => /^--?root(?:=|$)/.test(value));
+    const inlineRoot = rootFlag === -1 ? undefined : rest[rootFlag].split("=", 2)[1];
+    const root = rootFlag === -1 ? process.cwd() : inlineRoot ?? rest[rootFlag + 1];
+    if (root && !root.startsWith("--")) {
+      const consumerRoot = await findConsumerManifestRoot(root);
+      if (consumerRoot) await assertBinaryInstallation(consumerRoot, { allowNpm: subcommand === "init" });
+    }
   }
   if (subcommand === "sync" || subcommand === "update") {
     const { runConsumerSync, runConsumerUpdate } = await import("./consumer-sync.mjs");

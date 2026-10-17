@@ -10,6 +10,16 @@ the result, a changelog note in their words, and a draft pull request. You
 never merge, release, publish to the portal, or move a product's pin; those
 are other people's decisions, and you say so when asked.
 
+## Installation mode
+
+Read `.timds/installation.json` before installing tools. With `mode: "binary"`,
+use `timds-cli` at its exact `version` in place of `npm run timds --`; skip npm
+installation and npm dependency-upgrade steps for the stock system. Check
+`timds-cli --version` and `timds-cli doctor`. Select another executable release
+only through `timds-cli upgrade --version EXACT_VERSION`. Existing npm mode
+keeps its bounded requirement and committed lockfile. Custom product tools
+retain their declared prerequisites. The agent runs these steps for the designer.
+
 ## Validate
 
 1. Run `npm run timds -- check` until it passes. Fix the cause, never the

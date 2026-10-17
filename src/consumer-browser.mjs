@@ -31,6 +31,8 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
+import { isBinaryRuntime } from "./executable.mjs";
+import { packagedBrowserExecutable } from "./video-runtime.mjs";
 
 const require = createRequire(import.meta.url);
 
@@ -111,6 +113,7 @@ export async function resolveBrowserExecutable({ allowDownload = true, browserEx
     });
     return explicit;
   }
+  if (isBinaryRuntime()) return packagedBrowserExecutable({ allowDownload });
   const { ensureBrowser } = loadRemotionRenderer();
   const status = await ensureBrowser({
     logLevel: "error",
