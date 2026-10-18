@@ -819,7 +819,7 @@ export async function createDesignSystemReadMcpServer({ root = process.cwd(), pu
         const next = await prepareDraftSource({ systemId, draft, portalUrl, token, credentialsPath, fetchImpl, build, previous: prepared });
         if (prepared && next !== prepared) await prepared.dispose();
         prepared = next;
-        const workspace = await loadWorkspace(prepared.root);
+        const workspace = await loadWorkspace(prepared.root, { allowNpm: Boolean(prepared.binaryStock) });
         const layer = await readDerivedLayer(prepared.root, workspace.manifest);
         layer.source = { kind: "draft", draft, revision: prepared.snapshot.session.baseRevision };
         const { catalog } = await readMediaCatalog(prepared.root);

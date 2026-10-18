@@ -18,8 +18,18 @@ Keep package releases cohesive. A version must carry compatible CLI behavior,
 templates, workflows, and skill instructions together. Update or add tests
 whenever managed-file behavior changes.
 
-Client repositories select the bounded `0.1.x` package line, commit the exact
-resolved lockfile, and execute `npm run timds --`. They do not vendor package
+Npm client repositories select the bounded `0.1.x` package line, commit the exact
+resolved lockfile, and execute `npm run timds --`. Binary clients instead select
+an exact executable release in schema 2 `.timds/installation.json` with
+`mode: "binary"` and execute `timds-cli`. Its runtime and dependencies live in a
+verified per-user cache, never in the client repository. Binary adoption is an
+explicit `installation adopt --binary --apply` migration: it may rewrite only
+recognized stock `timds.json` workspace commands plus the managed boundary;
+authored docs, package pins, custom commands and product source are retained.
+`upgrade --version` selects the running verified binary release without replacing
+the executable, and restores the previous selection/files when checking fails.
+Binary-only consumers explicitly sync published bundles; existing npm hooks
+retain their product toolchain. See `docs/binary-installation.md` for the contract. They do not vendor package
 source. The always-managed repository-local boundary is
 `.timds/installation.json`, `.agents/skills/timds-edit-design-system/`,
 `.agents/skills/timds-create-video/`, the four designer skills

@@ -1,6 +1,8 @@
 // Dependency selection is explicit. Normal synchronization stays in core.mjs
 // (and consumer-init.mjs for product repositories); this command prepares
 // dependency and managed-file changes for review in either kind of repository.
+import { readBinaryInstallation, assertBinaryInstallation } from "./binary-installation.mjs";
+import { packageIdentity } from "./executable.mjs";
 import { execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
 import { createRequire } from "node:module";
@@ -37,6 +39,11 @@ export function validateLockedRuntime(lock, toolkit) {
 }
 
 export async function checkRuntimeDependencies({repoRoot, designSystemRoot}) {
+  if (await readBinaryInstallation(designSystemRoot)) {
+    await assertBinaryInstallation(designSystemRoot);
+    const toolkit = packageIdentity();
+    return {toolkit: toolkit.version, dependencies: Object.fromEntries(Object.entries(toolkit.dependencies).filter(([name]) => isRuntime(name)))};
+  }
   const pkg = await readJson(path.join(repoRoot, "package.json"));
   const lock = await readJson(path.join(repoRoot, "package-lock.json"));
   for (const key of ["dependencies", "devDependencies", "optionalDependencies"]) {

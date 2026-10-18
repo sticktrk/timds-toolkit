@@ -5,6 +5,19 @@ __CONTRACT_DESCRIPTION__ Read `timds.json`, this file, and the relevant source b
 Paths in this file are relative to the Design System root, the directory that
 holds `timds.json`. Run `__TIMDS_CLI__` commands from the repository root.
 
+## Installation mode
+
+The selected toolkit is recorded in `.timds/installation.json`. Binary mode
+(`schemaVersion: 2`, `mode: "binary"`) pins an exact `timds-cli` release and
+needs no separately installed Node or npm for stock commands. Use
+`timds-cli --version` and `timds-cli doctor` to compare running and selected
+versions. Npm-specific installation and dependency-upgrade steps below apply
+only to npm mode. For binary upgrades, install a checksum-verified executable,
+then run `timds-cli upgrade --version EXACT_VERSION`; executable replacement
+and workspace selection are separate. Existing npm systems preview migration
+with `timds-cli installation adopt --binary`, then explicitly use `--apply`.
+Authored documentation is not rewritten by adoption or upgrade.
+
 ## Who works here
 
 This repository is where designers do all of their design work: tokens,
