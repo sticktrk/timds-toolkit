@@ -17,8 +17,10 @@ complete LICENSE accompany the extracted runtime.
 
 This is a small CommonJS SEA launcher containing compressed filesystem assets,
 not a bundle of the application into the SEA module. It materializes the npm
-package, production dependencies, and an unmodified general-purpose Node
-interpreter, then runs `bin/timds.mjs`. That preserves ESM, dynamic imports,
+package, production dependencies, and a general-purpose Node interpreter from
+the pinned distribution, then runs `bin/timds.mjs`. macOS distribution signing
+replaces that interpreter's code signature without changing its implementation.
+That preserves ESM, dynamic imports,
 package export conditions, TSX registration, native dependencies and runtime
 filesystem discovery. The prototype demonstrated that stock viewer imports
 resolve without a local `node_modules`. Bun was not needed to address a
@@ -143,18 +145,124 @@ platform identities, the clean source commit and manifest/lockfile hashes, and v
 
 ## Signing
 
-Local builds and unconfigured CI produce **ad-hoc signed macOS executables,
-without notarization**; Linux executables are unsigned. SHA-256 verifies bytes
-against the release manifest, not publisher identity. Do not describe an
-ad-hoc signed download as Apple-notarized.
+Local builds and PR checks without signing credentials produce an **ad-hoc
+signed macOS launcher without notarization**; Linux executables are unsigned.
+SHA-256 verifies bytes against the release manifest, not publisher identity.
+Do not describe an ad-hoc build or a signed-only build as Apple-notarized.
 
-For Developer ID signing, configure release repository secrets
-`TIMDS_MACOS_CERTIFICATE_BASE64`, `TIMDS_MACOS_CERTIFICATE_PASSWORD` and
-`TIMDS_CODESIGN_IDENTITY`. The release-only reusable workflow imports the
-certificate into a temporary keychain, signs with the JIT entitlements in
-`scripts/binary-entitlements.plist`, and removes the keychain afterwards.
-Optional `TIMDS_NOTARY_APPLE_ID`, `TIMDS_NOTARY_TEAM_ID` and
-`TIMDS_NOTARY_PASSWORD` enable notarization and wait for Apple's result before
-smoke tests and upload. Command-line Mach-O executables have no stapled ticket;
-Gatekeeper retrieves the notarization record online. Signing/notarization changes
-are reflected in the build JSON. PR checks receive no release signing secrets.
+The release's Apple trust boundary includes both the SEA launcher and the native
+code it extracts. Signing the launcher alone does not sign its compressed Node,
+esbuild, compositor, FFmpeg libraries, or native addons. The macOS build therefore:
+
+1. Inventories every Mach-O file in the staged runtime, including shared libraries
+   and native addons regardless of filename extension. Remotion's sibling library
+   references are normalized to `@loader_path` before signing, so its media tools
+   can load their packaged libraries under hardened runtime without relying on
+   `DYLD_LIBRARY_PATH`. It signs the native files individually
+   with Developer ID, hardened runtime, and a secure timestamp. The Node
+   interpreter receives the runtime entitlements in
+   `scripts/binary-entitlements.plist`; helpers do not inherit those exceptions.
+   An unexpected native app or framework bundle stops the build until it has an
+   explicit signing policy. Signed FFmpeg, FFprobe and compositor startup probes
+   run before submission to catch native loader failures early.
+2. Submits the signed runtime in a ZIP that exposes its files to Apple's notary
+   service and requires an `Accepted` result. A custom compressed SEA asset is
+   not used as evidence that Apple inspected the extracted native code.
+3. Computes the payload manifest and content hash from the final signed bytes,
+   compresses them, and injects the payload into the launcher. No extracted file
+   is re-signed or modified at launch.
+4. Signs the final SEA launcher, submits it separately for notarization, and
+   requires `Accepted` before producing a notarized release. Smoke tests then
+   exercise the extracted signed runtime, including real video rendering.
+
+The two submissions concern different bytes: the native runtime before custom
+compression and the completed launcher after injection. A successful outer
+submission alone cannot establish the runtime's notarization status. Apple's
+[custom notarization workflow](https://developer.apple.com/documentation/security/customizing-the-notarization-workflow)
+describes this two-stage process for custom installers, ZIP submissions, and
+checking the service's result and log.
+
+The build fetches each submission's log, checks its archive SHA-256, and requires
+the ticket contents to cover every signed code-directory hash and architecture.
+The adjacent build JSON records the evidence:
+
+| Field | Meaning |
+| --- | --- |
+| `signed`, `signingTeamId` | Distribution signing mode and expected Apple team |
+| `nativeCode` | Every payload Mach-O's relative `path`, `teamIdentifier`, and verified `tickets` (`path`, `arch`, `cdhash`) |
+| `launcherCode` | The same verification record for the final SEA executable |
+| `payloadNotarization`, `notarization` | Payload and launcher reports with `status`, `submissionId`, `archiveSha256`, `ticketCount`, `verifiedCodeCount`, and `issues` |
+| `notarized` | True only when both submissions are accepted and every native code hash is covered |
+
+`notarizationSubmissionId` remains the outer submission ID. Unconfigured builds
+have no accepted reports; they cannot acquire notarized status from a successful
+upload command alone. Review any reported issues even when Apple accepts the
+submission. Native signatures and notary tickets establish publisher trust;
+the embedded file manifest separately verifies the extracted bytes on every run.
+
+### Signing credentials
+
+Configure these repository secrets for the macOS release job:
+
+| Secret | Value |
+| --- | --- |
+| `TIMDS_MACOS_CERTIFICATE_BASE64` | Base64-encoded PKCS#12 export containing the Developer ID Application certificate and its private key |
+| `TIMDS_MACOS_CERTIFICATE_PASSWORD` | Password protecting that PKCS#12 export |
+| `TIMDS_CODESIGN_IDENTITY` | The imported Developer ID Application signing identity |
+| `TIMDS_NOTARY_APPLE_ID` | Apple Account authorized for the developer team |
+| `TIMDS_NOTARY_TEAM_ID` | That Apple Developer team identifier |
+| `TIMDS_NOTARY_PASSWORD` | App-specific password for the account's notarytool authentication |
+
+Release jobs require all six secrets and accepted payload and launcher
+notarizations; missing configuration fails the release rather than publishing an
+ad-hoc fallback. PR and ordinary local builds remain available without secrets.
+
+The reusable workflow imports the certificate into a temporary keychain, creates
+a notarytool credential profile there, and removes the keychain afterwards. PR
+checks receive no release signing secrets. Credentials, certificates and private
+keys are not payload assets or build metadata. For a local signed build, the
+identity must already be available to `codesign`; set `TIMDS_CODESIGN_IDENTITY`
+and `TIMDS_NOTARY_PROFILE` to an existing notarytool profile, with
+`TIMDS_NOTARY_KEYCHAIN` when that profile is in a specific keychain.
+
+### Validate a notarized release
+
+The downloadable asset remains a raw command-line Mach-O executable. It cannot
+carry a stapled ticket, so first use needs access to Apple's online notarization
+records; offline first-launch support is not claimed. No PKG or DMG is required
+for this Terminal-based distribution. Apple's
+[custom notarization workflow](https://developer.apple.com/documentation/security/customizing-the-notarization-workflow)
+documents online ticket retrieval and the lack of stapling for standalone binaries.
+
+For each release, retain both accepted submission reports and `nativeCode` from
+the build metadata. Verify the launcher and each extracted native file with
+`codesign --verify --strict --verbose=2`, inspect their Developer ID authority,
+team and timestamp with `codesign --display --verbose=4`, and check the online
+notarization record with:
+
+```sh
+codesign -vvvv -R='notarized' --check-notarization "$NATIVE_FILE"
+```
+
+Run these checks on the installed bytes, using the exact cache directory produced
+by a fresh `TIMDS_BINARY_CACHE`. Require the report's `signingTeamId` for every
+member; an intact signature from another publisher does not establish that this
+release signed its payload. Browser downloads remain separately supplied files
+in the browser cache and are not part of this inventory.
+
+Then run both smoke drivers against the same final executable from outside the
+checkout, with source `node_modules` absent. The stock proof exercises the
+embedded Node and MCP/draft children. The video proof exercises esbuild,
+Remotion's native compositor and media tools, six real shared/snapshot/override
+renders, Studio, and browser capture. Keep those results with the signing report.
+
+Finally, use a fresh supported Mac or VM, download the release through Safari so
+quarantine is present, keep it online, and run it from Terminal as a user would.
+Verify the checksum, run `--version`, initialize/check a stock system, and render
+a small video. A development machine's cached trust or a successful `curl`
+download is not this test. Do not clear quarantine or disable Gatekeeper to make
+it pass. Reset the VM before repeating. Apple recommends this end-user test and
+the `codesign` check for non-app code in
+[Testing a Notarised Product](https://developer.apple.com/forums/thread/130560);
+`spctl` or app-only `syspolicy_check` output is not the release's sole acceptance
+criterion.
