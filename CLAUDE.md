@@ -227,3 +227,22 @@ behavior.
 - Zod is imported as `zod/v4`.
 - Local `.env` files hold portal and R2 credentials and are ignored; tests must
   not depend on them.
+
+### Standalone executable distribution
+
+`npm run binary:build` packages the same npm allowlist and exact production
+lockfile with Node 24.22.0 as a native `timds-cli` SEA. `src/executable.mjs`
+distinguishes CLI re-entry from JavaScript execution and owns resource/runtime
+paths. The SEA materializes a validated external per-user cache; it never copies
+engine code into a client repository. `src/binary-installation.mjs` owns exact
+binary selections (`schemaVersion: 2`, `mode: "binary"`). Explicit
+`installation adopt --binary --apply` migrates stock workspace commands and
+managed skills/automation, retaining npm pins and authored docs; ordinary
+`upgrade --version EXACT_VERSION` selects the already installed executable.
+Npm installations retain the bounded requirement and resolved lockfile.
+
+Run `npm run binary:smoke` and `npm run binary:smoke:video` after a binary build.
+Native macOS arm64 and Linux x64 CI runs the complete suite and these clean-PATH
+checks before either release path publishes. See `docs/binary-installation.md`
+and `docs/binary-packaging.md` for installation, migration, cache integrity,
+platform floors, external prerequisites and actual signing status.

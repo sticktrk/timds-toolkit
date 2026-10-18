@@ -1,0 +1,22 @@
+      - name: Install the exact TimDS executable
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(jq -er 'select(.schemaVersion == 2 and .mode == "binary" and .executable == "timds-cli") | .version' .timds/installation.json)"
+          [[ "$version" =~ ^0\.1\.[0-9]+$ ]] || { echo "Invalid binary toolkit release pin" >&2; exit 1; }
+          asset="timds-cli-v${version}-linux-x64"
+          release="https://github.com/sticktrk/timds-toolkit/releases/download/v${version}"
+          directory="$(mktemp -d "$RUNNER_TEMP/timds-binary.XXXXXX")"
+          trap 'rm -rf "$directory"' EXIT
+          curl --fail --location --retry 3 "$release/$asset" --output "$directory/$asset"
+          curl --fail --location --retry 3 "$release/SHA256SUMS" --output "$directory/SHA256SUMS"
+          (cd "$directory" && awk -v asset="$asset" '$2 == asset { print; found = 1 } END { if (!found) exit 1 }' SHA256SUMS | sha256sum --check --strict -)
+          mkdir -p "$HOME/.local/bin"
+          install -m 755 "$directory/$asset" "$HOME/.local/bin/timds-cli"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Fetch the published Design System pin
+        shell: bash
+        run: |
+          if jq -e '.designSystem.version != null' timds.consumer.json >/dev/null; then
+            timds-cli consumer sync
+          fi

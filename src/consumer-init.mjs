@@ -8,9 +8,11 @@
 // discovered one directory down, plus the repository root when its
 // package.json has a dev, start, preview, or build script, with guessed
 // install, serve, port, and design surface for a developer to confirm),
-// selects the toolkit in the root package.json (and, for a published pin,
+// In npm mode, selects the toolkit in the root package.json (and, for a published pin,
 // `postinstall: timds consumer sync` so the bundle arrives with every
-// install), and installs the consumer-managed files:
+// install). Binary mode records the exact executable release, directly syncs
+// published bundles, and leaves package files and product install hooks alone.
+// Both install the consumer-managed files:
 //
 //   .agents/skills/timds-consume-design-system/   the designer-facing skill,
 //                                                 product half rendered from
@@ -58,6 +60,8 @@ import { resolvePublishedBundle, syncConsumerBundle } from "./consumer-sync.mjs"
 import { planConsumerToolkitLock, resolveConsumerToolkitLock, runConsumerNpm } from "./consumer-install.mjs";
 import { acceptsToolkitReleaseRange, runtimeIdentity, toolkitReleaseRange } from "./runtime.mjs";
 import { linkClaudeSkills } from "./agent-skills.mjs";
+import { isBinaryRuntime } from "./executable.mjs";
+import { assertBinaryInstallation, binaryInstallationRecord, readBinaryInstallation } from "./binary-installation.mjs";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -102,7 +106,13 @@ once unless --skip-install. A missing or older toolkit lock is resolved to
 the running release, keeping the bounded dependency range. --skip-install
 refuses an older lock; rerun without it to refresh the lock first.
 Without --system, the product must already carry
-the Design System as the design-system git submodule.`;
+the Design System as the design-system git submodule.
+
+The standalone timds-cli records its exact release in .timds/installation.json
+and fetches published bundles directly, without changing package.json or
+running a package manager. --skip-install skips that first bundle sync.
+Existing npm consumers adopt explicitly with installation adopt --binary;
+product install/build commands and existing npm hooks keep their semantics.`;
 
 const DEFAULT_POSTINSTALL = "timds consumer sync";
 
@@ -342,7 +352,7 @@ function list(values) {
   return values.map(code).join(", ");
 }
 
-function appSection(name, app) {
+function appSection(name, app, invocation = "npm run timds --") {
   const cwd = app.cwd === "." ? "repository root" : `${code(`${app.cwd}/`)}`;
   const preview = app.preview;
   const lines = [`### ${code(name)}`, ""];
@@ -351,7 +361,7 @@ function appSection(name, app) {
   if (preview.serve) {
     lines.push(`- Run locally: the ${code(name)} entry in ${code(CONSUMER_LAUNCH_PATH)} (${code(preview.serve.join(" "))}), then open http://localhost:${preview.port}${preview.ready || "/"}.`);
   } else {
-    lines.push(`- Run locally: build with ${code(preview.build.join(" "))} (output in ${code(`${preview.output}/`)}), or from repository root run ${code(`npm run timds -- consumer preview --app ${name}`)} and open ${code(`.timds/preview/${name}/index.html`)}.`);
+    lines.push(`- Run locally: build with ${code(preview.build.join(" "))} (output in ${code(`${preview.output}/`)}), or from repository root run ${code(`${invocation} consumer preview --app ${name}`)} and open ${code(`.timds/preview/${name}/index.html`)}.`);
   }
   if (preview.routes?.length) lines.push(`- Review routes: ${list(preview.routes)}.`);
   const designs = Object.entries(preview.designs || {});
@@ -365,12 +375,14 @@ function appSection(name, app) {
 }
 
 /** The skill paragraphs that differ by pin mode: how the system arrives and what must never be touched. */
-function pinSections(designSystem) {
+function pinSections(designSystem, binary = false) {
   const dsPath = designSystem.path;
   if (consumerPinMode(designSystem) === "published") {
     const pin = designSystem.version === "current" ? "the current published version" : `version ${designSystem.version}`;
     return {
-      __PIN_SETUP__: `Run \`npm ci\` at repository root; its \`postinstall\` fetches the pinned\n   Design System bundle (${pin}) into \`${dsPath}/\`. If that directory is\n   empty, run \`npm run timds -- consumer sync\`.`,
+      __PIN_SETUP__: binary
+        ? `Run \`timds-cli consumer sync\` to fetch the pinned Design System bundle (${pin}) into \`${dsPath}/\`. Product install and build commands remain the ones declared below.`
+        : `Run \`npm ci\` at repository root; its \`postinstall\` fetches the pinned\n   Design System bundle (${pin}) into \`${dsPath}/\`. If that directory is\n   empty, run \`npm run timds -- consumer sync\`.`,
       __PIN_UPDATE__: `The product pins a published version (${pin}) in \`timds.consumer.json\`.\nMove it to the release the designers handed off, or to the current one:\n\n\`\`\`bash\nnpm run timds -- consumer update            # the current published release\nnpm run timds -- consumer update 2026.10.12-1   # a named release\n\`\`\`\n\nIt rewrites \`designSystem.version\` and fetches that version's bundle into\n\`${dsPath}/\` (ignored by git). Commit the manifest change. Never edit files\nunder \`${dsPath}/\`; \`npm ci\` recreates them from the pin.`,
       __PIN_RULES__: `- \`${dsPath}/\` holds the published bundle of \`__SYSTEM_ID__\` at the version\n  \`timds.consumer.json\` pins, fetched by \`npm install\` and ignored by git.\n  Never edit, commit, or add files under it, and never change\n  \`designSystem.version\`. Moving the pin is a separate developer decision\n  (\`timds consumer update\`).\n- Never copy Design System stylesheets, fonts, or images into the product.\n  Reference what the app already loads from \`${dsPath}/\`.`,
       __DERIVED_LAYER__: `- The published system is one URL away: the \`describe_system\` tool names\n  it, and \`${dsPath}/.timds-bundle.json\` records the version and files that\n  were fetched. Read \`llms.txt\` at the published prefix for the brand\n  essentials (colors, fonts and where to get them, logos, asset formats),\n  \`brand.json\` and \`tokens.json\` beside it for the details. These are\n  published output: read them, never edit them.`,
@@ -398,9 +410,26 @@ export async function renderConsumerSkill(manifest, options = {}) {
 export async function renderConsumerSkillFile(skillName, manifest, options = {}) {
   const validated = validateConsumerManifest(manifest);
   const source = await fs.readFile(path.join(packageRoot, "skills", skillName, "SKILL.md"), "utf8");
-  const apps = Object.entries(validated.apps).map(([name, app]) => appSection(name, app)).join("\n\n");
+  const binary = options.mode === "binary";
+  const invocation = binary ? "timds-cli" : "npm run timds --";
+  const apps = Object.entries(validated.apps).map(([name, app]) => appSection(name, app, invocation)).join("\n\n");
   let text = source;
-  for (const [placeholder, replacement] of Object.entries(pinSections(validated.designSystem))) text = text.replace(placeholder, () => replacement);
+  for (const [placeholder, replacement] of Object.entries(pinSections(validated.designSystem, binary))) text = text.replace(placeholder, () => replacement);
+  if (binary) {
+    text = text.replaceAll("npm run timds --", "timds-cli")
+      .replaceAll("fetched by npm install", "fetched by timds-cli consumer sync")
+      .replaceAll("fetched by `npm install`", "fetched by `timds-cli consumer sync`")
+      .replaceAll("`npm ci` recreates them from the pin", "`timds-cli consumer sync` recreates them from the pin");
+    // The submodule has its own installation contract; adopting the product
+    // does not migrate that separately pinned repository.
+    if (consumerPinMode(validated.designSystem) === "submodule") {
+      const dsPath = validated.designSystem.path;
+      text = text.replace("matches the pin, then `npm ci` at repository root.", "matches the pin. Use the product install commands declared below.")
+        .replace(`Then \`npm --prefix ${dsPath} ci\` and \`npm --prefix ${dsPath} run timds -- check\``, `Build the pin using its own installation record: \`timds-cli check --root ${dsPath}\` with its exact binary release, or \`npm --prefix ${dsPath} ci\` and \`npm --prefix ${dsPath} run timds -- check\` for an npm installation,`)
+        .replace(`- After \`npm --prefix ${dsPath} ci\` and\n  \`npm --prefix ${dsPath} run timds -- check\`, the derived layer`, "- After building the pinned system with its own selected toolkit, the derived layer");
+    }
+    text = text.replace("## Start\n", "## Start\n\nThis product selects an exact TimDS executable release in `.timds/installation.json`.\nUse `timds-cli` for its TimDS commands; keep the product's declared toolchain.\nA submodule Design System keeps its own installation mode and version.\n");
+  }
   return text
     .replaceAll("__SYSTEM_ID__", () => validated.designSystem.systemId)
     .replaceAll("__DESIGN_SYSTEM_PATH__", () => validated.designSystem.path)
@@ -444,9 +473,25 @@ export async function consumerManagedFiles(manifest, options = {}) {
     };
     await walk(skillRoot);
   }
-  files.push({ path: CONSUMER_WORKFLOW_PATH, content: await template("timds-consumer-preview.yml") });
-  files.push({ path: CONSUMER_DESIGNER_WORKFLOW_PATH, content: await template("timds-designer-change.yml") });
+  files.push({ path: CONSUMER_WORKFLOW_PATH, content: await consumerWorkflow("timds-consumer-preview.yml", options) });
+  files.push({ path: CONSUMER_DESIGNER_WORKFLOW_PATH, content: await consumerWorkflow("timds-designer-change.yml", options) });
   return files;
+}
+
+/** Binary consumers retain product commands while installing only the pinned CLI for TimDS. */
+export async function consumerWorkflow(name, { mode = "npm" } = {}) {
+  const source = await template(name);
+  if (mode !== "binary") return source;
+  const install = await template("consumer-binary-install.yml");
+  return source
+    .replaceAll("npm run timds --", "timds-cli")
+    .replaceAll("a published pin is fetched by npm ci", "a published pin is fetched by consumer sync")
+    .replaceAll("npm ci fetches the pinned version.", "consumer sync fetches the pinned version.")
+    .replaceAll(`$(node -p "require('./timds.consumer.json').designSystem?.path || 'design-system'")`, `$(jq -r '.designSystem.path // "design-system"' timds.consumer.json)`)
+    .replaceAll(`$(node -e "process.stdout.write(JSON.stringify(Object.keys(require('./timds.consumer.json').apps)))")`, "$(jq -c '.apps | keys' timds.consumer.json)")
+    .replaceAll("          cache: npm\n", "")
+    .replaceAll("          node-version: 22\n", "          node-version: 22\n          package-manager-cache: false\n")
+    .replaceAll("      - run: npm ci\n", install);
 }
 
 /**
@@ -625,8 +670,8 @@ async function planGitignoreLines(repoRoot, lines) {
  * record of the previous installation. Shared by init and upgrade so both
  * apply the same rules; nothing is written here.
  */
-async function planConsumerManagedState(repoRoot, manifest, previous, { defaultBranch, force, portalUrl }) {
-  const files = await consumerManagedFiles(manifest, { defaultBranch });
+async function planConsumerManagedState(repoRoot, manifest, previous, { defaultBranch, force, portalUrl, mode = "npm" }) {
+  const files = await consumerManagedFiles(manifest, { defaultBranch, mode });
   const filePlan = await planManagedFiles(repoRoot, files, previous.managedFiles || {}, force);
   const launchPlan = await planLaunch(repoRoot, await consumerLaunchConfigurations(manifest), previous.launchConfigurations || {}, force);
   const mcpPlan = await planMcp(repoRoot, consumerMcpServers({ portalUrl }), previous.mcpServers || {}, force);
@@ -660,20 +705,26 @@ async function refuseIgnoredPaths(repoRoot, paths, command) {
  * it or requiring its pin to be in the index yet. Migration uses this before
  * removing the submodule; force applies only to the installation's files.
  */
-export async function planConsumerInstallation(repoRoot, manifest, { force = false, portalUrl = null, command = "timds consumer init" } = {}) {
+export async function planConsumerInstallation(repoRoot, manifest, { force = false, portalUrl = null, command = "timds consumer init", mode = null } = {}) {
+  await assertBinaryInstallation(repoRoot, { allowNpm: true });
   const validated = validateConsumerManifest(manifest);
   const installationPath = path.join(repoRoot, CONSUMER_INSTALLATION_PATH);
-  const installation = (await readJsonFile(installationPath, CONSUMER_INSTALLATION_PATH)) ?? {};
+  let installation = (await readJsonFile(installationPath, CONSUMER_INSTALLATION_PATH)) ?? {};
+  mode ??= installation.mode === "binary" || isBinaryRuntime() ? "binary" : "npm";
+  if (mode === "binary" && installation.consumer && installation.mode !== "binary") {
+    throw new Error("This consumer uses an npm installation. Adopt explicitly with timds-cli installation adopt --binary --apply before running binary init.");
+  }
   const previous = installation.consumer && typeof installation.consumer === "object" ? installation.consumer : {};
   const defaultBranch = await consumerDefaultBranch(repoRoot);
   const { files, filePlan, launchPlan, mcpPlan } = await planConsumerManagedState(repoRoot, validated, previous, {
-    defaultBranch, force, portalUrl: portalUrl ?? await installedPortalUrl(repoRoot),
+    defaultBranch, force, mode, portalUrl: portalUrl ?? await installedPortalUrl(repoRoot),
   });
   refuseCustomizedFiles(filePlan.conflicts, command);
   const published = consumerPinMode(validated.designSystem) === "published";
-  const packagePlan = await planPackageJson(repoRoot, force, { published, command });
-  const toolkitLockPlan = published ? await planConsumerToolkitLock(repoRoot) : null;
+  const packagePlan = mode === "binary" ? { changed: false, created: false } : await planPackageJson(repoRoot, force, { published, command });
+  const toolkitLockPlan = published && mode !== "binary" ? await planConsumerToolkitLock(repoRoot) : null;
   const gitignorePlan = await planGitignoreLines(repoRoot, ["node_modules/", ".timds/preview/", ...(published ? [`${validated.designSystem.path}/`] : [])]);
+  if (mode === "binary") installation = binaryInstallationRecord(installation);
   installation.consumer = consumerInstallationRecord(files, launchPlan, mcpPlan);
   const writes = [
     ...filePlan.writes,
@@ -685,8 +736,8 @@ export async function planConsumerInstallation(repoRoot, manifest, { force = fal
   ];
   // The manifest, package, and lock are checked even when unchanged: a kept
   // one that git ignores is as absent from a clone as a new one.
-  await refuseIgnoredPaths(repoRoot, [CONSUMER_MANIFEST_FILE, "package.json", ...(toolkitLockPlan ? [toolkitLockPlan.path] : []), ...writes.map((file) => file.path)], command);
-  return { writes, defaultBranch, launchPlan, mcpPlan, packagePlan, toolkitLockPlan, installation: installation.consumer };
+  await refuseIgnoredPaths(repoRoot, [CONSUMER_MANIFEST_FILE, ...(mode === "binary" ? [] : ["package.json"]), ...(toolkitLockPlan ? [toolkitLockPlan.path] : []), ...writes.map((file) => file.path)], command);
+  return { writes, mode, defaultBranch, launchPlan, mcpPlan, packagePlan, toolkitLockPlan, installation: installation.consumer };
 }
 
 /** Finish dependency preflight before writing a manifest or removing a submodule. */
@@ -734,7 +785,7 @@ async function resolvePublishedPin({ system, version, url, fetchImpl }) {
  * on a conflicting toolkit declaration, when git ignores a file it would
  * write, or on customized managed files unless `force`.
  */
-export async function initializeConsumer(rootInput = process.cwd(), { force = false, skipInstall = false, portalUrl = DEFAULT_PORTAL_URL, system = null, version = null, url = null, draftPreview = false, fetchImpl = fetch, runNpm = runConsumerNpm, output = () => {} } = {}) {
+export async function initializeConsumer(rootInput = process.cwd(), { force = false, skipInstall = false, portalUrl = DEFAULT_PORTAL_URL, system = null, version = null, url = null, draftPreview = false, mode = null, fetchImpl = fetch, runNpm = runConsumerNpm, output = () => {} } = {}) {
   const repoRoot = await findGitRoot(rootInput);
   const manifestPath = path.join(repoRoot, CONSUMER_MANIFEST_FILE);
   const existingRaw = await readJsonFile(manifestPath, CONSUMER_MANIFEST_FILE);
@@ -772,8 +823,10 @@ export async function initializeConsumer(rootInput = process.cwd(), { force = fa
     if (old && old !== moduleContent && !force) throw new Error(`${modulePath} already exists; use --force to replace this preview module`);
     await refuseIgnoredPaths(repoRoot, [modulePath, ...(previewPlan.html ? ['index.html'] : [])], 'timds consumer init');
   }
-  const plan = await planConsumerInstallation(repoRoot, manifest, { force, portalUrl });
+  const plan = await planConsumerInstallation(repoRoot, manifest, { force, portalUrl, mode });
   const { defaultBranch, launchPlan, mcpPlan, packagePlan } = plan;
+  const binary = plan.mode === "binary";
+  const invocation = binary ? "timds-cli" : "npm run timds --";
   await prepareConsumerInstallation(repoRoot, plan, { skipInstall, runNpm, output });
 
   const written = [];
@@ -824,8 +877,8 @@ export async function initializeConsumer(rootInput = process.cwd(), { force = fa
     ...todos.flatMap(({ app, items }) => items.map((item) => `${app}: ${item}`)),
     ...(published
       ? [
-        `${designSystemPath}/ is the published bundle of ${published.systemId} at ${published.version === "current" ? "the current release" : `version ${published.version}`}, fetched by npm install (postinstall) and ignored by git; never commit it. Move the pin with npm run timds -- consumer update [VERSION]`,
-        ...(skipInstall ? [`Run npm install (or npm run timds -- consumer sync) to fetch the bundle into ${designSystemPath}/`] : []),
+        `${designSystemPath}/ is the published bundle of ${published.systemId} at ${published.version === "current" ? "the current release" : `version ${published.version}`}, fetched by ${binary ? "timds-cli consumer sync" : "npm install (postinstall)"} and ignored by git; never commit it. Move the pin with ${invocation} consumer update [VERSION]`,
+        ...(skipInstall ? [`Run ${binary ? "timds-cli consumer sync" : "npm install (or npm run timds -- consumer sync)"} to fetch the bundle into ${designSystemPath}/`] : []),
       ]
       : []),
     "Automatic previews are off by default; to enable them, set the TIMDS_PREVIEWS_ENABLED repository variable to true and add the TIMDS_ACCESS_TOKEN repository secret",
@@ -836,7 +889,7 @@ export async function initializeConsumer(rootInput = process.cwd(), { force = fa
     `For designer changes: create the ${CONSUMER_DESIGN_CHANGE_LABEL} label, set the TIMDS_DESIGNER_BOTS repository variable to the TimDS portal's GitHub App bot login (comma-separated if more than one), and allow GitHub Actions to create pull requests (Settings > Actions > General)`,
     `${CONSUMER_MCP_PATH} reads the Design System through the portal with TIMDS_ACCESS_TOKEN from the environment; export it locally to use the ${CONSUMER_MCP_SERVER_NAME} tools`,
     `After editing ${CONSUMER_MANIFEST_FILE}, rerun timds consumer init so the skill's product section and the launch entries match it`,
-    `Commit ${CONSUMER_MANIFEST_FILE}, package.json, the lockfile, and the managed files; then run npm run timds -- consumer check`,
+    `Commit ${CONSUMER_MANIFEST_FILE}, ${binary ? "the exact executable pin" : "package.json, the lockfile"}, and the managed files; then run ${invocation} consumer check`,
   ];
   output("");
   output("For the developer to confirm:");
@@ -887,18 +940,20 @@ async function installedPortalUrl(repoRoot) {
  */
 export async function upgradeConsumer(rootInput = process.cwd(), { force = false, output = () => {} } = {}) {
   const repoRoot = await findGitRoot(rootInput);
+  await assertBinaryInstallation(repoRoot);
   const manifest = await readJsonFile(path.join(repoRoot, CONSUMER_MANIFEST_FILE), CONSUMER_MANIFEST_FILE);
   if (!manifest) throw new Error(`No ${CONSUMER_MANIFEST_FILE} at ${repoRoot}. Run timds consumer init to adopt TimDS in this product repository.`);
   validateConsumerManifest(manifest);
   const installationPath = path.join(repoRoot, CONSUMER_INSTALLATION_PATH);
-  const installation = (await readJsonFile(installationPath, CONSUMER_INSTALLATION_PATH)) ?? {};
+  let installation = (await readJsonFile(installationPath, CONSUMER_INSTALLATION_PATH)) ?? {};
+  const mode = installation.mode === "binary" ? "binary" : "npm";
   const previous = installation.consumer;
   if (!previous || typeof previous !== "object" || Array.isArray(previous)) {
     throw new Error(`${repoRoot} has no TimDS consumer installation record (consumer in ${CONSUMER_INSTALLATION_PATH}). Run timds consumer init first; upgrade only refreshes the files init installed.`);
   }
   const defaultBranch = await consumerDefaultBranch(repoRoot);
   const portalUrl = await installedPortalUrl(repoRoot);
-  const { files, filePlan, launchPlan, mcpPlan } = await planConsumerManagedState(repoRoot, manifest, previous, { defaultBranch, force, portalUrl });
+  const { files, filePlan, launchPlan, mcpPlan } = await planConsumerManagedState(repoRoot, manifest, previous, { defaultBranch, force, portalUrl, mode });
   refuseCustomizedFiles(filePlan.conflicts, "timds upgrade");
   await refuseIgnoredPaths(repoRoot, [
     ...filePlan.writes.map((file) => file.path),
@@ -923,6 +978,7 @@ export async function upgradeConsumer(rootInput = process.cwd(), { force = false
   for (const file of retired.filter((entry) => entry.status === "removed")) await fs.rm(path.join(repoRoot, file.path), { force: true });
   if (launchPlan.changed) await writeFile(launchPlan.launchPath, launchPlan.content);
   if (mcpPlan.changed) await writeFile(mcpPlan.mcpPath, mcpPlan.content);
+  if (mode === "binary") installation = binaryInstallationRecord(installation);
   installation.consumer = consumerInstallationRecord(files, launchPlan, mcpPlan);
   await writeFile(installationPath, toJson(installation));
 
@@ -952,6 +1008,50 @@ export async function upgradeConsumer(rootInput = process.cwd(), { force = false
     mcpServers: mcpPlan.statuses,
     installation: installation.consumer,
   };
+}
+
+/** Explicitly adopt the binary managed boundary; product source, package hooks and pins stay authored. */
+export async function adoptConsumerBinary(rootInput = process.cwd(), { apply = false, force = false, output = () => {} } = {}) {
+  const repoRoot = await findGitRoot(rootInput);
+  const manifest = await readJsonFile(path.join(repoRoot, CONSUMER_MANIFEST_FILE), CONSUMER_MANIFEST_FILE);
+  if (!manifest) throw new Error(`No ${CONSUMER_MANIFEST_FILE} at ${repoRoot}. Run timds-cli consumer init first.`);
+  validateConsumerManifest(manifest);
+  const installation = (await readJsonFile(path.join(repoRoot, CONSUMER_INSTALLATION_PATH), CONSUMER_INSTALLATION_PATH)) ?? {};
+  if (!installation.consumer) throw new Error("This product has no consumer installation record; run consumer init before adopting its managed files.");
+  const selected = await readBinaryInstallation(repoRoot);
+  if (selected && selected.version !== runtimeIdentity.version) throw new Error(`Workspace already selects ${selected.version}; use timds-cli upgrade --version ${runtimeIdentity.version} to change releases.`);
+  const { files, filePlan, launchPlan, mcpPlan } = await planConsumerManagedState(repoRoot, manifest, installation.consumer, {
+    defaultBranch: await consumerDefaultBranch(repoRoot), force, portalUrl: await installedPortalUrl(repoRoot), mode: "binary",
+  });
+  refuseCustomizedFiles(filePlan.conflicts, "timds-cli installation adopt --binary --apply");
+  const next = binaryInstallationRecord(installation);
+  next.consumer = consumerInstallationRecord(files, launchPlan, mcpPlan);
+  const writes = [
+    ...filePlan.writes,
+    ...(launchPlan.changed ? [{ path: CONSUMER_LAUNCH_PATH, content: launchPlan.content }] : []),
+    ...(mcpPlan.changed ? [{ path: CONSUMER_MCP_PATH, content: mcpPlan.content }] : []),
+    ...(toJson(next) !== toJson(installation) ? [{ path: CONSUMER_INSTALLATION_PATH, content: toJson(next) }] : []),
+  ];
+  await refuseIgnoredPaths(repoRoot, writes.map(file => file.path), "timds-cli installation adopt --binary");
+  for (const file of writes) output(`  ${apply ? "write" : "would write"} ${file.path}`);
+  if (apply) {
+    // Restore the whole managed plan if a write fails; no package-manager or
+    // product script runs during adoption.
+    const previous = await Promise.all(writes.map(file => readText(path.join(repoRoot, file.path))));
+    try {
+      for (const file of writes) await writeFile(path.join(repoRoot, file.path), file.content);
+    } catch (error) {
+      for (let index = writes.length - 1; index >= 0; index -= 1) {
+        const file = path.join(repoRoot, writes[index].path);
+        if (previous[index] === null) await fs.rm(file, { force: true });
+        else await writeFile(file, previous[index]);
+      }
+      throw error;
+    }
+  }
+  output(`Consumer toolkit release: ${runtimeIdentity.version}; product commands and npm hooks keep their declared toolchain.`);
+  if (!apply) output("Review these paths, then run timds-cli installation adopt --binary --apply.");
+  return { repoRoot, changed: writes.length > 0, applied: apply, files: writes.map(file => file.path), installation: next };
 }
 
 function parseInitArguments(argv) {

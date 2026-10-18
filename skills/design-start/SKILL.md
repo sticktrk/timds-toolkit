@@ -10,6 +10,16 @@ building, branching, and reading the state of the system. Never hand the
 designer a command to run, except the one-time browser sign-in that only
 they can complete.
 
+## Installation mode
+
+Read `.timds/installation.json` before installing tools. With `mode: "binary"`,
+use `timds-cli` at its exact `version` in place of `npm run timds --`; skip npm
+installation and npm dependency-upgrade steps for the stock system. Check
+`timds-cli --version` and `timds-cli doctor`. Select another executable release
+only through `timds-cli upgrade --version EXACT_VERSION`. Existing npm mode
+keeps its bounded requirement and committed lockfile. Custom product tools
+retain their declared prerequisites. The agent runs these steps for the designer.
+
 ## Get the workspace running
 
 1. Read the repository's `AGENTS.md` completely. It holds the rules; the

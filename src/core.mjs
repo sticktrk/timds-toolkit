@@ -1,3 +1,5 @@
+import { isBinaryRuntime, javascriptCommand, packageIdentity, runtimeEnvironment } from "./executable.mjs";
+import { assertBinaryInstallation, binaryInstallationRecord, binaryWorkspaceCommand, isStockWorkspace, readBinaryInstallation, readInstallation, renderBinaryInstructions, requireBinaryRelease, stockWorkspaceCommands, withBinarySelection, withFileRollback } from "./binary-installation.mjs";
 import { hasContractGroups, migrateContractGroups, syncContractViews } from "./contract-groups.mjs";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { spawn } from "node:child_process";
@@ -205,8 +207,16 @@ export function execute(command, options = {}) {
       forward(child.stdout, (chunk) => { stdout = (stdout + chunk).slice(-20_000); });
       forward(child.stderr, (chunk) => { stderr = (stderr + chunk).slice(-20_000); });
     }
-    child.on("error", reject);
-    child.on("close", (code) => {
+    const signals = ["SIGINT", "SIGTERM"];
+    const handlers = signals.map(signal => { const handler = () => child.kill(signal); process.on(signal, handler); return handler; });
+    const cleanup = () => signals.forEach((signal, index) => process.removeListener(signal, handlers[index]));
+    child.on("error", error => {
+      cleanup();
+      reject(error.code === "ENOENT" ? Object.assign(new Error(`Required command ${JSON.stringify(command[0])} is unavailable. Install the tool declared by this workspace, or explicitly migrate stock commands with timds-cli installation adopt --binary --apply.`, { cause: error }), {code: error.code}) : error);
+    });
+    child.on("close", (code, signal) => {
+      cleanup();
+      if (signal) { reject(Object.assign(new Error(`${command[0]} stopped by ${signal}`), {signal})); return; }
       if (code !== 0 && !options.allowFailure) {
         reject(commandError(command, code, redirect ? stderr || stdout : stderr));
         return;
@@ -413,9 +423,10 @@ async function readJsonObject(filePath, label, { required = true } = {}) {
   }
 }
 
-export async function loadWorkspace(repoRootInput = process.cwd(), { editing = false } = {}) {
+export async function loadWorkspace(repoRootInput = process.cwd(), { editing = false, allowVersionMismatch = false, allowNpm = false } = {}) {
   const repoRoot = await findRepositoryRoot(repoRootInput);
   const { designSystemRoot, layout, scopePath } = resolveDesignSystemRoot(repoRoot);
+  await assertBinaryInstallation(designSystemRoot, { allowMismatch: allowVersionMismatch, allowNpm: allowNpm || allowVersionMismatch });
   const manifestPath = path.join(designSystemRoot, "timds.json");
   const manifest = validateManifest(await readJsonObject(manifestPath, "timds.json"));
   const contractGroups = editing ? await hasContractGroups(designSystemRoot) : await syncContractViews(designSystemRoot);
@@ -508,7 +519,7 @@ async function runWorkspaceCommand(workspace, commandName, options = {}) {
   const command = workspace.manifest.workspace[commandName];
   if (!command) return false;
   output(`Running ${commandName}: ${command.join(" ")}`);
-  await execute(command, { cwd: workspace.designSystemRoot, ...options });
+  await execute(binaryWorkspaceCommand(command), { cwd: workspace.designSystemRoot, ...options });
   return true;
 }
 
@@ -709,6 +720,128 @@ async function copyDirectory(source, destination, { created = null, overwrite = 
   }
 }
 
+async function renderBinarySkillDirectory(directory) {
+  for (const entry of await fs.readdir(directory, {withFileTypes: true})) {
+    const file = path.join(directory, entry.name);
+    if (entry.isDirectory()) await renderBinarySkillDirectory(file);
+    else if (entry.isFile() && entry.name.endsWith('.md')) await fs.writeFile(file, renderBinaryInstructions(await fs.readFile(file, 'utf8')));
+  }
+}
+async function automationTemplate(name, binary = false) {
+  if (!binary) return template(name);
+  if (['timds-standalone.yml', 'timds-design-system.yml'].includes(name)) return template(name.replace('.yml', '-binary.yml'));
+  if (name === 'starter/scripts/release.mjs') return (await template(name)).replace('execFileSync("node",', 'execFileSync(process.execPath,');
+  if (name === 'starter/scripts/release.sh') return '#!/usr/bin/env bash\nset -euo pipefail\ncd "$(dirname "$0")/.."\nexec timds-cli run scripts/release.mjs "$@"\n';
+  return template(name);
+}
+async function skillFileContents(root) {
+  const files = {};
+  async function walk(directory) {
+    let entries;
+    try { entries = await fs.readdir(directory, {withFileTypes: true}); } catch (error) { if (error.code === 'ENOENT') return; throw error; }
+    for (const entry of entries) {
+      const file = path.join(directory, entry.name);
+      if (entry.isDirectory()) await walk(file);
+      else if (entry.isFile()) files[path.relative(root, file).split(path.sep).join('/')] = await fs.readFile(file);
+      else throw new Error(`Managed skills must contain regular files: ${file}`);
+    }
+  }
+  for (const name of designSystemSkillNames) await walk(path.join(root, '.agents/skills', name));
+  return files;
+}
+async function preflightBinarySkills(workspace, previous, force) {
+  if (force) return;
+  for (const [relative, bytes] of Object.entries(await skillFileContents(workspace.repoRoot))) {
+    const hash = createHash('sha256').update(bytes).digest('hex');
+    if (previous.skillFiles?.[relative] === hash) continue;
+    const source = relative.replace('.agents/', '');
+    const candidates = [path.join(packageRoot, source), path.join(workspace.repoRoot, 'node_modules/@dtconcepts/timds', source)];
+    let stock = false;
+    for (const candidate of candidates) {
+      try {
+        const content = await fs.readFile(candidate);
+        if (bytes.equals(content) || bytes.equals(Buffer.from(renderBinaryInstructions(content.toString())))) stock = true;
+      } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    }
+    if (!stock) throw new Error(`Refusing customized managed skill ${relative}; review it, then explicitly use --force to replace it.`);
+  }
+}
+function binaryRollbackPaths(workspace) {
+  return [workspace.manifestPath, ...['.timds/contract-layout.json', 'tokens', 'media', 'tokens.json', 'media.json', 'dist'].map(file => path.join(workspace.designSystemRoot, file)), ...starterSyncPaths.map(file => path.join(workspace.designSystemRoot, file)),
+    path.join(workspace.designSystemRoot, '.timds/installation.json'), path.join(workspace.designSystemRoot, '.timds/cli'), path.join(workspace.repoRoot, '.claude/skills'),
+    ...designSystemSkillNames.map(name => path.join(workspace.repoRoot, '.agents/skills', name)),
+    ...standaloneReleaseAutomationFiles.map(([file]) => path.join(workspace.repoRoot, file)),
+    path.join(workspace.repoRoot, '.github/workflows/timds-upgrade.yml'), path.join(workspace.repoRoot, 'package.json')];
+}
+async function requireCleanMigration(workspace) {
+  const provider = await workspaceProvider(workspace.repoRoot);
+  if (provider?.kind === 'hosted') return;
+  const result = await git(['status', '--porcelain', '--untracked-files=all'], workspace.repoRoot, {allowFailure: true});
+  if (result.code !== 0) throw new Error('Binary adoption and version selection need a Git checkout or a hosted workspace.');
+  if (result.stdout.trim()) throw new Error('Binary adoption and version selection require a clean working tree; commit or restore changes first.');
+}
+async function runInstallationCommand(root, positional, options) {
+  if (positional[0] !== 'adopt' || !options.binary) throw new Error('Usage: timds-cli installation adopt --binary [--apply] [--force] [--root PATH]');
+  requireBinaryRelease(runtimeIdentity.version);
+  const {findConsumerManifestRoot} = await import('./consumer.mjs');
+  const consumerRoot = await findConsumerManifestRoot(root);
+  if (consumerRoot && !existsSync(path.join(consumerRoot, 'timds.json'))) {
+    const {adoptConsumerBinary} = await import('./consumer-init.mjs');
+    return adoptConsumerBinary(consumerRoot, {apply: Boolean(options.apply && !options.dryRun), force: Boolean(options.force), output});
+  }
+  return withBinarySelection(async () => {
+    const workspace = await loadWorkspace(root, {editing: true});
+    const previous = await readInstallation(workspace.designSystemRoot) || {};
+    if (previous.mode === 'binary') {
+      await readBinaryInstallation(workspace.designSystemRoot);
+      if (previous.version !== runtimeIdentity.version) throw new Error(`Workspace already selects ${previous.version}; use upgrade --version ${runtimeIdentity.version} to change releases.`);
+      output('Binary execution is already adopted.');
+      return {applied: false, changed: []};
+    }
+    await preflightBinarySkills(workspace, previous, options.force);
+    if (previous.dependencyAutomation) throw new Error('Remove the opted-in npm dependency-PR workflow and its installation.dependencyAutomation record in a reviewed change before binary adoption; binary releases are selected explicitly.');
+    const stock = await isStockWorkspace(workspace.designSystemRoot, workspace.manifest);
+    const changed = ['.timds/installation.json', ...designSystemSkillNames.map(name => `.agents/skills/${name}/`),
+      ...(stock ? ['timds.json (stock workspace commands)'] : []), ...(previous.releaseAutomation ? standaloneReleaseAutomationFiles.map(([file]) => file) : [])];
+    for (const file of changed) output(`Binary adoption: ${file}`);
+    if (!stock) output('Custom workspace commands and scripts are preserved; they retain their declared toolchain.');
+    if (!options.apply || options.dryRun) { output('Review this plan; apply with timds-cli installation adopt --binary --apply.'); return {applied: false, changed, stock}; }
+    await requireCleanMigration(workspace);
+    // Preflight automation before any mutation; authored docs and npm pins remain untouched.
+    const plans = previous.releaseAutomation ? await Promise.all(standaloneReleaseAutomationFiles.map(([relative, name]) => planReleaseAutomationFile(workspace.repoRoot, relative, name, {force: options.force, managedHash: previous.managedFiles?.[relative], legacyHashes: legacyStandaloneAutomationHashes.get(relative) || []}))) : [];
+    return withFileRollback(binaryRollbackPaths(workspace), async () => {
+      if (stock) {
+        const manifest = JSON.parse(await fs.readFile(workspace.manifestPath, 'utf8'));
+        manifest.workspace = {...manifest.workspace, ...structuredClone(stockWorkspaceCommands)};
+        await fs.writeFile(workspace.manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+      }
+      for (const plan of plans.filter(file => file.needsUpdate)) { await fs.mkdir(path.dirname(plan.destination), {recursive: true}); await fs.writeFile(plan.destination, plan.desired); }
+      await installManagedToolkit({designSystemRoot: workspace.designSystemRoot, repoRoot: workspace.repoRoot, replace: true, binary: true});
+      await checkWorkspace(workspace.repoRoot);
+      output(`Adopted binary TimDS ${runtimeIdentity.version}. Commit the reviewed migration.`);
+      return {applied: true, changed, stock};
+    });
+  });
+}
+async function upgradeBinaryRepository(root, options) {
+  const workspace = await loadWorkspace(root, {editing: true, allowVersionMismatch: true});
+  const previous = await readBinaryInstallation(workspace.designSystemRoot);
+  requireBinaryRelease(options.version || previous.version);
+  if (options.ownRuntime) throw new Error('--own-runtime is an npm dependency migration; binary execution uses its packaged graph.');
+  if (options.dependencyPrs) throw new Error('Binary release selection is explicit: install the reviewed executable, then upgrade --version EXACT_VERSION. --dependency-prs manages npm dependency PRs.');
+  await preflightBinarySkills(workspace, previous, options.force);
+  if (options.version) await requireCleanMigration(workspace);
+  return withBinarySelection(() => withFileRollback(binaryRollbackPaths(workspace), async () => {
+    const result = await upgradeRepository(root, {autoRelease: options.autoRelease, decideCustomized: terminalPlumbingPrompt(), force: options.force});
+    await checkWorkspace(root);
+    const defaults = await syncDefaults(result);
+    if (defaults.changed.length) output(`Publishing defaults: ${defaults.changed.length} change(s) available. Run timds-cli defaults to review, then timds-cli defaults --apply.`);
+    output(`TimDS binary selection: ${previous.version} -> ${runtimeIdentity.version}. Review and commit the managed changes.`);
+    for (const line of result.starter ? describeStarterSync(result.starter) : []) output(line);
+    return result;
+  }));
+}
+
 async function template(name) {
   return fs.readFile(path.join(packageRoot, "templates", name), "utf8");
 }
@@ -758,7 +891,7 @@ async function readInstallationMetadata(designSystemRoot) {
   return readJsonObject(path.join(designSystemRoot, ".timds", "installation.json"), "TimDS installation", { required: false });
 }
 
-async function installManagedToolkit({ designSystemRoot, releaseAutomation, dependencyAutomation, repoRoot, replace = false }) {
+async function installManagedToolkit({ designSystemRoot, releaseAutomation, dependencyAutomation, repoRoot, replace = false, binary = isBinaryRuntime() }) {
   const installedIdentity = await toolkitPackageIdentity();
   const paths = managedToolkitPaths(repoRoot, designSystemRoot);
   const previousInstallation = await readInstallationMetadata(designSystemRoot);
@@ -767,11 +900,12 @@ async function installManagedToolkit({ designSystemRoot, releaseAutomation, depe
     const destination = paths.skillDestinations[index];
     if (replace) await fs.rm(destination, { force: true, recursive: true });
     await copyDirectory(path.join(packageRoot, "skills", name), destination, { overwrite: replace });
+    if (binary) await renderBinarySkillDirectory(destination);
   }
   await linkClaudeSkills(repoRoot);
   await fs.mkdir(path.dirname(paths.installationPath), { recursive: true });
   const selectedReleaseAutomation = releaseAutomation ?? previousInstallation.releaseAutomation;
-  const installation = { name: installedIdentity.name, schemaVersion: 1, version: installedIdentity.version };
+  const installation = binary ? binaryInstallationRecord() : { name: installedIdentity.name, schemaVersion: 1, version: installedIdentity.version };
   if (previousInstallation.runtimeDependencyOwnership) installation.runtimeDependencyOwnership = previousInstallation.runtimeDependencyOwnership;
   if (selectedReleaseAutomation) installation.releaseAutomation = selectedReleaseAutomation;
   const selectedDependencyAutomation = dependencyAutomation ?? previousInstallation.dependencyAutomation;
@@ -782,9 +916,10 @@ async function installManagedToolkit({ designSystemRoot, releaseAutomation, depe
     ...(selectedDependencyAutomation ? dependencyAutomationFiles : []),
   ];
   for (const [relative, templateName] of trackedAutomation) {
-    managedFiles[relative] = createHash("sha256").update(await template(templateName)).digest("hex");
+    managedFiles[relative] = createHash("sha256").update(await automationTemplate(templateName, binary)).digest("hex");
   }
   if (trackedAutomation.length) installation.managedFiles = managedFiles;
+  if (binary) installation.skillFiles = Object.fromEntries(Object.entries(await skillFileContents(repoRoot)).map(([file, bytes]) => [file, createHash("sha256").update(bytes).digest("hex")]));
   await fs.writeFile(
     paths.installationPath,
     `${JSON.stringify(installation, null, 2)}\n`,
@@ -793,9 +928,9 @@ async function installManagedToolkit({ designSystemRoot, releaseAutomation, depe
   return { ...paths, package: installedIdentity };
 }
 
-async function planReleaseAutomationFile(repoRoot, relativePath, templateName, { force = false, legacyHashes = [], managedHash } = {}) {
+async function planReleaseAutomationFile(repoRoot, relativePath, templateName, { force = false, legacyHashes = [], managedHash, binary = isBinaryRuntime() } = {}) {
   const destination = path.join(repoRoot, relativePath);
-  const desired = await template(templateName);
+  const desired = await automationTemplate(templateName, binary);
   let current = null;
   try {
     current = await fs.readFile(destination, "utf8");
@@ -825,9 +960,9 @@ async function planStandaloneReleaseAutomation(repoRoot, { force = false, manage
 
   const packagePath = path.join(repoRoot, "package.json");
   const packageJson = await readJsonObject(packagePath, "repository package.json");
-  const expectedTestScript = "node --test scripts/prepare-merge-release.test.mjs";
+  const expectedTestScript = isBinaryRuntime() ? "timds-cli run --test scripts/prepare-merge-release.test.mjs" : "node --test scripts/prepare-merge-release.test.mjs";
   const currentTestScript = packageJson.scripts?.["test:release"];
-  if (currentTestScript && currentTestScript !== expectedTestScript && !force) {
+  if (currentTestScript && currentTestScript !== expectedTestScript && !(isBinaryRuntime() && currentTestScript === "node --test scripts/prepare-merge-release.test.mjs") && !force) {
     throw new Error(`package.json scripts.test:release is already ${JSON.stringify(currentTestScript)}; rerun with --auto-release --force to replace it`);
   }
   return { expectedTestScript, files, packageJson, packagePath, testScriptChanged: currentTestScript !== expectedTestScript };
@@ -857,6 +992,19 @@ async function configurePackageManifest(repoRoot, identity, { force = false, ini
     packageJson.private = true;
   }
   if (initializeRelease) packageJson.version = initialVersion;
+  if (isBinaryRuntime()) {
+    if (!force && packageJson.scripts?.timds && packageJson.scripts.timds !== "timds-cli") throw new Error("package.json scripts.timds is customized; review it or use init --force to select timds-cli");
+    packageJson.scripts = { ...(packageJson.scripts || {}), timds: "timds-cli" };
+    if (initializeRelease) {
+      packageJson.scripts["check:versions"] = "timds-cli run scripts/check-versions.mjs";
+      packageJson.scripts.release = "timds-cli run scripts/release.mjs";
+      packageJson.scripts["test:release"] = "timds-cli run --test scripts/prepare-merge-release.test.mjs";
+    }
+    await fs.writeFile(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`);
+    const lockPath = path.join(repoRoot, "package-lock.json");
+    if (!existsSync(lockPath) && !packageJson.dependencies && !packageJson.devDependencies) await fs.writeFile(lockPath, `${JSON.stringify({name: packageJson.name, version: packageJson.version, lockfileVersion: 3, requires: true, packages: {"": {name: packageJson.name, version: packageJson.version}}}, null, 2)}\n`);
+    return packagePath;
+  }
   const releaseRange = toolkitReleaseRange(identity);
   const currentDependency = packageJson.devDependencies?.[identity.name] ?? packageJson.dependencies?.[identity.name];
   const currentScript = packageJson.scripts?.timds;
@@ -919,6 +1067,7 @@ export async function initializeRepository(repoRootInput, {
   const designSystemRoot = standalone ? repoRoot : path.join(repoRoot, "design-system");
   const manifestPath = path.join(designSystemRoot, "timds.json");
   const createsContract = !existsSync(manifestPath);
+  if (!createsContract) await assertBinaryInstallation(designSystemRoot);
   if (!createsContract && (name || systemId || description !== undefined)) {
     const existing = JSON.parse(await fs.readFile(manifestPath, "utf8"));
     if ((name && existing.name !== name.trim()) || (systemId && existing.systemId !== systemId) || (description !== undefined && existing.description !== description)) {
@@ -961,6 +1110,7 @@ export async function initializeRepository(repoRootInput, {
     .replaceAll("__PUBLISH_REF__", standalone ? ',\n    "publishRef": "timds-published"' : "")
     .replaceAll("__CONSUMER__", consumerConfig));
   if (provider) manifest.provider = provider;
+  if (isBinaryRuntime()) manifest.workspace = structuredClone(stockWorkspaceCommands);
   manifest.name = name.trim() || `${path.basename(repoRoot)} Design System`;
   manifest.systemId = systemId || `${repoSlug}/core`;
   if (description !== undefined) manifest.description = description;
@@ -973,11 +1123,11 @@ export async function initializeRepository(repoRootInput, {
   }
   await ensureGitignoreLine(path.join(repoRoot, ".gitignore"), "node_modules/", created);
   if (standalone) await ensureGitignoreLine(path.join(designSystemRoot, ".gitignore"), "dist/", created);
-  const cliCommand = "npm run timds --";
+  const cliCommand = isBinaryRuntime() ? "timds-cli" : "npm run timds --";
   const contractDescription = standalone
     ? "This repository is the editable source and static publication contract for TimDS."
     : "This root `design-system/` directory is the editable source and static publication contract for TimDS.";
-  const renderTemplate = (content) => content
+  const renderTemplate = (content) => (isBinaryRuntime() ? renderBinaryInstructions(content) : content)
     .replaceAll("__TIMDS_CLI__", cliCommand)
     .replaceAll("__CONTRACT_DESCRIPTION__", contractDescription)
     .replaceAll("__DIST_PATH__", standalone ? "dist/" : "design-system/dist/")
@@ -993,10 +1143,13 @@ export async function initializeRepository(repoRootInput, {
     // toolkit wrote lets every later `upgrade` refresh the starter's plumbing
     // and structure without guessing what the client has changed.
     created.push(await recordFreshStarter(designSystemRoot, identity.version));
+    if (isBinaryRuntime()) for (const name of ['starter/scripts/release.mjs', 'starter/scripts/release.sh']) {
+      await fs.writeFile(path.join(designSystemRoot, name.replace('starter/', '')), await automationTemplate(name, true));
+    }
   }
   if (!hosted) await writeIfMissing(
     path.join(repoRoot, ".github", "workflows", "timds-design-system.yml"),
-    await template(standalone ? "timds-standalone.yml" : "timds-design-system.yml"),
+    await automationTemplate(standalone ? "timds-standalone.yml" : "timds-design-system.yml", isBinaryRuntime()),
     created,
   );
   if (standalone && !hosted) {
@@ -1009,8 +1162,8 @@ export async function initializeRepository(repoRootInput, {
 
   if (hosted) {
     const packageJson = JSON.parse(await fs.readFile(packagePath, "utf8"));
-    packageJson.devDependencies.wrangler = "^4.135.0";
-    packageJson.scripts["build:preview"] = "npm run timds -- check";
+    if (!isBinaryRuntime()) packageJson.devDependencies.wrangler = "^4.135.0";
+    packageJson.scripts["build:preview"] = isBinaryRuntime() ? "timds-cli check" : "npm run timds -- check";
     await fs.writeFile(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`);
     await writeIfMissing(path.join(repoRoot, "wrangler.jsonc"), `${JSON.stringify({ name: repoSlug, compatibility_date: "2026-10-12", assets: { directory: "./dist" }, previews: {} }, null, 2)}\n`, created);
     await writeIfMissing(path.join(repoRoot, "_headers"), "/*\n  X-Robots-Tag: noindex\n", created);
@@ -1030,12 +1183,12 @@ export async function initializeRepository(repoRootInput, {
 export async function upgradeRepository(repoRootInput, { autoRelease = false, decideCustomized = null, dependencyPrs = false, force = false } = {}) {
   const workspace = await loadWorkspace(repoRootInput);
   const identity = await toolkitPackageIdentity();
-  await requirePinnedToolkitDependency(workspace.repoRoot, identity);
+  if (!await readBinaryInstallation(workspace.designSystemRoot)) await requirePinnedToolkitDependency(workspace.repoRoot, identity);
   if (autoRelease && workspace.layout !== "standalone") {
     throw new Error("--auto-release is supported only by standalone TimDS repositories");
   }
   const paths = managedToolkitPaths(workspace.repoRoot, workspace.designSystemRoot);
-  if (!force) {
+  if (!force && (await workspaceProvider(workspace.repoRoot))?.kind !== "hosted") {
     const pathspecs = [paths.legacyVendoredCliRoot, paths.installationPath, ...paths.skillDestinations, path.join(workspace.designSystemRoot, ...STARTER_RECORD_FILE.split("/"))]
       .map((filePath) => path.relative(workspace.repoRoot, filePath).split(path.sep).join("/"));
     const status = await git(["status", "--porcelain", "--untracked-files=all", "--", ...pathspecs], workspace.repoRoot);
@@ -1090,6 +1243,7 @@ export async function upgradeRepository(repoRootInput, { autoRelease = false, de
  * its own. A workspace that is not a git checkout has nothing to compare.
  */
 async function requireCleanStarterFiles(workspace) {
+  if ((await workspaceProvider(workspace.repoRoot))?.kind === "hosted") return;
   const toplevel = await git(["rev-parse", "--show-toplevel"], workspace.repoRoot, { allowFailure: true });
   if (toplevel.code !== 0) return;
   const pathspecs = starterSyncPaths.map((relative) => path.relative(workspace.repoRoot, path.join(workspace.designSystemRoot, ...relative.split("/"))).split(path.sep).join("/"));
@@ -1297,6 +1451,13 @@ async function upgradeConsumerRepository(root, options) {
   if (unsupported.length) {
     throw new Error(`${unsupported.join(", ")} ${unsupported.length === 1 ? "applies" : "apply"} only to Design System repositories; ${consumerRoot} is a consumer (${CONSUMER_MANIFEST_FILE}). Run timds upgrade${options.version ? ` --version ${options.version}` : ""} without ${unsupported.length === 1 ? "it" : "them"}.`);
   }
+  const binary = await readBinaryInstallation(consumerRoot);
+  if (binary) {
+    requireBinaryRelease(options.version || binary.version);
+    const {upgradeConsumer} = await import("./consumer-init.mjs");
+    return withBinarySelection(() => upgradeConsumer(consumerRoot, {force: Boolean(options.force), output}));
+  }
+  if (isBinaryRuntime()) await assertBinaryInstallation(consumerRoot);
   if (options.version) {
     const result = await upgradeConsumerToRelease(consumerRoot, { version: options.version, force: options.force });
     output(`Prepared TimDS ${result.version} for consumer ${consumerRoot}; review the package, lockfile, and managed-file changes, then run npm run timds -- consumer check`);
@@ -1320,7 +1481,7 @@ function parseArguments(argv) {
     const rawName = separator < 0 ? argument : argument.slice(0, separator);
     const inlineValue = separator < 0 ? undefined : argument.slice(separator + 1);
     const name = ({ m: "message", p: "port" })[rawName] || rawName.replace(/-([a-z])/g, (_match, letter) => letter.toUpperCase());
-    if (["json", "apply", "autoRelease", "dryRun", "force", "global", "help", "list", "ownRuntime", "dependencyPrs", "noBuild", "noOpen", "noBrowser", "oauth", "device", "noPr", "noPush", "plan", "prepare", "publish", "render", "requireCleanDist", "serve", "silent", "skipBuild", "skipPush", "standalone", "yes"].includes(name)) {
+    if (["json", "apply", "binary", "autoRelease", "dryRun", "force", "global", "help", "list", "ownRuntime", "dependencyPrs", "noBuild", "noOpen", "noBrowser", "oauth", "device", "noPr", "noPush", "plan", "prepare", "publish", "render", "requireCleanDist", "serve", "silent", "skipBuild", "skipPush", "standalone", "yes"].includes(name)) {
       options[name] = true;
       continue;
     }
@@ -1500,11 +1661,19 @@ function machineSummary({ counts }) {
 }
 
 function helpText() {
-  return `TimDS design-system workflow — humans direct; agents edit\n\nUsage:\n  timds init [--root PATH] [--standalone] [--name NAME] [--system-id ID] [--description TEXT] [--json] [--consumer-repository OWNER/REPO] [--consumer-branch BRANCH] [--consumer-path PATH] [--force]\n  timds start SYSTEM [--root PATH] [--portal-url URL] [--on GLOB,...] [--draft NAME]\n  timds pull|update|status|history [--root PATH] [--json]\n  timds update --resolve PATH[#KEY=mine|theirs] [--resolve ...] [--note INTENT]\n  timds sessions close [--root PATH]\n  timds join SESSION|STUDIO-LINK [--root PATH] [--portal-url URL] [--principal-id ID]\n  timds whoami [--portal-url URL] [--json]\n  timds principals [--system-id ID] [--json]\n  timds claim --on GLOB,... [--note INTENT]\n  timds active-work [--system-id ID]\n  timds draft create NAME [--from main|VERSION] [--system-id ID]\n  timds draft list|close [NAME] [--system-id ID]\n  timds upgrade [--root PATH] [--auto-release] [--dependency-prs] [--force]\n  timds upgrade --version VERSION [--own-runtime] [--root PATH]\n  timds dependencies check [--root PATH]\n  timds login [--token TOKEN] [--portal-url URL]\n  timds auth login [--portal-url URL] [--oauth|--device] [--force] [--no-browser] [--client-id ID] [--scope SCOPES] [--timeout-seconds N]\n  timds rollback VERSION [--system-id ID] [--dry-run] [--yes]\n  timds auth status [--portal-url URL]\n  timds auth logout [--portal-url URL]\n  timds skills install [--root PATH | --global] [--portal-url URL --system-id ID [--system-name NAME] [--studio-url URL]] [--force]\n  timds defaults [--root PATH] [--apply]\n  timds designs init [--root PATH] [--force]\n  timds starter sync [--root PATH] [--force PATH...]\n  timds doctor [--root PATH]\n  timds brand [--root PATH] [--json]\n  timds dev [--root PATH] [--port PORT]\n  timds check [--root PATH] [--skip-build] [--require-clean-dist]\n  timds extract [--root PATH] [--skip-build] [--publish]\n  timds publish [--submission ID] [--dry-run] [--yes] [--root PATH] [--skip-build] [--skip-push] [--portal-url URL] [--json]\n  timds preview [--root PATH] [--port 4400] [--no-build]\n  timds diff [--root PATH] [--base origin/main]\n  timds assets list [--root PATH]\n  timds assets add FILE [--key LOGICAL_KEY] [--title TEXT] [--tags a,b]\n  timds assets backfill-metadata [--root PATH] [--force]\n  timds assets publish [--root PATH]\n  timds assets pull KEY [--output PATH] [--force]\n  timds video --help\n  timds mcp [edit] [--root PATH]\n  timds mcp read [--root PATH | --published URL | --draft NAME --system-id ID --portal-url URL]\n  timds submit --message "Change summary" [--dry-run] [--no-push] [--no-pr]\n  timds consumer check [--root PATH] [--app NAME] [--base REF]\n  timds consumer sync [--root PATH]\n  timds consumer update [VERSION | --draft NAME] [--portal-url URL] [--root PATH]\n  timds consumer migrate [--version VERSION] [--url URL] [--root PATH] [--force] [--skip-sync]\n  timds consumer preview --app NAME [--root PATH] [--base REF] [--output DIR] [--publish] [--pull-request N]\n  timds consumer init [--root PATH] [--system ID] [--version VERSION] [--url URL] [--force] [--skip-install] [--portal-url URL]\n  timds consumer scaffold emdash --root PATH --design-system GIT_URL [--stylesheet PATH]... [--site-url URL] [--skip-install]\n  timds consumer notes [--root PATH] [--app NAME] [--pull-request N] [--all] [--json]\n  timds consumer notes resolve ID [ID...] [--commit SHA] [--dismiss]\n\nCheck and extract derive index.json, tokens.json, brand.json (each font role with the files or font service that provide it), formats.json (from src/formats.json when the system keeps one), llms.txt (the brand essentials and the page directory), llms-full.txt, and per-page Markdown from the built artifact so agents, pipelines, and anyone given the system's public link can read the system without scraping HTML or CSS. Brand prints the derived brand kit in plain language with a fix for every gap. Extract --publish uploads the index, tokens, brand kit, formats, llms.txt, llms-full.txt, the per-page Markdown mirrors, a .timds-artifact.json provenance stamp, and the artifact files the index and the kit reference (logos, imagery, font files) to the system's stable CDN prefix through the portal, so pipelines and agents consume the system from one stable URL. A manifest with bundle.include globs also gets a consumer bundle: the stylesheets, scripts, and assets a website loads, copied into the artifact under their source paths with a bundle.json of digests, and published under the current prefix and an immutable v/<version>/ prefix a website pins. Large public media is copied into ignored media-local/ for authoring. assets add measures timed-media duration and dimensions before upload; backfill-metadata repairs older catalogs from their stable public URLs without re-uploading them. Designs init adds the website-designs contract to an existing Design System: whole pages under src/designs/ in plain HTML on the system's stylesheets, built to /designs/ and checked for portability, so an engineer can port them to any production stack; a fresh scaffold already has it. Starter sync brings a starter-based system up to the installed release's scaffold and opts it into doing so on every upgrade: stock scripts and viewer stylesheets are refreshed while unmodified, new views, planned pages, and asset formats are merged into src/site.json and src/formats.json without touching what the client declared, and the overview fragments the starter mirrors are written for views the sync adds; in a terminal the sync asks about each customized stock script or stylesheet (keep, replace with stock, or see the diff first), otherwise they are reported and replaced only when --force names them one by one (an overview fragment this system wrote is never replaced), the sync refuses to run over uncommitted changes to the files it writes, and it is rolled back if check fails afterwards. Video-enabled systems keep client rules and production data in the Design System while TimDS owns validation, voiceover orchestration, Remotion rendering, and packaging. Mcp serves the Design System editing tools (guide, workspace description, guarded file reads and writes, check, derived layer, media catalog) over stdio for an MCP-capable agent; protected tooling and generated paths stay read-only. Mcp read serves the consumer read tools (brand roles, tokens, guidance search, pages, media catalog, gap reports) over the derived layer of the current checkout or of a published base URL. Hosted agent commands: start, pull, submit, update, claim, join, active-work, draft, and sessions close. Hosted submit freezes a submission with a preview. Humans use login, status, history, publish, and rollback in Studio. Skills install copies the designer skills an agent works from (the editing procedure, design-start, design-media, design-ship, design-handoff, and, with --portal-url and --system-id, the hosted skill rendered for that design system) into .agents/skills, .claude/skills, and .cursor/skills of the current folder or, with --global, of the home folder, recording digests in .timds/skills.json so a rerun at @latest refreshes unmodified files and keeps edits unless --force. Git-provider submit creates a draft pull request. Consumer commands run in a product repository that pins a Design System (a published version fetched by npm install into the gitignored design-system directory, or the design-system git submodule) and declares its apps in timds.consumer.json: check validates the manifest, the pin, and that a branch only touches the declared design surface; sync fetches the pinned published bundle, verifying every digest, and update moves the pin to a version or the current release; migrate replaces the submodule with a published pin at the version the checkout declared, removing the gitlink, .gitmodules entry, and checkout, and lists the product files that still mention the submodule; preview captures each app's routes for review; init writes the manifest skeleton (with --system ID, a published pin and the postinstall sync), the consumer skill, the preview and designer-change workflows, and the read MCP entry; scaffold emdash creates a new EmDash CMS site repository that pins a Design System as that submodule, reads its stylesheets and tokens from the pin, and is adopted the way init adopts a product; notes lists the designer's notes on a pull request's preview and resolves them once addressed.`;
+  return `TimDS design-system workflow — humans direct; agents edit\n\nUsage:\n  timds-cli --version\n  timds-cli installation adopt --binary [--apply] [--force] [--root PATH]\n  timds-cli run FILE [ARGS...]\n  timds init [--root PATH] [--standalone] [--name NAME] [--system-id ID] [--description TEXT] [--json] [--consumer-repository OWNER/REPO] [--consumer-branch BRANCH] [--consumer-path PATH] [--force]\n  timds start SYSTEM [--root PATH] [--portal-url URL] [--on GLOB,...] [--draft NAME]\n  timds pull|update|status|history [--root PATH] [--json]\n  timds update --resolve PATH[#KEY=mine|theirs] [--resolve ...] [--note INTENT]\n  timds sessions close [--root PATH]\n  timds join SESSION|STUDIO-LINK [--root PATH] [--portal-url URL] [--principal-id ID]\n  timds whoami [--portal-url URL] [--json]\n  timds principals [--system-id ID] [--json]\n  timds claim --on GLOB,... [--note INTENT]\n  timds active-work [--system-id ID]\n  timds draft create NAME [--from main|VERSION] [--system-id ID]\n  timds draft list|close [NAME] [--system-id ID]\n  timds upgrade [--root PATH] [--auto-release] [--dependency-prs] [--force]\n  timds upgrade --version VERSION [--own-runtime] [--root PATH]\n  timds dependencies check [--root PATH]\n  timds login [--token TOKEN] [--portal-url URL]\n  timds auth login [--portal-url URL] [--oauth|--device] [--force] [--no-browser] [--client-id ID] [--scope SCOPES] [--timeout-seconds N]\n  timds rollback VERSION [--system-id ID] [--dry-run] [--yes]\n  timds auth status [--portal-url URL]\n  timds auth logout [--portal-url URL]\n  timds skills install [--root PATH | --global] [--portal-url URL --system-id ID [--system-name NAME] [--studio-url URL]] [--force]\n  timds defaults [--root PATH] [--apply]\n  timds designs init [--root PATH] [--force]\n  timds starter sync [--root PATH] [--force PATH...]\n  timds doctor [--root PATH]\n  timds brand [--root PATH] [--json]\n  timds dev [--root PATH] [--port PORT]\n  timds check [--root PATH] [--skip-build] [--require-clean-dist]\n  timds extract [--root PATH] [--skip-build] [--publish]\n  timds publish [--submission ID] [--dry-run] [--yes] [--root PATH] [--skip-build] [--skip-push] [--portal-url URL] [--json]\n  timds preview [--root PATH] [--port 4400] [--no-build]\n  timds diff [--root PATH] [--base origin/main]\n  timds assets list [--root PATH]\n  timds assets add FILE [--key LOGICAL_KEY] [--title TEXT] [--tags a,b]\n  timds assets backfill-metadata [--root PATH] [--force]\n  timds assets publish [--root PATH]\n  timds assets pull KEY [--output PATH] [--force]\n  timds video --help\n  timds mcp [edit] [--root PATH]\n  timds mcp read [--root PATH | --published URL | --draft NAME --system-id ID --portal-url URL]\n  timds submit --message "Change summary" [--dry-run] [--no-push] [--no-pr]\n  timds consumer check [--root PATH] [--app NAME] [--base REF]\n  timds consumer sync [--root PATH]\n  timds consumer update [VERSION | --draft NAME] [--portal-url URL] [--root PATH]\n  timds consumer migrate [--version VERSION] [--url URL] [--root PATH] [--force] [--skip-sync]\n  timds consumer preview --app NAME [--root PATH] [--base REF] [--output DIR] [--publish] [--pull-request N]\n  timds consumer init [--root PATH] [--system ID] [--version VERSION] [--url URL] [--force] [--skip-install] [--portal-url URL]\n  timds consumer scaffold emdash --root PATH --design-system GIT_URL [--stylesheet PATH]... [--site-url URL] [--skip-install]\n  timds consumer notes [--root PATH] [--app NAME] [--pull-request N] [--all] [--json]\n  timds consumer notes resolve ID [ID...] [--commit SHA] [--dismiss]\n\nCheck and extract derive index.json, tokens.json, brand.json (each font role with the files or font service that provide it), formats.json (from src/formats.json when the system keeps one), llms.txt (the brand essentials and the page directory), llms-full.txt, and per-page Markdown from the built artifact so agents, pipelines, and anyone given the system's public link can read the system without scraping HTML or CSS. Brand prints the derived brand kit in plain language with a fix for every gap. Extract --publish uploads the index, tokens, brand kit, formats, llms.txt, llms-full.txt, the per-page Markdown mirrors, a .timds-artifact.json provenance stamp, and the artifact files the index and the kit reference (logos, imagery, font files) to the system's stable CDN prefix through the portal, so pipelines and agents consume the system from one stable URL. A manifest with bundle.include globs also gets a consumer bundle: the stylesheets, scripts, and assets a website loads, copied into the artifact under their source paths with a bundle.json of digests, and published under the current prefix and an immutable v/<version>/ prefix a website pins. Large public media is copied into ignored media-local/ for authoring. assets add measures timed-media duration and dimensions before upload; backfill-metadata repairs older catalogs from their stable public URLs without re-uploading them. Designs init adds the website-designs contract to an existing Design System: whole pages under src/designs/ in plain HTML on the system's stylesheets, built to /designs/ and checked for portability, so an engineer can port them to any production stack; a fresh scaffold already has it. Starter sync brings a starter-based system up to the installed release's scaffold and opts it into doing so on every upgrade: stock scripts and viewer stylesheets are refreshed while unmodified, new views, planned pages, and asset formats are merged into src/site.json and src/formats.json without touching what the client declared, and the overview fragments the starter mirrors are written for views the sync adds; in a terminal the sync asks about each customized stock script or stylesheet (keep, replace with stock, or see the diff first), otherwise they are reported and replaced only when --force names them one by one (an overview fragment this system wrote is never replaced), the sync refuses to run over uncommitted changes to the files it writes, and it is rolled back if check fails afterwards. Video-enabled systems keep client rules and production data in the Design System while TimDS owns validation, voiceover orchestration, Remotion rendering, and packaging. Mcp serves the Design System editing tools (guide, workspace description, guarded file reads and writes, check, derived layer, media catalog) over stdio for an MCP-capable agent; protected tooling and generated paths stay read-only. Mcp read serves the consumer read tools (brand roles, tokens, guidance search, pages, media catalog, gap reports) over the derived layer of the current checkout or of a published base URL. Hosted agent commands: start, pull, submit, update, claim, join, active-work, draft, and sessions close. Hosted submit freezes a submission with a preview. Humans use login, status, history, publish, and rollback in Studio. Skills install copies the designer skills an agent works from (the editing procedure, design-start, design-media, design-ship, design-handoff, and, with --portal-url and --system-id, the hosted skill rendered for that design system) into .agents/skills, .claude/skills, and .cursor/skills of the current folder or, with --global, of the home folder, recording digests in .timds/skills.json so a rerun at @latest refreshes unmodified files and keeps edits unless --force. Git-provider submit creates a draft pull request. Consumer commands run in a product repository that pins a Design System (a published version fetched by npm install into the gitignored design-system directory, or the design-system git submodule) and declares its apps in timds.consumer.json: check validates the manifest, the pin, and that a branch only touches the declared design surface; sync fetches the pinned published bundle, verifying every digest, and update moves the pin to a version or the current release; migrate replaces the submodule with a published pin at the version the checkout declared, removing the gitlink, .gitmodules entry, and checkout, and lists the product files that still mention the submodule; preview captures each app's routes for review; init writes the manifest skeleton (with --system ID, a published pin and the postinstall sync), the consumer skill, the preview and designer-change workflows, and the read MCP entry; scaffold emdash creates a new EmDash CMS site repository that pins a Design System as that submodule, reads its stylesheets and tokens from the pin, and is adopted the way init adopts a product; notes lists the designer's notes on a pull request's preview and resolves them once addressed.`;
 }
 
 export async function runCli(argv) {
   const [command = "help", ...rest] = argv;
+  if (["--version", "-v", "version"].includes(command)) { output(runtimeIdentity.version); return runtimeIdentity; }
+  if (command === "run") {
+    if (!rest.length) throw new Error("Usage: timds-cli run FILE [ARGS...] (Node options are supported before FILE)");
+    await assertBinaryInstallation(resolveDesignSystemRoot(await findRepositoryRoot()).designSystemRoot);
+    const result = await execute(javascriptCommand(rest), { env: runtimeEnvironment(), cwd: process.cwd(), allowFailure: true });
+    process.exitCode = result.code;
+    return result;
+  }
   if (command === 'login') return runCli(['auth', 'login', ...rest]);
   if (command === "consumer") {
     // Consumer subcommands own their flags (see consumer.mjs).
@@ -1517,7 +1686,13 @@ export async function runCli(argv) {
     return;
   }
   const root = options.root || process.cwd();
+  if (command === "installation") return runInstallationCommand(root, positional, options);
+  if (command === "artifact" && positional[0] === "publish") return publishArtifactRef(await loadWorkspace(root));
   if (["start", "pull", "update", "status", "history", "sessions", "join", "claim", "active-work", "whoami", "principals", "draft", "rollback"].includes(command)) {
+    if (!["start", "join", "whoami", "principals"].includes(command)) {
+      const candidate = resolveDesignSystemRoot(await findRepositoryRoot(root)).designSystemRoot;
+      if (existsSync(path.join(candidate, "timds.json"))) await assertBinaryInstallation(candidate);
+    }
     if (command === "sessions" && (positional[0] !== "close" || positional.length !== 1)) throw new Error("Usage: timds sessions close [--root PATH]");
     const operation = command === "sessions" ? "close" : command === "draft" ? `draft-${positional[0]}` : command;
     if (command === "draft" && !["create", "list", "close"].includes(positional[0])) throw new Error("Usage: timds draft create NAME --from main|VERSION | draft list | draft close NAME");
@@ -1536,14 +1711,14 @@ export async function runCli(argv) {
     else { output(`TimDS ${operation}: ${result.session?.status || "complete"}${result.session?.id ? ` (${result.session.id})` : ""}`); if (["history", "status", "active-work", "claim", "draft-list", "rollback"].includes(operation)) output(JSON.stringify(result, null, 2)); if (result.session?.liveUrl) output(`Live: ${result.session.liveUrl}`); }
     if (!options.json && command === "start") {
       output(`Workspace: ${path.resolve(options.root || String(positional[0]).split("/").at(-1))}`);
-      output("Next: cd into the workspace, run npm ci (or npm install if there is no lockfile), then timds dev.");
+      output(isBinaryRuntime() ? "Next: cd into the workspace, run timds-cli installation adopt --binary (then --apply), and timds-cli dev." : "Next: cd into the workspace, run npm ci (or npm install if there is no lockfile), then timds dev.");
       output('After editing: timds check, then timds submit --note "Describe the change".');
     }
     if (!options.json && command === "join" && !result.conflicts?.length) {
       if (options.principalId) output(`Invited ${options.principalId}. They attach with: timds join ${invitation.sessionId} --root ./NEW-FOLDER`);
       else {
         output(`Workspace: ${path.resolve(joinRoot)}`);
-        output("Next: run npm ci (or npm install if there is no lockfile) in the workspace, then timds dev.");
+        output(isBinaryRuntime() ? "Next: inspect timds-cli doctor; adopt binary execution explicitly if this source still selects npm." : "Next: run npm ci (or npm install if there is no lockfile) in the workspace, then timds dev.");
         output('After editing: timds check, then timds update --note "Describe the change" to share it with the session.');
       }
     }
@@ -1746,7 +1921,7 @@ export async function runCli(argv) {
     if (result.initializedArtifact) {
       output(`Starter artifact: ${result.initializedArtifact.fileCount} files, ${result.initializedArtifact.totalBytes} bytes.`);
     }
-    output(options.provider === "hosted" ? "Run npm install to create the lockfile; the portal owns source and publication." : "Run npm install to create the lockfile, then git add --all and commit the validated contract.");
+    output(isBinaryRuntime() ? "Ready: timds-cli check, timds-cli dev. Commit the exact installation record with your source." : options.provider === "hosted" ? "Run npm install to create the lockfile; the portal owns source and publication." : "Run npm install to create the lockfile, then git add --all and commit the validated contract.");
     return result;
   }
   if (command === "defaults") {
@@ -1768,6 +1943,10 @@ export async function runCli(argv) {
   if (command === "upgrade") {
     const consumerResult = await upgradeConsumerRepository(root, options);
     if (consumerResult) return consumerResult;
+    if (await readBinaryInstallation(resolveDesignSystemRoot(await findRepositoryRoot(root)).designSystemRoot)) {
+      return upgradeBinaryRepository(root, options);
+    }
+    if (isBinaryRuntime()) await assertBinaryInstallation(resolveDesignSystemRoot(await findRepositoryRoot(root)).designSystemRoot);
     if (options.version) {
       const result = await upgradeToRelease(await loadWorkspace(root), {version: options.version, ownRuntime: options.ownRuntime, force: options.force});
       output(`Prepared TimDS ${result.version}; review dependency, lockfile, and managed-file changes before merging`);
@@ -1805,14 +1984,15 @@ export async function runCli(argv) {
     return result;
   }
   if (command === "doctor") {
-    const workspace = await loadWorkspace(root);
+    const workspace = await loadWorkspace(root, {allowVersionMismatch: true, editing: true});
     const hosted = (await workspaceProvider(root))?.kind === "hosted";
     const branch = hosted ? null : await currentBranch(workspace.repoRoot);
     output(`Repository: ${workspace.repoRoot}`);
     output(`Design system: ${workspace.designSystemRoot}`);
     output(`System: ${workspace.manifest.name} (${workspace.manifest.systemId})`);
     output(`Version: ${workspace.manifest.version}`);
-    output(`Toolkit: ${await readInstalledToolkitVersion(workspace.designSystemRoot)}`);
+    output(`Toolkit selected: ${await readInstalledToolkitVersion(workspace.designSystemRoot)}`);
+    output(`Toolkit running: ${runtimeIdentity.version} (${isBinaryRuntime() ? "binary" : "npm"})`);
     output(`Media assets: ${workspace.mediaCatalog.assets.length}`);
     const designCatalog = await readDesignCatalog(workspace.designSystemRoot);
     output(`Designs: ${designCatalog.exists ? `${designCatalog.designs.length} design${designCatalog.designs.length === 1 ? "" : "s"}, ${designCatalog.designs.reduce((sum, design) => sum + design.pages.length, 0)} pages` : "not set up (timds designs init)"}`);

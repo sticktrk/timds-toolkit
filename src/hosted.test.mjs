@@ -9,6 +9,7 @@ import { HOST_API_VERSION, SESSION_FILE, runHostedCommand, sessionChanges, sessi
 import { saveAccessToken } from "./auth.mjs";
 import { initializeRepository } from "./core.mjs";
 import { registerHostedSessionTools } from "./mcp.mjs";
+import { binaryInstallationRecord } from "./binary-installation.mjs";
 
 const file = (name, content, mode = "100644") => ({ path: name, encoding: "base64", content: Buffer.from(content).toString("base64"), mode });
 const snapshot = (files, revision = "base", extra = {}) => ({ apiVersion: 1, session: { id: "session-1", systemId: "example/core", baseRevision: revision, status: "open" }, files, ...extra });
@@ -89,6 +90,26 @@ async function fixture(t, files = [file("note.txt", "base")]) {
   await runHostedCommand("start", { ...options, systemId: "example/core" });
   return { root, options, requests, set(value) { next = value; }, state: async () => JSON.parse(await fs.readFile(path.join(root, SESSION_FILE), "utf8")) };
 }
+
+test("hosted APIs and MCP refuse mismatched executable selections before requests or writes", async (t) => {
+  const f = await fixture(t, [file("timds.json", JSON.stringify({ systemId: "example/core", provider: { kind: "hosted", url: "https://host.example" } }))]);
+  await fs.writeFile(path.join(f.root, ".timds/installation.json"), JSON.stringify({ ...binaryInstallationRecord(), version: "0.1.0" }));
+  const before = await fs.readFile(path.join(f.root, SESSION_FILE), "utf8");
+  const requests = f.requests.length;
+  for (const command of ["pull", "update", "submit", "status", "history", "close", "publish", "claim", "active-work", "draft-create", "draft-list", "draft-close", "rollback", "join"]) {
+    await assert.rejects(runHostedCommand(command, { ...f.options, fixedRoot: true, name: "test", sessionId: "session-1", principalId: "principal" }), /Workspace selects TimDS 0\.1\.0/, command);
+  }
+  let closeDraft;
+  registerHostedSessionTools({ registerTool(name, _definition, handler) { if (name === "timds_draft_close") closeDraft = handler; } }, { root: f.root });
+  const result = await closeDraft({ name: "test" });
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /Workspace selects TimDS 0\.1\.0/);
+  assert.equal(f.requests.length, requests);
+  assert.equal(await fs.readFile(path.join(f.root, SESSION_FILE), "utf8"), before);
+  await runHostedCommand("whoami", f.options);
+  await runHostedCommand("principals", f.options);
+  assert.equal(f.requests.length, requests + 2, "identity lookups do not select a workspace runtime");
+});
 
 test("host session materializes plain files, uploads changed/deleted paths, reads history and closes", async (t) => {
   const f = await fixture(t, [file("keep.txt", "same"), file("delete.txt", "delete"), file("note.txt", "base")]);

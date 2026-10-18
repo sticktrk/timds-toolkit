@@ -6,6 +6,19 @@ __CONTRACT_DESCRIPTION__
 this system: where things live, how pages reach the machine-readable layer,
 and what is protected. Read it before the first change.
 
+## Installation mode
+
+The selected toolkit is recorded in `.timds/installation.json`. Binary mode
+(`schemaVersion: 2`, `mode: "binary"`) pins an exact `timds-cli` release and
+needs no separately installed Node or npm for stock commands. Use
+`timds-cli --version` and `timds-cli doctor` to compare running and selected
+versions. Npm-specific installation and dependency-upgrade steps below apply
+only to npm mode. For binary upgrades, install a checksum-verified executable,
+then run `timds-cli upgrade --version EXACT_VERSION`; executable replacement
+and workspace selection are separate. Existing npm systems preview migration
+with `timds-cli installation adopt --binary`, then explicitly use `--apply`.
+Authored documentation is not rewritten by adoption or upgrade.
+
 ## Designers design here, developers ship it
 
 Designers do all of their work in this repository and never touch the

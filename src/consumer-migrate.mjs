@@ -386,7 +386,7 @@ export async function migrateConsumerToPublished(rootInput = process.cwd(), { ve
     }
   }
   output("");
-  output(`Review the diff (git status), then commit. ${designSystem.path}/ is ignored by git and fetched by npm install; moving the pin later is timds consumer update.`);
+  output(`Review the diff (git status), then commit. ${designSystem.path}/ is ignored by git and fetched by ${plan.mode === "binary" ? "timds-cli consumer sync" : "npm install"}; moving the pin later is ${plan.mode === "binary" ? "timds-cli" : "timds"} consumer update.`);
 
   return { repoRoot, systemId: designSystem.systemId, version: pinned, checkoutVersion, url: base, removed, written, synced, dangling, mentions };
 }

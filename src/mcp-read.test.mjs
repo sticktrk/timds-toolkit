@@ -9,6 +9,8 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { checkWorkspace, initializeRepository, loadWorkspace } from "./core.mjs";
 import { readDerivedLayer } from "./derived.mjs";
+import { packageRoot } from "./executable.mjs";
+import { binaryInstallationRecord } from "./binary-installation.mjs";
 import {
   CONSUMER_GUIDE_URI,
   GAP_KINDS,
@@ -451,4 +453,39 @@ test('draft read server refreshes snapshots but reuses the checked build until t
   assert.equal(reads, 2); assert.equal(builds, 1);
   const mismatch = await call(client, 'get_tokens', { draft: 'other' });
   assert.equal(mismatch.isError, true);
+});
+
+test('binary draft MCP reads verified npm stock snapshots without relaxing exact binary selection', async t => {
+  const source = await checkedRepo(t);
+  const files = [];
+  async function collect(directory, prefix = '') {
+    for (const name of await fs.readdir(directory)) {
+      if (['.git', '.github', 'dist', 'node_modules'].includes(name)) continue;
+      const absolute = path.join(directory, name), relative = prefix ? `${prefix}/${name}` : name;
+      const stat = await fs.lstat(absolute);
+      if (stat.isDirectory()) await collect(absolute, relative);
+      else files.push({ path: relative, encoding: 'base64', content: (stat.isSymbolicLink() ? Buffer.from(await fs.readlink(absolute)) : await fs.readFile(absolute)).toString('base64'), mode: stat.isSymbolicLink() ? '120000' : '100644' });
+    }
+  }
+  await collect(source);
+  const record = files.find(file => file.path === '.timds/installation.json');
+  assert.equal(JSON.parse(Buffer.from(record.content, 'base64')).schemaVersion, 1);
+  const temporary = await temporaryDirectory(t);
+  const wrapper = path.join(temporary, 'timds-cli');
+  const quote = value => `'${value.replaceAll("'", "'\\''")}'`;
+  await fs.writeFile(wrapper, `#!/bin/sh\nexec ${quote(process.execPath)} ${quote(path.join(packageRoot, 'bin/timds.mjs'))} "$@"\n`, { mode: 0o755 });
+  const values = { TIMDS_BINARY_EXECUTABLE: wrapper, TIMDS_RUNTIME_ROOT: temporary, TIMDS_RUNTIME_PACKAGE: packageRoot };
+  const before = Object.fromEntries(Object.keys(values).map(key => [key, process.env[key]]));
+  Object.assign(process.env, values);
+  t.after(() => { for (const [key, value] of Object.entries(before)) if (value === undefined) delete process.env[key]; else process.env[key] = value; });
+  let revision = 'npm-stock';
+  const server = await createDesignSystemReadMcpServer({ draft: 'stock', systemId: 'example/core', portalUrl: 'https://host.test', token: 'test', fetchImpl: async () => Response.json({ apiVersion: 1, session: { id: 'draft', baseRevision: revision, status: 'open' }, files }) });
+  const client = await connect(server);
+  t.after(async () => { await client.close(); await server.close(); });
+  assert.equal((await ok(client, 'get_tokens')).system.source, 'draft');
+  revision = 'mismatched-binary';
+  record.content = Buffer.from(JSON.stringify({ ...binaryInstallationRecord(), version: '0.1.0' })).toString('base64');
+  const mismatch = await call(client, 'get_tokens');
+  assert.equal(mismatch.isError, true);
+  assert.match(mismatch.content[0].text, /Workspace selects TimDS 0\.1\.0/);
 });
