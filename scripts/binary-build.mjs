@@ -6,7 +6,8 @@ import { gzipSync } from 'node:zlib';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
-import { notarizeExecutable } from './binary-notarization.mjs';
+import { notarizeExecutable, notarizePayload } from './binary-notarization.mjs';
+import { appleSigningConfiguration, inspectSignedMachO, probeNativePayload, signNativePayload } from './binary-signing.mjs';
 
 const run = promisify(execFile);
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -18,6 +19,8 @@ const distributions = {
 const sha256 = value => createHash('sha256').update(value).digest('hex');
 const target = `${process.platform}-${process.arch}`;
 if (!distributions[target]) throw new Error(`Unsupported native binary target ${target}; supported: ${Object.keys(distributions).join(', ')}`);
+const { identity: signingIdentity, profile: notaryProfile } = appleSigningConfiguration();
+const entitlements = path.join(root, 'scripts/binary-entitlements.plist');
 const packageJson = await fs.readFile(path.join(root, 'package.json'));
 const pkg = JSON.parse(packageJson);
 const sourceCommit = (await run('git', ['rev-parse', 'HEAD'], { cwd: root })).stdout.trim();
@@ -62,6 +65,12 @@ try {
   await fs.rm(path.join(packageRoot, 'package-lock.json'));
   const payloadVersion = (await run(node, [path.join(packageRoot, 'bin/timds.mjs'), '--version'])).stdout.trim();
   if (payloadVersion !== pkg.version) throw new Error('Packed CLI identity does not match package.json');
+  // A custom compressed SEA asset is opaque to the notary service. Sign and
+  // notarize the native payload while its files are visible, before hashing or
+  // compressing it. The final extracting executable gets its own submission.
+  const nativeCode = signingIdentity ? await signNativePayload({ root: payloadRoot, identity: signingIdentity, entitlements, run }) : [];
+  if (signingIdentity) console.log((await probeNativePayload({ root: payloadRoot, run })).stdout.trim());
+  const payloadNotarization = notaryProfile ? await notarizePayload({ root: payloadRoot, profile: notaryProfile, keychain: process.env.TIMDS_NOTARY_KEYCHAIN, tickets: nativeCode.flatMap(item => item.tickets), run }) : null;
   const files = [];
   const buffers = [];
   let offset = 0;
@@ -103,15 +112,16 @@ try {
   const postject = path.join(root, 'node_modules/postject/dist/cli.js');
   if (JSON.parse(await fs.readFile(path.join(root, 'node_modules/postject/package.json'), 'utf8')).version !== '1.0.0-alpha.6') throw new Error('Unexpected postject build tool version');
   await run(node, [postject, executable, 'NODE_SEA_BLOB', blob, '--sentinel-fuse', 'NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2', ...(process.platform === 'darwin' ? ['--macho-segment-name', 'NODE_SEA'] : [])], { maxBuffer: 16 * 1024 * 1024 });
-  if (process.platform === 'darwin') await run('codesign', ['--force', '--sign', process.env.TIMDS_CODESIGN_IDENTITY || '-', ...(process.env.TIMDS_CODESIGN_IDENTITY ? ['--options', 'runtime', '--timestamp', '--entitlements', path.join(root, 'scripts/binary-entitlements.plist')] : []), executable]);
+  if (process.platform === 'darwin') await run('codesign', ['--force', '--sign', signingIdentity || '-', ...(signingIdentity ? ['--options', 'runtime', '--timestamp', '--entitlements', entitlements] : []), executable]);
+  const launcherCode = signingIdentity ? await inspectSignedMachO(executable, { run, relativePath: filename }) : null;
+  if (launcherCode && launcherCode.teamIdentifier !== nativeCode[0].teamIdentifier) throw new Error('Launcher and payload were signed by different Developer ID teams');
   let notarization = null;
-  if (process.platform === 'darwin' && process.env.TIMDS_NOTARY_PROFILE) {
-    if (!process.env.TIMDS_CODESIGN_IDENTITY) throw new Error('Notarization requires TIMDS_CODESIGN_IDENTITY');
-    notarization = await notarizeExecutable({ executable, profile: process.env.TIMDS_NOTARY_PROFILE, keychain: process.env.TIMDS_NOTARY_KEYCHAIN, run });
+  if (notaryProfile) {
+    notarization = await notarizeExecutable({ executable, profile: notaryProfile, keychain: process.env.TIMDS_NOTARY_KEYCHAIN, tickets: launcherCode.tickets, run });
   }
   const executableBytes = await fs.readFile(executable);
   await fs.writeFile(`${executable}.sha256`, `${sha256(executableBytes)}  ${filename}\n`);
-  const report = { schema: 1, sourceCommit, sourceDirty, packageSha256, lockSha256, version: pkg.version, node: nodeVersion, postject: '1.0.0-alpha.6', target, executable: filename, executableBytes: executableBytes.length, payloadBytes: compressed.length, extractedBytes: offset, fileCount: files.length, payloadHash: manifest.payloadHash, signed: process.platform === 'darwin' ? (process.env.TIMDS_CODESIGN_IDENTITY ? 'developer-id' : 'ad-hoc') : 'unsigned', notarized: notarization?.status === 'Accepted', notarizationSubmissionId: notarization?.submissionId || null };
+  const report = { schema: 1, sourceCommit, sourceDirty, packageSha256, lockSha256, version: pkg.version, node: nodeVersion, postject: '1.0.0-alpha.6', target, executable: filename, executableBytes: executableBytes.length, payloadBytes: compressed.length, extractedBytes: offset, fileCount: files.length, payloadHash: manifest.payloadHash, signed: process.platform === 'darwin' ? (signingIdentity ? 'developer-id' : 'ad-hoc') : 'unsigned', notarized: notarization?.status === 'Accepted' && payloadNotarization?.status === 'Accepted', notarizationSubmissionId: notarization?.submissionId || null, signingTeamId: launcherCode?.teamIdentifier || null, nativeCode, launcherCode, payloadNotarization, notarization };
   await fs.writeFile(`${executable}.json`, `${JSON.stringify(report, null, 2)}\n`);
   console.log(JSON.stringify(report, null, 2));
 } finally { await fs.rm(scratch, { recursive: true, force: true }); }

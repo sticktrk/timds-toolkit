@@ -19,6 +19,31 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  signing-preflight:
+    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require Apple release signing before creating a tag
+        shell: bash
+        env:
+          TIMDS_MACOS_CERTIFICATE_BASE64: ${{ secrets.TIMDS_MACOS_CERTIFICATE_BASE64 }}
+          TIMDS_MACOS_CERTIFICATE_PASSWORD: ${{ secrets.TIMDS_MACOS_CERTIFICATE_PASSWORD }}
+          TIMDS_CODESIGN_IDENTITY: ${{ secrets.TIMDS_CODESIGN_IDENTITY }}
+          TIMDS_NOTARY_APPLE_ID: ${{ secrets.TIMDS_NOTARY_APPLE_ID }}
+          TIMDS_NOTARY_TEAM_ID: ${{ secrets.TIMDS_NOTARY_TEAM_ID }}
+          TIMDS_NOTARY_PASSWORD: ${{ secrets.TIMDS_NOTARY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for name in TIMDS_MACOS_CERTIFICATE_BASE64 TIMDS_MACOS_CERTIFICATE_PASSWORD TIMDS_CODESIGN_IDENTITY TIMDS_NOTARY_APPLE_ID TIMDS_NOTARY_TEAM_ID TIMDS_NOTARY_PASSWORD; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Missing required Apple release secret: $name"
+              exit 1
+            fi
+          done
+          [[ "$TIMDS_CODESIGN_IDENTITY" != '-' ]] || { echo '::error::Release signing cannot use an ad-hoc identity'; exit 1; }
+          [[ "$TIMDS_NOTARY_TEAM_ID" =~ ^[A-Z0-9]{10}$ ]] || { echo '::error::Invalid Apple Developer team ID'; exit 1; }
+
   # A dry run exchanges the workflow's OIDC token with npm exactly as publish
   # does and prints npm's answer, so a trusted-publisher mismatch is readable.
   check-trusted-publishing:
@@ -39,6 +64,7 @@ jobs:
       - run: npm publish --dry-run --loglevel verbose 2>&1 | grep -iE 'oidc|provenance|publishing to' || true
 
   create-release:
+    needs: signing-preflight
     if: github.event_name == 'workflow_dispatch' && !inputs.dry_run
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -79,14 +105,16 @@ jobs:
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
   binaries:
-    needs: create-release
+    needs: [create-release, signing-preflight]
     if: >-
       ${{ !cancelled() &&
+          needs.signing-preflight.result == 'success' &&
           (github.event_name == 'release' || needs.create-release.result == 'success') }}
     uses: ./.github/workflows/binary.yml
     secrets: inherit
     with:
       ref: ${{ needs.create-release.outputs.sha || github.ref }}
+      require_apple_signing: true
 
   # Releases created with GITHUB_TOKEN do not trigger another release workflow.
   # Publish here as well as for releases created by the local release command.

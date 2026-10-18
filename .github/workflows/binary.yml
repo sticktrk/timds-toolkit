@@ -8,6 +8,11 @@ on:
         type: string
         required: false
         default: ''
+      require_apple_signing:
+        description: Require Developer ID signing, both Apple notarizations, and a fresh download trust check
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -24,11 +29,31 @@ jobs:
           - runner: ubuntu-24.04
             target: linux-x64
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 35
+    timeout-minutes: ${{ inputs.require_apple_signing && matrix.target == 'darwin-arm64' && 120 || 35 }}
     steps:
       - uses: actions/checkout@v6
         with:
           ref: ${{ inputs.ref || github.sha }}
+      - name: Require Apple signing configuration
+        if: runner.os == 'macOS' && inputs.require_apple_signing
+        shell: bash
+        env:
+          TIMDS_MACOS_CERTIFICATE_BASE64: ${{ secrets.TIMDS_MACOS_CERTIFICATE_BASE64 }}
+          TIMDS_MACOS_CERTIFICATE_PASSWORD: ${{ secrets.TIMDS_MACOS_CERTIFICATE_PASSWORD }}
+          TIMDS_CODESIGN_IDENTITY: ${{ secrets.TIMDS_CODESIGN_IDENTITY }}
+          TIMDS_NOTARY_APPLE_ID: ${{ secrets.TIMDS_NOTARY_APPLE_ID }}
+          TIMDS_NOTARY_TEAM_ID: ${{ secrets.TIMDS_NOTARY_TEAM_ID }}
+          TIMDS_NOTARY_PASSWORD: ${{ secrets.TIMDS_NOTARY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for name in TIMDS_MACOS_CERTIFICATE_BASE64 TIMDS_MACOS_CERTIFICATE_PASSWORD TIMDS_CODESIGN_IDENTITY TIMDS_NOTARY_APPLE_ID TIMDS_NOTARY_TEAM_ID TIMDS_NOTARY_PASSWORD; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Missing required Apple release secret: $name"
+              exit 1
+            fi
+          done
+          [[ "$TIMDS_CODESIGN_IDENTITY" != '-' ]] || { echo '::error::Release signing cannot use an ad-hoc identity'; exit 1; }
+          [[ "$TIMDS_NOTARY_TEAM_ID" =~ ^[A-Z0-9]{10}$ ]] || { echo '::error::Invalid Apple Developer team ID'; exit 1; }
       - uses: actions/setup-node@v6
         with:
           node-version: 24.22.0
@@ -46,8 +71,8 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run pack:check
-      - name: Configure optional macOS signing
-        if: runner.os == 'macOS'
+      - name: Configure required macOS release signing
+        if: runner.os == 'macOS' && inputs.require_apple_signing
         env:
           CERTIFICATE: ${{ secrets.TIMDS_MACOS_CERTIFICATE_BASE64 }}
           CERTIFICATE_PASSWORD: ${{ secrets.TIMDS_MACOS_CERTIFICATE_PASSWORD }}
@@ -56,6 +81,7 @@ jobs:
           APPLE_TEAM: ${{ secrets.TIMDS_NOTARY_TEAM_ID }}
           APPLE_PASSWORD: ${{ secrets.TIMDS_NOTARY_PASSWORD }}
         run: |
+          set -euo pipefail
           if [ -n "$SIGNING_IDENTITY" ]; then
             test -n "$CERTIFICATE"
             KEYCHAIN="$RUNNER_TEMP/timds-signing.keychain-db"
@@ -76,6 +102,8 @@ jobs:
             fi
           fi
       - run: npm run binary:build
+        env:
+          TIMDS_REQUIRE_APPLE_SIGNING: ${{ runner.os == 'macOS' && inputs.require_apple_signing }}
       - name: Remove source dependencies before clean-machine proof
         run: rm -rf node_modules
       - name: Stock workflow with no external JavaScript toolchain
@@ -104,3 +132,93 @@ jobs:
           if [ -f "$RUNNER_TEMP/timds-signing.keychain-db" ]; then
             security delete-keychain "$RUNNER_TEMP/timds-signing.keychain-db"
           fi
+
+  notarized-download:
+    name: Verify quarantined macOS download
+    needs: binary
+    if: inputs.require_apple_signing
+    runs-on: macos-15
+    timeout-minutes: 25
+    # This runner receives tested artifacts, never signing credentials or a
+    # signing keychain. Gatekeeper trust is checked as a Terminal CLI download.
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.22.0
+          package-manager-cache: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: timds-native-*
+          path: dist/binary
+          merge-multiple: true
+      - name: Verify signed release metadata and download checksums
+        run: RELEASE_TAG="v$(node -p "require('./package.json').version")" node scripts/binary-release.mjs
+      - name: Verify quarantined launcher and every extracted native file
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import fs from 'node:fs/promises';
+          import path from 'node:path';
+          import { execFile } from 'node:child_process';
+          import { promisify } from 'node:util';
+          import { inventoryMachO, inspectSignedMachO, probeNativePayload } from './scripts/binary-signing.mjs';
+          const execute = promisify(execFile);
+          const run = (command, args, options = {}) => execute(command, args, { maxBuffer: 16 * 1024 * 1024, ...options });
+          assert.equal(`${process.platform}-${process.arch}`, 'darwin-arm64');
+          const pkg = JSON.parse(await fs.readFile('package.json', 'utf8'));
+          const name = `timds-cli-v${pkg.version}-darwin-arm64`;
+          const metadata = JSON.parse(await fs.readFile(`dist/binary/${name}.json`, 'utf8'));
+          const temporary = await fs.mkdtemp(path.join(process.env.RUNNER_TEMP, 'quarantined TimDS '));
+          const executable = path.join(temporary, 'timds-cli');
+          const cache = path.join(temporary, 'cache');
+          const tools = path.join(temporary, 'tools');
+          const workspace = path.join(temporary, 'stock system');
+          await fs.copyFile(`dist/binary/${name}`, executable);
+          await fs.chmod(executable, 0o755);
+          await fs.mkdir(tools);
+          await fs.mkdir(workspace);
+          const git = (await run('/usr/bin/which', ['git'])).stdout.trim();
+          await fs.symlink(git, path.join(tools, 'git'));
+          const env = { ...process.env, PATH: tools, TIMDS_BINARY_CACHE: cache };
+          for (const tool of ['node', 'npm', 'npx', 'bun']) await assert.rejects(run(tool, ['--version'], { env }), error => error.code === 'ENOENT');
+          const quarantine = async file => run('/usr/bin/xattr', ['-w', 'com.apple.quarantine', `0083;${Math.floor(Date.now() / 1000).toString(16)};TimDS release verification;`, file]);
+          async function verifyCode(file, expected) {
+            assert.deepEqual(await inspectSignedMachO(file, { run, relativePath: expected.path }), { path: expected.path, teamIdentifier: expected.teamIdentifier, tickets: expected.tickets });
+            // Accepted tickets can take time to reach Apple's online service;
+            // CloudKit can cache an initial miss for 300 seconds. Allow that
+            // cache to expire. Retry only lookup, never signing or submission.
+            for (let attempt = 1; ; attempt++) {
+              try { await run('/usr/bin/codesign', ['-vvvv', '-R=notarized', '--check-notarization', file]); break; }
+              catch (error) { if (attempt === 48) throw error; console.log(`Waiting for notarization ticket: ${expected.path} (${attempt}/48)`); await new Promise(resolve => setTimeout(resolve, 10000)); }
+            }
+            await quarantine(file);
+          }
+          await verifyCode(executable, metadata.launcherCode);
+          assert.ok((await run('/usr/bin/xattr', ['-p', 'com.apple.quarantine', executable])).stdout.trim());
+          assert.equal((await run(executable, ['--version'], { env, cwd: temporary })).stdout.trim(), pkg.version);
+          const runtime = path.join(cache, `${pkg.version}-darwin-arm64-${metadata.payloadHash.slice(0, 20)}`);
+          const native = await inventoryMachO(runtime);
+          assert.deepEqual(native.map(file => path.relative(runtime, file).split(path.sep).join('/')).sort(), metadata.nativeCode.map(code => code.path).sort());
+          for (const code of metadata.nativeCode) await verifyCode(path.join(runtime, code.path), code);
+          const nativeStartup = await probeNativePayload({ root: runtime, run: (command, args, options = {}) => run(command, args, { cwd: temporary, ...options, env }) });
+          await run('git', ['init', '-b', 'main'], { cwd: workspace, env });
+          const cli = args => run(executable, [...args, '--root', workspace], { cwd: workspace, env });
+          await cli(['init', '--standalone', '--name', 'Notarized download', '--system-id', 'example/notarized-download']);
+          const checked = await cli(['check']);
+          assert.equal((checked.stdout.match(/^Warning:/gm) || []).length, 2);
+          await cli(['doctor']);
+          assert.ok(JSON.parse((await cli(['brand', '--json'])).stdout).brand);
+          const proof = { version: pkg.version, sourceCommit: metadata.sourceCommit, signingTeamId: metadata.signingTeamId, nativeFiles: native.length, verifiedCodeCount: metadata.payloadNotarization.verifiedCodeCount, nativeStartup, quarantined: true, commands: ['--version', 'init', 'check', 'doctor', 'brand'] };
+          await fs.writeFile(path.join(process.env.RUNNER_TEMP, 'timds-notarized-download.json'), JSON.stringify(proof, null, 2));
+          console.log(JSON.stringify(proof));
+          NODE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: timds-notarized-download-verification
+          path: ${{ runner.temp }}/timds-notarized-download.json
+          if-no-files-found: error
