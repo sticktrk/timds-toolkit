@@ -77,6 +77,11 @@ BASE="https://github.com/sticktrk/timds-toolkit/releases/download/v${VERSION}"
 curl --fail --location "$BASE/$ASSET" -o "$ASSET"
 curl --fail --location "$BASE/$ASSET.sha256" -o "$ASSET.sha256"
 shasum -a 256 --check "$ASSET.sha256" # Linux can use sha256sum --check
+if [ "$TARGET" = darwin-arm64 ]; then
+  codesign --verify --strict --verbose=2 "$ASSET"
+  codesign --display --verbose=4 "$ASSET"
+  codesign -vvvv -R='notarized' --check-notarization "$ASSET"
+fi
 chmod +x "$ASSET"
 ./"$ASSET" --version
 mkdir -p "$HOME/.local/bin"
@@ -86,8 +91,8 @@ if [ -f "$HOME/.local/bin/timds-cli" ]; then
   cp "$HOME/.local/bin/timds-cli" "$HOME/.local/bin/timds-cli.previous"
 fi
 mv "$HOME/.local/bin/timds-cli.new" "$HOME/.local/bin/timds-cli"
-timds-cli_path="$HOME/.local/bin/timds-cli"
-"$timds-cli_path" --version
+timds_cli_path="$HOME/.local/bin/timds-cli"
+"$timds_cli_path" --version
 )
 export PATH="$HOME/.local/bin:$PATH"
 ```
@@ -99,6 +104,20 @@ one. Running workspaces keep their selected release until an explicit upgrade.
 To restore the executable, copy `timds-cli.previous` to `timds-cli.new` and rename
 it over `timds-cli`, then select the matching version in the workspace or restore
 its reviewed prior commit. Downloads are never executed by a curl-to-shell pipe.
+
+On macOS, check the release's adjacent build JSON for Developer ID signing and
+accepted notarization of both the launcher and its extracted native runtime.
+The raw CLI has no stapled ticket, so keep the Mac online for first use. The
+install snippet verifies its signature and online notarization record before
+execution. The signature display should identify the release publisher's Developer ID
+Application team and a timestamp; an ad-hoc signature is not equivalent. Apple
+publishes notarization records online, as described in its
+[notarization overview](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution).
+Do not remove quarantine or disable Gatekeeper to install a rejected release.
+Report the exact release, macOS version, and diagnostic output instead. The
+[release validation procedure](binary-packaging.md#validate-a-notarized-release)
+covers a quarantined Safari download and the extracted native files; checksums
+and a successful launch alone do not establish that full proof.
 
 A fresh system can be created with:
 
