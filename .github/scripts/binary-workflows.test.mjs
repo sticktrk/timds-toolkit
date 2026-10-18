@@ -93,7 +93,7 @@ test('release gating includes a separate secret-free quarantined download and fu
   assert.match(script, /for \(const code of metadata\.nativeCode\) await verifyCode/);
   assert.ok(script.indexOf('await probeNativePayload') > script.indexOf('for (const code of metadata.nativeCode) await verifyCode'));
   assert.match(script, /'-R=notarized', '--check-notarization'/);
-  assert.match(script, /attempt === 12/);
+  assert.match(script, /attempt === 48/);
   assert.match(script, /'com\.apple\.quarantine'/);
   assert.doesNotMatch(script, /xattr[^\n]*['"]-(?:d|c)['"]/);
   assert.match(script, /PATH: tools/);

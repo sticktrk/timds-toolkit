@@ -189,11 +189,12 @@ jobs:
           const quarantine = async file => run('/usr/bin/xattr', ['-w', 'com.apple.quarantine', `0083;${Math.floor(Date.now() / 1000).toString(16)};TimDS release verification;`, file]);
           async function verifyCode(file, expected) {
             assert.deepEqual(await inspectSignedMachO(file, { run, relativePath: expected.path }), { path: expected.path, teamIdentifier: expected.teamIdentifier, tickets: expected.tickets });
-            // Accepted tickets can take time to reach Apple's online service.
-            // Retry only the trust lookup, never signing, submission or build.
+            // Accepted tickets can take time to reach Apple's online service;
+            // CloudKit can cache an initial miss for 300 seconds. Allow that
+            // cache to expire. Retry only lookup, never signing or submission.
             for (let attempt = 1; ; attempt++) {
               try { await run('/usr/bin/codesign', ['-vvvv', '-R=notarized', '--check-notarization', file]); break; }
-              catch (error) { if (attempt === 12) throw error; console.log(`Waiting for notarization ticket: ${expected.path} (${attempt}/12)`); await new Promise(resolve => setTimeout(resolve, 10000)); }
+              catch (error) { if (attempt === 48) throw error; console.log(`Waiting for notarization ticket: ${expected.path} (${attempt}/48)`); await new Promise(resolve => setTimeout(resolve, 10000)); }
             }
             await quarantine(file);
           }
