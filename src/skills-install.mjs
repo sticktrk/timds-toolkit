@@ -78,6 +78,42 @@ async function writeFile(filePath, content) {
   await fs.writeFile(filePath, content, "utf8");
 }
 
+/** `0.1.9` is older than `0.1.10`: compare release numbers, not strings. */
+function olderRelease(installed, current) {
+  const a = String(installed).split(".").map(Number), b = String(current).split(".").map(Number);
+  for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
+    const left = a[index] || 0, right = b[index] || 0;
+    if (left !== right) return left < right;
+  }
+  return false;
+}
+
+/**
+ * One line when the nearest skills record (this folder, then its ancestors,
+ * then the home folder's global record) was written by an older release than
+ * the one running; null when it is current or there is none. Hosted CLI
+ * commands print it after their own output so installed skills do not fall
+ * silently behind the CLI, which always runs at @latest.
+ */
+export async function staleSkillsNotice({ root = process.cwd(), homeDirectory = os.homedir(), env = process.env, version = runtimeIdentity.version } = {}) {
+  const candidates = [];
+  let directory = path.resolve(root);
+  while (true) {
+    candidates.push({ base: directory, file: path.join(directory, ...SKILLS_RECORD_FILE.split("/")), global: false });
+    const parent = path.dirname(directory);
+    if (parent === directory) break;
+    directory = parent;
+  }
+  candidates.push({ base: path.resolve(homeDirectory), file: globalSkillsRecordPath({ homeDirectory, env }), global: true });
+  for (const candidate of candidates) {
+    const record = await readRecord(candidate.file).catch(() => null);
+    if (!record || typeof record.version !== "string") continue;
+    if (!olderRelease(record.version, version)) return null;
+    return `TimDS skills under ${candidate.base} are from ${record.version}; this is ${version}. Run timds skills install${candidate.global ? " --global" : ""} there to refresh them (your edits are kept).`;
+  }
+  return null;
+}
+
 /** The record file for `--global`, beside the credentials file. */
 export function globalSkillsRecordPath({ homeDirectory = os.homedir(), env = process.env } = {}) {
   const configRoot = String(env.XDG_CONFIG_HOME || "").trim() ? path.resolve(env.XDG_CONFIG_HOME) : path.join(homeDirectory, ".config");

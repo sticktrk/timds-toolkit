@@ -247,7 +247,7 @@ test("hosted scaffold has Wrangler/noindex, no workflows, and check works withou
 test("MCP exposes hosted commands and principal-authorized publication", () => {
   const names = [];
   registerHostedSessionTools({ registerTool(name) { names.push(name); } });
-  assert.deepEqual(names, ["timds_start", "timds_pull", "timds_submit", "timds_update", "timds_status", "timds_history", "timds_sessions_close", "timds_publish", "timds_claim", "timds_active_work", "timds_join", "timds_whoami", "timds_principals", "timds_draft_create", "timds_draft_list", "timds_draft_close"]);
+  assert.deepEqual(names, ["timds_start", "timds_pull", "timds_submit", "timds_update", "timds_status", "timds_history", "timds_sessions_close", "timds_publish", "timds_claim", "timds_active_work", "timds_join", "timds_whoami", "timds_systems", "timds_principals", "timds_draft_create", "timds_draft_list", "timds_draft_close"]);
 });
 
 test("MCP submission shares the hosted changelog gate", async (t) => {
@@ -474,6 +474,19 @@ test("whoami reads the signed-in principal from the saved host and principals li
   assert.equal(listed.principals[0].id, principal.id);
   assert.equal(requests.at(-1).url, "https://saved.test/api/timds/design-systems/example%2Fcore/principals");
   await assert.rejects(runHostedCommand("principals", { root: directory, credentialsPath, portalUrl: "https://saved.test", fetchImpl }), /Provide --system-id/);
+});
+
+test("systems lists the design systems the signed-in principal can see on the saved host", async t => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "timds-systems-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const credentialsPath = path.join(directory, "credentials.json");
+  await saveAccessToken("https://saved.test", "timds_saved", { credentialsPath });
+  const systems = [{ id: "11111111-1111-4111-8111-111111111111", systemId: "example/core", name: "Example Core" }, { id: "22222222-2222-4222-8222-222222222222", systemId: "example/marketing", name: "Example Marketing" }];
+  const requests = [];
+  const fetchImpl = async (url, options) => { requests.push({ url, method: options.method, authorization: options.headers.Authorization }); return response({ apiVersion: 1, systems }); };
+  // No workspace and no portal flag: the saved login selects the host, as for whoami.
+  assert.deepEqual(await runHostedCommand("systems", { root: path.join(directory, "nowhere"), credentialsPath, fetchImpl }), { apiVersion: 1, systems, portal: "https://saved.test" });
+  assert.deepEqual(requests, [{ url: "https://saved.test/api/timds/design-systems", method: "GET", authorization: "Bearer timds_saved" }]);
 });
 
 test("join attaches an empty folder to an existing session and names a new folder when it cannot", async t => {
