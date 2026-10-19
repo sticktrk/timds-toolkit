@@ -118,6 +118,7 @@ export function createHostProvider({ url, token, resolveToken, fetchImpl = fetch
   const sessionPath = (id) => `/${encodeURIComponent(id)}`;
   return {
     me: () => request("GET", "", undefined, 'me'),
+    systems: () => request("GET", "", undefined, 'design-systems'),
     principals: (id) => request("GET", `/${encodeURIComponent(id)}/principals`, undefined, 'design-systems'),
     rollback: (id, input) => request("POST", `/${encodeURIComponent(id)}/rollback`, input, 'design-systems'),
     activeWork: (id) => request("GET", `/${encodeURIComponent(id)}/active-work`, undefined, 'design-systems'),
@@ -366,15 +367,15 @@ export async function runHostedCommand(command, { root = process.cwd(), fixedRoo
   const manifest = await readJson(path.join(selected, "timds.json"));
   // Empty start/join destinations and identity lookups have no selected
   // workspace. Every operation on an existing workspace shares the CLI guard.
-  if (manifest && !["whoami", "principals"].includes(command)) await assertBinaryInstallation(selected);
+  if (manifest && !["whoami", "systems", "principals"].includes(command)) await assertBinaryInstallation(selected);
   const state = await readJson(path.join(selected, SESSION_FILE));
   const configured = destination
     ? normalizeProvider((await readJson(path.join(selected, "timds.json")))?.provider || state?.provider)
     : await workspaceProvider(selected);
   const pending = command === "start" ? await readJson(path.join(selected, PENDING_START_FILE)) : null;
-  const url = portalUrl || process.env.TIMDS_PORTAL_URL || configured?.url || pending?.provider?.url || (destination || command === "whoami" ? await savedPortalUrl({ credentialsPath }) : null);
-  // whoami reads an identity, not a workspace: it answers for any signed-in host.
-  const identityOnly = command === "whoami";
+  const url = portalUrl || process.env.TIMDS_PORTAL_URL || configured?.url || pending?.provider?.url || (destination || ["whoami", "systems"].includes(command) ? await savedPortalUrl({ credentialsPath }) : null);
+  // whoami and systems read an identity and its catalog, not a workspace: they answer for any signed-in host.
+  const identityOnly = ["whoami", "systems"].includes(command);
   if (!url || !identityOnly && configured && configured.kind !== "hosted") throw new Error(NO_HOST);
   const provider = normalizeProvider({ kind: "hosted", url });
   if (!identityOnly && state && state.provider.url !== provider.url) throw new Error("Session belongs to a different TimDS host");
@@ -391,6 +392,8 @@ export async function runHostedCommand(command, { root = process.cwd(), fixedRoo
   }
   // The identity a session owner needs before inviting this caller.
   if (command === "whoami") return { ...await host.me(), portal: provider.url };
+  // Every design system this principal can see, so an agent can move between them.
+  if (command === "systems") return { ...await host.systems(), portal: provider.url };
   if (["active-work", "principals", "draft-create", "draft-list", "draft-close"].includes(command)) {
     if (!selectedSystem) throw new Error("Provide --system-id or run inside a hosted design system");
     if (command === "active-work") return host.activeWork(selectedSystem);
