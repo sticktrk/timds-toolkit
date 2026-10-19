@@ -14,6 +14,7 @@ import {
   hostedSkillPlaceholders,
   installSkills,
   renderHostedSkillFiles,
+  staleSkillsNotice,
 } from "./skills-install.mjs";
 
 const toolkitVersion = JSON.parse(await fs.readFile(new URL("../package.json", import.meta.url), "utf8")).version;
@@ -41,6 +42,7 @@ test("the hosted skill template is a CLI workflow with only the placeholders the
     "timds auth login --portal-url __HOST_ORIGIN__ --oauth",
     "timds whoami",
     "timds systems",
+    "timds skills install --portal-url __HOST_ORIGIN__ --system-id __SYSTEM_ID__",
     "timds skills install --portal-url __HOST_ORIGIN__ --system-id <id>",
     "timds start __SYSTEM_ID__ --root ./<folder> --portal-url __HOST_ORIGIN__",
     'timds join "<invite link>"',
@@ -153,6 +155,37 @@ test("a linked skill folder is written once, and --global installs under the hom
   assert.equal(result.recordPath, path.join(home, ".config", "timds", "skills.json"));
   await fs.access(path.join(home, ".cursor", "skills", "timds-core", "SKILL.md"));
   await assert.rejects(fs.access(path.join(home, ".timds")));
+});
+
+test("hosted commands say when the nearest installed skills are from an older release", async (t) => {
+  const home = await temporaryDirectory(t);
+  const env = { XDG_CONFIG_HOME: path.join(home, "config") };
+  const work = path.join(home, "work");
+  await installSkills({ root: work, output: quiet });
+  // Current skills in this folder: nothing to say, here or in a session folder below it.
+  assert.equal(await staleSkillsNotice({ root: work, homeDirectory: home, env }), null);
+  assert.equal(await staleSkillsNotice({ root: path.join(work, "session-1"), homeDirectory: home, env }), null);
+  // The same record written by an earlier release: the nearest record wins, by release number.
+  const record = path.join(work, ".timds", "skills.json");
+  await fs.writeFile(record, JSON.stringify({ ...JSON.parse(await fs.readFile(record, "utf8")), version: "0.1.9" }));
+  assert.equal(await staleSkillsNotice({ root: path.join(work, "session-1"), homeDirectory: home, env, version: "0.1.10" }), `TimDS skills under ${work} are from 0.1.9; this is 0.1.10. Run timds skills install there to refresh them (your edits are kept).`);
+  assert.equal(await staleSkillsNotice({ root: work, homeDirectory: home, env, version: "0.1.9" }), null);
+  // No folder record: the global one is checked, and nothing at all is silent.
+  await installSkills({ global: true, homeDirectory: home, env, output: quiet });
+  const globalRecord = path.join(env.XDG_CONFIG_HOME, "timds", "skills.json");
+  await fs.writeFile(globalRecord, JSON.stringify({ ...JSON.parse(await fs.readFile(globalRecord, "utf8")), version: "0.1.1" }));
+  assert.match(await staleSkillsNotice({ root: path.join(home, "elsewhere"), homeDirectory: home, env }), /^TimDS skills under .* are from 0\.1\.1; .*timds skills install --global there/);
+  await fs.rm(globalRecord);
+  assert.equal(await staleSkillsNotice({ root: path.join(home, "elsewhere"), homeDirectory: home, env }), null);
+  // The CLI prints the line after a hosted command's own output.
+  const originalFetch = globalThis.fetch;
+  t.after(() => { globalThis.fetch = originalFetch; });
+  const principal = { id: "11111111-1111-4111-8111-111111111111", type: "user", name: "Example Person", admin: false };
+  globalThis.fetch = async () => new Response(JSON.stringify({ apiVersion: 1, principal }), { status: 200, headers: { "Content-Type": "application/json" } });
+  const lines = [];
+  await runWithOutputSink((line) => lines.push(line), () => runCli(["whoami", "--root", path.join(work, "session-1"), "--portal-url", "https://host.example", "--token", "timds_test"]));
+  assert.equal(lines.length, 2);
+  assert.match(lines[1], new RegExp(`^TimDS skills under .* are from 0\\.1\\.9; this is ${toolkitVersion.replaceAll(".", "\\.")}\\.`));
 });
 
 test("skills install refuses folders whose skills another TimDS record owns", async (t) => {

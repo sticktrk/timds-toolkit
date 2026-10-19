@@ -75,6 +75,11 @@ Then tell the agent what to change. Without `--portal-url` and
 A designer who works on several systems runs the command once per system:
 the designer skills are shared and each system gets its own `timds-<system>`
 skill, and `timds systems` lists the ids to use.
+Installed skills are files and do not update themselves, while the CLI
+always runs at `@latest`: the hosted skill has the agent rerun the install at
+the start of each conversation, and every hosted command prints one line
+after its output when the nearest `.timds/skills.json` (this folder, its
+parents, then the home folder) was written by an older release.
 `--global` installs under the home folder instead; `--system-name` and
 `--studio-url` override the names the skill shows. A folder that is a link
 to another of the three is written once.

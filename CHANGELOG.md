@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Add `timds systems` (and the `timds_systems` MCP tool): list every hosted Design System the signed-in person can see, with its id and name, for the selected or saved host. Give the hosted skill a "Switching" section: another session of the same system goes in a new folder beside the current one, and another system means `timds systems`, then `skills install` for that system. The edit skill names the command too.
+- Keep installed skills current: the hosted skill has the agent rerun `timds skills install` for its host and system at the start of each conversation, and every hosted CLI command prints one line after its output when the nearest `.timds/skills.json` (this folder, its parents, then the global record) was written by an older release than the one running.
 
 - Require Developer ID signing and Apple notarization for macOS releases, covering the launcher and every bundled native executable and library. Verify Apple's accepted code hashes before publishing, then check a quarantined download on a separate Mac runner. Pull request builds retain local ad-hoc signing.
 

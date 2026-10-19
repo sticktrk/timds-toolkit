@@ -30,6 +30,11 @@ version.
    reused on later runs; `--force` signs in again or switches accounts.
 2. `timds whoami` confirms the host and who you are signed in as. Report the
    name and principal id: a session owner needs the id to invite you.
+3. `timds skills install --portal-url __HOST_ORIGIN__ --system-id __SYSTEM_ID__`
+   at the start of each conversation, from the folder you work from (not a
+   session folder). These skills are files; the CLI is always current, so
+   this refreshes them to match in a moment and keeps any edits. The CLI
+   also says so after a command when they have fallen behind.
 
 ## Start or join a session
 
