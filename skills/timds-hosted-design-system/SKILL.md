@@ -104,6 +104,19 @@ publish. Report the submission id and the Preview URL the command prints,
 then stop. Reviewing, publishing and rolling back happen in Studio, by people
 with the right to do so.
 
+## Switching
+
+- **Another session of this system.** Leave this folder as it is and never
+  reuse it. `timds active-work --system-id __SYSTEM_ID__` lists the open
+  sessions; join or start the next one in a new folder beside this one.
+  `timds status` in any folder says which session it holds.
+- **Another design system.** `timds systems` lists every design system the
+  signed-in person can see on this host, with its id. Install that system's
+  skill beside this one, from the folder you work from (not inside a session
+  folder), and follow it from then on:
+  `timds skills install --portal-url __HOST_ORIGIN__ --system-id <id>`.
+  This skill stays for __SYSTEM_NAME__; every system has its own.
+
 ## Never, unless the designer explicitly asks
 
 - Publish (`timds publish`) or roll back (`timds rollback`). Both need a
