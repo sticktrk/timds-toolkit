@@ -19,8 +19,11 @@ const run = (root, args, {binary = true, env = {}, fail = false} = {}) => {
 const git = (root, ...args) => execFileSync('git', args, {cwd: root, encoding: 'utf8'});
 async function fixture(t, binary = true) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'timds binary contract '));
-  t.after(() => fs.rm(root, {recursive: true, force: true}));
+  t.after(() => fs.rm(root, {recursive: true, force: true, maxRetries: 5, retryDelay: 50}));
   git(root, 'init', '-q', '-b', 'main'); git(root, 'config', 'user.email', 'binary@example.test'); git(root, 'config', 'user.name', 'Binary Test');
+  // Background Git maintenance can outlive a commit and race fixture cleanup.
+  git(root, 'config', 'maintenance.auto', 'false');
+  git(root, 'config', 'gc.auto', '0');
   run(root, ['init', '--standalone'], {binary});
   git(root, 'add', '.'); git(root, 'commit', '-qm', 'Initial');
   return root;
