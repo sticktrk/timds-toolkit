@@ -4,7 +4,7 @@ import { hasContractGroups, migrateContractGroups, syncContractViews } from "./c
 import { AsyncLocalStorage } from "node:async_hooks";
 import { spawn } from "node:child_process";
 import { linkClaudeSkills } from "./agent-skills.mjs";
-import { SKILLS_HELP, installSkills } from "./skills-install.mjs";
+import { SKILLS_HELP, installSkills, staleSkillsNotice } from "./skills-install.mjs";
 import { createHash } from "node:crypto";
 import { createReadStream, existsSync } from "node:fs";
 import { promises as fs } from "node:fs";
@@ -1723,6 +1723,8 @@ export async function runCli(argv) {
         output('After editing: timds check, then timds update --note "Describe the change" to share it with the session.');
       }
     }
+    // Installed skills are static files; say so once they are behind the CLI.
+    if (!options.json) { const stale = await staleSkillsNotice({ root }); if (stale) output(stale); }
     return result;
   }
   if (command === "skills") {
