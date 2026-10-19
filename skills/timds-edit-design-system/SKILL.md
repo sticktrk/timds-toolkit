@@ -401,8 +401,9 @@ npm script, runs `npx --yes @dtconcepts/timds@latest <command>` (or a global
 install of `@dtconcepts/timds@latest`); always `@latest`, never a pinned
 version. Below, `timds` stands for whichever applies. The session commands
 are `timds start`, `join`, `pull`, `update`, `submit`, `claim`,
-`active-work`, `whoami`, `principals`, `draft create|list|close`, and
-`sessions close`.
+`active-work`, `whoami`, `systems`, `principals`, `draft create|list|close`,
+and `sessions close`. When the human names a design system you have no id
+for, `timds systems` lists every system the signed-in person can see.
 
 Join before you start. When the human names an open session (a session id, a
 Studio link, or "the session I have open"), attach to it and send work with

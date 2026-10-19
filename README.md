@@ -72,6 +72,9 @@ the hosted skill (`timds-<system>`, rendered from
 filled in) into `.agents/skills/`, `.claude/skills/` and `.cursor/skills/`.
 Then tell the agent what to change. Without `--portal-url` and
 `--system-id` only the system-independent skills are installed.
+A designer who works on several systems runs the command once per system:
+the designer skills are shared and each system gets its own `timds-<system>`
+skill, and `timds systems` lists the ids to use.
 `--global` installs under the home folder instead; `--system-name` and
 `--studio-url` override the names the skill shows. A folder that is a link
 to another of the three is written once.
@@ -1673,7 +1676,7 @@ and `rollback`. Agents write with the CLI commands below, which the hosted
 skill (`timds skills install`) teaches them. The MCP tools `timds_start`,
 `timds_pull`, `timds_submit`, `timds_update`, `timds_sessions_close`,
 `timds_claim`, `timds_active_work`, `timds_join`, `timds_whoami`,
-`timds_principals`, and `timds_draft_create|list|close` expose the same
+`timds_systems`, `timds_principals`, and `timds_draft_create|list|close` expose the same
 operations for hosts and MCP clients.
 
 `timds auth login` (also `timds login`) selects `--portal-url` first, then the
@@ -1726,6 +1729,7 @@ timds claim --on 'tokens/color*' --note 'Warm the brand palette'
 timds submit --note 'Warm the brand palette'
 timds update --resolve 'tokens/color.json#brand.value=theirs' --note 'Keep the director’s color'
 timds whoami
+timds systems
 timds principals
 timds join SESSION --principal-id PRINCIPAL
 timds join SESSION --root ./member-session
@@ -1762,8 +1766,10 @@ Claims are advisory: overlapping work is visible, never blocked. `status` and
 `active-work` expose members, claims, submissions and live URLs. An owner or
 publisher invites a principal with `join --principal-id`; an invited principal
 attaches to the same fork with `join`. `whoami` prints the signed-in
-principal's id, name and type for the selected host, and `principals` lists
-the people and agents who can be invited into the Design System's sessions.
+principal's id, name and type for the selected host, `systems` lists every
+Design System that principal can see there with its id, so an agent can move
+between systems, and `principals` lists the people and agents who can be
+invited into the Design System's sessions.
 `join` materializes the session into an empty `--root`, selects the host the
 same way `start` does, and prints the workspace and next steps; it refuses a
 folder that already has files or another session and names `--root

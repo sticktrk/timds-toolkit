@@ -40,6 +40,8 @@ test("the hosted skill template is a CLI workflow with only the placeholders the
   for (const command of [
     "timds auth login --portal-url __HOST_ORIGIN__ --oauth",
     "timds whoami",
+    "timds systems",
+    "timds skills install --portal-url __HOST_ORIGIN__ --system-id <id>",
     "timds start __SYSTEM_ID__ --root ./<folder> --portal-url __HOST_ORIGIN__",
     'timds join "<invite link>"',
     "timds draft create <name> --system-id __SYSTEM_ID__",

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add `timds systems` (and the `timds_systems` MCP tool): list every hosted Design System the signed-in person can see, with its id and name, for the selected or saved host. Give the hosted skill a "Switching" section: another session of the same system goes in a new folder beside the current one, and another system means `timds systems`, then `skills install` for that system. The edit skill names the command too.
+
 - Require Developer ID signing and Apple notarization for macOS releases, covering the launcher and every bundled native executable and library. Verify Apple's accepted code hashes before publishing, then check a quarantined download on a separate Mac runner. Pull request builds retain local ad-hoc signing.
 
 - Add the `timds-hosted-design-system` skill template under `skills/`, with its `agents/openai.yaml`: how an agent with a shell contributes to a hosted Design System through the CLI at `@latest`, from sign-in and `whoami` through starting, joining or drafting a session, claiming files, the `dev`/`check`/`pull`/`update --resolve` loop, and `submit`, and what it must never do unless the designer asks. It no longer mentions MCP, and the `__MCP_URL__` placeholder is gone; the remaining placeholders are `__SKILL_NAME__`, `__SYSTEM_NAME__`, `__SYSTEM_ID__`, `__HOST_ORIGIN__` and `__STUDIO_URL__`. A host serves it filled in.
