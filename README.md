@@ -787,7 +787,7 @@ scaffold, and anything the client changed is kept, and reported when the
 scaffold's own value moved rather than on every sync; nothing is removed,
 reordered, or retitled, and a format whose page the system does not declare
 is skipped. The Digital, Social, and Print overview fragments and the Use
-page (every way to consume a system) are written
+pages (Install, and every way to consume a system) are written
 when the sync adds or authors their page and refreshed while unmodified; one
 that differs is the system's own page and is never replaced. `src/layout.html`
 only gains a missing stock stylesheet link. Everything else, other fragments,
