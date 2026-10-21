@@ -968,7 +968,7 @@ test("the starter viewer renders its site model, and its build guards pages, pla
 
   // The derived layer carries only authored guidance, so the brand kit still reports what the client has not supplied.
   const { designs, machine } = await checkWorkspace(repoRoot);
-  assert.deepEqual(machine.pages.map((page) => page.id), ["brand/color", "brand/typography", "digital", "index", "print", "social", "use", "web/components", "web/spacing"], "design and changelog pages are not guidance");
+  assert.deepEqual(machine.pages.map((page) => page.id), ["brand/color", "brand/typography", "digital", "index", "print", "social", "use", "use/install", "web/components", "web/spacing"], "design and changelog pages are not guidance");
   assert.deepEqual(machine.index.changelog, { url: "/changelog.json", page: "/changelog/", releases: 1, latest: machine.index.system.version });
   assert.equal(JSON.parse(await read("dist/changelog.json")).releases[0].entries[0].area, "Maintenance");
   assert.equal(machine.counts.untyped, 0);
@@ -1009,7 +1009,7 @@ test("the starter viewer renders its site model, and its build guards pages, pla
   const voice = site.views[0].pages.find((page) => page.slug === "voice");
   delete voice.planned;
   await writeJson(path.join(repoRoot, "src/site.json"), site);
-  assert.match(run("build"), /10 pages/);
+  assert.match(run("build"), /11 pages/);
   assert.match(await read("dist/brand/voice/index.html"), /Lead with the answer/);
   await fs.rm(path.join(repoRoot, "src/pages/brand/voice.html"));
   fails("build", /src\/pages\/brand\/voice\.html is missing/);
@@ -1164,6 +1164,7 @@ test("starter sync adopts a scaffold from before the asset views, and upgrade ke
     ["src/pages/print/index.html", "created"],
     ["src/pages/social/index.html", "created"],
     ["src/pages/use/index.html", "created"],
+    ["src/pages/use/install.html", "created"],
     ["src/layout.html", "updated"],
   ]);
   assert.deepEqual(result.site, { addedPages: ["web/email", "web/email-templates"], addedViews: ["digital", "social", "print", "use"], advanced: ["web.label", "web.blurb"], kept: [] });
@@ -1232,8 +1233,9 @@ test("starter sync adds a view a newer scaffold declares to a system adopted und
   const read = (relative) => fs.readFile(path.join(repoRoot, relative), "utf8");
   const dropUse = (site) => ({ ...site, views: site.views.filter((view) => view.id !== "use") });
   const record = JSON.parse(await read(".timds/starter.json"));
-  assert.ok(record.files["src/pages/use/index.html"], "a fresh scaffold records the Use fragment");
+  assert.ok(record.files["src/pages/use/index.html"] && record.files["src/pages/use/install.html"], "a fresh scaffold records the Use fragments");
   delete record.files["src/pages/use/index.html"];
+  delete record.files["src/pages/use/install.html"];
   record.baseline.site = dropUse(record.baseline.site);
   record.version = "0.1.0";
   await writeJson(path.join(repoRoot, ".timds/starter.json"), record);
@@ -1247,11 +1249,13 @@ test("starter sync adds a view a newer scaffold declares to a system adopted und
   assert.deepEqual(result.files.filter((file) => file.status !== "current").map((file) => [file.path, file.status]), [
     ["src/site.json", "updated"],
     ["src/pages/use/index.html", "created"],
+    ["src/pages/use/install.html", "created"],
   ]);
-  const stock = await fs.readFile(path.join(templatesRoot, "starter/src/pages/use/index.html"), "utf8");
-  assert.equal(await read("src/pages/use/index.html"), stock, "the fragment is written byte for byte");
+  for (const relative of ["src/pages/use/index.html", "src/pages/use/install.html"]) {
+    assert.equal(await read(relative), await fs.readFile(path.join(templatesRoot, "starter", relative), "utf8"), `${relative} is written byte for byte`);
+  }
   assert.equal(await read("src/site.json"), await fs.readFile(path.join(templatesRoot, "starter/src/site.json"), "utf8"), "the view is appended as the scaffold declares it");
-  assert.ok(result.check.machine.pages.map((page) => page.id).includes("use"), "the check that follows builds the page");
+  assert.ok(["use", "use/install"].every((id) => result.check.machine.pages.map((page) => page.id).includes(id)), "the check that follows builds both pages");
   const after = JSON.parse(await read(".timds/starter.json"));
   assert.equal(after.version, toolkitVersion);
   assert.ok(after.files["src/pages/use/index.html"], "the record now carries the fragment so later syncs can refresh it while unmodified");
