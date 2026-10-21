@@ -1,0 +1,158 @@
+<span class="eyebrow">Use</span>
+<h1 class="page-title">Install</h1>
+<p class="lede">Put {{name}} in front of the tool you work with. A one-off piece of work needs nothing installed: paste one address. Ongoing work connects an agent once. A website or app pins a release. Every way in reads the same published release, so choose by the job, not by the tool.</p>
+<div class="rule"></div>
+
+<section class="block" id="choose">
+  <div class="block__head">
+    <h2 class="h2">Which one is yours</h2>
+    <p>Start from the row that describes the job. The steps below follow the same order, lightest first, and each one is complete on its own.</p>
+  </div>
+  <table class="spec">
+    <thead><tr><th>The job</th><th>Do this</th><th>What it installs</th></tr></thead>
+    <tbody>
+      <tr><td><strong>One piece of work</strong>: a post, an email, a deck, a one-page site, a quick question about the brand</td><td><a href="#one-url">1 · Paste one address</a></td><td>Nothing</td></tr>
+      <tr><td><strong>Ongoing work in a repository</strong> with an agent: Claude Code, Codex, Cursor, Gemini CLI, VS Code, or any MCP client</td><td><a href="#agent">2 · Connect the agent over MCP</a></td><td>One server entry; the CLI runs at <code>@latest</code></td></tr>
+      <tr><td><strong>A website or app</strong> built on the system</td><td><a href="#product">3 · Pin a release in the product</a></td><td>A manifest, a dev dependency, a skill, and the MCP entry</td></tr>
+      <tr><td><strong>Changing the system itself</strong>: a designer, or an agent working for one</td><td><a href="#contribute">4 · Give the agent the designer skills</a></td><td>Skills in the folder the agent works from</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<div class="steps">
+<section class="block step" id="one-url">
+  <div class="block__head">
+    <h2 class="h2">Paste one address</h2>
+    <p>For a one-off, hand any AI tool that can read a URL the system's <code>llms.txt</code>. The file opens with how to use itself, then the brand essentials: every role color, every font and where it comes from, every logo, every asset format, and the directory of these pages. Paste the line below into the chat and finish it with the work you want.</p>
+  </div>
+  <pre data-copy>Read <span data-root>https://THIS-SYSTEM/</span>llms.txt and follow it. Then: …</pre>
+  <table class="spec">
+    <thead><tr><th>Address</th><th>Holds</th><th>Use it when</th></tr></thead>
+    <tbody>
+      <tr><td><a href="/llms.txt"><code>llms.txt</code></a></td><td>How to use the file, the brand essentials, and the page directory with a link to each page's Markdown.</td><td>Most one-off work. The tool follows a link only for the detail it needs.</td></tr>
+      <tr><td><a href="/llms-full.txt"><code>llms-full.txt</code></a></td><td>Every page's Markdown in one file.</td><td>A tool that reads a single URL and cannot follow links, or work that touches the whole system.</td></tr>
+    </tbody>
+  </table>
+  <p class="note">Both files are regenerated on every release and carry absolute addresses, so either one can be handed around on its own. Nothing is installed and nothing is pinned: the next paste reads the next release. Ask the tool to name the version it read; it is on the file's first lines.</p>
+</section>
+
+<section class="block step" id="agent">
+  <div class="block__head">
+    <h2 class="h2">Connect your agent over MCP</h2>
+    <p>For ongoing work in a repository, add the system's read server to the agent once. The entry runs the TimDS CLI at <code>@latest</code> against the published copy, so there is no version to maintain, no sign-in, and no token: the server is read-only and never sees authored source. It is named <code>timds-design-system-read</code>; its first calls are <code>get_consumer_guide</code>, then <code>describe_system</code>, and every result names the release it read. Pick the tool, copy the snippet, and start a new conversation in the repository.</p>
+  </div>
+  <table class="spec">
+    <thead><tr><th>Tool</th><th>Where the entry goes</th><th>Snippet</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Claude Code</strong></td><td><code>.mcp.json</code> at the repository root, written by the command</td><td>1</td></tr>
+      <tr><td><strong>Codex</strong></td><td><code>~/.codex/config.toml</code></td><td>2</td></tr>
+      <tr><td><strong>Cursor</strong></td><td><code>.cursor/mcp.json</code> in the repository</td><td>3</td></tr>
+      <tr><td><strong>Gemini CLI</strong></td><td><code>.gemini/settings.json</code> in the repository</td><td>4</td></tr>
+      <tr><td><strong>VS Code</strong></td><td><code>.vscode/mcp.json</code> in the repository</td><td>5</td></tr>
+      <tr><td><strong>Any other MCP client</strong></td><td>Its stdio server configuration</td><td>6</td></tr>
+      <tr><td><strong>No local install</strong></td><td>A TimDS host answers read-only MCP over HTTP at <code>/mcp</code> on this public origin</td><td>7</td></tr>
+    </tbody>
+  </table>
+  <div class="tabs" data-tabs aria-label="Agent">
+    <div class="tabs__panel" data-tab="Claude Code">
+      <pre data-copy># Claude Code: writes the entry into .mcp.json at the repository root
+claude mcp add --scope project timds-design-system-read -- npx -y @dtconcepts/timds@latest mcp read --published <span data-root>https://THIS-SYSTEM/</span></pre>
+    </div>
+    <div class="tabs__panel" data-tab="Codex">
+      <pre data-copy># Codex: add to ~/.codex/config.toml
+[mcp_servers.timds-design-system-read]
+command = "npx"
+args = ["-y", "@dtconcepts/timds@latest", "mcp", "read", "--published", "<span data-root>https://THIS-SYSTEM/</span>"]</pre>
+    </div>
+    <div class="tabs__panel" data-tab="Cursor">
+      <pre data-copy>{
+  "mcpServers": {
+    "timds-design-system-read": {
+      "command": "npx",
+      "args": ["-y", "@dtconcepts/timds@latest", "mcp", "read", "--published", "<span data-root>https://THIS-SYSTEM/</span>"]
+    }
+  }
+}</pre>
+    </div>
+    <div class="tabs__panel" data-tab="Gemini CLI">
+      <pre data-copy>{
+  "mcpServers": {
+    "timds-design-system-read": {
+      "command": "npx",
+      "args": ["-y", "@dtconcepts/timds@latest", "mcp", "read", "--published", "<span data-root>https://THIS-SYSTEM/</span>"]
+    }
+  }
+}</pre>
+    </div>
+    <div class="tabs__panel" data-tab="VS Code">
+      <pre data-copy>{
+  "servers": {
+    "timds-design-system-read": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@dtconcepts/timds@latest", "mcp", "read", "--published", "<span data-root>https://THIS-SYSTEM/</span>"]
+    }
+  }
+}</pre>
+    </div>
+    <div class="tabs__panel" data-tab="Any client">
+      <pre data-copy># A stdio server: the command, then its arguments
+npx -y @dtconcepts/timds@latest mcp read --published <span data-root>https://THIS-SYSTEM/</span></pre>
+    </div>
+    <div class="tabs__panel" data-tab="HTTP">
+      <pre data-copy>{
+  "mcpServers": {
+    "timds-host-read": { "type": "http", "url": "<span data-origin>https://THIS-ORIGIN</span>/mcp" }
+  }
+}</pre>
+    </div>
+  </div>
+  <p class="note">Snippets 1 to 6 give the agent the whole consumer tool set: brand roles, tokens, guidance search, pages, formats, designs, and media; <a href="/use/#mcp">Using the system</a> lists every tool. Snippet 7 needs nothing on the machine and carries the host's published read tools, <code>describe_system</code>, <code>get_tokens</code>, <code>read_page</code> and <code>read_derived_layer</code>, each taking this system's id, <code><span data-system-id>SYSTEM-ID</span></code>, as <code>systemId</code> and an optional <code>version</code>.</p>
+  <p class="note">First reads, in order: <code>get_consumer_guide</code> once per conversation, then <code>describe_system</code> and note the version. For a color or a font ask <code>resolve_role</code>, not a token name; for marks and imagery <code>get_brand</code> and <code>list_media</code>; for copy <code>search_guidance</code>; for a size <code>list_formats</code>. Report what was used, and name anything the system could not answer rather than guessing it.</p>
+</section>
+
+<section class="block step" id="product">
+  <div class="block__head">
+    <h2 class="h2">Pin a release in a website or app</h2>
+    <p>A product never copies the system. One command at the product's root pins the current release in <code>timds.consumer.json</code>, wires a digest-verified fetch of the consumer bundle into <code>npm install</code>, installs the <code>timds-consume-design-system</code> skill that tells an agent how to make a design change in the product, and writes the MCP entry from step 2. A clone and an install is then all a developer, or an agent working in the product, needs.</p>
+  </div>
+  <pre data-copy>npx --yes @dtconcepts/timds@latest consumer init --system <span data-system-id>SYSTEM-ID</span> --url <span data-root-bare>https://THIS-SYSTEM</span>
+npm ci</pre>
+  <table class="spec">
+    <thead><tr><th>Then</th><th>Command</th><th>Does</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Move the pin</strong></td><td><code>npm run timds -- consumer update</code></td><td>Moves to the current release, or to the version named after it. A pin of <code>current</code> follows every release at the next install.</td></tr>
+      <tr><td><strong>Check</strong></td><td><code>npm run timds -- consumer check</code></td><td>Validates the manifest and the pin, and that a branch stays inside the product's declared design surface.</td></tr>
+      <tr><td><strong>Review</strong></td><td><code>npm run timds -- consumer preview --app NAME</code></td><td>Captures each route at desktop and phone widths beside its paired design.</td></tr>
+    </tbody>
+  </table>
+  <p class="note">In product CSS use a token by name, never by its literal value, so the product follows the pin. <code>SYSTEM-ID</code> is this system's id, the one <code>.timds-artifact.json</code> beside this page names; a browser fills it in above. <a href="/use/#products">Using the system</a> has the full product workflow.</p>
+</section>
+
+<section class="block step" id="contribute">
+  <div class="block__head">
+    <h2 class="h2">Give your agent the designer skills</h2>
+    <p>Changing the system is a different job from using it: it happens in the system's repository, through a session the host reviews, and this published copy is read-only. Install the designer skills once in the folder the agent works from, with the authenticated host your operator gives you. The skill has the agent sign in as you, start a session, bring up the local preview, and submit for review when you say so.</p>
+  </div>
+  <pre data-copy>npx --yes @dtconcepts/timds@latest skills install --portal-url https://YOUR-HOST --system-id <span data-system-id>SYSTEM-ID</span></pre>
+  <p class="note">The skills land in <code>.agents/skills/</code>, <code>.claude/skills/</code> and <code>.cursor/skills/</code>; <code>--global</code> puts them under the home folder instead. <code>YOUR-HOST</code> is the host's authenticated origin, not this public address: Studio's <b>Send your agent…</b> button produces a brief with it filled in. <a href="/use/#change">Using the system</a> covers the other ways the system changes.</p>
+</section>
+</div>
+
+<section class="block" id="updates">
+  <div class="block__head">
+    <h2 class="h2">Stay current</h2>
+    <p>Every way in reads the current release by default, and nothing above pins the toolkit. Each merged change becomes a new release that the next read picks up.</p>
+  </div>
+  <table class="spec">
+    <thead><tr><th>Way in</th><th>On a new release</th></tr></thead>
+    <tbody>
+      <tr><td><strong>One address</strong></td><td>Nothing to do. The files are regenerated with each release.</td></tr>
+      <tr><td><strong>An agent over MCP</strong></td><td>Nothing to do. The server runs at <code>@latest</code> and serves the current release; pass <code>version</code> to read an earlier one.</td></tr>
+      <tr><td><strong>A pinned product</strong></td><td>Move the pin with <code>consumer update</code> when the developers are ready; <a href="/changelog/">the changelog</a> lists what changed in between.</td></tr>
+      <tr><td><strong>Designer skills</strong></td><td>Rerun <code>skills install</code>; it refreshes unmodified files and keeps edits.</td></tr>
+    </tbody>
+  </table>
+  <p class="note">This copy is {{version}}. A read that fails means the current guidance could not be verified: say so, rather than working from an earlier result.</p>
+</section>
+
