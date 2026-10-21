@@ -66,13 +66,39 @@ test("explicit dependency selection keeps the bounded line and synchronizes usin
   assert.equal(JSON.parse(await fs.readFile(path.join(root, "package-lock.json"))).packages[""].devDependencies[toolkit.name], "0.1.x");
   assert.equal(await fs.readFile(workspace.manifestPath, "utf8"), before);
   assert.deepEqual(calls.slice(-3), [["npm", "run", "timds", "--", "upgrade"], ["npm", "run", "timds", "--", "dependencies", "check"], ["npm", "run", "timds", "--", "check"]]);
-  await assert.rejects(upgradeToRelease(workspace, {version: "latest", run}), /exact stable 0\.1\.x/u);
+  assert.deepEqual([result.checks, result.upgrade], [["dependencies check", "check"], null]);
+  // With json, the selected CLI's own upgrade --json document is returned, and the checks that ran are listed.
+  const innerReport = {ok: true, command: "upgrade", toolkit: {previous: "0.1.0", selected: toolkit.version}};
+  const reporting = async (command, args, options) => {
+    if (args[0] !== "run" || args[3] !== "upgrade") return run(command, args, options);
+    calls.push([command, ...args]);
+    return {stdout: `${JSON.stringify(innerReport)}\n`};
+  };
+  const selected = await upgradeToRelease(workspace, {version: toolkit.version, json: true, run: reporting});
+  assert.deepEqual(calls.at(-3), ["npm", "run", "timds", "--", "upgrade", "--json"]);
+  assert.deepEqual([selected.version, selected.checks, selected.upgrade], [toolkit.version, ["dependencies check", "check"], innerReport]);
+  // A release whose upgrade prints prose instead of JSON reports no document rather than failing the selection.
+  const prose = async (command, args, options) => args[0] === "run" && args[3] === "upgrade" ? {stdout: "TimDS tooling upgraded\n"} : run(command, args, options);
+  assert.equal((await upgradeToRelease(workspace, {version: toolkit.version, json: true, run: prose})).upgrade, null);
+  // The first failing step names itself and its failure code, so a JSON caller can say where and why the selection stopped.
+  const failingAt = (name) => async (command, args, options) => args[0] === "run" && args.slice(3).join(" ") === name ? Promise.reject(new Error(`${name} failed`)) : run(command, args, options);
+  await assert.rejects(upgradeToRelease(workspace, {version: toolkit.version, run: failingAt("check")}), (caught) => caught.message === "check failed" && caught.step === "check" && caught.failureCode === "check_failed");
+  await assert.rejects(upgradeToRelease(workspace, {version: toolkit.version, run: failingAt("dependencies check")}), (caught) => caught.step === "dependencies check" && caught.failureCode === "dependency_check_failed");
+  await assert.rejects(upgradeToRelease(workspace, {version: toolkit.version, run: failingAt("upgrade")}), (caught) => caught.step === "upgrade" && caught.failureCode === "upgrade_failed");
+  // A refusal the inner upgrade --json printed is lifted with its own code and message.
+  const innerRefusal = async (command, args, options) => args[0] === "run" && args[3] === "upgrade"
+    ? Promise.reject(Object.assign(new Error("Command failed"), {stdout: JSON.stringify({ok: false, error: {code: "managed_file_conflict", message: "Refusing to replace locally modified TimDS tooling"}})}))
+    : run(command, args, options);
+  await assert.rejects(upgradeToRelease(workspace, {version: toolkit.version, json: true, run: innerRefusal}), (caught) => caught.failureCode === "managed_file_conflict" && caught.step === "upgrade" && /locally modified/u.test(caught.message));
+  await assert.rejects(upgradeToRelease(workspace, {version: "latest", run}), (caught) => /exact stable 0\.1\.x/u.test(caught.message) && caught.failureCode === "unsupported_requirement");
+  const dirty = async (command, args, options) => command === "git" ? {stdout: " M README.md\n"} : run(command, args, options);
+  await assert.rejects(upgradeToRelease(workspace, {version: toolkit.version, run: dirty}), (caught) => caught.failureCode === "dirty_worktree");
   await assert.rejects(upgradeToRelease(workspace, {version: "0.2.0", run}), /exact stable 0\.1\.x release/u, "the line comes from the repository's bounded requirement");
   const shuffled = async (command, args, options) => args[0] === "view"
     ? {stdout: JSON.stringify([toolkit, {...toolkit, version:"0.1.1"}])} : run(command, args, options);
   assert.equal((await upgradeToRelease(workspace, {version:"0.1.x", run:shuffled})).version, toolkit.version);
   const failingInstall = async (command, args, options) => args[0] === "install" ? Promise.reject(new Error("Registry failed")) : run(command, args, options);
-  await assert.rejects(upgradeToRelease(workspace, {version:toolkit.version, run:failingInstall}), /Registry failed/u);
+  await assert.rejects(upgradeToRelease(workspace, {version:toolkit.version, run:failingInstall}), (caught) => /Registry failed/u.test(caught.message) && caught.failureCode === "install_failed");
   assert.equal(JSON.parse(await fs.readFile(path.join(root, "package.json"))).devDependencies[toolkit.name], "0.1.x");
   // Moving to the next minor line is an explicit package.json edit; the command then follows it.
   const packagePath = path.join(root, "package.json"), lockPath = path.join(root, "package-lock.json");
