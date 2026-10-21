@@ -50,7 +50,8 @@ remembers the host outside your repository, so `start` needs no repeated portal
 flag. An older credential file with exactly one signed-in portal also works;
 multiple portals without a saved selection require `--portal-url` or
 `TIMDS_PORTAL_URL`. Explicit flags and workspace configuration take precedence.
-Hosted `doctor` checks the contract without requiring Git. If the local dev
+Hosted `doctor` checks the contract without requiring Git; `doctor --json`
+prints the same facts as one JSON object. If the local dev
 port is busy, use `timds dev --port 4322`; this supplies `PORT` to the workspace's
 dev command. Frameworks that do not read `PORT` need their own port configuration.
 For a static review, use `timds preview --port 4401`.
@@ -831,7 +832,11 @@ The published prefix carries `.timds-artifact.json`, which names the version,
 source commit, and location of each derived file, so a remote reader needs
 only the base URL. `timds doctor` reports the kit's readiness in one line and
 `timds brand` prints it in full, with the fix for every gap; `--json` returns
-the kit itself.
+the kit itself. `timds doctor --json` prints the whole report as one JSON
+object: the repository and design system roots, the system id, name and
+version, the toolkit selected and running (binary or npm), the starter record
+(synced version and plumbing mode, not adopted, or not a starter system), the
+media asset count, designs, video, consumer, branch, brand kit, and bundle.
 
 ### Publish the portal release
 
@@ -1471,6 +1476,33 @@ rewrites `timds.json`,
 tokens, media records, authored source outside the recorded starter boundary,
 framework config, documentation, or artifacts.
 
+`upgrade --json` prints one JSON object on stdout and nothing else (progress
+goes to stderr) for a host job or script that runs the upgrade: the previous
+and selected toolkit versions, whether a `--version` selection ran, the
+managed files written and the release automation files updated, the starter
+sync (the files written, current, and customized, the catalog views, pages,
+and formats it merged, and which customized files `starter sync --force` may
+replace), the publishing defaults available, the designs setup state, and the
+check the upgrade ran itself. A committed customization of a starter file is
+not a failure: the file is kept, listed under `starter.customized` (and
+`starter.replaceable` when `starter sync --force` may replace it), and the
+result is still `"ok": true`. A refused or failed upgrade exits non-zero and
+still prints `{ "ok": false, "error": { "code": "...", "message": "..." } }`,
+with `error.step` naming the command a `--version` selection stopped at. The
+codes a host job can branch on:
+
+| `error.code` | Meaning |
+| --- | --- |
+| `managed_file_conflict` | A managed file (skill, installation record, starter record) is locally modified; commit or restore it, or rerun with `--force`. |
+| `dirty_worktree` | Uncommitted changes to files the starter sync writes, or (for a selection) any uncommitted change. |
+| `unsupported_requirement` | The `@dtconcepts/timds` requirement, `scripts.timds`, the requested version, or the lockfile is not in the form a selection needs. |
+| `install_failed` | `npm install`, `npm dedupe`, or `npm ci` failed during a selection. |
+| `dependency_check_failed` | `timds dependencies check` failed after the selection installed. |
+| `check_failed` | The post-upgrade check failed: the starter sync was rolled back, or `timds check` or `check:timds-upgrade` failed after a selection. |
+| `upgrade_failed` | Anything else, including the selected release's own `upgrade` failing without a code of its own. |
+
+The prose output is unchanged without the flag.
+
 ### One dependency selection
 
 After bootstrapping a release that supports dependency selection, prepare a
@@ -1488,7 +1520,10 @@ the selected CLI, and runs dependency and Design System checks. A configured
 checks. Commit the package, lockfile, skills, and installation record together.
 A failed check leaves the attempted change available for diagnosis; restore the
 tracked dependency and managed files and run `npm ci` to return to the previous
-resolution. The command does not merge or deploy.
+resolution. The command does not merge or deploy. With `--json`, the selection
+asks the selected release's CLI for its own `upgrade --json` document and
+returns it as `upgrade` (null when that release prints prose), beside the
+versions and the list of checks that ran.
 
 TimDS owns exact React/Remotion runtime versions. Clients can consume hoisted
 modules without redeclaring them. Existing direct declarations require one
