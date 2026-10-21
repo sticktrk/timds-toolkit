@@ -101,6 +101,8 @@ function readSiteModel(site) {
         group: page.group || "",
         summary: page.summary || "",
         planned: page.planned === true,
+        // A promoted page is linked as a call to action in the app bar of every page.
+        promote: typeof page.promote === "string" ? page.promote : page.promote === true ? page.title : "",
         file: slug ? `${id}.html` : `${view.id}/index.html`,
         href: `/${id}/`,
         output: `${id}/index.html`,
@@ -292,6 +294,9 @@ function renderViews(model, current, designs) {
     return `<a class="appbar__view" href="${target.href}"${view.id === current.view ? ' aria-current="true"' : ""}>${label}</a>`;
   });
   if (designs.length) views.push('<a class="appbar__view" href="/designs/"><b>Designs</b><small>Whole pages</small></a>');
+  for (const page of model.pages) {
+    if (page.promote && !page.planned) views.push(`<a class="appbar__cta" href="${page.href}"${page.id === current.id ? ' aria-current="page"' : ""}>${escapeHtml(page.promote)}</a>`);
+  }
   // On a phone the row scrolls sideways, so the current view is brought into view rather than left past the edge.
   views.push('<script>document.querySelector(".appbar__view[aria-current]")?.scrollIntoView({ block: "nearest", inline: "center" });</script>');
   return views.join("\n        ");
@@ -316,6 +321,88 @@ function renderSidenav(model, current) {
   }
   return lines.join("\n        ");
 }
+
+// Progressive enhancement every page gets: [data-root], [data-root-bare],
+// [data-origin] and [data-system-id] are filled with this system's own
+// published address and id (the app bar's brand link is that address whatever
+// the page is served from: the dev server, the host's canonical path, or a
+// per-system hostname; the id comes from the derived layer); [data-tabs]
+// becomes a tablist of its .tabs__panel children; pre[data-copy] gets a copy
+// button. Without the script every panel shows under its own label and every
+// snippet reads as written, so nothing a page says depends on it.
+const enhancements = `<script>
+(() => {
+  const brand = document.querySelector(".appbar__brand");
+  const root = new URL(brand ? brand.getAttribute("href") : "/", location.href);
+  for (const node of document.querySelectorAll("[data-root]")) node.textContent = root.href;
+  for (const node of document.querySelectorAll("[data-root-bare]")) node.textContent = root.href.replace(/\\/$/, "");
+  for (const node of document.querySelectorAll("[data-origin]")) node.textContent = root.origin;
+  if (document.querySelector("[data-system-id]")) {
+    fetch(new URL("index.json", root)).then((response) => (response.ok ? response.json() : null)).then((index) => {
+      const id = index && index.system && index.system.id;
+      if (id) for (const node of document.querySelectorAll("[data-system-id]")) node.textContent = id;
+    }).catch(() => {});
+  }
+  for (const tabs of document.querySelectorAll("[data-tabs]")) {
+    const panels = [...tabs.querySelectorAll(":scope > .tabs__panel")];
+    if (panels.length < 2) continue;
+    const list = document.createElement("div");
+    list.className = "tabs__list";
+    list.setAttribute("role", "tablist");
+    if (tabs.getAttribute("aria-label")) list.setAttribute("aria-label", tabs.getAttribute("aria-label"));
+    const select = (active) => panels.forEach((panel, index) => {
+      panel.hidden = index !== active;
+      list.children[index].setAttribute("aria-selected", String(index === active));
+      list.children[index].tabIndex = index === active ? 0 : -1;
+    });
+    panels.forEach((panel, index) => {
+      const tab = document.createElement("button");
+      tab.type = "button";
+      tab.className = "tabs__tab";
+      tab.setAttribute("role", "tab");
+      tab.textContent = panel.dataset.tab || \`Option \${index + 1}\`;
+      if (!panel.id) panel.id = \`\${tabs.closest("section")?.id || "tabs"}-\${index + 1}\`;
+      tab.setAttribute("aria-controls", panel.id);
+      panel.setAttribute("role", "tabpanel");
+      tab.addEventListener("click", () => select(index));
+      tab.addEventListener("keydown", (event) => {
+        const delta = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+        if (!delta) return;
+        event.preventDefault();
+        const next = (index + delta + panels.length) % panels.length;
+        select(next);
+        list.children[next].focus();
+      });
+      list.append(tab);
+    });
+    tabs.prepend(list);
+    tabs.classList.add("is-enhanced");
+    select(0);
+  }
+  for (const pre of document.querySelectorAll("pre[data-copy]")) {
+    const snippet = document.createElement("div");
+    snippet.className = "snippet";
+    const bar = document.createElement("div");
+    bar.className = "snippet__bar";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "copy";
+    button.textContent = "Copy";
+    button.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(pre.textContent.trim());
+        button.textContent = "Copied";
+      } catch {
+        button.textContent = "Select and copy";
+      }
+      setTimeout(() => { button.textContent = "Copy"; }, 1600);
+    });
+    bar.append(button);
+    pre.replaceWith(snippet);
+    snippet.append(bar, pre);
+  }
+})();
+</script>`;
 
 function renderPagenav(authored, current) {
   const index = authored.indexOf(current);
@@ -406,7 +493,7 @@ export async function renderSite() {
       title: escapeHtml(page.title),
       views: renderViews(model, page, designs),
       sidenav: renderSidenav(model, page),
-      pagenav: renderPagenav(authored, page),
+      pagenav: `${renderPagenav(authored, page)}\n        ${enhancements}`,
       content: content.trim(),
     }));
   }

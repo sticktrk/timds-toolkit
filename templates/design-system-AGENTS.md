@@ -104,6 +104,9 @@ built from the same few blocks.
   the derived layer never carries placeholder guidance. To author it, create
   the fragment and remove the flag. The build fails when the two disagree, and
   when a fragment exists that `site.json` does not declare.
+- A page marked `"promote": "<label>"` is also linked with that label as the
+  call to action in the app bar of every page. The starter promotes the Use
+  view's Install page as "Use this system"; keep one promoted page at most.
 - `src/formats.json` is the catalog of asset formats: `print` in inches,
   `digital` and `social` in pixels, each format with its safe area, limits,
   and the page that shows it. `{{formats:GROUP}}` renders a group's table and

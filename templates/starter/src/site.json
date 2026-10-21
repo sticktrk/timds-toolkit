@@ -89,6 +89,7 @@
       "label": "Use",
       "blurb": "People, products, agents",
       "pages": [
+        { "slug": "install", "title": "Install", "promote": "Use this system", "summary": "Put the system in front of your tools: paste one address for a one-off, connect an agent over MCP, pin a release in a product, or give an agent the designer skills." },
         { "slug": "", "title": "Using the system", "summary": "Every way in: the pages, one URL for any AI tool, the machine-readable layer, MCP, a pinned bundle, and the website designs." }
       ]
     }
