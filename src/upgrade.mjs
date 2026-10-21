@@ -118,9 +118,37 @@ async function lockExactRelease({dedupe = true, dependencyKey, invoke, lockPath,
   return lock;
 }
 
-export async function upgradeToRelease(workspace, {version, ownRuntime = false, force = false, run = execute} = {}) {
+/**
+ * The inner CLI's `upgrade --json` document, when the selected release prints
+ * one; an older release ignores the flag and prints prose, which is reported
+ * as null rather than failing the selection.
+ */
+function parseUpgradeDocument(stdout) {
+  try {
+    const parsed = JSON.parse(String(stdout ?? ""));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * `json` asks the selected CLI for its `upgrade --json` document and returns it
+ * as `upgrade`; `checks` lists the checks that ran (every one passed, since the
+ * first failure throws), and that failure carries the step name as `step` so a
+ * machine-readable caller can say where the selection stopped.
+ */
+export async function upgradeToRelease(workspace, {version, ownRuntime = false, force = false, json = false, run = execute} = {}) {
   const root = workspace.repoRoot;
   const invoke = (command, args) => run(command, args, {cwd: root, maxBuffer: 20_000_000});
+  const step = async (name, command, args) => {
+    try {
+      return await invoke(command, args);
+    } catch (caught) {
+      if (caught && typeof caught === "object" && !caught.step) caught.step = name;
+      throw caught;
+    }
+  };
   const release = await selectRelease(root, version, invoke);
   const {pkg, selected} = release;
   const installationPath = path.join(workspace.designSystemRoot, ".timds", "installation.json");
@@ -138,19 +166,30 @@ export async function upgradeToRelease(workspace, {version, ownRuntime = false, 
   }
   const lock = await lockExactRelease({...release, invoke});
   validateLockedRuntime(lock, selected);
-  await invoke("npm", ["ci"]);
+  await step("npm ci", "npm", ["ci"]);
   // The selected package performs synchronization and checks, so new CLI,
   // templates, and skill behavior always come from one release.
-  await invoke("npm", ["run", "timds", "--", "upgrade", ...(force ? ["--force"] : [])]);
+  const synchronizedUpgrade = await step("upgrade", "npm", ["run", "timds", "--", "upgrade", ...(json ? ["--json"] : []), ...(force ? ["--force"] : [])]);
   if (ownership) {
     const synchronized = await readJson(installationPath);
     synchronized.runtimeDependencyOwnership = "timds-v1";
     await writeJson(installationPath, synchronized);
   }
-  await invoke("npm", ["run", "timds", "--", "dependencies", "check"]);
-  await invoke("npm", ["run", "timds", "--", "check"]);
-  if (pkg.scripts?.["check:timds-upgrade"]) await invoke("npm", ["run", "check:timds-upgrade"]);
-  return {version: selected.version, runtimeDependencyOwnership: ownership ? "timds-v1" : null};
+  const checks = [];
+  await step("dependencies check", "npm", ["run", "timds", "--", "dependencies", "check"]);
+  checks.push("dependencies check");
+  await step("check", "npm", ["run", "timds", "--", "check"]);
+  checks.push("check");
+  if (pkg.scripts?.["check:timds-upgrade"]) {
+    await step("check:timds-upgrade", "npm", ["run", "check:timds-upgrade"]);
+    checks.push("check:timds-upgrade");
+  }
+  return {
+    version: selected.version,
+    runtimeDependencyOwnership: ownership ? "timds-v1" : null,
+    checks,
+    upgrade: json ? parseUpgradeDocument(synchronizedUpgrade?.stdout) : null,
+  };
 }
 
 /**

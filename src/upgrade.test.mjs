@@ -66,6 +66,23 @@ test("explicit dependency selection keeps the bounded line and synchronizes usin
   assert.equal(JSON.parse(await fs.readFile(path.join(root, "package-lock.json"))).packages[""].devDependencies[toolkit.name], "0.1.x");
   assert.equal(await fs.readFile(workspace.manifestPath, "utf8"), before);
   assert.deepEqual(calls.slice(-3), [["npm", "run", "timds", "--", "upgrade"], ["npm", "run", "timds", "--", "dependencies", "check"], ["npm", "run", "timds", "--", "check"]]);
+  assert.deepEqual([result.checks, result.upgrade], [["dependencies check", "check"], null]);
+  // With json, the selected CLI's own upgrade --json document is returned, and the checks that ran are listed.
+  const innerReport = {ok: true, command: "upgrade", toolkit: {previous: "0.1.0", selected: toolkit.version}};
+  const reporting = async (command, args, options) => {
+    if (args[0] !== "run" || args[3] !== "upgrade") return run(command, args, options);
+    calls.push([command, ...args]);
+    return {stdout: `${JSON.stringify(innerReport)}\n`};
+  };
+  const selected = await upgradeToRelease(workspace, {version: toolkit.version, json: true, run: reporting});
+  assert.deepEqual(calls.at(-3), ["npm", "run", "timds", "--", "upgrade", "--json"]);
+  assert.deepEqual([selected.version, selected.checks, selected.upgrade], [toolkit.version, ["dependencies check", "check"], innerReport]);
+  // A release whose upgrade prints prose instead of JSON reports no document rather than failing the selection.
+  const prose = async (command, args, options) => args[0] === "run" && args[3] === "upgrade" ? {stdout: "TimDS tooling upgraded\n"} : run(command, args, options);
+  assert.equal((await upgradeToRelease(workspace, {version: toolkit.version, json: true, run: prose})).upgrade, null);
+  // The first failing step names itself, so a JSON caller can say where the selection stopped.
+  const failingCheck = async (command, args, options) => args[0] === "run" && args[3] === "check" ? Promise.reject(new Error("check failed")) : run(command, args, options);
+  await assert.rejects(upgradeToRelease(workspace, {version: toolkit.version, run: failingCheck}), (caught) => caught.message === "check failed" && caught.step === "check");
   await assert.rejects(upgradeToRelease(workspace, {version: "latest", run}), /exact stable 0\.1\.x/u);
   await assert.rejects(upgradeToRelease(workspace, {version: "0.2.0", run}), /exact stable 0\.1\.x release/u, "the line comes from the repository's bounded requirement");
   const shuffled = async (command, args, options) => args[0] === "view"

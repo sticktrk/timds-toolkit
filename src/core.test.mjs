@@ -620,6 +620,70 @@ test("upgrades clean managed records and removes the legacy vendored CLI", async
   assert.equal(await fs.readFile(skillPath, "utf8"), originalSkill);
 });
 
+test("upgrade --json prints one document with the versions, managed files, starter, defaults, designs, and check, and an error object on failure", async (t) => {
+  const repoRoot = await createDesignSystemRepo(t);
+  await initializeRepository(repoRoot);
+  await writeJson(path.join(repoRoot, "design-system", ".timds", "installation.json"), { name: "@dtconcepts/timds", schemaVersion: 1, version: "0.1.0" });
+  execFileSync("git", ["add", "--all"], { cwd: repoRoot });
+  execFileSync("git", ["commit", "-m", "Install TimDS toolkit"], { cwd: repoRoot, stdio: "ignore" });
+
+  const lines = [];
+  await runWithOutputSink((line) => lines.push(line), () => runCli(["upgrade", "--root", repoRoot, "--json"]));
+  const report = JSON.parse(lines.join("\n"));
+  assert.equal(report.ok, true);
+  assert.deepEqual([report.command, report.selection, report.requestedVersion], ["upgrade", false, null]);
+  assert.deepEqual([report.repoRoot, report.designSystemRoot], [repoRoot, path.join(repoRoot, "design-system")]);
+  assert.deepEqual(report.toolkit, { previous: "0.1.0", selected: toolkitVersion, runtime: "npm" });
+  assert.deepEqual(report.managedFiles, {
+    written: ["design-system/.timds/installation.json", ...["timds-edit-design-system", "timds-create-video", "design-start", "design-media", "design-ship", "design-handoff"].map((name) => `.agents/skills/${name}/`)],
+    releaseAutomation: [],
+  });
+  assert.deepEqual(report.starter, { state: "not-starter" }, "a system scaffolded without the starter has nothing to sync");
+  assert.deepEqual(report.defaults, { enabled: false, changed: [], preserved: [], applied: false });
+  assert.deepEqual(report.designs, { setUp: false, designs: 0, pages: 0 });
+  assert.deepEqual(report.contractMigration, { migrated: false, reason: "No authored token groups to migrate" });
+  assert.equal(report.check, null, "a plain upgrade that synced no starter runs no check of its own");
+
+  // A refused upgrade still answers with one JSON object (ok false and the message) and rejects, so the process exits non-zero.
+  const skillPath = path.join(repoRoot, ".agents", "skills", "timds-edit-design-system", "SKILL.md");
+  await fs.appendFile(skillPath, "\nLocal modification\n", "utf8");
+  const failure = [];
+  await assert.rejects(runWithOutputSink((line) => failure.push(line), () => runCli(["upgrade", "--root", repoRoot, "--json"])), /locally modified TimDS tooling/);
+  const error = JSON.parse(failure.join("\n"));
+  assert.equal(error.ok, false);
+  assert.match(error.error, /Refusing to replace locally modified TimDS tooling/);
+});
+
+test("doctor --json prints the facts the report shows", async (t) => {
+  const repoRoot = await createDesignSystemRepo(t);
+  await initializeRepository(repoRoot);
+  const lines = [];
+  const text = [];
+  await runWithOutputSink((line) => text.push(line), () => runCli(["doctor", "--root", repoRoot]));
+  assert.ok(text.includes("Contract: valid") && text.includes("Starter: not a starter system") && text.includes("Designs: not set up (timds designs init)"), text.join("\n"));
+  await runWithOutputSink((line) => lines.push(line), () => runCli(["doctor", "--root", repoRoot, "--json"]));
+  const report = JSON.parse(lines.join("\n"));
+  assert.deepEqual(report, {
+    ok: true,
+    command: "doctor",
+    repoRoot,
+    designSystemRoot: path.join(repoRoot, "design-system"),
+    layout: "embedded",
+    system: { id: "test/core", name: "Test Design System", version: "1.0.0" },
+    toolkit: { selected: toolkitVersion, running: toolkitVersion, runtime: "npm" },
+    media: { assets: 0 },
+    designs: { setUp: false, designs: 0, pages: 0 },
+    starter: { state: "not-starter" },
+    video: { enabled: false },
+    consumer: null,
+    hosted: false,
+    branch: "main",
+    brand: { derived: null, stale: false },
+    bundle: { configured: false },
+    contract: "valid",
+  });
+});
+
 test("refuses an upgrade outside the running toolkit release line", async (t) => {
   const repoRoot = await createDesignSystemRepo(t);
   await initializeRepository(repoRoot);
@@ -1200,6 +1264,19 @@ test("starter sync adopts a scaffold from before the asset views, and upgrade ke
   assert.deepEqual(forcedUpgrade.starter.files.find((file) => file.path === "scripts/dev.mjs"), { path: "scripts/dev.mjs", status: "customized" });
   assert.deepEqual(forceReplaceable(forcedUpgrade.starter), ["scripts/dev.mjs"]);
   assert.match(await read("scripts/dev.mjs"), /client change/);
+
+  // upgrade --json reports the sync the same way: the customized file is listed as kept and replaceable, and nothing else moved.
+  const jsonLines = [];
+  await runWithOutputSink((line) => jsonLines.push(line), () => runCli(["upgrade", "--root", repoRoot, "--json"]));
+  const jsonReport = JSON.parse(jsonLines.join("\n"));
+  assert.equal(jsonReport.ok, true);
+  assert.deepEqual([jsonReport.starter.state, jsonReport.starter.adopted, jsonReport.starter.plumbing, jsonReport.starter.version], ["current", false, "recorded", toolkitVersion]);
+  assert.deepEqual([jsonReport.starter.written, jsonReport.starter.customized, jsonReport.starter.replaceable], [[], ["scripts/dev.mjs"], ["scripts/dev.mjs"]]);
+  assert.equal(jsonReport.starter.current.length, forcedUpgrade.starter.files.length - 1);
+  assert.deepEqual(jsonReport.starter.site, { addedPages: [], addedViews: [], advanced: [], kept: [] });
+  assert.deepEqual(jsonReport.starter.formats.skipped, []);
+  assert.deepEqual([jsonReport.starter.check, jsonReport.check], [null, null]);
+  assert.deepEqual(jsonReport.designs, { setUp: true, designs: 1, pages: 2 });
 
   // A sync that fails its check runs before the managed files are touched, so the upgrade aborts with the repository as it was and a plain rerun is not refused.
   const stockViewer = await read("scripts/viewer.mjs");
