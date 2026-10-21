@@ -730,9 +730,10 @@ export async function syncStarter({ designSystemRoot, version, check = null, dec
       if (previousRecordText === null) await fs.rm(recordPath, { force: true });
       else await fs.writeFile(recordPath, previousRecordText, "utf8");
       const customized = forceReplaceable({ files });
-      throw new Error(`Starter sync was rolled back because the workspace check failed afterwards: ${caught.message}${customized.length
+      // `failureCode` lets a machine-readable caller tell a failed check from a refusal.
+      throw Object.assign(new Error(`Starter sync was rolled back because the workspace check failed afterwards: ${caught.message}${customized.length
         ? `\nCustomized files were kept (${customized.join(", ")}); the new pages may need their stock versions. Port your changes, or run timds starter sync --force ${customized.join(" ")} to replace them.`
-        : ""}`);
+        : ""}`), { failureCode: "check_failed" });
     }
   }
   return report;

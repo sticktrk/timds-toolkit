@@ -163,18 +163,21 @@ function output(message = "") {
  * Run a command whose stdout is exactly one JSON document. Every progress
  * line the command and its child processes would print goes to stderr
  * instead, the `report` the task resolves is printed as JSON afterwards, and
- * a failure still prints `{ ok: false, error }` (with the step that failed
- * when the error names one) before the error reaches the caller, so the
- * process exits non-zero with a machine-readable reason on stdout. Returns
+ * a failure still prints `{ ok: false, error: { code, message } }` before the
+ * error reaches the caller, so the process exits non-zero with a
+ * machine-readable reason on stdout. `code` is the error's `failureCode` (set
+ * where a refusal or a failed check is thrown, so a host job can branch on it)
+ * or `fallbackCode`; `step` names the command a selection stopped at. Returns
  * the task's `result`, the same value the prose form of the command returns.
  */
-async function runJsonCommand(task) {
+async function runJsonCommand(task, { fallbackCode }) {
   let outcome;
   try {
     outcome = await runWithOutputSink((line) => process.stderr.write(`${line}\n`), task);
   } catch (caught) {
     const message = caught instanceof Error ? caught.message : String(caught);
-    output(JSON.stringify({ ok: false, error: message, ...(typeof caught?.step === "string" ? { step: caught.step } : {}) }, null, 2));
+    const code = typeof caught?.failureCode === "string" ? caught.failureCode : fallbackCode;
+    output(JSON.stringify({ ok: false, error: { code, message, ...(typeof caught?.step === "string" ? { step: caught.step } : {}) } }, null, 2));
     throw caught;
   }
   output(JSON.stringify(outcome.report, null, 2));
@@ -800,7 +803,7 @@ async function requireCleanMigration(workspace) {
   if (provider?.kind === 'hosted') return;
   const result = await git(['status', '--porcelain', '--untracked-files=all'], workspace.repoRoot, {allowFailure: true});
   if (result.code !== 0) throw new Error('Binary adoption and version selection need a Git checkout or a hosted workspace.');
-  if (result.stdout.trim()) throw new Error('Binary adoption and version selection require a clean working tree; commit or restore changes first.');
+  if (result.stdout.trim()) throw Object.assign(new Error('Binary adoption and version selection require a clean working tree; commit or restore changes first.'), { failureCode: 'dirty_worktree' });
 }
 async function runInstallationCommand(root, positional, options) {
   if (positional[0] !== 'adopt' || !options.binary) throw new Error('Usage: timds-cli installation adopt --binary [--apply] [--force] [--root PATH]');
@@ -855,7 +858,7 @@ async function upgradeBinaryRepository(root, options) {
   if (options.version) await requireCleanMigration(workspace);
   return withBinarySelection(() => withFileRollback(binaryRollbackPaths(workspace), async () => {
     const result = await upgradeRepository(root, {autoRelease: options.autoRelease, decideCustomized: terminalPlumbingPrompt(), force: options.force});
-    const checked = await checkWorkspace(root);
+    const checked = await checkWorkspace(root).catch((caught) => { throw Object.assign(caught, { failureCode: caught?.failureCode ?? "check_failed" }); });
     const defaults = await syncDefaults(result);
     if (!options.json) {
       if (defaults.changed.length) output(`Publishing defaults: ${defaults.changed.length} change(s) available. Run timds-cli defaults to review, then timds-cli defaults --apply.`);
@@ -1280,7 +1283,7 @@ export async function upgradeRepository(repoRootInput, { autoRelease = false, de
       .map((filePath) => path.relative(workspace.repoRoot, filePath).split(path.sep).join("/"));
     const status = await git(["status", "--porcelain", "--untracked-files=all", "--", ...pathspecs], workspace.repoRoot);
     if (status.stdout.trim()) {
-      throw new Error(`Refusing to replace locally modified TimDS tooling:\n${status.stdout.trim()}\nCommit or restore it, or rerun with --force`);
+      throw Object.assign(new Error(`Refusing to replace locally modified TimDS tooling:\n${status.stdout.trim()}\nCommit or restore it, or rerun with --force`), { failureCode: "managed_file_conflict" });
     }
   }
   const previousVersion = await readInstalledToolkitVersion(workspace.designSystemRoot);
@@ -1336,7 +1339,7 @@ async function requireCleanStarterFiles(workspace) {
   const pathspecs = starterSyncPaths.map((relative) => path.relative(workspace.repoRoot, path.join(workspace.designSystemRoot, ...relative.split("/"))).split(path.sep).join("/"));
   const status = await git(["status", "--porcelain", "--untracked-files=all", "--", ...pathspecs], workspace.repoRoot);
   if (status.stdout.trim()) {
-    throw new Error(`Starter sync refuses to run over uncommitted changes to the files it writes:\n${status.stdout.trim()}\nCommit or stash them first, so the sync's own diff stays reviewable`);
+    throw Object.assign(new Error(`Starter sync refuses to run over uncommitted changes to the files it writes:\n${status.stdout.trim()}\nCommit or stash them first, so the sync's own diff stays reviewable`), { failureCode: "dirty_worktree" });
   }
 }
 
@@ -2163,7 +2166,7 @@ export async function runCli(argv) {
     return result;
   }
   if (command === "upgrade") {
-    if (options.json) return runJsonCommand(() => runUpgradeCommand(root, options));
+    if (options.json) return runJsonCommand(() => runUpgradeCommand(root, options), { fallbackCode: "upgrade_failed" });
     return (await runUpgradeCommand(root, options)).result;
   }
   if (command === "dependencies") {
@@ -2173,7 +2176,7 @@ export async function runCli(argv) {
     return result;
   }
   if (command === "doctor") {
-    if (options.json) return runJsonCommand(() => runDoctorCommand(root, options));
+    if (options.json) return runJsonCommand(() => runDoctorCommand(root, options), { fallbackCode: "doctor_failed" });
     return (await runDoctorCommand(root, options)).result;
   }
   if (command === "brand") {
