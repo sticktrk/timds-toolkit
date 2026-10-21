@@ -1483,10 +1483,25 @@ managed files written and the release automation files updated, the starter
 sync (the files written, current, and customized, the catalog views, pages,
 and formats it merged, and which customized files `starter sync --force` may
 replace), the publishing defaults available, the designs setup state, and the
-check the upgrade ran itself. A refused or failed upgrade exits non-zero and
-still prints `{ "ok": false, "error": "..." }`, with the step that failed when a
-selection stopped at one of its commands. The prose output is unchanged
-without the flag.
+check the upgrade ran itself. A committed customization of a starter file is
+not a failure: the file is kept, listed under `starter.customized` (and
+`starter.replaceable` when `starter sync --force` may replace it), and the
+result is still `"ok": true`. A refused or failed upgrade exits non-zero and
+still prints `{ "ok": false, "error": { "code": "...", "message": "..." } }`,
+with `error.step` naming the command a `--version` selection stopped at. The
+codes a host job can branch on:
+
+| `error.code` | Meaning |
+| --- | --- |
+| `managed_file_conflict` | A managed file (skill, installation record, starter record) is locally modified; commit or restore it, or rerun with `--force`. |
+| `dirty_worktree` | Uncommitted changes to files the starter sync writes, or (for a selection) any uncommitted change. |
+| `unsupported_requirement` | The `@dtconcepts/timds` requirement, `scripts.timds`, the requested version, or the lockfile is not in the form a selection needs. |
+| `install_failed` | `npm install`, `npm dedupe`, or `npm ci` failed during a selection. |
+| `dependency_check_failed` | `timds dependencies check` failed after the selection installed. |
+| `check_failed` | The post-upgrade check failed: the starter sync was rolled back, or `timds check` or `check:timds-upgrade` failed after a selection. |
+| `upgrade_failed` | Anything else, including the selected release's own `upgrade` failing without a code of its own. |
+
+The prose output is unchanged without the flag.
 
 ### One dependency selection
 

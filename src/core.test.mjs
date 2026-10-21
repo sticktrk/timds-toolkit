@@ -56,6 +56,13 @@ function commitAll(repoRoot, message) {
   execFileSync("git", ["commit", "-q", "-m", message], { cwd: repoRoot, stdio: "ignore" });
 }
 
+/** Run a `--json` CLI command that must reject, and return the error receipt it printed. */
+async function jsonFailure(argv, expected) {
+  const lines = [];
+  await assert.rejects(runWithOutputSink((line) => lines.push(line), () => runCli(argv)), expected);
+  return JSON.parse(lines.join("\n"));
+}
+
 /** Rewind a fresh standalone scaffold to the shape `init` produced before the asset views and format catalog existed. */
 async function rewindStarter(repoRoot) {
   await fs.cp(starterFixtureRoot, repoRoot, { force: true, recursive: true });
@@ -651,7 +658,8 @@ test("upgrade --json prints one document with the versions, managed files, start
   await assert.rejects(runWithOutputSink((line) => failure.push(line), () => runCli(["upgrade", "--root", repoRoot, "--json"])), /locally modified TimDS tooling/);
   const error = JSON.parse(failure.join("\n"));
   assert.equal(error.ok, false);
-  assert.match(error.error, /Refusing to replace locally modified TimDS tooling/);
+  assert.equal(error.error.code, "managed_file_conflict");
+  assert.match(error.error.message, /Refusing to replace locally modified TimDS tooling/);
 });
 
 test("doctor --json prints the facts the report shows", async (t) => {
@@ -1253,6 +1261,8 @@ test("starter sync adopts a scaffold from before the asset views, and upgrade ke
   // From now on every upgrade syncs the starter, under the same clean-tree rule; a system without the record is only told how to opt in.
   await fs.appendFile(path.join(repoRoot, "src/site.json"), "\n");
   await assert.rejects(upgradeRepository(repoRoot), /Starter sync refuses to run over uncommitted changes to the files it writes:\n\s*M src\/site\.json/);
+  const dirtyReceipt = await jsonFailure(["upgrade", "--root", repoRoot, "--json"], /uncommitted changes/);
+  assert.deepEqual([dirtyReceipt.ok, dirtyReceipt.error.code], [false, "dirty_worktree"]);
   execFileSync("git", ["checkout", "--", "src/site.json"], { cwd: repoRoot, stdio: "ignore" });
   const upgraded = await upgradeRepository(repoRoot);
   assert.deepEqual([upgraded.starterAvailable, upgraded.starter.written], [false, []]);
@@ -1285,6 +1295,12 @@ test("starter sync adopts a scaffold from before the asset views, and upgrade ke
   await fs.rm(path.join(repoRoot, ".agents/skills/timds-edit-design-system"), { recursive: true });
   commitAll(repoRoot, "Break the viewer and drop the managed skill");
   for (const attempt of [1, 2]) {
+    if (attempt === 2) {
+      // The JSON receipt of the same failure classifies it as a failed check, not a refusal.
+      const receipt = await jsonFailure(["upgrade", "--root", repoRoot, "--json"], /Starter sync was rolled back/);
+      assert.deepEqual([receipt.ok, receipt.error.code], [false, "check_failed"]);
+      assert.match(receipt.error.message, /client change broke the viewer/);
+    }
     await assert.rejects(upgradeRepository(repoRoot), /Starter sync was rolled back because the workspace check failed afterwards/, `attempt ${attempt}`);
     await assert.rejects(fs.access(path.join(repoRoot, ".agents/skills/timds-edit-design-system")), /ENOENT/, "the managed skill was not reinstalled by the aborted upgrade");
     await assert.rejects(fs.access(path.join(repoRoot, "src/styles/canvas.css")), /ENOENT/);
