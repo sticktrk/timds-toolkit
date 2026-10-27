@@ -62,6 +62,7 @@
     "src/agent-skills.mjs",
     "src/skills-install.mjs",
     "src/consumer.mjs",
+    "src/consumer-register.mjs",
     "src/consumer-init.mjs",
     "src/consumer-install.mjs",
     "src/consumer-scaffold.mjs",

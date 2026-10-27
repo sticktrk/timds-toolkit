@@ -68,7 +68,9 @@ export const CONSUMER_ALWAYS_ALLOWED = Object.freeze([
 ]);
 
 const CONSUMER_HELP = `Usage:
-  timds consumer check [--root PATH] [--app NAME] [--base REF] [--require-token=--NAME]... [--json]
+  timds consumer check [--root PATH] [--app NAME] [--base REF] [--allow-pin-update LABEL] [--require-token=--NAME]... [--json]
+  timds consumer register --portal-url URL [--repository OWNER/REPO] [--delivery auto|approve] [--notify] [--surface PATH]... [--root PATH] [--json]
+  timds consumer updates [LABEL] [--portal-url URL] [--consumer-id UUID] [--root PATH] [--json]
   timds consumer sync [--root PATH]
   timds consumer update [VERSION] [--root PATH]
   timds consumer migrate [--version VERSION] [--url URL] [--root PATH] [--force] [--skip-sync]
@@ -662,6 +664,9 @@ async function checkRequiredTokens(designSystem, required) {
 export async function checkConsumer(repoRootInput = process.cwd(), options = {}) {
   const errors = [];
   const warnings = [];
+  if (options.allowPinUpdate !== undefined && (!options.base || typeof options.allowPinUpdate !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(options.allowPinUpdate) || ["current", "latest"].includes(options.allowPinUpdate))) {
+    throw new Error("--allow-pin-update requires --base and one immutable published release label");
+  }
   let consumer;
   try {
     consumer = await loadConsumer(repoRootInput);
@@ -803,6 +808,10 @@ export async function checkConsumer(repoRootInput = process.cwd(), options = {})
     const paths = await changedPaths(repoRoot, options.base, designSystem.path);
     const atBase = await manifestAtBase(repoRoot, options.base);
     const scopeManifest = atBase.manifest || manifest;
+    const pinUpdateAllowed = options.allowPinUpdate !== undefined && Boolean(atBase.manifest?.designSystem.version) && designSystem.mode === "published"
+      && manifest.designSystem.version === options.allowPinUpdate
+      && ["path", "systemId", "url"].every(key => atBase.manifest.designSystem[key] === manifest.designSystem[key]);
+    if (options.allowPinUpdate !== undefined && !pinUpdateAllowed) errors.push("The approved pin update requires an existing published pin, the exact requested release label, and unchanged Design System path, systemId and URL.");
     const pinMoved = Boolean(atBase.manifest) && JSON.stringify(atBase.manifest.designSystem) !== JSON.stringify(manifest.designSystem);
     if (atBase.manifest && JSON.stringify(atBase.manifest) !== JSON.stringify(manifest)) {
       warnings.push(`${CONSUMER_MANIFEST_FILE} changed on this branch; the design surface is judged against the manifest at ${options.base}. Changing the manifest needs a developer.`);
@@ -820,7 +829,7 @@ export async function checkConsumer(repoRootInput = process.cwd(), options = {})
     });
     const outside = changes.filter((change) => change.status === "outside");
     const guarded = changes.filter((change) => change.status === "protected");
-    if (changes.some((change) => change.status === "pin")) {
+    if (changes.some((change) => change.status === "pin" && !(pinUpdateAllowed && change.path === CONSUMER_MANIFEST_FILE))) {
       errors.push(designSystem.mode === "published"
         ? `The Design System pin (designSystem in ${CONSUMER_MANIFEST_FILE}) changed. A design change never moves the pin; moving it is a separate developer decision (timds consumer update).`
         : `The Design System pin at ${designSystem.path} changed. A design change never moves the pin; moving it is a separate developer decision.`);
@@ -859,7 +868,7 @@ export async function checkConsumer(repoRootInput = process.cwd(), options = {})
 // CLI
 
 const CHECK_BOOLEAN_FLAGS = new Set(["help", "json"]);
-const CHECK_VALUE_FLAGS = new Set(["app", "base", "root", "requireToken"]);
+const CHECK_VALUE_FLAGS = new Set(["app", "base", "root", "requireToken", "allowPinUpdate"]);
 
 // Strict on purpose: a mistyped or empty --base would otherwise skip the scope check and pass.
 function parseCheckArguments(argv) {
@@ -922,7 +931,7 @@ export async function runConsumerCli(args = [], { env = process.env, output = de
   // Each subcommand still owns argument validation. Resolve just the shared
   // root before dispatch so a globally installed CLI cannot silently move
   // a consumer's selected release (including sync/update and preview).
-  if (["check", "sync", "update", "migrate", "preview", "notes", "init"].includes(subcommand) && !rest.some(value => ["--help", "-h"].includes(value))) {
+  if (["check", "sync", "update", "migrate", "preview", "notes", "init", "register", "updates"].includes(subcommand) && !rest.some(value => ["--help", "-h"].includes(value))) {
     const rootFlag = rest.findLastIndex(value => /^--?root(?:=|$)/.test(value));
     const inlineRoot = rootFlag === -1 ? undefined : rest[rootFlag].split("=", 2)[1];
     const root = rootFlag === -1 ? process.cwd() : inlineRoot ?? rest[rootFlag + 1];
@@ -930,6 +939,10 @@ export async function runConsumerCli(args = [], { env = process.env, output = de
       const consumerRoot = await findConsumerManifestRoot(root);
       if (consumerRoot) await assertBinaryInstallation(consumerRoot, { allowNpm: subcommand === "init" });
     }
+  }
+  if (subcommand === "register" || subcommand === "updates") {
+    const { runConsumerRegistration } = await import("./consumer-register.mjs");
+    return runConsumerRegistration(subcommand, rest, { output });
   }
   if (subcommand === "sync" || subcommand === "update") {
     const { runConsumerSync, runConsumerUpdate } = await import("./consumer-sync.mjs");
@@ -961,7 +974,7 @@ export async function runConsumerCli(args = [], { env = process.env, output = de
     output(CONSUMER_HELP);
     return;
   }
-  const result = await checkConsumer(options.root || process.cwd(), { app: options.app, base: options.base, requireTokens: options.requireTokens });
+  const result = await checkConsumer(options.root || process.cwd(), { app: options.app, base: options.base, requireTokens: options.requireTokens, allowPinUpdate: options.allowPinUpdate });
   if (options.json) output(JSON.stringify(result, null, 2));
   else output(checkReport(result));
   // The stock workflow previews only these apps; written before a scope failure throws.
