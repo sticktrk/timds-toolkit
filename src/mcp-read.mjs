@@ -121,8 +121,11 @@ pages, and the media catalog. Nothing here is editable; use it to be on-brand.
 ## Website designs
 
 - \`list_designs\` lists the whole pages the designer has designed in the
-  system: each design, its routes, and the states each route has (a sent
-  form, an empty list, an error). \`read_design\` returns one page state as
+  system: each design, its routes, the states each route has (a sent
+  form, an empty list, an error), and its journeys: the screens in the
+  order a visitor meets them, step by step, with the branches met instead.
+  Port a journey's screens in that order and express every state it
+  shows. \`read_design\` returns one page state as
   the authored HTML and JavaScript, with the system stylesheets, scripts,
   and media it loads.
 - A design is the reference a product route must match. Port its markup
@@ -448,7 +451,7 @@ export function registerDesignSystemReadTools(server, { resolveSystem, listSyste
       formats: layer.formats ? { count: layer.formats.count ?? 0, groups: (layer.formats.groups ?? []).map((group) => ({ id: group.id, unit: group.unit, count: group.formats?.length ?? 0 })) } : null,
       // What a website loads from the system, and the immutable copy it pins; null until the manifest declares a bundle.
       bundle: layer.bundle ? { url: layer.bundle.url, directory: layer.bundle.directory, versioned: layer.bundle.versioned ?? null, files: layer.bundle.fileCount ?? 0, bytes: layer.bundle.bytes ?? 0, paths: (layer.bundle.files ?? []).map((file) => file.path) } : null,
-      designs: layer.designs ? { count: layer.designs.designCount ?? 0, pages: layer.designs.pageCount ?? 0, states: layer.designs.stateCount ?? 0, designs: designsDirectory(layer.designs).map(({ id, title, pageCount }) => ({ id, title, pageCount })) } : null,
+      designs: layer.designs ? { count: layer.designs.designCount ?? 0, pages: layer.designs.pageCount ?? 0, states: layer.designs.stateCount ?? 0, journeys: layer.designs.journeyCount ?? 0, designs: designsDirectory(layer.designs).map(({ id, title, pageCount, journeys }) => ({ id, title, pageCount, journeyCount: journeys.length })) } : null,
       // The release history, when the system keeps a changelog: the latest version and the most recent releases with their notes.
       changelog: layer.changelog ? { url: layer.changelog.url, base: layer.changelog.base ?? null, latest: layer.changelog.latest ?? null, releases: layer.changelog.releaseCount ?? 0, recent: (layer.changelog.releases ?? []).slice(0, 5).map((release) => ({ version: release.version, date: release.date ?? null, notes: (release.entries ?? []).map((entry) => entry.area ? `${entry.area}: ${entry.text}` : entry.text) })) } : null,
       video: index?.video?.boards ? { boards: index.video.boards.kinds ?? [], cadence: index.video.boards.cadence ?? null, formats: index.video.boards.formats ?? null } : null,
@@ -595,7 +598,7 @@ export function registerDesignSystemReadTools(server, { resolveSystem, listSyste
   tool("list_designs", {
     title: "List website designs",
     annotations: READ_ONLY,
-    description: "The website designs the designer has authored in the system: each design with its title, summary, routes, and the states each route has. A design is the reference a product port must match; read a page with read_design.",
+    description: "The website designs the designer has authored in the system: each design with its title, summary, routes, the states each route has, and its journeys (the screens, each a route in a state, in the order a visitor meets them, step by step, with the branch screens met instead, and the storyboard url that shows them). A design is the reference a product port must match: port a journey's screens in its order and express every state it shows; read a page with read_design.",
   }, async (args) => {
     const resolved = await systemFor(args);
     const document = resolved.layer.designs;
@@ -606,7 +609,7 @@ export function registerDesignSystemReadTools(server, { resolveSystem, listSyste
   tool("read_design", {
     title: "Read a design page",
     annotations: READ_ONLY,
-    description: "One page of a website design as the HTML and JavaScript the designer authored on the system's stylesheets, with the stylesheets, scripts, and media it loads. Address it by design id and route (/, /about); pass a state name for a route's other states (list_designs names them).",
+    description: "One page of a website design as the HTML and JavaScript the designer authored on the system's stylesheets, with the stylesheets, scripts, and media it loads. Address it by design id and route (/, /about); pass a state name for a route's other states (list_designs names them, and its journeys say in which order and after which screen a visitor meets each).",
     inputSchema: {
       design: z.string().min(1).max(100).describe("Design id from list_designs"),
       route: z.string().min(1).max(300).describe("The page route, such as / or /contact"),

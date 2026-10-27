@@ -875,8 +875,8 @@ function summarizeCheck(check) {
   return {
     passed: true,
     artifact: { entryPath: check.artifact.entryPath, fileCount: check.artifact.fileCount, totalBytes: check.artifact.totalBytes },
-    designs: check.designs?.enabled ? { designCount: check.designs.designCount, pageCount: check.designs.pageCount, stateCount: check.designs.stateCount } : null,
-    warnings: [...(check.machine?.warnings ?? []), ...(check.video?.warnings ?? [])],
+    designs: check.designs?.enabled ? { designCount: check.designs.designCount, pageCount: check.designs.pageCount, stateCount: check.designs.stateCount, journeyCount: check.designs.journeyCount } : null,
+    warnings: [...(check.designs?.warnings ?? []), ...(check.machine?.warnings ?? []), ...(check.video?.warnings ?? [])],
   };
 }
 
@@ -2196,7 +2196,8 @@ export async function runCli(argv) {
     });
     output(`TimDS check passed: ${result.artifact.fileCount} files, ${result.artifact.totalBytes} bytes, entry ${result.artifact.entryPath}`);
     if (result.designs?.enabled) {
-      output(`Website designs: ${result.designs.designCount} design${result.designs.designCount === 1 ? "" : "s"}, ${result.designs.pageCount} page${result.designs.pageCount === 1 ? "" : "s"}, ${result.designs.stateCount} state${result.designs.stateCount === 1 ? "" : "s"}`);
+      output(`Website designs: ${result.designs.designCount} design${result.designs.designCount === 1 ? "" : "s"}, ${result.designs.pageCount} page${result.designs.pageCount === 1 ? "" : "s"}, ${result.designs.stateCount} state${result.designs.stateCount === 1 ? "" : "s"}, ${result.designs.journeyCount} journey${result.designs.journeyCount === 1 ? "" : "s"}`);
+      for (const warning of result.designs.warnings ?? []) output(`Warning: ${warning}`);
     }
     if (result.bundle?.enabled) output(describeBundle(result.bundle.document));
     if (result.changelog?.written?.length) {
