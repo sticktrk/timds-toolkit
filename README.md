@@ -415,7 +415,9 @@ Changing mode in either direction, explicit delivery policy or a supplied
 surface refuses rather than registering a duplicate.
 
 `consumer updates` reads retained run receipts; add a label for the newest
-attempt at that label, or `--consumer-id UUID` from another checkout. Its JSON
+attempt at that label, or `--consumer-id UUID` from another checkout. Receipt
+labels follow the host contract: at most 100 characters, starting with a letter
+or digit and continuing with letters, digits, `.`, `_`, `+` or `-`. Its JSON
 is the same source-scoped receipt Studio and authenticated MCP read, including
 rollback status, safe failure or skip reason, and the pull request URL. The
 host never merges or deploys the product.
