@@ -15,6 +15,22 @@ test('registration discovers source and GitHub repository, saves one id and read
 
 test('an uncertain registration retries the same saved UUID and request',async t=>{const root=await fixture(t),server=host({loseFirst:true}),options={portalUrl:'https://host.example.com',token:'test-only',fetchImpl:server.fetchImpl};await assert.rejects(registerConsumer(root,options),/lost response/);await registerConsumer(root,options);const posts=server.calls.filter(call=>call.init.method==='POST');assert.equal(posts.length,2);assert.equal(posts[0].init.body,posts[1].init.body);});
 
+test('receipt lookup accepts host release labels, encodes plus signs and enforces the 100-character limit',async t=>{
+  const root=await fixture(t),server=host(),options={portalUrl:'https://host.example.com',token:'test-only',fetchImpl:server.fetchImpl};
+  const registered=await registerConsumer(root,options),base=`${options.portalUrl}/api/timds/sources/${sourceId}/consumers/${registered.consumer.id}/updates/`;
+  for(const label of ['1','2026.10.27-2+build.7','a'.repeat(99)+'+']){
+    const output=[];
+    await runConsumerRegistration('updates',[label,'--root',root,'--portal-url',options.portalUrl,'--json'],{...options,output:line=>output.push(line)});
+    assert.equal(server.calls.at(-1).url,base+encodeURIComponent(label));
+    assert.equal(JSON.parse(output.join('\n')).update.consumerId,registered.consumer.id);
+  }
+  assert.ok(server.calls.some(call=>call.url===base+'2026.10.27-2%2Bbuild.7'));
+  const before=server.calls.filter(call=>call.url.includes('/updates/')).length;
+  for(const label of ['a'.repeat(101),'a'.repeat(128),'+build','version/name','version name','version%2Bbuild'])
+    await assert.rejects(consumerUpdates(root,{...options,label}),/valid release label/);
+  assert.equal(server.calls.filter(call=>call.url.includes('/updates/')).length,before,'invalid labels never reach the receipt endpoint');
+});
+
 test('registration rejects ambiguous roots, foreign remotes and root-wide globs without widening them',async t=>{const root=await fixture(t),server=host(),options={portalUrl:'https://host.example.com',token:'test-only',fetchImpl:server.fetchImpl};await assert.rejects(registerConsumer(root,{...options,portalUrl:'https://host.example.com/private'}),/HTTPS origin/);execFileSync('git',['remote','set-url','origin','https://example.com/timds-example/product.git'],{cwd:root});await assert.rejects(registerConsumer(root,options),/GitHub/);assert.equal(server.calls.filter(call=>call.init.method==='POST').length,0);const input=manifest();input.apps.web.cwd='.';input.apps.web.designSurface=['*.css'];assert.throws(()=>registrationSurface(input),/explicit --surface/);assert.deepEqual(registrationSurface(input,['styles.css']),['styles.css','timds.consumer.json']);assert.throws(()=>registrationSurface(input,['../outside']),/safe repository/);await assert.rejects(runConsumerRegistration('register',['--delivery']),/requires a value/);await assert.rejects(runConsumerRegistration('updates',['--notify']),/Invalid/);});
 
 for(const remote of ['https://github.com/TimDS-Example/Product.git','ssh://git@github.com/TimDS-Example/Product.git','git@github.com:TimDS-Example/Product.git'])test(`registration normalizes a supported GitHub remote: ${remote}`,async t=>{
