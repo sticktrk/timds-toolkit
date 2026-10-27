@@ -126,7 +126,7 @@ export async function registerConsumer(root = process.cwd(), options = {}) {
 export async function consumerUpdates(root = process.cwd(), options = {}) {
   const ctx = await context(root, options), prior = await record(ctx.recordFile), id = options.consumerId || prior?.input?.id;
   if (!uuid.test(id || "")) throw new Error("Run consumer register first, or pass --consumer-id UUID");
-  if (options.label && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(options.label)) throw new Error("Provide a valid release label");
+  if (options.label && !/^[A-Za-z0-9][A-Za-z0-9._+-]{0,99}$/.test(options.label)) throw new Error("Provide a valid release label");
   return options.label ? ctx.host.consumerUpdate(ctx.sourceId, id, options.label) : ctx.host.consumerUpdates(ctx.sourceId, id);
 }
 export async function runConsumerRegistration(command, argv, { output = message => process.stdout.write(`${message}\n`), ...options } = {}) {
