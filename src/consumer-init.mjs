@@ -375,7 +375,7 @@ function appSection(name, app, invocation = "npm run timds --") {
 }
 
 /** The skill paragraphs that differ by pin mode: how the system arrives and what must never be touched. */
-function pinSections(designSystem, binary = false) {
+function pinSections(designSystem, binary = false, { targetLabel, delivery } = {}) {
   const dsPath = designSystem.path;
   if (consumerPinMode(designSystem) === "published") {
     const pin = designSystem.version === "current" ? "the current published version" : `version ${designSystem.version}`;
@@ -383,7 +383,9 @@ function pinSections(designSystem, binary = false) {
       __PIN_SETUP__: binary
         ? `Run \`timds-cli consumer sync\` to fetch the pinned Design System bundle (${pin}) into \`${dsPath}/\`. Product install and build commands remain the ones declared below.`
         : `Run \`npm ci\` at repository root; its \`postinstall\` fetches the pinned\n   Design System bundle (${pin}) into \`${dsPath}/\`. If that directory is\n   empty, run \`npm run timds -- consumer sync\`.`,
-      __PIN_UPDATE__: `The product pins a published version (${pin}) in \`timds.consumer.json\`.\nMove it to the release the designers handed off, or to the current one:\n\n\`\`\`bash\nnpm run timds -- consumer update            # the current published release\nnpm run timds -- consumer update 2026.10.12-1   # a named release\n\`\`\`\n\nIt rewrites \`designSystem.version\` and fetches that version's bundle into\n\`${dsPath}/\` (ignored by git). Commit the manifest change. Never edit files\nunder \`${dsPath}/\`; \`npm ci\` recreates them from the pin.`,
+      __PIN_UPDATE__: targetLabel
+        ? `The product pins a published version (${pin}) in \`timds.consumer.json\`.\nMove it to the supplied immutable release \`${targetLabel}\`:\n\n\`\`\`bash\nnpm run timds -- consumer update ${targetLabel}\n\`\`\`\n\nThis changes only \`designSystem.version\` and fetches that release's bundle\ninto \`${dsPath}/\` (ignored by git). ${delivery === "hosted" ? "Leave the checked change in the working tree for the host." : "Commit the manifest change with the port."}\nNever edit files under \`${dsPath}/\`; sync recreates them from the pin.`
+        : `The product pins a published version (${pin}) in \`timds.consumer.json\`.\nMove it to the release the designers handed off, or to the current one:\n\n\`\`\`bash\nnpm run timds -- consumer update            # the current published release\nnpm run timds -- consumer update 2026.10.12-1   # a named release\n\`\`\`\n\nIt rewrites \`designSystem.version\` and fetches that version's bundle into\n\`${dsPath}/\` (ignored by git). Commit the manifest change. Never edit files\nunder \`${dsPath}/\`; \`npm ci\` recreates them from the pin.`,
       __PIN_RULES__: `- \`${dsPath}/\` holds the published bundle of \`__SYSTEM_ID__\` at the version\n  \`timds.consumer.json\` pins, fetched by \`npm install\` and ignored by git.\n  Never edit, commit, or add files under it, and never change\n  \`designSystem.version\`. Moving the pin is a separate developer decision\n  (\`timds consumer update\`).\n- Never copy Design System stylesheets, fonts, or images into the product.\n  Reference what the app already loads from \`${dsPath}/\`.`,
       __DERIVED_LAYER__: `- The published system is one URL away: the \`describe_system\` tool names\n  it, and \`${dsPath}/.timds-bundle.json\` records the version and files that\n  were fetched. Read \`llms.txt\` at the published prefix for the brand\n  essentials (colors, fonts and where to get them, logos, asset formats),\n  \`brand.json\` and \`tokens.json\` beside it for the details. These are\n  published output: read them, never edit them.`,
     };
@@ -396,11 +398,33 @@ function pinSections(designSystem, binary = false) {
   };
 }
 
+/** The host receives a checked working tree; a local developer owns Git delivery. */
+function updateSections({ targetLabel, delivery } = {}) {
+  const hosted = delivery === "hosted";
+  return {
+    __UPDATE_WORKSPACE__: hosted
+      ? "Use only the prepared consumer checkout and the exact supplied release. The host owns branches, commits and pull requests; keep your changes in the working tree."
+      : "Work only in the repository the user supplied, on a branch named for the release, such as `design-system/update-2026.10.12-1`.",
+    __UPDATE_DELIVERY__: hosted
+      ? "## Return the prepared change\n\nLeave the checked pin and port in the working tree and return the structured\nreport requested by the host. Never commit, push, open a pull request, merge,\ndeploy or publish. The host collects the bounded change set and opens or\nrefreshes one pull request after its current-authority and approval checks."
+      : "## Open the pull request\n\nCommit the pin and the port together, push, and open a pull request against\n`__DEFAULT_BRANCH__` titled for the release (`Adopt Design System 2026.10.12-1`).\nDescribe what was ported route by route, what was left out and why, and\nthe review routes. Never merge, deploy, or publish without separate\nauthorization; production publication is a decision this skill does not\nmake.",
+    __UPDATE_RESULT__: hosted
+      ? "Report the exact supplied version, the routes ported or left with their reasons, the checks completed, and gaps in the system. Return the structured report at the path the host supplied; the host adds the pull-request link after delivery."
+      : "Lead with the version moved to and the routes ported, journey by journey where the routes belong to one. Include the pull-request link, the routes and widths you checked, any design state not yet expressed, and every gap reported to the Design System.",
+    __PIN_CHECK_TARGET__: targetLabel || "<target-label>",
+    __PIN_CHECK_EXPLANATION__: targetLabel
+      ? `Use only the supplied immutable release \`${targetLabel}\`.`
+      : "Replace `<target-label>` with the exact immutable release selected above.",
+  };
+}
+
 /**
  * The managed SKILL.md for a consumer manifest. Generic guidance is static;
  * the pin sections follow the manifest's mode (published bundle or git
  * submodule), and `__APPS__` becomes one section per app.
  * `options.defaultBranch` names the pull-request base (default `main`).
+ * `options.targetLabel` fixes the published update to one immutable release;
+ * `options.delivery: "hosted"` leaves Git delivery to the host and requires it.
  */
 export async function renderConsumerSkill(manifest, options = {}) {
   return renderConsumerSkillFile(CONSUMER_SKILL_NAME, manifest, options);
@@ -409,12 +433,15 @@ export async function renderConsumerSkill(manifest, options = {}) {
 /** Render any consumer skill's SKILL.md for `manifest`: the pin sections, the system, the branch, and the apps. */
 export async function renderConsumerSkillFile(skillName, manifest, options = {}) {
   const validated = validateConsumerManifest(manifest);
+  if (options.targetLabel !== undefined && (typeof options.targetLabel !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(options.targetLabel) || ["current", "latest"].includes(options.targetLabel) || consumerPinMode(validated.designSystem) !== "published")) throw new Error("A consumer update skill targetLabel must name one immutable published release");
+  if (options.delivery !== undefined && !["local", "hosted"].includes(options.delivery)) throw new Error("Consumer skill delivery must be local or hosted");
+  if (options.delivery === "hosted" && !options.targetLabel) throw new Error("A hosted consumer update skill requires targetLabel");
   const source = await fs.readFile(path.join(packageRoot, "skills", skillName, "SKILL.md"), "utf8");
   const binary = options.mode === "binary";
   const invocation = binary ? "timds-cli" : "npm run timds --";
   const apps = Object.entries(validated.apps).map(([name, app]) => appSection(name, app, invocation)).join("\n\n");
   let text = source;
-  for (const [placeholder, replacement] of Object.entries(pinSections(validated.designSystem, binary))) text = text.replace(placeholder, () => replacement);
+  for (const [placeholder, replacement] of Object.entries({ ...pinSections(validated.designSystem, binary, options), ...updateSections(options) })) text = text.replace(placeholder, () => replacement);
   if (binary) {
     text = text.replaceAll("npm run timds --", "timds-cli")
       .replaceAll("fetched by npm install", "fetched by timds-cli consumer sync")

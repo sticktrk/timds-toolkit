@@ -29,6 +29,7 @@ import { existsSync, promises as fs } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import * as z from "zod/v4";
+import { isDeepStrictEqual } from "node:util";
 import { consumerToolkitLockRemedy, planConsumerToolkitLock, PUBLISHED_CONSUMER_MINIMUM_VERSION, toolkitVersionOlderThan } from "./consumer-install.mjs";
 import { parseCssTokens, resolveTokens } from "./tokens.mjs";
 import { assertBinaryInstallation, readBinaryInstallation } from "./binary-installation.mjs";
@@ -69,7 +70,7 @@ export const CONSUMER_ALWAYS_ALLOWED = Object.freeze([
 
 const CONSUMER_HELP = `Usage:
   timds consumer check [--root PATH] [--app NAME] [--base REF] [--allow-pin-update LABEL] [--require-token=--NAME]... [--json]
-  timds consumer register --portal-url URL [--repository OWNER/REPO] [--delivery auto|approve] [--notify] [--surface PATH]... [--root PATH] [--json]
+  timds consumer register [--portal-url URL] [--repository OWNER/REPO] [--base-branch REF] [--delivery auto|approve] [--notify] [--surface PATH]... [--root PATH] [--json]
   timds consumer updates [LABEL] [--portal-url URL] [--consumer-id UUID] [--root PATH] [--json]
   timds consumer sync [--root PATH]
   timds consumer update [VERSION] [--root PATH]
@@ -483,7 +484,7 @@ export async function loadConsumer(repoRootInput = process.cwd()) {
     linked,
     present: mode === "published" && !linked ? record !== null : existsSync(path.join(designSystemRoot, "timds.json")),
   };
-  return { repoRoot, manifestPath, manifest, apps: manifest.apps, designSystem, binaryInstallation: await readBinaryInstallation(repoRoot) };
+  return { repoRoot, manifestPath, manifest, rawManifest: parsed, apps: manifest.apps, designSystem, binaryInstallation: await readBinaryInstallation(repoRoot) };
 }
 
 /** The app entry named `name` (or the only app when `name` is omitted), with its absolute `cwd`. */
@@ -609,7 +610,8 @@ async function manifestAtBase(repoRoot, base) {
   const shown = await git(["show", `${mergeBase.stdout.trim()}:${CONSUMER_MANIFEST_FILE}`], repoRoot);
   if (shown.code !== 0) return { manifest: null, missing: true };
   try {
-    return { manifest: validateConsumerManifest(JSON.parse(shown.stdout)), missing: false };
+    const rawManifest = JSON.parse(shown.stdout);
+    return { manifest: validateConsumerManifest(rawManifest), rawManifest, missing: false };
   } catch {
     return { manifest: null, missing: false };
   }
@@ -808,10 +810,11 @@ export async function checkConsumer(repoRootInput = process.cwd(), options = {})
     const paths = await changedPaths(repoRoot, options.base, designSystem.path);
     const atBase = await manifestAtBase(repoRoot, options.base);
     const scopeManifest = atBase.manifest || manifest;
+    const withoutVersion = value => ({ ...value, designSystem: Object.fromEntries(Object.entries(value.designSystem).filter(([key]) => key !== "version")) });
     const pinUpdateAllowed = options.allowPinUpdate !== undefined && Boolean(atBase.manifest?.designSystem.version) && designSystem.mode === "published"
       && manifest.designSystem.version === options.allowPinUpdate
-      && ["path", "systemId", "url"].every(key => atBase.manifest.designSystem[key] === manifest.designSystem[key]);
-    if (options.allowPinUpdate !== undefined && !pinUpdateAllowed) errors.push("The approved pin update requires an existing published pin, the exact requested release label, and unchanged Design System path, systemId and URL.");
+      && isDeepStrictEqual(withoutVersion(atBase.rawManifest), withoutVersion(consumer.rawManifest));
+    if (options.allowPinUpdate !== undefined && !pinUpdateAllowed) errors.push("The approved pin update requires an existing published pin, the exact requested release label, and unchanged manifest metadata outside designSystem.version (including the Design System path, systemId and URL).");
     const pinMoved = Boolean(atBase.manifest) && JSON.stringify(atBase.manifest.designSystem) !== JSON.stringify(manifest.designSystem);
     if (atBase.manifest && JSON.stringify(atBase.manifest) !== JSON.stringify(manifest)) {
       warnings.push(`${CONSUMER_MANIFEST_FILE} changed on this branch; the design surface is judged against the manifest at ${options.base}. Changing the manifest needs a developer.`);

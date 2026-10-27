@@ -467,7 +467,27 @@ test("developer pin opt-in permits only an exact published release and preserves
   assert.equal((await checkConsumer(product, { base: 'HEAD', allowPinUpdate: '1.2.0' })).status, 'failed');
   const manifest = JSON.parse(await fs.readFile(path.join(product, CONSUMER_MANIFEST_FILE), 'utf8'));
   await write(product, CONSUMER_MANIFEST_FILE, { ...manifest, designSystem: { ...manifest.designSystem, url: 'https://example.com/another-system' } });
-  assert.match((await checkConsumer(product, { base: 'HEAD', allowPinUpdate: '1.3.0' })).errors.join('\n'), /unchanged Design System path, systemId and URL/);
+  assert.match((await checkConsumer(product, { base: 'HEAD', allowPinUpdate: '1.3.0' })).errors.join('\n'), /unchanged manifest metadata outside designSystem.version/);
+  for (const mutate of [
+    value => { value.$schema = 'https://example.com/consumer.schema.json'; },
+    value => { value.apps.web.preview.build = ['node', 'different-build.mjs']; },
+    value => { value.apps.web.preview = { serve: ['npm', 'run', 'dev'], port: 4321, routes: ['/'] }; },
+    value => { value.apps.web.preview.routes = ['/', '/other']; },
+    value => { value.apps.web.designSurface = ['**']; },
+    value => { value.apps.web.protected = ['src/**']; },
+    value => { value.apps.web.install = ['npm', 'install']; },
+    value => { value.apps.web.cwd = '.'; },
+    value => { value.apps.web.preview.schemes = ['light']; },
+    value => { value.apps.web.protected = []; },
+  ]) {
+    const changed = structuredClone(manifest); mutate(changed);
+    await write(product, CONSUMER_MANIFEST_FILE, changed);
+    const checked = await checkConsumer(product, { base: 'HEAD', allowPinUpdate: '1.3.0' });
+    assert.equal(checked.status, 'failed');
+    assert.match(checked.errors.join('\n'), /unchanged manifest metadata outside designSystem.version/, 'only the version may change, including metadata normalized away by validation');
+  }
+  await write(product, CONSUMER_MANIFEST_FILE, { apps: manifest.apps, designSystem: { url: manifest.designSystem.url, version: manifest.designSystem.version, systemId: manifest.designSystem.systemId, path: manifest.designSystem.path }, schemaVersion: 1 });
+  assert.equal((await checkConsumer(product, { base: 'HEAD', allowPinUpdate: '1.3.0' })).status, 'passed', 'JSON key order and whitespace are not manifest metadata');
   await write(product, CONSUMER_MANIFEST_FILE, { ...manifest, apps: { web: { ...manifest.apps.web, designSurface: ['**'] } } });
   await write(product, 'web/server/handler.mjs', 'export default {};\n');
   assert.match((await checkConsumer(product, { base: 'HEAD', allowPinUpdate: '1.3.0' })).errors.join('\n'), /outside the design surface/, 'the branch cannot widen its own scope');

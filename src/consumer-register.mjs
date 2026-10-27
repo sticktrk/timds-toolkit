@@ -1,4 +1,4 @@
-// Register the current product with an explicitly selected TimDS host. Durable
+// Register the current product with the selected TimDS host. Durable
 // registration identity lives in git metadata, outside the tracked product.
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -12,7 +12,7 @@ import { CONSUMER_MANIFEST_FILE, loadConsumer } from "./consumer.mjs";
 const execute = promisify(execFile);
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const HELP = `Usage:
-  timds consumer register --portal-url URL [--repository OWNER/REPO] [--base-branch REF] [--delivery auto|approve] [--notify] [--surface PATH]... [--root PATH] [--json]
+  timds consumer register [--portal-url URL] [--repository OWNER/REPO] [--base-branch REF] [--delivery auto|approve] [--notify] [--surface PATH]... [--root PATH] [--json]
   timds consumer updates [LABEL] [--portal-url URL] [--consumer-id UUID] [--root PATH] [--json]
 
 Register the current timds.consumer.json with a host, then complete its GitHub
@@ -22,7 +22,11 @@ pin and a product CLI supporting consumer check --allow-pin-update LABEL.
 --notify dispatches an existing repository workflow instead of running an agent.
 --surface supplies narrower repository path prefixes when manifest globs have
 no safe prefix. The immutable base manifest still limits the agent's changes.
-updates reads the same retained receipts as Studio and authenticated MCP.`;
+updates reads the same retained receipts as Studio and authenticated MCP.
+The host is selected by --portal-url, TIMDS_PORTAL_URL, or the saved selected
+login, in that order. If no saved host is unambiguous, pass --portal-url.
+The consumer manifest must be at the Git repository root. Surface prefixes
+are limited to 100 including timds.consumer.json.`;
 
 function origin(value) {
   let url;
@@ -47,16 +51,21 @@ function repository(value, explicit = false) {
     }
     name = name.replace(/\.git$/, "");
   }
-  if (!/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9_.-]{1,100}$/.test(name) || name.endsWith(".git")) throw new Error("Use a GitHub owner/repository locator");
+  if (!/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9_.-]{1,100}$/.test(name) || name.endsWith(".git") || [".", ".."].includes(name.split("/")[1])) throw new Error("Use a GitHub owner/repository locator");
   return name.toLowerCase();
 }
 function safePrefix(value) {
   return typeof value === "string" && value.length > 0 && value.length <= 500 && !/[\\\u0000-\u001f*?{}\[\]]/.test(value) && !value.startsWith("/") && value.split("/").every(part => part && part !== "." && part !== ".." && part !== ".git");
 }
+function boundedSurface(prefixes) {
+  const result = [...new Set(prefixes)].sort();
+  if (result.length > 100) throw new Error("Hosted registration supports at most 100 design-surface prefixes including timds.consumer.json");
+  return result;
+}
 export function registrationSurface(manifest, supplied) {
   if (supplied?.length) {
     if (!supplied.every(safePrefix)) throw new Error("--surface must name a safe repository file or directory prefix without globs");
-    return [...new Set([CONSUMER_MANIFEST_FILE, ...supplied])].sort();
+    return boundedSurface([CONSUMER_MANIFEST_FILE, ...supplied]);
   }
   const prefixes = [CONSUMER_MANIFEST_FILE];
   for (const app of Object.values(manifest.apps)) for (const glob of app.designSurface) {
@@ -65,10 +74,12 @@ export function registrationSurface(manifest, supplied) {
     if (!safePrefix(prefix)) throw new Error("A design-surface glob has no safe directory prefix; provide explicit --surface PATH values");
     prefixes.push(prefix);
   }
-  return [...new Set(prefixes)].sort();
+  return boundedSurface(prefixes);
 }
 async function context(root, options) {
   const consumer = await loadConsumer(root);
+  const top = await fs.realpath(await git(consumer.repoRoot, ["rev-parse", "--show-toplevel"]));
+  if (await fs.realpath(consumer.repoRoot) !== top) throw new Error("Hosted followers require timds.consumer.json at the Git repository root");
   const portal = origin(options.portalUrl || process.env.TIMDS_PORTAL_URL || await savedPortalUrl(options));
   const host = createHostProvider({ url: portal, resolveToken: extra => resolveAccessToken(portal, { ...options, ...extra }), fetchImpl: options.fetchImpl || fetch });
   const rows = (await host.systems()).systems?.filter(row => row.systemId === consumer.manifest.designSystem.systemId) || [];
@@ -86,12 +97,14 @@ export async function registerConsumer(root = process.cwd(), options = {}) {
   const locator = repository(options.repository || await git(ctx.repoRoot, ["remote", "get-url", "origin"]), Boolean(options.repository));
   const prior = await record(recordFile);
   if (prior && (prior.portal !== portal || prior.sourceId !== sourceId || prior.input?.locator !== locator || !uuid.test(prior.input?.id))) throw new Error("The saved registration belongs to another repository or source");
-  if (!options.notify && (designSystem.mode !== "published" || ["current", "latest"].includes(manifest.designSystem.version))) throw new Error("Hosted registration needs a fixed published release pin; migrate a submodule or use --notify");
+  const requestedMode = options.notify ? "notify" : "hosted";
+  if (prior && prior.input.policy?.mode !== requestedMode) throw new Error("Registration already exists with a different update mode; repeat --notify for notifications or manage it in Studio");
+  if (requestedMode === "hosted" && (designSystem.mode !== "published" || ["current", "latest"].includes(manifest.designSystem.version))) throw new Error("Hosted registration needs a fixed published release pin; migrate a submodule or use --notify");
   const delivery = options.delivery || "auto";
   if (!["auto", "approve"].includes(delivery)) throw new Error("--delivery must be auto or approve");
   let input = prior?.input;
   if (!input) {
-    input = { id: randomUUID(), kind: "github", locator, pinPath: CONSUMER_MANIFEST_FILE, pinnedLabel: manifest.designSystem.version || "", designSurface: options.notify ? [] : registrationSurface(manifest, options.surface), policy: { mode: options.notify ? "notify" : "hosted", delivery }, ...(options.baseBranch ? { baseBranch: options.baseBranch } : {}) };
+    input = { id: randomUUID(), kind: "github", locator, pinPath: CONSUMER_MANIFEST_FILE, pinnedLabel: manifest.designSystem.version || "", designSurface: options.notify ? [] : registrationSurface(manifest, options.surface), policy: { mode: requestedMode, delivery }, ...(options.baseBranch ? { baseBranch: options.baseBranch } : {}) };
     await fs.mkdir(path.dirname(recordFile), { recursive: true, mode: 0o700 });
     try { await fs.writeFile(recordFile, `${JSON.stringify({ schemaVersion: 1, portal, sourceId, input }, null, 2)}\n`, { mode: 0o600, flag: "wx" }); }
     catch (error) { if (error.code !== "EEXIST") throw error; const winner = await record(recordFile); if (winner?.portal !== portal || winner.sourceId !== sourceId || winner.input?.locator !== locator || !uuid.test(winner.input?.id)) throw new Error("Another registration changed this repository; retry after inspecting its state"); input = winner.input; }
@@ -99,7 +112,7 @@ export async function registerConsumer(root = process.cwd(), options = {}) {
   // Reuse the exact input saved before the first POST, including after a lost
   // response or a later local pin move. Changed CLI policy never creates another
   // follower silently; policy edits belong to the existing host registration.
-  if (options.delivery && input.policy.delivery !== options.delivery || options.notify && input.policy.mode !== "notify" || options.baseBranch && input.baseBranch !== options.baseBranch || options.surface && JSON.stringify(input.designSurface) !== JSON.stringify(registrationSurface(manifest, options.surface))) throw new Error("Registration already exists with different policy or surface; manage it in Studio");
+  if (options.delivery && input.policy.delivery !== options.delivery || input.policy.mode !== requestedMode || options.baseBranch && input.baseBranch !== options.baseBranch || options.surface && JSON.stringify(input.designSurface) !== JSON.stringify(registrationSurface(manifest, options.surface))) throw new Error("Registration already exists with different policy or surface; manage it in Studio");
   const result = await host.registerConsumer(sourceId, input);
   if (result.consumer?.id !== input.id || result.consumer.sourceId !== sourceId || result.consumer.locator !== locator) throw new Error("The host returned a mismatched consumer registration");
   let installUrl;
@@ -120,6 +133,7 @@ export async function runConsumerRegistration(command, argv, { output = message 
   const parsed = {};
   for (let index = 0; index < argv.length; index++) {
     const item = argv[index];
+    if (item === "-h") { parsed.help = true; continue; }
     if (!item.startsWith("-")) { if (command !== "updates" || parsed.label) throw new Error(`Unexpected argument\n${HELP}`); parsed.label = item; continue; }
     const match = /^--([a-z-]+)(?:=(.*))?$/.exec(item);
     if (!match) throw new Error(`Unknown option\n${HELP}`);

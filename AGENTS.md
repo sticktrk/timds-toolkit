@@ -63,14 +63,17 @@ with `--version`, the root package and lockfile) and never touches
 `timds.consumer.json`, other launch entries or MCP servers, or product source.
 
 `consumer register` reads the product manifest and records a source-scoped
-follower on the explicitly selected host. Its stable retry input lives under
-the product's Git common directory in `timds-consumers/`, never in tracked
+follower on the selected host (`--portal-url`, `TIMDS_PORTAL_URL`, then the
+saved selected login). The manifest must be at the Git repository root. Its
+stable retry input lives under the product's Git common directory in `timds-consumers/`, never in tracked
 source; credentials stay in the existing external login store. `consumer
 updates` reads the same run receipts as Studio and authenticated MCP. Hosted
 pin adoption uses `consumer check --base REF --allow-pin-update LABEL`: only
-the exact published version can change; system ID, URL, bundle path and the
-base manifest's surface/protected rules remain fixed. Ordinary designer checks
-continue to reject pin moves. Keep registration, the shared host provider,
+the exact published version can change; every other manifest value remains
+fixed, including app commands, routes, system identity and surface/protected
+rules. Hosted skill rendering requires the exact `targetLabel` and
+`delivery: "hosted"`, which leaves commits, pushes and PR delivery to the host.
+Ordinary designer checks continue to reject pin moves. Keep registration, the shared host provider,
 its CLI help and the developer update skill compatible in one release.
 
 `consumer scaffold emdash` creates a new EmDash site repository that consumes
