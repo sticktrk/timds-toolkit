@@ -364,6 +364,62 @@ design in the pinned Design System, as `"<design>:<route>"`:
 "preview": { "serve": ["npm", "run", "dev"], "port": 4321, "routes": ["/", "/contact"], "designs": { "/": "website:/", "/contact": "website:/contact" } }
 ```
 
+### Hosted follower updates
+
+A product with a fixed published release pin can register with a TimDS host:
+
+```sh
+npm run timds -- consumer register --portal-url https://host.example.com
+npm run timds -- consumer updates --portal-url https://host.example.com
+npm run timds -- consumer updates 2026.10.27-2 --portal-url https://host.example.com --json
+```
+
+Registration requires `timds.consumer.json` at the Git repository root; a
+manifest found only in a subdirectory is refused before contacting the host.
+It reads that manifest, resolves its system ID in the
+signed-in host's catalogue, discovers the GitHub repository from `origin`, and
+posts one source-scoped follower. It prints the signed GitHub App installation
+link; complete that installation to activate updates. The existing TimDS
+OAuth login supplies the credential, only to the selected host. GitHub App
+keys and installation tokens stay on the host. The optional `--portal-url`
+selects the host before `TIMDS_PORTAL_URL`, then the saved selected login.
+When no saved host is unambiguous, provide `--portal-url`; the CLI does not
+guess between accounts.
+
+The default policy runs a hosted agent and opens a pull request for developer
+review. `--delivery approve` asks a publisher in Studio to approve the
+prepared change before delivery. `--notify` instead sends the repository
+release notification for an existing Actions workflow. `--repository
+OWNER/REPO` and `--base-branch REF` select those values explicitly. Hosted
+runs require the product's pinned CLI to support
+`consumer check --allow-pin-update LABEL`; update older product lockfiles
+through their reviewed dependency workflow before enabling the hosted agent.
+
+The registry's upper bound is the safe directory prefix of each app's design
+surface, plus the pin manifest. The runtime also enforces the immutable base
+manifest's complete globs and protected paths. A root glob such as `*.css`
+has no safe prefix; provide explicit `--surface PATH` values instead of
+silently widening it to the repository root. Registration never edits the
+product manifest, dependency lock or workflow. The registration allows at most
+100 distinct prefixes, including `timds.consumer.json`; the CLI checks this
+bound before posting.
+
+A stable registration UUID and its original request live under
+`git rev-parse --git-common-dir` in `timds-consumers/`, outside the tracked
+product. The first request is saved before transport; a lost response or
+another invocation reuses it. The record contains no token or installation
+secret. A later local pin move does not create another follower. Manage an
+existing follower's state in Studio. A rerun must use the same update mode:
+repeat `--notify` for a notification follower and omit it for a hosted one.
+Changing mode in either direction, explicit delivery policy or a supplied
+surface refuses rather than registering a duplicate.
+
+`consumer updates` reads retained run receipts; add a label for the newest
+attempt at that label, or `--consumer-id UUID` from another checkout. Its JSON
+is the same source-scoped receipt Studio and authenticated MCP read, including
+rollback status, safe failure or skip reason, and the pull request URL. The
+host never merges or deploys the product.
+
 Every paired route must be in `routes`; `consumer check` verifies each pairing
 against the pin's `src/designs/`. The preview then builds the pin's artifact
 with its own declared commands when it is not built yet, renders its designs,
@@ -406,6 +462,17 @@ Declared `routes` always come first and always stay.
   or `timds.consumer.json` changed. The stock workflow builds a preview only
   for those apps, so a pull request that cannot change how an app looks skips
   the preview job.
+- A developer carrying a release into the product runs
+  `timds consumer check --base origin/main --allow-pin-update LABEL` with the
+  exact target label. This explicit opt-in accepts that published version
+  change while keeping every other manifest value fixed, including app
+  commands, routes, scope, protected paths, system identity and bundle path.
+  Adding an explicit default is also a manifest change; JSON key order and
+  formatting may differ. It still checks the base manifest's design surface and
+  protected paths; a branch cannot expand its own permissions. It requires an existing published
+  pin and `--base`, and rejects `current` and `latest`. The ordinary check
+  without the flag continues to reject all pin moves. Submodule migration
+  remains an explicit separate operation.
 - `timds consumer preview --app NAME [--base REF] [--publish]` builds or serves
   the app and writes a review folder to `.timds/preview/<app>/`: `preview.json`,
   a script-free gallery `index.html`, `captures/` (full-page PNGs per route,

@@ -9,8 +9,7 @@ Designers do their work in the Design System repository and release it;
 this product follows a pinned version and a developer carries each release
 across. The Design System's website designs are the reference the product's
 routes must match, never pages to copy in. You are doing the developer's
-part. Work only in the repository the user supplied, on a branch named for
-the release, such as `design-system/update-2026.10.12-1`.
+part. __UPDATE_WORKSPACE__
 
 The product's brand lives in the system `__SYSTEM_ID__`, pinned at
 `__DESIGN_SYSTEM_PATH__/`. `timds.consumer.json` declares each app, its
@@ -92,27 +91,34 @@ names the file to open):
 2. Run the app locally (its `.claude/launch.json` entry or the serve command)
    and visit every review route at each declared width and scheme, paired
    routes against their design state by state. Fix what you find.
-3. Run, from repository root:
+3. For a published version pin, run from repository root:
+
+```bash
+npm run timds -- consumer check --base origin/__DEFAULT_BRANCH__ --allow-pin-update __PIN_CHECK_TARGET__
+```
+
+   __PIN_CHECK_EXPLANATION__
+   The opt-in permits only that published version change. All other manifest
+   metadata, including the system identity, paths, app commands and scope,
+   must remain unchanged. The base manifest still controls the
+   design surface and protected paths. If the pinned CLI does not recognize
+   the flag, upgrade it through the product’s normal reviewed dependency path
+   before using hosted updates. Never weaken or bypass this check.
+
+   For a git submodule pin, keep its explicit gitlink review and run:
 
 ```bash
 npm run timds -- consumer check --base origin/__DEFAULT_BRANCH__
 ```
 
-   The pin change and the port are expected; anything else outside the
-   design surface needs a reason in the pull request.
+   That check still reports the deliberate gitlink pin move; inspect the exact
+   commit selected and report that diagnostic in the pull request. Resolve
+   every other check failure, including protected paths and design-surface
+   violations. Do not describe that run as green. The published-pin opt-in
+   does not apply to submodules; hosted followers require a published pin.
 
-## Open the pull request
-
-Commit the pin and the port together, push, and open a pull request against
-`__DEFAULT_BRANCH__` titled for the release (`Adopt Design System 2026.10.12-1`).
-Describe what was ported route by route, what was left out and why, and
-the review routes. Never merge, deploy, or publish without separate
-authorization; production publication is a decision this skill does not
-make.
+__UPDATE_DELIVERY__
 
 ## Report the result
 
-Lead with the version moved to and the routes ported, journey by journey
-where the routes belong to one. Include the
-pull-request link, the routes and widths you checked, any design state not
-yet expressed, and every gap reported to the Design System.
+__UPDATE_RESULT__
