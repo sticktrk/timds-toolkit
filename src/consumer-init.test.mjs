@@ -12,6 +12,7 @@ import {
   consumerMcpServers,
   initializeConsumer,
   renderConsumerSkill,
+  renderConsumerSkillFile,
   rootAppName,
   runConsumerInit,
 } from "./consumer-init.mjs";
@@ -609,4 +610,25 @@ test('optional draft preview adds a browser hook after the pinned stylesheet and
   assert.equal(result.manifest.designSystem.version, '1.2.3');
   const runtime = await fs.readFile(path.join(product, '.timds/draft-preview.mjs'), 'utf8');
   assert.match(runtime, /timds_draft/); assert.match(runtime, /"source":"acme\/core"/);
+});
+
+test("update skills bind an exact target and distinguish hosted preparation from local delivery", async () => {
+  const manifest = { schemaVersion: 1, designSystem: { path: "design-system", systemId: "timds-example/core", version: "2026.10.27-1", url: "https://public.example.com" }, apps: { web: { cwd: ".", preview: { build: ["npm", "run", "build"], output: "dist" }, designSurface: ["src/**"] } } };
+  const options = { defaultBranch: "main", targetLabel: "2026.10.27-2" };
+  const local = await renderConsumerSkillFile("timds-update-design-system", manifest, options);
+  assert.match(local, /consumer update 2026\.10\.27-2/);
+  assert.match(local, /consumer check --base origin\/main --allow-pin-update 2026\.10\.27-2/);
+  assert.doesNotMatch(local, /or to the current one|consumer update\s+# the current|<target-label>|__[A-Z_]+__/);
+  assert.match(local, /Commit the pin and the port together, push/);
+  const hosted = await renderConsumerSkillFile("timds-update-design-system", manifest, { ...options, delivery: "hosted" });
+  assert.match(hosted, /consumer update 2026\.10\.27-2/);
+  assert.match(hosted, /Never commit, push, open a pull request, merge,/);
+  assert.match(hosted, /host adds the pull-request link after delivery/);
+  assert.doesNotMatch(hosted, /Commit the manifest change|Commit the pin and the port together|on a branch named|## Open the pull request|__[A-Z_]+__/);
+  const binary = await renderConsumerSkillFile("timds-update-design-system", manifest, { ...options, mode: "binary", delivery: "hosted" });
+  assert.match(binary, /timds-cli consumer update 2026\.10\.27-2/);
+  assert.doesNotMatch(binary, /npm run timds --/);
+  for (const targetLabel of ["current", "latest", "wrong label", "2026.10.27-2; push"])
+    await assert.rejects(renderConsumerSkillFile("timds-update-design-system", manifest, { targetLabel }), /immutable published release/);
+  await assert.rejects(renderConsumerSkillFile("timds-update-design-system", manifest, { delivery: "hosted" }), /requires targetLabel/);
 });

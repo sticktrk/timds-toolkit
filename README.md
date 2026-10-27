@@ -374,12 +374,17 @@ npm run timds -- consumer updates --portal-url https://host.example.com
 npm run timds -- consumer updates 2026.10.27-2 --portal-url https://host.example.com --json
 ```
 
-Registration reads `timds.consumer.json`, resolves its system ID in the
+Registration requires `timds.consumer.json` at the Git repository root; a
+manifest found only in a subdirectory is refused before contacting the host.
+It reads that manifest, resolves its system ID in the
 signed-in host's catalogue, discovers the GitHub repository from `origin`, and
 posts one source-scoped follower. It prints the signed GitHub App installation
 link; complete that installation to activate updates. The existing TimDS
 OAuth login supplies the credential, only to the selected host. GitHub App
-keys and installation tokens stay on the host.
+keys and installation tokens stay on the host. The optional `--portal-url`
+selects the host before `TIMDS_PORTAL_URL`, then the saved selected login.
+When no saved host is unambiguous, provide `--portal-url`; the CLI does not
+guess between accounts.
 
 The default policy runs a hosted agent and opens a pull request for developer
 review. `--delivery approve` asks a publisher in Studio to approve the
@@ -395,15 +400,19 @@ surface, plus the pin manifest. The runtime also enforces the immutable base
 manifest's complete globs and protected paths. A root glob such as `*.css`
 has no safe prefix; provide explicit `--surface PATH` values instead of
 silently widening it to the repository root. Registration never edits the
-product manifest, dependency lock or workflow.
+product manifest, dependency lock or workflow. The registration allows at most
+100 distinct prefixes, including `timds.consumer.json`; the CLI checks this
+bound before posting.
 
 A stable registration UUID and its original request live under
 `git rev-parse --git-common-dir` in `timds-consumers/`, outside the tracked
 product. The first request is saved before transport; a lost response or
 another invocation reuses it. The record contains no token or installation
 secret. A later local pin move does not create another follower. Manage an
-existing follower's state in Studio; invoking registration with different
-explicit policy refuses rather than registering a duplicate.
+existing follower's state in Studio. A rerun must use the same update mode:
+repeat `--notify` for a notification follower and omit it for a hosted one.
+Changing mode in either direction, explicit delivery policy or a supplied
+surface refuses rather than registering a duplicate.
 
 `consumer updates` reads retained run receipts; add a label for the newest
 attempt at that label, or `--consumer-id UUID` from another checkout. Its JSON
@@ -456,9 +465,11 @@ Declared `routes` always come first and always stay.
 - A developer carrying a release into the product runs
   `timds consumer check --base origin/main --allow-pin-update LABEL` with the
   exact target label. This explicit opt-in accepts that published version
-  change while keeping the system ID, public URL and bundle path fixed. It
-  still checks the base manifest's design surface and protected paths; a
-  branch cannot expand its own permissions. It requires an existing published
+  change while keeping every other manifest value fixed, including app
+  commands, routes, scope, protected paths, system identity and bundle path.
+  Adding an explicit default is also a manifest change; JSON key order and
+  formatting may differ. It still checks the base manifest's design surface and
+  protected paths; a branch cannot expand its own permissions. It requires an existing published
   pin and `--base`, and rejects `current` and `latest`. The ordinary check
   without the flag continues to reject all pin moves. Submodule migration
   remains an explicit separate operation.
