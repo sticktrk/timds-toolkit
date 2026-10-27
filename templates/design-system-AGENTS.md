@@ -174,6 +174,45 @@ clean.
   `orders.empty.html`, and `checkout.error.html` work the same way. Every
   named state is a file a port can inspect. JavaScript may also implement
   interactive states, animations, navigation, and form demonstrations.
+- Pages a visitor moves through in order (a funnel, a checkout, a form with
+  its states, an onboarding) are declared as a journey in `design.json`
+  when they are added, not afterwards. A journey is `{ id, title,
+  summary?, steps }`; a step is `{ title, summary?, screens, branches? }`;
+  a screen is `{ page, state?, label?, note? }`: `page` a route the design
+  has, `state` one of its states (the default when omitted), `label` what
+  the storyboard calls the screen (the page title plus the state name when
+  omitted), `note` what the visitor sees there. Branches are the screens
+  met instead of the step's own (an error, a stalled read). `check`
+  validates every reference, builds one storyboard per journey at
+  `/designs/<design>/journeys/<id>/` (the live pages at phone width,
+  numbered in visitor order), lists the journeys on `/designs/`, and warns
+  when a design has several pages or a route with states that no journey
+  shows. Developers read the same order from `list_designs`. The sample
+  design declares one. For a checkout:
+
+  ```json
+  "journeys": [
+    {
+      "id": "checkout",
+      "title": "Buying a plan",
+      "summary": "From the pricing page to the paid confirmation.",
+      "steps": [
+        { "title": "Choose", "screens": [{ "page": "/pricing" }] },
+        {
+          "title": "Pay",
+          "summary": "The form, then the wait for the payment provider.",
+          "screens": [
+            { "page": "/checkout", "label": "Checkout" },
+            { "page": "/checkout", "state": "pending", "note": "While the payment is checked." },
+            { "page": "/checkout", "state": "sent", "label": "Paid" }
+          ],
+          "branches": [{ "page": "/checkout", "state": "error", "label": "Payment not confirmed" }]
+        }
+      ]
+    }
+  ]
+  ```
+
 - A design uses only what the system defines. JavaScript is allowed.
   `check` refuses `<style>`, `style` attributes, a class no linked
   stylesheet declares, and a relative reference. When a page needs a style

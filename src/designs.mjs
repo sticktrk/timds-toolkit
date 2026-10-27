@@ -15,6 +15,13 @@
 // Named reference states are HTML files beside the default so consumers can
 // inspect and diff them. JavaScript may also implement interactive states.
 //
+// Pages a visitor moves through in order (a funnel, a checkout, a form with
+// its states) are declared as journeys in design.json: steps, each with the
+// screens (a page in a state) a visitor meets and the branches met instead.
+// The renderer writes one storyboard per journey at
+// /designs/<id>/journeys/<journey>/, the live pages at phone width in that
+// order, and designs.json carries the resolved order for consumers.
+//
 // TimDS owns the renderer and the portability rules; the client owns the
 // designs. The renderer is deliberately small: it fills the layout shell,
 // rewrites links between a design's own routes so the pages hold together
@@ -45,6 +52,8 @@ export const DESIGNS_SOURCE_DIRECTORY = "src/designs";
 export const DESIGNS_OUTPUT_DIRECTORY = "designs";
 export const DESIGNS_SCHEMA_VERSION = 1;
 export const DEFAULT_STATE = "default";
+/** The directory under a design's output reserved for journey storyboards. */
+export const JOURNEYS_OUTPUT_DIRECTORY = "journeys";
 
 const ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const PLACEHOLDER = /\{\{\s*([a-z]+)\s*\}\}/g;
@@ -57,6 +66,14 @@ const FILE_REFERENCE_TAGS = new Set(["link", "img", "source", "video", "audio", 
 const isExternal = (value) => /^[a-z][a-z0-9+.-]*:/i.test(value) || value.startsWith("//");
 
 const posixRelative = (from, to) => path.relative(from, to).split(path.sep).join("/");
+
+/** A route as design.json may write it (`contact`, `/contact/`) in the catalog's form (`/contact`). */
+const normalizeRoute = (value) => {
+  const route = String(value ?? "").trim();
+  return route.length > 1 ? `/${route.replace(/^\/+|\/+$/g, "")}` : "/";
+};
+
+const isJourneysRoute = (route) => route === `/${JOURNEYS_OUTPUT_DIRECTORY}` || route.startsWith(`/${JOURNEYS_OUTPUT_DIRECTORY}/`);
 
 /* ── catalog ────────────────────────────────────────────────────────────── */
 
@@ -110,8 +127,66 @@ function parsePageFile(relative, source) {
 }
 
 /**
- * Every design under src/designs with its pages and states, in a stable
- * order. `exists` is false when the system has no designs directory, which is
+ * The journeys a design.json declares, every screen resolved against the
+ * design's pages: `page` must be a route the design has and `state` a state
+ * that route has (the default when omitted). A journey needs at least one
+ * step with at least one screen; branches are the screens a visitor meets
+ * instead of the step's own. Returns [] when the manifest declares none.
+ */
+function readJourneys(manifest, label, pages) {
+  if (manifest.journeys === undefined) return [];
+  if (!Array.isArray(manifest.journeys)) throw new Error(`${label} journeys must be an array of journeys ({ id, title, steps })`);
+  const routes = [...pages.keys()].sort((left, right) => left.localeCompare(right)).join(", ");
+  const readScreen = (raw, where) => {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error(`${where} must be an object with a page ({ "page": "/route" })`);
+    if (typeof raw.page !== "string" || !raw.page.trim()) throw new Error(`${where} needs a page: one of the design's routes (${routes})`);
+    const route = normalizeRoute(raw.page);
+    const page = pages.get(route);
+    if (!page) throw new Error(`${where} names the route ${route}, which the design has no page for; routes: ${routes}`);
+    if (raw.state !== undefined && (typeof raw.state !== "string" || !raw.state.trim())) throw new Error(`${where} state must be the name of a state of ${route}`);
+    const state = raw.state === undefined ? DEFAULT_STATE : raw.state.trim();
+    if (!page.states.some((candidate) => candidate.name === state)) {
+      throw new Error(`${where} names state ${JSON.stringify(state)} of ${route}, which that route does not have; states: ${page.states.map((candidate) => candidate.name).join(", ")}`);
+    }
+    for (const field of ["label", "note"]) {
+      if (raw[field] !== undefined && typeof raw[field] !== "string") throw new Error(`${where} ${field} must be a string`);
+    }
+    return { page: route, state, label: String(raw.label ?? "").trim() || null, note: String(raw.note ?? "").trim() || null };
+  };
+  const ids = new Set();
+  return manifest.journeys.map((raw, index) => {
+    const where = `${label} journeys[${index}]`;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error(`${where} must be an object with id, title, and steps`);
+    const id = String(raw.id ?? "").trim();
+    if (!ID.test(id)) throw new Error(`${where} id ${JSON.stringify(raw.id ?? "")} must be lowercase words joined by hyphens`);
+    if (ids.has(id)) throw new Error(`${label} declares the journey ${id} twice; give each journey its own id`);
+    ids.add(id);
+    const title = String(raw.title ?? "").trim();
+    if (!title) throw new Error(`${where} (${id}) needs a title`);
+    if (raw.summary !== undefined && typeof raw.summary !== "string") throw new Error(`${where} (${id}) summary must be a string`);
+    if (!Array.isArray(raw.steps) || !raw.steps.length) throw new Error(`${where} (${id}) needs steps: at least one step with at least one screen`);
+    const steps = raw.steps.map((step, stepIndex) => {
+      const at = `${where} (${id}) steps[${stepIndex}]`;
+      if (!step || typeof step !== "object" || Array.isArray(step)) throw new Error(`${at} must be an object with a title and screens`);
+      const stepTitle = String(step.title ?? "").trim();
+      if (!stepTitle) throw new Error(`${at} needs a title`);
+      if (step.summary !== undefined && typeof step.summary !== "string") throw new Error(`${at} summary must be a string`);
+      if (!Array.isArray(step.screens) || !step.screens.length) throw new Error(`${at} needs screens: at least one { "page": "/route" }, with "state" for a route's other states`);
+      const screens = step.screens.map((entry, screenIndex) => readScreen(entry, `${at} screens[${screenIndex}]`));
+      let branches = [];
+      if (step.branches !== undefined) {
+        if (!Array.isArray(step.branches) || !step.branches.length) throw new Error(`${at} branches must list at least one screen a visitor meets instead, or be left out`);
+        branches = step.branches.map((entry, branchIndex) => readScreen(entry, `${at} branches[${branchIndex}]`));
+      }
+      return { title: stepTitle, summary: String(step.summary ?? "").trim(), screens, branches };
+    });
+    return { id, title, summary: String(raw.summary ?? "").trim(), steps };
+  });
+}
+
+/**
+ * Every design under src/designs with its pages, states, and journeys, in a
+ * stable order. `exists` is false when the system has no designs directory, which is
  * not an error: designs are optional.
  */
 export async function readDesignCatalog(designSystemRoot) {
@@ -141,7 +216,7 @@ export async function readDesignCatalog(designSystemRoot) {
       for (const [route, page] of Object.entries(manifest.pages)) {
         const title = typeof page === "string" ? page : page?.title;
         if (typeof title !== "string" || !title.trim()) throw new Error(`${label} pages[${JSON.stringify(route)}] needs a title`);
-        titles.set(route.length > 1 ? `/${route.replace(/^\/+|\/+$/g, "")}` : "/", title.trim());
+        titles.set(normalizeRoute(route), title.trim());
       }
     }
     const layout = path.join(directory, "layout.html");
@@ -152,6 +227,7 @@ export async function readDesignCatalog(designSystemRoot) {
     for (const relative of files) {
       const file = `${DESIGNS_SOURCE_DIRECTORY}/${entry.name}/pages/${relative}`;
       const { route, state } = parsePageFile(relative, file);
+      if (isJourneysRoute(route)) throw new Error(`${file}: the route ${route} is reserved for journey storyboards (/designs/${entry.name}/${JOURNEYS_OUTPUT_DIRECTORY}/<journey>/); name the route differently`);
       const page = pages.get(route) ?? { route, title: titles.get(route) ?? null, states: [] };
       const existing = page.states.find((candidate) => candidate.name === state);
       if (existing) throw new Error(`${file} and ${existing.source} both describe route ${route}${state === DEFAULT_STATE ? "" : ` state ${state}`}; keep one`);
@@ -175,6 +251,7 @@ export async function readDesignCatalog(designSystemRoot) {
       summary: String(manifest.summary ?? "").trim(),
       layout: existsSync(layout) ? layout : null,
       pages: [...pages.values()].sort((left, right) => left.route.localeCompare(right.route)),
+      journeys: readJourneys(manifest, label, pages),
     });
   }
   return { exists: true, source, designs };
@@ -219,6 +296,124 @@ function outputPath(prefixDirectory, designId, route, state) {
 function pageUrl(basePrefix, designId, route, state) {
   const directory = `${basePrefix}/${DESIGNS_OUTPUT_DIRECTORY}/${designId}${route === "/" ? "" : route}`;
   return state === DEFAULT_STATE ? `${directory}/` : `${directory}/${state}.html`;
+}
+
+function journeyUrl(basePrefix, designId, journeyId) {
+  return `${basePrefix}/${DESIGNS_OUTPUT_DIRECTORY}/${designId}/${JOURNEYS_OUTPUT_DIRECTORY}/${journeyId}/`;
+}
+
+/** The route and state a screen shows, the way a caption and designs.json name it. */
+const screenWhere = (screen) => `${screen.route}${screen.state === DEFAULT_STATE ? "" : ` · ${screen.state}`}`;
+
+/**
+ * A catalog journey with every screen resolved against the rendered pages:
+ * the page state's url and title, and the label a caption shows (the
+ * declared one, else the page title plus the state name).
+ */
+function resolveJourney(journey, pages, basePrefix, designId, prefixDirectory) {
+  const resolve = (screen) => {
+    const page = pages.find((candidate) => candidate.route === screen.page);
+    const state = page.states.find((candidate) => candidate.name === screen.state);
+    return {
+      route: page.route,
+      state: state.name,
+      label: screen.label ?? (state.name === DEFAULT_STATE ? page.title : `${page.title} · ${state.name}`),
+      note: screen.note,
+      title: state.title,
+      url: state.url,
+    };
+  };
+  const steps = journey.steps.map((step) => ({ title: step.title, summary: step.summary, screens: step.screens.map(resolve), branches: step.branches.map(resolve) }));
+  const screenCount = steps.reduce((count, step) => count + step.screens.length + step.branches.length, 0);
+  const output = [prefixDirectory, DESIGNS_OUTPUT_DIRECTORY, designId, JOURNEYS_OUTPUT_DIRECTORY, journey.id, "index.html"].filter(Boolean).join("/");
+  return { id: journey.id, title: journey.title, summary: journey.summary, url: journeyUrl(basePrefix, designId, journey.id), output, stepCount: steps.length, screenCount, steps };
+}
+
+const plural = (count, noun) => `${count} ${noun}${count === 1 ? "" : "s"}`;
+
+function toolkitPage({ title, basePrefix, stylesheets, bodyClass, body }) {
+  return [
+    "<!doctype html>",
+    '<html lang="en">',
+    "  <head>",
+    '    <meta charset="utf-8">',
+    '    <meta name="viewport" content="width=device-width, initial-scale=1">',
+    `    <title>${title}</title>`,
+    ...stylesheets.map((href) => `    <link rel="stylesheet" href="${escapeHtml(href)}">`),
+    `    <link rel="stylesheet" href="${basePrefix}/${DESIGNS_OUTPUT_DIRECTORY}/_directory.css">`,
+    "  </head>",
+    `  <body class="${bodyClass}">`,
+    ...body,
+    "  </body>",
+    "</html>",
+    "",
+  ].join("\n");
+}
+
+/**
+ * One journey's storyboard: each step a section, its screens the live page
+ * states in lazy same-origin frames at phone width, numbered through the
+ * journey, with the step's branches in a second row marked "or".
+ */
+function renderJourney({ name, basePrefix, design, journey, stylesheets }) {
+  let number = 0;
+  const frame = (screen, badge) => {
+    const label = escapeHtml(screen.label);
+    const branch = badge === "or";
+    return [
+      `          <li class="td-journey-screen${branch ? " td-journey-screen--branch" : ""}">`,
+      `            <span class="td-journey-badge" aria-hidden="true">${badge}</span>`,
+      "            <figure>",
+      `              <div class="td-journey-frame"><iframe src="${screen.url}" title="${label}" loading="lazy" tabindex="-1"></iframe><a class="td-journey-open" href="${screen.url}" aria-label="Open ${label} at full size"></a></div>`,
+      `              <figcaption><b>${branch ? "Or: " : ""}${label}</b>${screen.note ? `<span>${escapeHtml(screen.note)}</span>` : ""}<a href="${screen.url}"><code>${escapeHtml(screenWhere(screen))}</code></a></figcaption>`,
+      "            </figure>",
+      "          </li>",
+    ].join("\n");
+  };
+  const sections = journey.steps.map((step, index) => {
+    const start = number + 1;
+    const screens = step.screens.map((screen) => frame(screen, String(++number)));
+    const branches = step.branches.map((screen) => frame(screen, "or"));
+    return [
+      `    <section class="td-journey-step" aria-labelledby="step-${index + 1}">`,
+      '      <div class="td-journey-step-head">',
+      `        <p class="td-directory-eyebrow">Step ${index + 1} of ${journey.steps.length}</p>`,
+      `        <h2 id="step-${index + 1}">${escapeHtml(step.title)}</h2>`,
+      step.summary ? `        <p class="td-directory-summary">${escapeHtml(step.summary)}</p>` : "",
+      "      </div>",
+      `      <ol class="td-journey-screens" start="${start}">`,
+      ...screens,
+      "      </ol>",
+      ...(branches.length ? [
+        '      <p class="td-journey-or">Or, instead</p>',
+        '      <ul class="td-journey-screens td-journey-screens--branch">',
+        ...branches,
+        "      </ul>",
+      ] : []),
+      "    </section>",
+    ].filter(Boolean).join("\n");
+  });
+  return toolkitPage({
+    title: `${escapeHtml(journey.title)} · ${escapeHtml(design.title)} · ${escapeHtml(name)}`,
+    basePrefix,
+    stylesheets,
+    bodyClass: "timds-design-directory timds-design-journey",
+    body: [
+      '    <header class="td-directory-bar">',
+      `      <a class="td-directory-brand" href="${basePrefix}/">${escapeHtml(name)}</a>`,
+      `      <a class="td-directory-back" href="${basePrefix}/${DESIGNS_OUTPUT_DIRECTORY}/">← All designs</a>`,
+      "    </header>",
+      '    <main class="td-directory-main">',
+      '      <div class="td-directory-intro">',
+      `        <p class="td-directory-eyebrow"><a href="${design.url}">${escapeHtml(design.title)}</a> · ${plural(journey.stepCount, "step")} · ${plural(journey.screenCount, "screen")}</p>`,
+      `        <h1>${escapeHtml(journey.title)}</h1>`,
+      journey.summary ? `        <p class="td-directory-lede">${escapeHtml(journey.summary)}</p>` : "",
+      '        <p class="td-directory-lede">The live designs at phone width, in the order a visitor meets them. Open any screen to review it at full size.</p>',
+      "      </div>",
+      ...sections,
+      "    </main>",
+    ].filter(Boolean),
+  });
 }
 
 /**
@@ -270,6 +465,13 @@ function renderDirectory({ name, basePrefix, designs, stylesheets }) {
         : '<span class="td-directory-default">Default</span>';
       return `        <tr><td><code>${escapeHtml(page.route)}</code></td><td><a class="td-directory-page" href="${defaultState.url}">${escapeHtml(page.title)}</a></td><td>${extra}</td></tr>`;
     });
+    const journeys = design.journeys.map((journey) => [
+      `        <a class="td-directory-journey" href="${journey.url}">`,
+      `          <b>${escapeHtml(journey.title)}</b>`,
+      journey.summary ? `          <span>${escapeHtml(journey.summary)}</span>` : "",
+      `          <span class="td-directory-journey-meta">${plural(journey.stepCount, "step")} · ${plural(journey.screenCount, "screen")} · Open storyboard <span aria-hidden="true">↗</span></span>`,
+      "        </a>",
+    ].filter(Boolean).join("\n"));
     return [
       `    <section class="td-directory-section" aria-labelledby="design-${escapeHtml(design.id)}">`,
       '      <div class="td-directory-section-head">',
@@ -279,6 +481,12 @@ function renderDirectory({ name, basePrefix, designs, stylesheets }) {
       '        </div>',
       `        <a class="td-directory-open" href="${landing}" aria-label="Open ${escapeHtml(design.title)}">Open design <span aria-hidden="true">↗</span></a>`,
       '      </div>',
+      ...(journeys.length ? [
+        `      <div class="td-directory-journeys" aria-label="Journeys of ${escapeHtml(design.title)}">`,
+        '        <p class="td-directory-journeys-label">Journeys: the screens in the order a visitor meets them</p>',
+        ...journeys,
+        "      </div>",
+      ] : []),
       '      <div class="td-directory-table-wrap">',
       `      <table aria-labelledby="design-${escapeHtml(design.id)}">`,
       '        <thead><tr><th scope="col">Route</th><th scope="col">Page</th><th scope="col">States</th></tr></thead>',
@@ -290,33 +498,26 @@ function renderDirectory({ name, basePrefix, designs, stylesheets }) {
       "    </section>",
     ].filter(Boolean).join("\n");
   });
-  return [
-    "<!doctype html>",
-    '<html lang="en">',
-    "  <head>",
-    '    <meta charset="utf-8">',
-    '    <meta name="viewport" content="width=device-width, initial-scale=1">',
-    `    <title>Website designs · ${escapeHtml(name)}</title>`,
-    ...stylesheets.map((href) => `    <link rel="stylesheet" href="${escapeHtml(href)}">`),
-    `    <link rel="stylesheet" href="${basePrefix}/${DESIGNS_OUTPUT_DIRECTORY}/_directory.css">`,
-    "  </head>",
-    '  <body class="timds-design-directory">',
-    '    <header class="td-directory-bar">',
-    `      <a class="td-directory-brand" href="${basePrefix}/">${escapeHtml(name)}</a>`,
-    `      <a class="td-directory-back" href="${basePrefix}/">← Back to design system</a>`,
-    '    </header>',
-    '    <main class="td-directory-main">',
-    '      <div class="td-directory-intro">',
-    `        <p class="td-directory-eyebrow">${designs.length} design${designs.length === 1 ? "" : "s"} · ${pageCount} page${pageCount === 1 ? "" : "s"}</p>`,
-    "        <h1>Website designs</h1>",
-    '        <p class="td-directory-lede">Browse complete page designs built with this system. Open a page to explore its layout and interactions, or choose an alternate state.</p>',
-    '      </div>',
-    ...(sections.length ? sections : ['      <p class="td-directory-empty">No website designs yet.</p>']),
-    "    </main>",
-    "  </body>",
-    "</html>",
-    "",
-  ].join("\n");
+  return toolkitPage({
+    title: `Website designs · ${escapeHtml(name)}`,
+    basePrefix,
+    stylesheets,
+    bodyClass: "timds-design-directory",
+    body: [
+      '    <header class="td-directory-bar">',
+      `      <a class="td-directory-brand" href="${basePrefix}/">${escapeHtml(name)}</a>`,
+      `      <a class="td-directory-back" href="${basePrefix}/">← Back to design system</a>`,
+      '    </header>',
+      '    <main class="td-directory-main">',
+      '      <div class="td-directory-intro">',
+      `        <p class="td-directory-eyebrow">${plural(designs.length, "design")} · ${plural(pageCount, "page")}</p>`,
+      "        <h1>Website designs</h1>",
+      '        <p class="td-directory-lede">Browse complete page designs built with this system. Open a page to explore its layout and interactions, or choose an alternate state.</p>',
+      '      </div>',
+      ...(sections.length ? sections : ['      <p class="td-directory-empty">No website designs yet.</p>']),
+      "    </main>",
+    ],
+  });
 }
 
 /**
@@ -340,6 +541,7 @@ export async function renderDesigns({ designSystemRoot, manifest = null }) {
   const designs = [];
   let pageCount = 0;
   let stateCount = 0;
+  let journeyCount = 0;
   const stylesheets = new Set();
 
   for (const design of catalog.designs) {
@@ -371,17 +573,28 @@ export async function renderDesigns({ designSystemRoot, manifest = null }) {
       pages.push({ route: page.route, title: states[0].title, url: states[0].url, output: states[0].output, states });
       pageCount += 1;
     }
-    designs.push({ id: design.id, title: design.title, summary: design.summary, url: `${basePrefix}/${DESIGNS_OUTPUT_DIRECTORY}/${design.id}/`, pages });
+    const journeys = design.journeys.map((journey) => resolveJourney(journey, pages, basePrefix, design.id, prefixDirectory));
+    journeyCount += journeys.length;
+    designs.push({ id: design.id, title: design.title, summary: design.summary, url: `${basePrefix}/${DESIGNS_OUTPUT_DIRECTORY}/${design.id}/`, pages, journeys });
   }
 
+  // The storyboards and the directory load what the designs load, so the
+  // system's colors and fonts reach the toolkit chrome.
+  const name = resolved.name || "Design System";
+  for (const design of designs) {
+    for (const journey of design.journeys) {
+      files.set(journey.output, renderJourney({ name, basePrefix, design, journey, stylesheets: [...stylesheets] }));
+    }
+  }
   const outputDirectory = [prefixDirectory, DESIGNS_OUTPUT_DIRECTORY].filter(Boolean).join("/");
-  files.set(`${outputDirectory}/index.html`, renderDirectory({ name: resolved.name || "Design System", basePrefix, designs, stylesheets: [...stylesheets] }));
+  files.set(`${outputDirectory}/index.html`, renderDirectory({ name, basePrefix, designs, stylesheets: [...stylesheets] }));
   files.set(`${outputDirectory}/_directory.css`, await fs.readFile(new URL("../templates/designs-directory.css", import.meta.url), "utf8"));
   return {
     basePrefix,
     catalog,
     designs,
     files,
+    journeyCount,
     outputDirectory,
     pageCount,
     stateCount,
@@ -396,7 +609,7 @@ export async function renderDesigns({ designSystemRoot, manifest = null }) {
  */
 export async function buildDesigns(designSystemRoot, { manifest = null } = {}) {
   const rendered = await renderDesigns({ designSystemRoot, manifest });
-  if (!rendered) return { designs: [], pageCount: 0, stateCount: 0, written: [] };
+  if (!rendered) return { designs: [], journeyCount: 0, pageCount: 0, stateCount: 0, written: [] };
   const artifactRoot = path.join(designSystemRoot, "dist");
   await fs.rm(path.join(artifactRoot, ...rendered.outputDirectory.split("/")), { force: true, recursive: true });
   const written = [];
@@ -406,7 +619,7 @@ export async function buildDesigns(designSystemRoot, { manifest = null } = {}) {
     await fs.writeFile(target, html, "utf8");
     written.push(target);
   }
-  return { designs: rendered.designs, pageCount: rendered.pageCount, stateCount: rendered.stateCount, written };
+  return { designs: rendered.designs, journeyCount: rendered.journeyCount, pageCount: rendered.pageCount, stateCount: rendered.stateCount, written };
 }
 
 /* ── portability check ──────────────────────────────────────────────────── */
@@ -452,13 +665,45 @@ async function linkedClasses(links, artifactRoot, problems, source) {
 }
 
 /**
+ * The nudges toward journeys: a design whose pages a visitor moves through
+ * (more than one page, or a route with states) and no journey to show the
+ * order, or a route with states that no journey shows. Warnings, never
+ * failures, so a system authored before journeys keeps passing.
+ */
+export function journeyWarnings(designs) {
+  const warnings = [];
+  for (const design of designs) {
+    const manifest = `${DESIGNS_SOURCE_DIRECTORY}/${design.id}/design.json`;
+    const withStates = design.pages.filter((page) => page.states.length > 1).map((page) => page.route);
+    if (!design.journeys.length) {
+      if (design.pages.length < 2 && !withStates.length) continue;
+      const what = [design.pages.length > 1 ? plural(design.pages.length, "page") : null, withStates.length ? `states on ${withStates.join(", ")}` : null].filter(Boolean).join(" and ");
+      warnings.push(`design ${design.id} has ${what} but ${manifest} declares no journeys; add "journeys" (steps, each with the screens a visitor meets and the branches met instead) so /${DESIGNS_OUTPUT_DIRECTORY}/${design.id}/${JOURNEYS_OUTPUT_DIRECTORY}/<journey>/ shows the pages in order; see the Website designs section of AGENTS.md`);
+      continue;
+    }
+    const shown = new Set();
+    for (const journey of design.journeys) {
+      for (const step of journey.steps) {
+        for (const screen of [...step.screens, ...step.branches]) shown.add(screen.route);
+      }
+    }
+    const missing = withStates.filter((route) => !shown.has(route));
+    if (missing.length) {
+      warnings.push(`design ${design.id} has states on ${missing.join(", ")} that no journey in ${manifest} shows; add the route as a screen or branch of the step where a visitor meets it`);
+    }
+  }
+  return warnings;
+}
+
+/**
  * Enforce that every design uses nothing the system does not define. Throws
  * one error listing every problem with its source file, so a designer fixes
- * them in one pass. Returns the counts for the check summary.
+ * them in one pass. Returns the counts for the check summary, with the
+ * journey nudges as warnings.
  */
 export async function checkDesigns({ designSystemRoot, manifest = null, artifactRoot = path.join(designSystemRoot, "dist") }) {
   const rendered = await renderDesigns({ designSystemRoot, manifest });
-  if (!rendered) return { enabled: false, designCount: 0, pageCount: 0, stateCount: 0 };
+  if (!rendered) return { enabled: false, designCount: 0, pageCount: 0, stateCount: 0, journeyCount: 0, warnings: [] };
   const problems = [];
   for (const design of rendered.designs) {
     for (const page of design.pages) {
@@ -502,12 +747,25 @@ export async function checkDesigns({ designSystemRoot, manifest = null, artifact
     if (problems.length > MAX_REPORTED_PROBLEMS) shown.push(`- and ${problems.length - MAX_REPORTED_PROBLEMS} more`);
     throw new Error(`Website designs must use only what the system defines:\n${shown.join("\n")}`);
   }
-  return { enabled: true, designCount: rendered.designs.length, pageCount: rendered.pageCount, stateCount: rendered.stateCount };
+  return { enabled: true, designCount: rendered.designs.length, pageCount: rendered.pageCount, stateCount: rendered.stateCount, journeyCount: rendered.journeyCount, warnings: journeyWarnings(rendered.designs) };
 }
 
 /* ── derived document ───────────────────────────────────────────────────── */
 
-/** designs.json: the design directory with every page state's HTML, for consumers without a checkout. */
+/** A journey's screen as designs.json names it: the page state in the design, its url, and what a caption shows. */
+const screenReference = (screen) => ({ route: screen.route, state: screen.state, label: screen.label, note: screen.note, url: screen.url });
+
+const journeyDocument = (journey) => ({
+  id: journey.id,
+  title: journey.title,
+  summary: journey.summary,
+  url: journey.url,
+  stepCount: journey.stepCount,
+  screenCount: journey.screenCount,
+  steps: journey.steps.map((step) => ({ title: step.title, summary: step.summary, screens: step.screens.map(screenReference), branches: step.branches.map(screenReference) })),
+});
+
+/** designs.json: the design directory with every page state's HTML and every journey's order, for consumers without a checkout. */
 export function designsDocument(rendered, manifest) {
   return {
     schemaVersion: DESIGNS_SCHEMA_VERSION,
@@ -518,6 +776,7 @@ export function designsDocument(rendered, manifest) {
     designCount: rendered.designs.length,
     pageCount: rendered.pageCount,
     stateCount: rendered.stateCount,
+    journeyCount: rendered.journeyCount,
     designs: rendered.designs.map((design) => ({
       id: design.id,
       title: design.title,
@@ -529,11 +788,35 @@ export function designsDocument(rendered, manifest) {
         url: page.url,
         states: page.states.map((state) => ({ name: state.name, title: state.title, url: state.url, html: state.html, references: state.references })),
       })),
+      journeys: design.journeys.map(journeyDocument),
     })),
   };
 }
 
-/** The directory of a designs document without the HTML, for listings. */
+/** A journey as a listing carries it: the steps and screens in visitor order, without the pages' HTML. */
+function journeyListing(journey) {
+  const screen = ({ route, state, label, note, url }) => ({ route, state, label, ...(note ? { note } : {}), url });
+  return {
+    id: journey.id,
+    title: journey.title,
+    ...(journey.summary ? { summary: journey.summary } : {}),
+    url: journey.url,
+    stepCount: journey.stepCount ?? journey.steps?.length ?? 0,
+    screenCount: journey.screenCount ?? 0,
+    steps: (journey.steps ?? []).map((step) => ({
+      title: step.title,
+      ...(step.summary ? { summary: step.summary } : {}),
+      screens: (step.screens ?? []).map(screen),
+      ...(step.branches?.length ? { branches: step.branches.map(screen) } : {}),
+    })),
+  };
+}
+
+/**
+ * The directory of a designs document without the HTML, for listings: each
+ * design's routes and states, and its journeys with the screens in the order
+ * a visitor meets them (a document written before journeys lists none).
+ */
 export function designsDirectory(document) {
   return (document?.designs ?? []).map((design) => ({
     id: design.id,
@@ -547,6 +830,7 @@ export function designsDirectory(document) {
       url: page.url,
       states: (page.states ?? []).map((state) => state.name),
     })),
+    journeys: (design.journeys ?? []).map(journeyListing),
   }));
 }
 
