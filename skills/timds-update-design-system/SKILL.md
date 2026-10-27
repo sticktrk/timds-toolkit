@@ -92,14 +92,30 @@ names the file to open):
 2. Run the app locally (its `.claude/launch.json` entry or the serve command)
    and visit every review route at each declared width and scheme, paired
    routes against their design state by state. Fix what you find.
-3. Run, from repository root:
+3. For a published version pin, run from repository root:
+
+```bash
+npm run timds -- consumer check --base origin/__DEFAULT_BRANCH__ --allow-pin-update <target-label>
+```
+
+   Replace `<target-label>` with the exact immutable release selected above.
+   The opt-in permits only that published version change; the system ID, URL
+   and bundle path must remain unchanged. The base manifest still controls the
+   design surface and protected paths. If the pinned CLI does not recognize
+   the flag, upgrade it through the product’s normal reviewed dependency path
+   before using hosted updates. Never weaken or bypass this check.
+
+   For a git submodule pin, keep its explicit gitlink review and run:
 
 ```bash
 npm run timds -- consumer check --base origin/__DEFAULT_BRANCH__
 ```
 
-   The pin change and the port are expected; anything else outside the
-   design surface needs a reason in the pull request.
+   That check still reports the deliberate gitlink pin move; inspect the exact
+   commit selected and report that diagnostic in the pull request. Resolve
+   every other check failure, including protected paths and design-surface
+   violations. Do not describe that run as green. The published-pin opt-in
+   does not apply to submodules; hosted followers require a published pin.
 
 ## Open the pull request
 

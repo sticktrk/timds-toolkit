@@ -119,6 +119,12 @@ export function createHostProvider({ url, token, resolveToken, fetchImpl = fetch
   return {
     me: () => request("GET", "", undefined, 'me'),
     systems: () => request("GET", "", undefined, 'design-systems'),
+    consumers: (id) => request("GET", `/${encodeURIComponent(id)}/consumers`, undefined, 'sources'),
+    registerConsumer: (id, input) => request("POST", `/${encodeURIComponent(id)}/consumers`, input, 'sources'),
+    consumer: (id, consumerId) => request("GET", `/${encodeURIComponent(id)}/consumers/${encodeURIComponent(consumerId)}`, undefined, 'sources'),
+    consumerUpdates: (id, consumerId) => request("GET", `/${encodeURIComponent(id)}/consumers/${encodeURIComponent(consumerId)}/updates`, undefined, 'sources'),
+    consumerUpdate: (id, consumerId, label) => request("GET", `/${encodeURIComponent(id)}/consumers/${encodeURIComponent(consumerId)}/updates/${encodeURIComponent(label)}`, undefined, 'sources'),
+    consumerInstall: (consumerId) => request("GET", `/app/install?consumerId=${encodeURIComponent(consumerId)}`, undefined, 'github'),
     principals: (id) => request("GET", `/${encodeURIComponent(id)}/principals`, undefined, 'design-systems'),
     rollback: (id, input) => request("POST", `/${encodeURIComponent(id)}/rollback`, input, 'design-systems'),
     activeWork: (id) => request("GET", `/${encodeURIComponent(id)}/active-work`, undefined, 'design-systems'),
