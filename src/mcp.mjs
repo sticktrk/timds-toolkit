@@ -117,7 +117,14 @@ change. Work only in the Design System the user gave you.
 - Website designs live under \`src/designs/<design>/\`: whole pages in HTML
   with system stylesheets and optional JavaScript, one file per route and state
   (\`pages/contact.html\`, \`pages/contact.sent.html\`), with an optional
-  \`layout.html\` shell. JavaScript interactions, script elements, and event
+  \`layout.html\` shell. Pages a visitor moves through in order (a funnel, a
+  checkout, a form with its states, an onboarding) are declared as a journey
+  in \`design.json\` when they are added: \`journeys: [{ id, title, summary,
+  steps: [{ title, summary, screens: [{ page, state, label, note }], branches: [...] }] }]\`,
+  every \`page\` a route the design has and every \`state\` one that route
+  has; \`run_check\` builds a storyboard per journey at
+  \`/designs/<design>/journeys/<id>/\` and warns when pages with states have
+  no journey. JavaScript interactions, script elements, and event
   handlers are allowed. Put shared scripts in \`src/assets/\` and link them
   by site-absolute path. \`run_check\` refuses inline styles,
   classes the linked stylesheets do not declare, and relative references,

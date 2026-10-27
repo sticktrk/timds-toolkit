@@ -48,6 +48,12 @@ never do it inside a design-only change.
   the product pairs with a design in `timds.consumer.json` or the brief
   names. Otherwise read `designs.json` at the published prefix, or
   `__DESIGN_SYSTEM_PATH__/dist/designs/` after building a submodule pin.
+  `list_designs` also returns each design's journeys: the screens (a route
+  in a state) in the order a visitor meets them, step by step, with the
+  branch screens met instead, and a storyboard url
+  (`/designs/<design>/journeys/<id>/`) that shows them at phone width.
+  When a changed route belongs to a journey, work through the journey in
+  its order rather than route by route.
 - Compare the new bundle with the old one: new tokens by name, new or
   changed stylesheets and scripts under `__DESIGN_SYSTEM_PATH__/`, and new
   media keys. A new file the product must load is an import in the theme
@@ -55,7 +61,9 @@ never do it inside a design-only change.
 
 ## Port each design
 
-For every route whose design changed or is new:
+For every route whose design changed or is new, in journey order when the
+route belongs to one (`list_designs` gives the order; a screen's `state`
+names the file to open):
 
 1. Open the design (every state: default, and each `<state>.html` beside
    it) and the product route side by side.
@@ -65,8 +73,11 @@ For every route whose design changed or is new:
    accessibility wiring. Never paste the design's HTML file in as a page,
    and never restyle it.
 3. Express every state the design shows as the product reaches it (a sent
-   form, an empty list, an error). A state the product cannot express yet
-   is a product change to make or to call out, not a design to simplify.
+   form, an empty list, an error), including every screen and branch a
+   journey shows: a visitor must be able to move through the product in
+   the journey's order and meet each branch where the journey places it.
+   A state the product cannot express yet is a product change to make or
+   to call out, not a design to simplify.
 4. A token, component, or role the design needs and the system lacks is a
    gap: report it (`report_gap` when the user agrees) and fix it in the
    Design System, not with a literal here.
@@ -101,6 +112,7 @@ make.
 
 ## Report the result
 
-Lead with the version moved to and the routes ported. Include the
+Lead with the version moved to and the routes ported, journey by journey
+where the routes belong to one. Include the
 pull-request link, the routes and widths you checked, any design state not
 yet expressed, and every gap reported to the Design System.

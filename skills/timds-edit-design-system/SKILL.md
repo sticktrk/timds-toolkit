@@ -113,6 +113,21 @@ the reference the port must match, never the production site itself.
   `about.html` is `/about`, `contact/index.html` is `/contact`, and
   `contact.sent.html` is `/contact` in its sent state. Named reference states
   stay inspectable as files; JavaScript may also implement interactive states.
+- Pages a visitor moves through in order (a funnel, a checkout, a form with
+  its states, an onboarding) are declared as a journey in `design.json` as
+  they are added: `journeys: [{ id, title, summary?, steps: [{ title,
+  summary?, screens: [{ page, state?, label?, note? }], branches? }] }]`,
+  every `page` a route the design has and every `state` one of that
+  route's states, branches the screens met instead (an error, a stalled
+  read). `check` builds one storyboard per journey at
+  `/designs/<design>/journeys/<id>/`, the live pages at phone width in
+  visitor order, and warns when a design has several pages or a route with
+  states that no journey shows. A funnel without a journey is unfinished.
+  For example, a checkout with its pending, sent, and error states:
+  `{ "id": "checkout", "title": "Buying a plan", "steps": [{ "title":
+  "Pay", "screens": [{ "page": "/checkout" }, { "page": "/checkout",
+  "state": "pending" }, { "page": "/checkout", "state": "sent", "label":
+  "Paid" }], "branches": [{ "page": "/checkout", "state": "error" }] }] }`.
 - Link pages by their eventual site route (`href="/contact"`); the build
   points those links at the design's place in the artifact. Link the
   system's stylesheets by site-absolute path and never the viewer's
@@ -131,7 +146,9 @@ the reference the port must match, never the production site itself.
   not forty posts.
 - The built pages sit under `/designs/<design>/` with a directory at
   `/designs/`; review them in `preview` at desktop and phone widths like any
-  page. Consumers read them through `list_designs` and `read_design`.
+  page, and each journey's storyboard at `/designs/<design>/journeys/<id>/`.
+  Consumers read them through `list_designs` and `read_design`, journeys
+  included.
 - A system scaffolded before designs existed adopts them with
   `npm run timds -- designs init`, which writes the sample, updates stock
   starter scripts, and appends the starter's layout pieces to the system

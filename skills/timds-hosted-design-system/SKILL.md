@@ -79,8 +79,14 @@ Everything from here runs inside the workspace folder.
 2. `timds dev` starts the live preview; give the designer the URL it prints
    and rebuild as you go. If the port is busy, `timds dev --port 4322`.
 3. Edit authored source only: tokens, stylesheets, pages, components, the
-   media catalog entries the system keeps. Run `timds check` after every
-   change and before every update or submit, and fix what it reports.
+   media catalog entries the system keeps, and the website designs under
+   `src/designs/`. Pages a visitor moves through in order (a funnel, a
+   checkout, a form with its states) are declared as a journey in that
+   design's `design.json` as they are added (`journeys: [{ id, title,
+   steps: [{ title, screens: [{ page, state? }], branches? }] }]`); `timds
+   check` builds the storyboard and warns when such pages have none. Run
+   `timds check` after every change and before every update or submit, and
+   fix what it reports.
 4. Share progress with the session, so members and the designer see it:
    `timds update --note "<what changed and why>"`. Every update and
    submission from an agent carries the designer's intent in `--note`.

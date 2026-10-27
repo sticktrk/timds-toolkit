@@ -1047,8 +1047,10 @@ test("the starter viewer renders its site model, and its build guards pages, pla
   assert.deepEqual(machine.warnings.map((warning) => warning.split(":")[0]), ["guidance group voice is empty", 'no asset is annotated data-timds-role="logo"; the brand kit has no logo']);
   assert.equal(machine.formats.count, 48);
   assert.ok(machine.formats.groups.flatMap((group) => group.formats).every((format) => format.planned === true && !format.pageUrl));
-  assert.deepEqual(designs, { enabled: true, designCount: 1, pageCount: 2, stateCount: 3 });
-  assert.deepEqual(machine.index.designs, { url: "/designs.json", count: 1, pages: 2, states: 3 });
+  assert.deepEqual(designs, { enabled: true, designCount: 1, pageCount: 2, stateCount: 3, journeyCount: 1, warnings: [] }, "the sample journey covers the sample's pages, so a fresh scaffold has no journey warning");
+  assert.deepEqual(machine.index.designs, { url: "/designs.json", count: 1, pages: 2, states: 3, journeys: 1 });
+  assert.match(await read("dist/designs/index.html"), /<a class="td-directory-journey" href="\/designs\/website\/journeys\/get-in-touch\/">/);
+  assert.match(await read("dist/designs/website/journeys/get-in-touch/index.html"), /<iframe src="\/designs\/website\/contact\/sent\.html" title="Message sent"/);
   const designsDocument = JSON.parse(await read("dist/designs.json"));
   assert.deepEqual(designsDocument.designs[0].pages.map((page) => [page.route, page.title, page.states.map((state) => state.name)]), [["/", "Home", ["default"]], ["/contact", "Contact", ["default", "sent"]]]);
 

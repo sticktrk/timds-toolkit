@@ -28,7 +28,12 @@ retain their declared prerequisites. The agent runs these steps for the designer
    website design uses that no stylesheet declares is added to the system
    stylesheet and documented on the components page. Warnings about a
    missing voice page or logo are gaps to name in the report, not to paper
-   over.
+   over. A warning that a design's pages have no journey is fixed before
+   shipping when the change added them: pages a visitor moves through in
+   order (a funnel, a checkout, a form with its states) are declared as a
+   journey in that design's `design.json` (`journeys: [{ id, title,
+   steps: [{ title, screens: [{ page, state? }], branches? }] }]`), so the
+   storyboard at `/designs/<design>/journeys/<id>/` shows them in order.
 2. Run `npm run timds -- brand` and note any gap the change was meant to
    close that is still open.
 3. Run `npm run timds -- diff` to see exactly what will ship, and confirm it
@@ -38,7 +43,8 @@ retain their declared prerequisites. The agent runs these steps for the designer
 ## Look at it
 
 Serve the exact artifact with `npm run timds -- preview` and open every
-changed page, and every website design route and state the change touched,
+changed page, every website design route and state the change touched, and
+the storyboard of every journey those pages belong to,
 at desktop and phone widths and in each color scheme the system offers.
 Use the browser tools when they are available and fix what you see before
 continuing. When you cannot open a browser, say plainly in the report that

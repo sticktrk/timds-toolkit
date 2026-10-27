@@ -63,7 +63,10 @@ __DERIVED_LAYER__
   (`list_designs` and `read_design`, or `designs.json` and `dist/designs/`
   in the pin), the design is the reference the product route must match:
   port its markup and every state it shows onto the product's stack with the
-  system's stylesheets. Never copy the design's HTML file into the product
+  system's stylesheets. When the route belongs to a journey (`list_designs`
+  lists each design's journeys: the screens in the order a visitor meets
+  them, with the branches met instead), port the screens in that order and
+  express each one. Never copy the design's HTML file into the product
   as a page, and never restyle it. A state the product cannot express is a
   developer change; say so.
 - An unfilled role or missing token is a gap, not something to invent. Report

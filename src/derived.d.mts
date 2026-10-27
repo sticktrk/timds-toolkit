@@ -159,7 +159,7 @@ export type IndexDocument = {
   /** Present when the system keeps an asset format catalog: where formats.json sits and how much it holds. */
   formats?: { url: string; groups: number; count: number };
   /** Present when the system holds website designs: where designs.json sits and how much it holds. */
-  designs?: { url: string; count: number; pages: number; states: number };
+  designs?: { url: string; count: number; pages: number; states: number; journeys?: number };
   /** Present when the system keeps a CHANGELOG.md: where changelog.json sits, how many releases it lists, and the latest. */
   changelog?: { url: string; page: string; releases: number; latest: string | null };
   /** Present when the manifest declares a consumer bundle: where bundle.json sits and how much it holds. */
@@ -260,7 +260,40 @@ export type DesignPageState = {
 
 export type DesignPage = { route: string; title: string; url: string; states: DesignPageState[] };
 
-export type Design = { id: string; title: string; summary: string; url: string; pages: DesignPage[] };
+/** One screen of a journey: a page of the design in one of its states. */
+export type DesignJourneyScreen = {
+  route: string;
+  /** `default`, or a named state of the route. */
+  state: string;
+  /** What the storyboard caption shows: the declared label, else the page title plus the state name. */
+  label: string;
+  note: string | null;
+  /** Artifact-relative URL of the page state. */
+  url: string;
+};
+
+export type DesignJourneyStep = {
+  title: string;
+  summary: string;
+  /** The screens a visitor meets in this step, in order. */
+  screens: DesignJourneyScreen[];
+  /** The screens a visitor meets instead (an error, a stalled read). */
+  branches: DesignJourneyScreen[];
+};
+
+/** The pages of a design in the order a visitor meets them, with the storyboard that shows them. */
+export type DesignJourney = {
+  id: string;
+  title: string;
+  summary: string;
+  /** Artifact-relative URL of the storyboard: `/designs/<design>/journeys/<id>/`. */
+  url: string;
+  stepCount: number;
+  screenCount: number;
+  steps: DesignJourneyStep[];
+};
+
+export type Design = { id: string; title: string; summary: string; url: string; pages: DesignPage[]; journeys: DesignJourney[] };
 
 export type DesignsDocument = {
   schemaVersion: 1;
@@ -271,6 +304,8 @@ export type DesignsDocument = {
   designCount: number;
   pageCount: number;
   stateCount: number;
+  /** Absent in a document written before journeys. */
+  journeyCount?: number;
   designs: Design[];
 };
 
