@@ -54,10 +54,15 @@ tree, when the designer wants a preview of unreleased work), gather:
   older releases may carry `MAJOR.MINOR.PATCH`.
 - Website designs: `git diff --stat <pinned>..HEAD -- src/designs/` lists
   the routes and states that changed or were added, and `design.json` any
-  renamed titles. A route is the file's path; a state is the `.state.html`
-  file beside it. Open each in the built artifact
-  (`npm run timds -- check`, then `dist/designs/<design>/<route>/`) when the
-  diff alone does not say what a developer must match.
+  renamed titles and the journeys that changed or were added (a journey is
+  the pages a visitor moves through in order, with its steps, screens, and
+  branches; its storyboard is `/designs/<design>/journeys/<id>/`). A route
+  is the file's path; a state is the `.state.html` file beside it. Open
+  each in the built artifact (`npm run timds -- check`, then
+  `dist/designs/<design>/<route>/`) when the diff alone does not say what a
+  developer must match. A changed funnel whose `design.json` declares no
+  journey is a gap in the system to fix before the brief, not a brief to
+  write around.
 - Tokens: changed or added names in `tokens.json`, by name only; the
   developer takes values from the pin, never from the brief.
 - Styles and components: changed files under `src/styles/` and the
@@ -75,6 +80,11 @@ Use this shape, in plain language, with nothing a developer must guess:
 # Design System <current version> for <product>
 
 Pinned now: <pinned version>. Pin: <current version>.
+
+## Journeys that changed
+- <journey title> (`<design>/<id>`): the steps and screens in visitor order,
+  and which changed. Port the screens in this order and express every state.
+  Storyboard: https://<published host>/designs/<design>/journeys/<id>/
 
 ## Designs to port
 - `/route` (states: default, sent): what changed and what to match.

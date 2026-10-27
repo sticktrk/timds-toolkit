@@ -736,10 +736,55 @@ route and state (`index.html` is `/`, `contact.html` is `/contact`,
 ports the design to whatever runs production; the design is the reference the
 port must match, never the production site itself.
 
-The `/designs/` directory has toolkit-owned, responsive navigation and page
-listings. Its scoped stylesheet uses the system's colors and fonts with neutral
-fallbacks, and is loaded only on the directory; authored page designs keep
-their own layout. Rebuilding with the updated toolkit refreshes the directory.
+Pages a visitor moves through in order (a funnel, a checkout, a form with its
+states, an onboarding) are declared as journeys in `design.json` when they are
+added, so the order is data every consumer can read rather than something a
+reader infers from alphabetical route lists:
+
+```json
+"journeys": [
+  {
+    "id": "checkout",
+    "title": "Buying a plan",
+    "summary": "From the pricing page to the paid confirmation.",
+    "steps": [
+      { "title": "Choose", "screens": [{ "page": "/pricing" }] },
+      {
+        "title": "Pay",
+        "summary": "The form, then the wait for the payment provider.",
+        "screens": [
+          { "page": "/checkout", "label": "Checkout" },
+          { "page": "/checkout", "state": "pending", "note": "While the payment is checked." },
+          { "page": "/checkout", "state": "sent", "label": "Paid" }
+        ],
+        "branches": [{ "page": "/checkout", "state": "error", "label": "Payment not confirmed" }]
+      }
+    ]
+  }
+]
+```
+
+A journey is `{ id, title, summary?, steps }`; a step is `{ title, summary?,
+screens, branches? }`; a screen is `{ page, state?, label?, note? }`, where
+`page` is a route the design has and `state` one of that route's states (the
+default when omitted). `label` defaults to the page title plus the state name.
+Branches are the screens a visitor meets instead of the step's own (an error,
+a stalled read). `check` validates every reference and refuses a route under
+`/journeys/`, which is reserved; it warns, without failing, when a design has
+several pages or a route with states and no journey shows them.
+
+Each journey is rendered as a storyboard at `/designs/<design>/journeys/<id>/`:
+one section per step with its screens as the live page states in lazy
+same-origin frames at phone width (390px, scaled to about 0.62), numbered
+through the journey, branch screens in a second row marked "or", each frame a
+link to the full page with a caption of the label, the note, and the route and
+state. The `/designs/` directory lists each design's journeys as cards above
+its route table.
+
+The `/designs/` directory and the storyboards have toolkit-owned, responsive
+chrome. Its scoped stylesheet uses the system's colors and fonts with neutral
+fallbacks, and is loaded only on those pages; authored page designs keep
+their own layout. Rebuilding with the updated toolkit refreshes them.
 
 `check` builds the designs to `/designs/` and refuses anything the system does
 not define: `<style>`, `style` attributes, a
@@ -751,7 +796,9 @@ and link them by site-absolute path. TimDS does not execute scripts during check
 or bundle their imports; publish self-contained scripts or build their dependencies
 into the artifact. Preview scripts run under the host's sandbox and content policy.
 `designs.json` beside `index.json` carries every page state's HTML and the
-files it loads; `list_designs` and `read_design` serve it to consumers, and
+files it loads, and every journey with its screens resolved to routes, states,
+and urls in visitor order; `list_designs` and `read_design` serve it to
+consumers, who port a journey's screens in that order, and
 `extract --publish` uploads it with the stylesheets, scripts, and media it references.
 `@dtconcepts/timds/designs` exports the renderer (`buildDesigns`), the check
 (`checkDesigns`), and the catalog reader. A system scaffolded before designs

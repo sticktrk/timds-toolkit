@@ -51,8 +51,11 @@ Report in the designer's terms, not the toolkit's:
 
 - Which views and pages exist, which are still planned, and what the brand
   kit lacks (from `brand`), each gap with what would fill it.
-- Which website designs exist under `src/designs/` and their routes and
-  states, when the system has any.
+- Which website designs exist under `src/designs/` and their routes,
+  states, and journeys (the storyboards at `/designs/<design>/journeys/<id>/`),
+  when the system has any. A design whose pages a visitor moves through in
+  order but that declares no journey in its `design.json` is a gap to name:
+  `check` warns about it.
 - The current version in `timds.json` and the unreleased notes in
   `CHANGELOG.md`, so the designer knows what is already in flight.
 - The URL to look at, and that you will rebuild after each change.

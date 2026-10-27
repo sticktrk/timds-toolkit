@@ -107,7 +107,7 @@ test("the local read server describes, resolves roles, lists tokens and pages, a
   assert.deepEqual(described.bundle.paths, ["dist/styles/system.css", "dist/tokens.css"]);
   assert.equal(described.bundle.versioned, null, "nothing is published locally");
   assert.equal(described.bundle.directory, "/bundle");
-  assert.deepEqual(described.designs, { count: 1, pages: 2, states: 3, designs: [{ id: "website", title: "Marketing site", pageCount: 2 }] });
+  assert.deepEqual(described.designs, { count: 1, pages: 2, states: 3, journeys: 1, designs: [{ id: "website", title: "Marketing site", pageCount: 2, journeyCount: 1 }] });
 
   // The starter's production sizes remain readable while its guidance pages are planned.
   const formats = await ok(client, "list_formats", {});

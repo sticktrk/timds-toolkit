@@ -443,7 +443,7 @@ export function buildLlmsText(manifest, pages, { indexUrl, tokensUrl = null, bra
   if (tokensUrl) lines.push(`Design tokens: ${tokensUrl} — every CSS custom property the pages load, resolved by scope.`);
   if (brandUrl) lines.push(`Brand kit: ${brandUrl} — role colors and fonts, logos, and imagery for on-brand production.`);
   if (formatsUrl) lines.push(`Asset formats: ${formatsUrl} — every print sheet and screen canvas with its size, bleed, and safe margin.`);
-  if (designsUrl) lines.push(`Website designs: ${designsUrl} — whole pages as HTML with JavaScript on the system's stylesheets, the reference a product port must match.`);
+  if (designsUrl) lines.push(`Website designs: ${designsUrl} — whole pages as HTML with JavaScript on the system's stylesheets, the reference a product port must match; each design's journeys list its screens in the order a visitor meets them.`);
   if (bundleUrl) lines.push(`Consumer bundle: ${bundleUrl} — the stylesheets, scripts, and assets a website loads from this system, each with its digest; a website pins the immutable copy it names under \`versioned\`.`);
   if (changelogUrl) lines.push(`Changelog: ${changelogUrl} — every release, newest first, with what changed in each; a product moving its pin reads the releases in between.`);
   lines.push("");
@@ -712,7 +712,7 @@ export async function extractArtifact({ artifactRoot, manifest, mediaCatalog = {
     // The asset format catalog, when the system keeps one: where it sits and how much it holds.
     ...(formatsDoc ? { formats: { url: formatsUrl, groups: formatsDoc.groupCount, count: formatsDoc.count } } : {}),
     // The website designs, when the system has any: where the document sits and how much it holds.
-    ...(designsDoc ? { designs: { url: designsUrl, count: designsDoc.designCount, pages: designsDoc.pageCount, states: designsDoc.stateCount } } : {}),
+    ...(designsDoc ? { designs: { url: designsUrl, count: designsDoc.designCount, pages: designsDoc.pageCount, states: designsDoc.stateCount, journeys: designsDoc.journeyCount } } : {}),
     // The consumer bundle, when the manifest declares one: where its manifest sits and how much it holds.
     ...(bundle ? { bundle: { url: bundleUrl, files: bundle.fileCount ?? 0, bytes: bundle.bytes ?? 0 } } : {}),
     // The changelog, when the system keeps one: the document, the page, how many releases it lists, and the latest.
