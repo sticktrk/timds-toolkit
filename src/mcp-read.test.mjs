@@ -95,6 +95,7 @@ test("the local read server describes, resolves roles, lists tokens and pages, a
   assert.equal(described.system.id, systems.systems[0].systemId);
   assert.equal(described.system.source, "local");
   assert.equal(described.system.pinned, null);
+  assert.equal(described.lineage, null);
   assert.ok(described.pages.length > 0);
   assert.ok(described.tokens.count > 0);
   assert.ok(described.brand.summary.roles.filled > 0);
@@ -373,8 +374,9 @@ test("a published base serves the layer the CDN holds", async (t) => {
   const workspace = await loadWorkspace(repoRoot);
   const layer = await layerOf(repoRoot);
   const base = "https://design-systems.example/client/core/artifact";
+  const lineage = { systemId: "example/parent", sourceId: "00000000-0000-4000-8000-000000000101", version: "1.0.0", commit: "a".repeat(40), mode: "full" };
   const files = {
-    ".timds-artifact.json": JSON.stringify({ schemaVersion: 1, sourceCommit: "abc123", version: layer.system.version, systemId: layer.system.id, entry: workspace.manifest.artifact.entry, files: { index: "index.json", tokens: "tokens.json", brand: "brand.json", llms: "llms.txt" } }),
+    ".timds-artifact.json": JSON.stringify({ schemaVersion: 1, sourceCommit: "abc123", version: layer.system.version, systemId: layer.system.id, entry: workspace.manifest.artifact.entry, lineage, files: { index: "index.json", tokens: "tokens.json", brand: "brand.json", llms: "llms.txt" } }),
     "index.json": JSON.stringify(layer.index),
     "tokens.json": JSON.stringify(layer.tokens),
     "brand.json": JSON.stringify(layer.brand),
@@ -395,6 +397,8 @@ test("a published base serves the layer the CDN holds", async (t) => {
   assert.equal(described.system.source, "published");
   assert.equal(described.system.published, layer.system.version);
   assert.equal(described.provenance.sourceCommit, "abc123");
+  assert.deepEqual(described.lineage, lineage);
+  assert.deepEqual(described.provenance.lineage, lineage);
   assert.equal(described.media.catalog, false);
   assert.equal(described.formats.count, 48);
   const media = await ok(client, "list_media", {});
@@ -425,7 +429,7 @@ test("the read server refuses a checkout with nothing derived", async (t) => {
 
 test("the consumer guide teaches roles, media, guidance, versions, and gaps without editing steps", () => {
   const guide = consumerGuideText();
-  for (const rule of ["resolve_role", "get_tokens", "get_brand", "list_media", "search_guidance", "read_page", "report_gap", "pinned", "Compliance guidance is binding"]) {
+  for (const rule of ["resolve_role", "get_tokens", "get_brand", "list_media", "search_guidance", "read_page", "report_gap", "pinned", "lineage", "Ancestry is provenance", "Compliance guidance is binding"]) {
     assert.ok(guide.includes(rule), rule);
   }
   for (const editing of ["write_file", "run_check", "hand-off", "npm ci", "git clone"]) {

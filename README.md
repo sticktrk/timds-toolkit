@@ -920,6 +920,23 @@ failed sync aborts the upgrade cleanly. The
 report is a per-file status table (`created`, `updated`, `current`,
 `customized`, `skipped`) and the catalog changes it merged.
 
+### Offshoots follow a parent release
+
+`timds shoot example/core --system-id example/child --root ../child
+--mode structure` creates a local offshoot from the parent's published source.
+Full mode keeps authored layers; structure keeps verified toolkit plumbing,
+catalogs, placeholder tokens and any exact files the parent's designer listed
+in `.timds/stock.json`. Both write `.timds/parent.json` and pass the workspace
+check before creation completes.
+
+`timds feed` merges the next parent release against that record: unchanged
+catalog fields advance, missing entries are added as planned pages, and local
+grafts stay. Authored source is never replaced; failed checks roll back the
+feed. Ordinary upgrades keep plumbing current and leave the parent's structure
+alone. `timds sever` confirms before removing the parent baseline. See
+[offshoots](docs/offshoots.md) for local Git parents, stock declarations,
+lineage readers and the hosted catalog boundary.
+
 ### The derived layer is the contract consumers read
 
 Together `index.json`, `tokens.json`, `brand.json`, `llms.txt`,

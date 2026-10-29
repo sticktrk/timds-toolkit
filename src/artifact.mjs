@@ -69,6 +69,7 @@ import { eachBrandKitMedia } from "./brand.mjs";
 import { bundleManifestPublishPaths, bundlePublishPaths, rewriteBundleForPublish } from "./bundle.mjs";
 import { eachDesignReference } from "./designs.mjs";
 import { PROVENANCE_FILE, derivedLayerPaths } from "./derived.mjs";
+import { parentLineage, readParentRecord } from "./offshoot-contract.mjs";
 
 const eachIndexMedia = (index, visit) => {
   for (const page of index.pages ?? []) {
@@ -330,6 +331,7 @@ export async function publishExtractedIndex(workspace, options = {}) {
     throw new Error(`${indexRelative} is not in the artifact — run \`timds extract\` first`);
   }
   const index = JSON.parse(indexRaw);
+  const lineage = parentLineage(await readParentRecord(workspace.designSystemRoot));
   if (index.system?.version !== workspace.manifest.version) {
     throw new Error(
       `Artifact index is stamped ${index.system?.version} but timds.json declares ${workspace.manifest.version}; rebuild before publishing`
@@ -474,6 +476,7 @@ export async function publishExtractedIndex(workspace, options = {}) {
           sourceCommit,
           version: workspace.manifest.version,
           systemId: workspace.manifest.systemId,
+          lineage,
           entry: workspace.manifest.artifact.entry,
           files: derivedLayerPaths(workspace.manifest.artifact.entry),
         }, null, 2)}\n`),

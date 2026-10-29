@@ -109,6 +109,7 @@ npx -y @dtconcepts/timds@latest mcp read --published <span data-root>https://THI
   </div>
   <p class="note">Snippets 1 to 6 give the agent the whole consumer tool set: brand roles, tokens, guidance search, pages, formats, designs, and media; <a href="/use/#mcp">Using the system</a> lists every tool. Snippet 7 needs nothing on the machine and carries the host's published read tools, <code>describe_system</code>, <code>get_tokens</code>, <code>read_page</code> and <code>read_derived_layer</code>, each taking this system's id, <code><span data-system-id>SYSTEM-ID</span></code>, as <code>systemId</code> and an optional <code>version</code>.</p>
   <p class="note">First reads, in order: <code>get_consumer_guide</code> once per conversation, then <code>describe_system</code> and note the version. For a color or a font ask <code>resolve_role</code>, not a token name; for marks and imagery <code>get_brand</code> and <code>list_media</code>; for copy <code>search_guidance</code>; for a size <code>list_formats</code>. Report what was used, and name anything the system could not answer rather than guessing it.</p>
+  <p class="note">When the release is an offshoot, <code>describe_system</code> and the derived layer's provenance carry <code>lineage</code>: its parent system, source, release, commit, and creation mode. A <code>null</code> lineage is supported for ordinary systems and older releases. Ancestry describes where the system began; use the served system's guidance and assets.</p>
 </section>
 
 <section class="block step" id="product">
