@@ -66,6 +66,19 @@ test("host retry recognizes explicit busy codes but immediately returns semantic
   }
 });
 
+test('release source reads use the selected immutable label and scoped system endpoint', async () => {
+  const calls = [];
+  const payload = { apiVersion: 1, systemId: 'example/core', version: '2026.10.29-1', files: [] };
+  const provider = createHostProvider({ url: 'https://host.example', token: 'timds_test', fetchImpl: async (url, options) => { calls.push({ url, ...options }); return response(payload); } });
+  assert.deepEqual(await provider.releaseSource('example/core', '2026.10.29-1'), payload);
+  assert.equal(calls[0].url, 'https://host.example/api/timds/design-systems/example%2Fcore/releases/2026.10.29-1/source');
+  assert.equal(calls[0].method, 'GET');
+  assert.equal(calls[0].headers.Authorization, 'Bearer timds_test');
+  assert.equal(calls[0].redirect, 'error');
+  await provider.releaseSource('example/core');
+  assert.match(calls[1].url, /\/releases\/latest\/source$/);
+});
+
 test("host recovery has an attempt and elapsed-time bound and never retries unrelated operations", async () => {
   for (const slow of [false, true]) {
     const clock = testRetryClock();
@@ -134,6 +147,23 @@ test("host session materializes plain files, uploads changed/deleted paths, read
   await runHostedCommand("close", f.options);
   assert.equal((await f.state()).session.status, "closed");
   await assert.rejects(runHostedCommand("submit", f.options), /closed/);
+});
+
+test('sessions retain parent lineage and refuse creating, changing or deleting it before upload', async t => {
+  const record = JSON.stringify({ schemaVersion: 1, systemId: 'example/parent' });
+  const f = await fixture(t, [file('.timds/parent.json', record), file('note.txt', 'base')]);
+  const state = await f.state();
+  assert.deepEqual((await sessionChanges(f.root, state)).changes.changedFiles, []);
+  const calls = f.requests.length;
+  await fs.writeFile(path.join(f.root, '.timds/parent.json'), `${record}\n`);
+  await assert.rejects(sessionChanges(f.root, state), /protected lineage/);
+  await assert.rejects(runHostedCommand('update', f.options), /protected lineage/);
+  assert.equal(f.requests.length, calls);
+  await fs.rm(path.join(f.root, '.timds/parent.json'));
+  await assert.rejects(sessionChanges(f.root, state), /cannot create, edit or delete/);
+  const plain = await fixture(t);
+  await fs.writeFile(path.join(plain.root, '.timds/parent.json'), record);
+  await assert.rejects(sessionChanges(plain.root, await plain.state()), /protected lineage/);
 });
 
 test("pull preserves local edits, reports both-side conflicts, and never partially applies a conflict", async (t) => {

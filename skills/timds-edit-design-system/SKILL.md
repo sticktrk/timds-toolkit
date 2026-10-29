@@ -182,6 +182,60 @@ appear after an upgrade as primitives to author. When a change needs a stock
 script, prefer `tokens/*.json`, `system.css`, and the pages; a local script
 change leaves that file behind on every later upgrade.
 
+## Offshoots and explicit parent stock
+
+Local `shoot` currently runs through the npm distribution; do not substitute
+`timds-cli` for that creation step. After reviewing and committing the new npm
+offshoot, binary users explicitly adopt it with
+`timds-cli installation adopt --binary --apply`. Feed and sever retain the
+selected execution mode.
+
+When the designer asks for a system based on a parent's release, run the
+toolkit for them. `timds shoot SYSTEM --system-id NEW --root DEST --mode
+full|structure --version RELEASE` creates a new local system in an empty
+destination. A local Git path can replace `SYSTEM`; supply `--source-id UUID`
+and optionally `--ref REF` to select its committed tree. Use this repository's
+selected executable (`npm run timds --` or `timds-cli`).
+
+Full mode carries every source layer. Structure mode keeps verified recorded
+plumbing, navigation, complete format catalogs, token names and role mappings.
+Pages without copied bodies become planned; token values become CSS `initial`
+and `check` reports them as unresolved warnings. Token descriptions, media and
+website designs are removed; neutral layout, overview and system styles fill
+missing stock. Collect approved brand inputs and author these foundations
+before presenting the skeleton as a completed brand.
+
+The parent designer alone decides which authored files are reusable structure.
+Write and publish `.timds/stock.json` as
+`{"schemaVersion":1,"paths":["src/pages/web/components.html","src/styles/system.css"]}`.
+Only exact existing regular HTML files under `src/pages/`, CSS files under
+`src/styles/`, or `src/layout.html` are accepted. No globs, symbolic links,
+media, designs or configuration. This is the editable exception under `.timds/`
+for remote editing tools; `run_check` validates it before publication.
+
+`.timds/parent.json` is protected ancestry: schemaVersion 1, parent `systemId`,
+source UUID `sourceId`, release `version`, source `commit`, `mode`, and
+`baseline: {site, formats}`. Never hand-edit it or remove it through a session.
+Starter sync and upgrade preserve it and update toolkit plumbing without
+merging the toolkit's catalogs, fragments or layout into an offshoot.
+
+For a requested parent update, commit current changes and run `timds feed`
+with an optional `--version RELEASE`. `--from ../parent` uses a local committed
+tree and the saved source UUID. Feed advances catalog fields equal to the
+baseline and appends missing entries with pages planned. The child's edits
+are grafts and stay. Explain each newly reported graft shading a parent
+change, then keep it or edit that field according to the designer's choice.
+Plumbing follows the ownership record. `--force PATH` reaches only named
+plumbing and never replaces authored pages, styles, layout, tokens or media.
+Feed refuses uncommitted changes to files it writes, checks the workspace and
+restores its writes on failure; success advances the parent baseline.
+
+Sever permanently removes that local baseline and needs confirmation. Use
+`timds sever --yes` only for an explicitly authorized sever; source stays and
+the system becomes independent. Feed and sever cannot run in a hosted session.
+For a hosted system, report that host catalog lineage must also be updated
+before publishing severed source; the local command cannot perform that step.
+
 ## Upgrade protected tooling only when requested
 
 1. Use the bounded release line selected by the user or DT Concepts operator.

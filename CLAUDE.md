@@ -179,6 +179,15 @@ lifecycle belong to the host.
 
 ### Templates and managed files
 
+`src/offshoot-contract.mjs` validates `.timds/parent.json` and the designer's
+exact-file `.timds/stock.json` declarations. `src/offshoots.mjs` implements
+local `shoot` from immutable hosted or Git source and confirmed `sever`;
+`src/feed.mjs` reuses the starter's catalog merges with parent stock, verified
+plumbing, dirty-file guards and rollback. While a parent record exists,
+ordinary starter sync updates plumbing only and preserves its structural
+baselines. Public lineage appears in derived readers and publication stamps;
+session edits cannot change the parent record. See `docs/offshoots.md`.
+
 `templates/` is copied verbatim (with `__PLACEHOLDER__` substitution) by `init`
 and `video init`. `templates/starter/` is the standalone repo scaffold including
 its release scripts; `templates/*.yml` are the stock workflows. The starter
