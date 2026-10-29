@@ -276,7 +276,9 @@ registering or publishing; `feed` reuses starter merges against the parent's
 baseline and never replaces authored source, even with force. Parent baselines
 advance only after a successful check, with rollback on failure. Ordinary
 starter sync/upgrade keeps offshoot plumbing current and preserves its parent
-record and catalog baselines. `sever` requires confirmation and removes only
+record and catalog baselines; it still maintains missing stock stylesheet links
+and the changelog version-chip link within the narrow layout boundary.
+`sever` requires confirmation and removes only
 the local parent record; hosted catalog severing remains a host operation.
 Public derived readers and provenance expose lineage or null, never baselines.
 See `docs/offshoots.md` for the contract and command details.

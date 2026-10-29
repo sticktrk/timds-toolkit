@@ -288,12 +288,18 @@ ancestry in `.timds/parent.json`. The schema-1 record holds the parent's
 `mode` (`full` or `structure`), and `baseline: {site, formats}` for future
 feeds. Do not edit or delete it as design work; hosted sessions refuse both.
 Ordinary starter sync and upgrade preserve it and update toolkit plumbing
-without importing the toolkit's catalogs, fragments or layout into an offshoot.
+without importing the toolkit's catalogs or fragments into an offshoot. It
+still maintains missing stock stylesheet links and the changelog version-chip
+link within the narrow layout boundary.
 
 The designer's agent creates a new local offshoot with
 `__TIMDS_CLI__ shoot example/core --system-id example/child --root ../child --mode structure --version RELEASE`.
-Use a local Git checkout in place of `example/core` with `--source-id UUID`;
+Use an absolute or `./` / `../` local Git checkout in place of `example/core`
+with `--source-id UUID`;
 `--ref REF` selects the committed tree. The destination must be new or empty.
+New child IDs are lowercase. Custom dependencies install with lifecycle
+scripts disabled; `--install` explicitly permits a reviewed custom installer
+or npm lifecycle scripts. Creation still runs the declared build/check.
 A full offshoot carries all source layers. A structure offshoot keeps
 navigation, whole format catalogs, verified recorded plumbing, token names
 and role mappings. Missing page bodies become planned pages; token values

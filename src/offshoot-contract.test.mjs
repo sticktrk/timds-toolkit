@@ -4,6 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { initializeRepository, checkWorkspace } from './core.mjs';
+import { readDerivedLayer } from './derived.mjs';
+import { createPublicationStampFromFiles } from './publication-snapshot.mjs';
 import { parentLineage, readParentRecord, readStockRecord, unresolvedTokenWarnings, validateOffshootRecords, validateParentRecord, validateStockRecord } from './offshoot-contract.mjs';
 
 const parent = () => ({ schemaVersion: 1, systemId: 'example/core', sourceId: '00000000-0000-4000-8000-000000000001', version: '2026.10.29-1', commit: 'a'.repeat(40), mode: 'structure', baseline: { site: { views: [{ id: 'brand', label: 'Brand', pages: [{ slug: '', title: 'Overview', planned: true }] }] }, formats: null } });
@@ -33,9 +35,46 @@ test('malformed lineage and structural baselines fail with the record path', asy
   for (const record of invalid) assert.throws(() => validateParentRecord(record), /\.timds\/parent.json/);
   const duplicate = parent(); duplicate.baseline.site.views[0].pages.push({ slug: '', title: 'Again' });
   assert.throws(() => validateParentRecord(duplicate), /duplicate page/);
+  for (const site of [
+    { views: {} }, { views: [null] }, { views: [{ id: 42, pages: [] }] },
+    { views: [{ id: 'web', pages: {} }] }, { views: [{ id: 'web', label: [], pages: [] }] },
+    { views: [{ id: 'web', pages: [null] }] }, { views: [{ id: 'web', pages: [{ slug: {} }] }] },
+    { views: [{ id: 'web', pages: [{ title: [] }] }] }, { views: [{ id: 'web', pages: [{ planned: 'yes' }] }] },
+    { views: [{ id: 'web', pages: [] }, { id: 'web', pages: [] }] },
+  ]) assert.throws(() => validateParentRecord({ ...parent(), baseline: { site, formats: null } }), /baseline.site/);
   const directory = await root(t);
   await write(directory, '.timds/parent.json', 'null\n');
   await assert.rejects(readParentRecord(directory), /schemaVersion 1/);
+});
+
+test('parent baselines preserve custom-renderer catalogs without imposing starter presentation rules', async t => {
+  const directory = await root(t);
+  const sites = [
+    { views: [] },
+    { views: [{ id: 'empty_view', pages: [] }] },
+    { views: [{ id: 'Web_View', pages: [{ slug: 'web_components' }, { slug: 'index' }, {}] }] },
+    { views: [{ id: 'custom', label: '', pages: [{ slug: 'nested/path.with_underscore', title: '' }] }] },
+  ];
+  for (const site of sites) {
+    const record = { ...parent(), mode: 'full', baseline: { site, formats: null } };
+    const before = structuredClone(record);
+    assert.equal(validateParentRecord(record), record);
+    assert.deepEqual(record, before);
+    await write(directory, '.timds/parent.json', json(record));
+    assert.deepEqual(await readParentRecord(directory), record);
+    const derived = await readDerivedLayer(directory, { systemId: 'example/child', version: '1.0.0' });
+    assert.deepEqual(derived.lineage, parentLineage(record));
+    const stamp = createPublicationStampFromFiles({
+      sourceCommit: 'b'.repeat(40),
+      sourceFiles: [
+        { path: 'timds.json', content: json({ systemId: 'example/child', name: 'Example', version: '1.0.0', artifact: { entry: 'index.html' } }) },
+        { path: 'tokens.json', content: '{}' }, { path: '.timds/parent.json', content: json(record) },
+      ],
+      artifactFiles: [{ path: 'index.html', content: '<h1>Example</h1>' }],
+    });
+    assert.deepEqual(stamp.lineage, parentLineage(record));
+    assert.equal(await fs.readFile(path.join(directory, '.timds/parent.json'), 'utf8'), json(record));
+  }
 });
 
 test('stock declarations name exact existing allowed regular source files', async t => {
@@ -62,6 +101,9 @@ test('initial token values are unresolved warnings rather than invalid values', 
   assert.match(unresolvedTokenWarnings(tokens)[0], /color.accent.*unresolved.*initial/);
   await write(directory, 'tokens.json', json(tokens));
   assert.equal((await validateOffshootRecords(directory)).warnings.length, 2);
+  const record = parent();
+  assert.equal((await validateOffshootRecords(directory, { parentRecord: record })).parent, record);
+  assert.equal((await validateOffshootRecords(directory, { parentRecord: null })).parent, null);
 });
 
 test('check accepts host structure records and reports placeholder tokens without changing lineage', async t => {
@@ -77,6 +119,10 @@ test('check accepts host structure records and reports placeholder tokens withou
   const checked = await checkWorkspace(directory);
   assert.ok(checked.machine.warnings.some(message => /color.accent.*unresolved/.test(message)));
   assert.equal(await fs.readFile(path.join(directory, '.timds/parent.json'), 'utf8'), json(record));
+  const customRecord = { ...record, mode: 'full', baseline: { site: { views: [{ id: 'empty_view', pages: [] }, { id: 'custom', pages: [{ slug: 'web_components' }] }] }, formats: null } };
+  await write(directory, '.timds/parent.json', json(customRecord));
+  assert.deepEqual((await checkWorkspace(directory)).machine.index.lineage, parentLineage(customRecord));
+  assert.equal(await fs.readFile(path.join(directory, '.timds/parent.json'), 'utf8'), json(customRecord));
   await write(directory, '.timds/stock.json', json({ schemaVersion: 1, paths: ['src/pages/*.html'] }));
   await assert.rejects(checkWorkspace(directory), /stock.json/);
 });

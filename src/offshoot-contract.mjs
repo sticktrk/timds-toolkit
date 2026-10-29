@@ -8,21 +8,22 @@ import { normalizeFormatCatalog } from './formats.mjs';
 export const PARENT_RECORD_FILE = '.timds/parent.json';
 export const STOCK_RECORD_FILE = '.timds/stock.json';
 const object = value => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-const slug = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-const pageSlug = /^(?:[a-z0-9]+(?:-[a-z0-9]+)*(?:\/[a-z0-9]+(?:-[a-z0-9]+)*)*)?$/;
 const onlyKeys = (value, keys) => Object.keys(value).every(key => keys.includes(key));
 
 function validateBaselineSite(site) {
   const at = `${PARENT_RECORD_FILE} baseline.site`;
-  if (!object(site) || !Array.isArray(site.views) || !site.views.length) throw new Error(`${at} must declare views`);
+  // This is passive merge data from a published parent, which may use a
+  // custom renderer. The stock viewer owns its stricter labels and route
+  // grammar; readers must not apply those presentation rules to every parent.
+  if (!object(site) || !Array.isArray(site.views)) throw new Error(`${at} must declare a views array`);
   const views = new Set();
   for (const view of site.views) {
-    if (!object(view) || !slug.test(view.id || '') || views.has(view.id) || typeof view.label !== 'string' || !view.label.trim() || !Array.isArray(view.pages) || !view.pages.length) throw new Error(`${at} has an invalid or duplicate view`);
+    if (!object(view) || typeof view.id !== 'string' || !view.id || views.has(view.id) || (view.label !== undefined && typeof view.label !== 'string') || !Array.isArray(view.pages)) throw new Error(`${at} has an invalid or duplicate view`);
     views.add(view.id);
     const pages = new Set();
     for (const page of view.pages) {
       const name = page?.slug ?? '';
-      if (!object(page) || typeof name !== 'string' || !pageSlug.test(name) || name.split('/').includes('index') || pages.has(name) || typeof page.title !== 'string' || !page.title.trim() || (page.planned !== undefined && typeof page.planned !== 'boolean')) throw new Error(`${at} view ${view.id} has an invalid or duplicate page`);
+      if (!object(page) || typeof name !== 'string' || pages.has(name) || (page.title !== undefined && typeof page.title !== 'string') || (page.planned !== undefined && typeof page.planned !== 'boolean')) throw new Error(`${at} view ${view.id} has an invalid or duplicate page`);
       pages.add(name);
     }
   }
@@ -114,8 +115,8 @@ export function unresolvedTokenWarnings(tokens) {
   return warnings;
 }
 
-export async function validateOffshootRecords(root) {
-  const parent = await readParentRecord(root);
+export async function validateOffshootRecords(root, { parentRecord = undefined } = {}) {
+  const parent = parentRecord === undefined ? await readParentRecord(root) : parentRecord;
   const stock = await readStockRecord(root);
   const tokens = JSON.parse(await fs.readFile(path.join(root, 'tokens.json'), 'utf8'));
   return { parent, stock, warnings: unresolvedTokenWarnings(tokens) };

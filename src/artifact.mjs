@@ -331,7 +331,7 @@ export async function publishExtractedIndex(workspace, options = {}) {
     throw new Error(`${indexRelative} is not in the artifact — run \`timds extract\` first`);
   }
   const index = JSON.parse(indexRaw);
-  const lineage = parentLineage(await readParentRecord(workspace.designSystemRoot));
+  const lineage = parentLineage(workspace.parentRecord === undefined ? await readParentRecord(workspace.designSystemRoot) : workspace.parentRecord);
   if (index.system?.version !== workspace.manifest.version) {
     throw new Error(
       `Artifact index is stamped ${index.system?.version} but timds.json declares ${workspace.manifest.version}; rebuild before publishing`

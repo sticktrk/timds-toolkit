@@ -91,7 +91,7 @@ export async function feedOffshoot({ designSystemRoot, source, check = null, for
   const selected = Object.keys(stockFiles).filter(plumbingPath);
   if (force.some((relative) => !selected.includes(relative))) throw new Error("Feed --force replaces only named plumbing files in the parent's recorded stock; authored content is never replaced");
   const plumbing = record?.plumbing ?? "recorded";
-  const files = [], writes = [], nextFiles = { ...record?.files };
+  const files = [], writes = [], pendingCustomized = [], nextFiles = { ...record?.files };
   const plan = async (relative, content, status, note, desiredMode) => {
     const file = await safeTarget(designSystemRoot, relative);
     const current = await optional(file);
@@ -99,7 +99,12 @@ export async function feedOffshoot({ designSystemRoot, source, check = null, for
     const mode = desiredMode ?? originalMode ?? 0o644;
     const modeChanged = content !== null && mode !== originalMode;
     if (modeChanged && current !== null && status === "current") status = "updated";
-    files.push({ path: relative, status, ...(note ? { note } : {}) });
+    const reported = { path: relative, status, ...(note ? { note } : {}) };
+    const reportedIndex = files.findIndex((entry) => entry.path === relative);
+    if (reportedIndex === -1) files.push(reported);
+    else files[reportedIndex] = reported;
+    const writeIndex = writes.findIndex((entry) => entry.relative === relative);
+    if (writeIndex !== -1) writes.splice(writeIndex, 1);
     if (content !== null && (content !== current || modeChanged)) {
       writes.push({ file, relative, current, content, mode, originalMode });
     }
@@ -119,18 +124,10 @@ export async function feedOffshoot({ designSystemRoot, source, check = null, for
     const bytes = entry;
     await safeTarget(designSystemRoot, relative);
     const desired = bytes.toString("utf8");
-    let planned = await planStockFile(path.join(designSystemRoot, relative), desired, { force: plumbing === "toolkit" || force.includes(relative), knownHashes: [record?.files?.[relative]].filter(Boolean) });
-    let note = planned.forced ? (plumbing === "toolkit" ? "the toolkit's plumbing; a local change was replaced" : "replaced with --force") : undefined;
+    const planned = await planStockFile(path.join(designSystemRoot, relative), desired, { force: plumbing === "toolkit" || force.includes(relative), knownHashes: [record?.files?.[relative]].filter(Boolean) });
+    const note = planned.forced ? (plumbing === "toolkit" ? "the toolkit's plumbing; a local change was replaced" : "replaced with --force") : undefined;
     if (planned.status === "customized" && decideCustomized) {
-      const preview = await fs.mkdtemp(path.join(os.tmpdir(), "timds-feed-diff-"));
-      const templatePath = path.join(preview, path.basename(relative));
-      let choice;
-      try {
-        await fs.writeFile(templatePath, desired, "utf8");
-        choice = await decideCustomized({ current: planned.current, desired, file: path.join(designSystemRoot, relative), path: relative, templatePath });
-      } finally { await fs.rm(preview, { recursive: true, force: true }); }
-      if (choice === "replace") { planned = { ...planned, write: true, status: "updated" }; note = "replaced at the prompt"; }
-      else note = "kept at the prompt";
+      pendingCustomized.push({ relative, entry, desired, planned });
     }
     if (planned.status !== "customized") nextFiles[relative] = stockFiles[relative];
     await plan(relative, planned.write || planned.status === "current" ? desired : null, planned.status, note, entry.mode === "100755" ? 0o755 : 0o644);
@@ -147,6 +144,28 @@ export async function feedOffshoot({ designSystemRoot, source, check = null, for
   if (formats !== null) await plan(STARTER_FORMATS_FILE, same(currentFormats, mergedFormats.catalog) ? null : formatFormatsJson(mergedFormats.catalog), same(currentFormats, mergedFormats.catalog) ? "current" : currentFormats === null ? "created" : "updated");
   if (record) await plan(STARTER_RECORD_FILE, json({ ...record, files: nextFiles }), "updated");
   await plan(PARENT_FILE, json(nextParent), "updated");
+  if (pendingCustomized.length) {
+    // Decide only after the whole plan is known. A customized script and a
+    // changed record hash are prospective writes even when the eventual
+    // answer is keep; unrelated authored files are never part of this guard.
+    const prospective = new Set([...writes.map((write) => write.relative), ...pendingCustomized.map(({ relative }) => relative)]);
+    if (record && pendingCustomized.some(({ relative }) => nextFiles[relative] !== stockFiles[relative])) prospective.add(STARTER_RECORD_FILE);
+    await requireClean(designSystemRoot, [...prospective]);
+    for (const { relative, entry, desired, planned } of pendingCustomized) {
+      const preview = await fs.mkdtemp(path.join(os.tmpdir(), "timds-feed-diff-"));
+      const templatePath = path.join(preview, path.basename(relative));
+      let choice;
+      try {
+        await fs.writeFile(templatePath, desired, "utf8");
+        choice = await decideCustomized({ current: planned.current, desired, file: path.join(designSystemRoot, relative), path: relative, templatePath });
+      } finally { await fs.rm(preview, { recursive: true, force: true }); }
+      if (choice === "replace") {
+        nextFiles[relative] = stockFiles[relative];
+        await plan(relative, desired, "updated", "replaced at the prompt", entry.mode === "100755" ? 0o755 : 0o644);
+      } else await plan(relative, null, "customized", "kept at the prompt");
+    }
+    if (record) await plan(STARTER_RECORD_FILE, json({ ...record, files: nextFiles }), "updated");
+  }
   const report = { designSystemRoot, parent: nextParent, previousParent: parent, files, written: writes.map((write) => write.relative), site: merged.changes, formats: mergedFormats.changes, plumbing, check: null, record: path.join(designSystemRoot, PARENT_FILE), recordWritten: writes.some((write) => write.relative === PARENT_FILE) };
   if (!writes.length) return report;
   await requireClean(designSystemRoot, writes.map((write) => write.relative));

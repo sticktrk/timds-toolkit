@@ -193,9 +193,13 @@ selected execution mode.
 When the designer asks for a system based on a parent's release, run the
 toolkit for them. `timds shoot SYSTEM --system-id NEW --root DEST --mode
 full|structure --version RELEASE` creates a new local system in an empty
-destination. A local Git path can replace `SYSTEM`; supply `--source-id UUID`
+destination. An absolute or `./` / `../` local Git path can replace `SYSTEM`;
+supply `--source-id UUID`
 and optionally `--ref REF` to select its committed tree. Use this repository's
-selected executable (`npm run timds --` or `timds-cli`).
+selected npm CLI for creation. New child system IDs use lowercase letters.
+Custom dependencies install with lifecycle scripts disabled. Use `--install`
+only when the designer authorized the reviewed custom installer or lifecycle
+scripts; creation still runs the declared build/check commands.
 
 Full mode carries every source layer. Structure mode keeps verified recorded
 plumbing, navigation, complete format catalogs, token names and role mappings.
@@ -217,7 +221,9 @@ for remote editing tools; `run_check` validates it before publication.
 source UUID `sourceId`, release `version`, source `commit`, `mode`, and
 `baseline: {site, formats}`. Never hand-edit it or remove it through a session.
 Starter sync and upgrade preserve it and update toolkit plumbing without
-merging the toolkit's catalogs, fragments or layout into an offshoot.
+merging the toolkit's catalogs or fragments into an offshoot. Layout
+maintenance remains limited to missing stock stylesheet links and the
+changelog link on its version chip.
 
 For a requested parent update, commit current changes and run `timds feed`
 with an optional `--version RELEASE`. `--from ../parent` uses a local committed

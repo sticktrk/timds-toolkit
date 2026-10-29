@@ -19,6 +19,7 @@ import { detectSourceCommit } from "./artifact.mjs";
 import { collectArtifactFiles } from "./artifact-files.mjs";
 import { createPublicationStampFromFiles, publicationDigest } from "./publication-snapshot.mjs";
 import { parentLineage, validateParentRecord } from "./offshoot-contract.mjs";
+import { readBlobs } from "./git-blobs.mjs";
 
 export { createPublicationStampFromFiles } from "./publication-snapshot.mjs";
 
@@ -31,23 +32,6 @@ async function readObject(file) {
   const value = JSON.parse(await fs.readFile(file, "utf8"));
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${path.basename(file)} must contain an object`);
   return value;
-}
-
-/** Committed blob bytes in one git process; checkout filters never apply. */
-function readBlobs(root, shas) {
-  const blobs = new Map();
-  const wanted = [...new Set(shas)];
-  if (!wanted.length) return blobs;
-  const out = execFileSync("git", ["cat-file", "--batch"], { cwd: root, input: `${wanted.join("\n")}\n`, stdio: ["pipe", "pipe", "pipe"], maxBuffer: 200_000_000, timeout: 30_000 });
-  for (let offset = 0; offset < out.length;) {
-    const end = out.indexOf(10, offset);
-    const header = end === -1 ? null : /^([0-9a-f]{40}) blob (\d+)$/.exec(out.subarray(offset, end).toString("utf8"));
-    if (!header) throw new Error("Source contract blobs could not be read from the source commit");
-    const size = Number(header[2]);
-    blobs.set(header[1], out.subarray(end + 1, end + 1 + size));
-    offset = end + 1 + size + 1;
-  }
-  return blobs;
 }
 
 async function artifactFiles(workspace) {
