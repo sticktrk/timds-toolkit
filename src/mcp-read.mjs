@@ -57,6 +57,10 @@ pages, and the media catalog. Nothing here is editable; use it to be on-brand.
    When \`pinned\` is present it names the version the client's application
    is built against; mention it if the user is producing for that
    application and it trails the published version.
+3. \`lineage\` names an offshoot's parent system, source, release, commit and
+   creation mode when that release records ancestry; it is \`null\` for an
+   ordinary system or an older release. Use the served system's own guidance
+   and assets. Ancestry is provenance, not permission to substitute the parent.
 
 ## Brand roles before raw tokens
 
@@ -442,8 +446,9 @@ export function registerDesignSystemReadTools(server, { resolveSystem, listSyste
     const kit = layer.brand;
     return {
       system: systemStamp(resolved),
+      lineage: layer.lineage ?? layer.provenance?.lineage ?? null,
       derived: Boolean(layer.derived),
-      provenance: layer.provenance ? { sourceCommit: layer.provenance.sourceCommit ?? null, version: layer.provenance.version ?? null } : null,
+      provenance: layer.provenance ? { sourceCommit: layer.provenance.sourceCommit ?? null, version: layer.provenance.version ?? null, lineage: layer.provenance.lineage ?? null } : null,
       pages: pageDirectory(index),
       tokens: tokens ? { count: tokens.count, kinds: tokens.kinds, roles: Object.keys(tokens.roles ?? {}), missingRoles: tokens.missingRoles ?? [], scopes: tokens.scopes?.length ?? 0 } : null,
       brand: kit ? { summary: summarizeBrandKit(kit), guidance: guidanceSummary(kit) } : null,
@@ -823,7 +828,7 @@ export async function createDesignSystemReadMcpServer({ root = process.cwd(), pu
         if (prepared && next !== prepared) await prepared.dispose();
         prepared = next;
         const workspace = await loadWorkspace(prepared.root, { allowNpm: Boolean(prepared.binaryStock) });
-        const layer = await readDerivedLayer(prepared.root, workspace.manifest);
+        const layer = await readDerivedLayer(prepared.root, workspace.manifest, {parentRecord: workspace.parentRecord});
         layer.source = { kind: "draft", draft, revision: prepared.snapshot.session.baseRevision };
         const { catalog } = await readMediaCatalog(prepared.root);
         return { layer, media: catalog, published: null, pinned: null };
@@ -853,7 +858,7 @@ export async function createDesignSystemReadMcpServer({ root = process.cwd(), pu
     resolveSystem: async ({ version, draft: requestedDraft } = {}) => {
         if (requestedDraft) throw new Error("Start the read server with --draft NAME --system-id ID to read a draft");
       const workspace = await loadWorkspace(repoRoot);
-      const layer = await readDerivedLayer(workspace.designSystemRoot, workspace.manifest);
+      const layer = await readDerivedLayer(workspace.designSystemRoot, workspace.manifest, {parentRecord: workspace.parentRecord});
       if (!layer.derived) throw new Error("Nothing has been derived yet; run timds check first");
       checkVersion(layer, version);
       const { catalog } = await readMediaCatalog(workspace.designSystemRoot);

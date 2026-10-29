@@ -3,6 +3,7 @@
 // The provenance stamp, build time and repository identity are outside it.
 import { createHash } from "node:crypto";
 import path from "node:path";
+import { parentLineage, validateParentRecord } from "./offshoot-contract.mjs";
 
 const text = (value, length, fallback = "") => String(value || fallback).trim().slice(0, length);
 const slug = (value, fallback = "") => text(value, Infinity, fallback).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 100) || fallback;
@@ -133,11 +134,19 @@ export function createPublicationStampFromFiles({ sourceCommit, sourceFiles, art
     return input;
   };
   const seen = new Set(), records = [];
+  let lineage = null;
   const readable = relative => ['timds.json', 'tokens.json', 'media.json'].includes(relative) || /^(docs\/.*\.(md|mdx)|components\/.*\.(json|md|mdx))$/i.test(relative);
   for (const file of sourceFiles) {
     const relative = checkedPath(file.path);
     if (seen.has(relative)) throw new Error(`Duplicate publication source path: ${relative}`);
     seen.add(relative);
+    if (relative === '.timds/parent.json') {
+      if (file.mode && !['100644', '100755'].includes(file.mode)) throw new Error('Offshoot lineage must be a regular source file');
+      const bytes = bytesFor(file);
+      if (bytes.length > 1_000_000) throw new Error('Source contract file is too large: .timds/parent.json');
+      lineage = parentLineage(validateParentRecord(JSON.parse(bytes.toString('utf8'))));
+      continue;
+    }
     if (file.mode && !['100644', '100755'].includes(file.mode)) continue;
     if (!['timds.json', 'tokens.json', 'media.json'].includes(relative) && !/^(docs|components|assets)\//.test(relative)) continue;
     const bytes = bytesFor(file);
@@ -159,6 +168,6 @@ export function createPublicationStampFromFiles({ sourceCommit, sourceFiles, art
     return { path: checkedPath(file.path), content: bytesFor(file) };
   });
   if (artifacts.some(file => file.path === '.timds-artifact.json')) throw new Error('The root .timds-artifact.json is reserved for publication metadata');
-  return { schemaVersion: 1, systemId: manifestSystem, version: manifestVersion, sourceCommit,
+  return { schemaVersion: 1, systemId: manifestSystem, version: manifestVersion, sourceCommit, lineage,
     contentDigest: publicationDigest({ manifest, tokens, media, sourceFiles: records, artifactFiles: artifacts }) };
 }

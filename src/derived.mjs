@@ -28,6 +28,7 @@
 
 import fs from "node:fs/promises";
 import path from "node:path";
+import { parentLineage, readParentRecord } from "./offshoot-contract.mjs";
 
 export const DERIVED_LAYER_FILES = Object.freeze({
   index: "index.json",
@@ -76,7 +77,7 @@ async function readOptional(filePath, parse) {
  * is null rather than an error, and `stale` says the layer was derived for a
  * version other than the manifest's, so a consumer knows to rerun `check`.
  */
-export async function readDerivedLayer(designSystemRoot, manifest) {
+export async function readDerivedLayer(designSystemRoot, manifest, {parentRecord = undefined} = {}) {
   const indexPromise = readOptional(derivedFilePath(designSystemRoot, manifest, "index"), JSON.parse);
   const [index, tokens, brand, llms, formats, designs, changelog, bundle] = await Promise.all([
     indexPromise,
@@ -89,12 +90,14 @@ export async function readDerivedLayer(designSystemRoot, manifest) {
     readOptional(derivedFilePath(designSystemRoot, manifest, "bundle"), JSON.parse),
   ]);
   const version = index?.system?.version ?? tokens?.system?.version ?? brand?.system?.version ?? null;
+  const lineage = parentLineage(parentRecord === undefined ? await readParentRecord(designSystemRoot) : parentRecord);
   return {
     source: { kind: "local", root: designSystemRoot, artifactRoot: path.join(designSystemRoot, "dist") },
     system: { id: manifest?.systemId ?? null, name: manifest?.name ?? null, version: manifest?.version ?? null },
     derived: index !== null || tokens !== null || brand !== null,
     stale: Boolean(version && manifest?.version && version !== manifest.version),
     provenance: null,
+    lineage,
     index,
     tokens,
     brand,
@@ -128,7 +131,11 @@ export async function fetchDerivedLayer(publicBase, { fetchImpl = fetch } = {}) 
       throw new Error(`${url} is not valid: ${caught instanceof Error ? caught.message : String(caught)}`);
     }
   };
-  const provenance = await get(PROVENANCE_FILE, JSON.parse, { required: true });
+  const stamp = await get(PROVENANCE_FILE, JSON.parse, { required: true });
+  // An immutable publication's stamp owns its ancestry. Older releases have
+  // no lineage field and remain ordinary systems to this reader.
+  const lineage = parentLineage(stamp.lineage ?? null);
+  const provenance = { ...stamp, lineage };
   // A stamp written before designs existed names no designs file; it then
   // sits where the entry says, and is simply absent for an older publish.
   const paths = { ...derivedLayerPaths(provenance.entry), ...(provenance.files ?? {}) };
@@ -155,6 +162,7 @@ export async function fetchDerivedLayer(publicBase, { fetchImpl = fetch } = {}) 
     derived: index !== null || tokens !== null || brand !== null,
     stale: false,
     provenance,
+    lineage,
     index,
     tokens,
     brand,

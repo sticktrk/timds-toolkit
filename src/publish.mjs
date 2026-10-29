@@ -18,6 +18,8 @@ import { cleanPortalUrl, resolveAccessToken } from "./auth.mjs";
 import { detectSourceCommit } from "./artifact.mjs";
 import { collectArtifactFiles } from "./artifact-files.mjs";
 import { createPublicationStampFromFiles, publicationDigest } from "./publication-snapshot.mjs";
+import { parentLineage, validateParentRecord } from "./offshoot-contract.mjs";
+import { readBlobs } from "./git-blobs.mjs";
 
 export { createPublicationStampFromFiles } from "./publication-snapshot.mjs";
 
@@ -30,23 +32,6 @@ async function readObject(file) {
   const value = JSON.parse(await fs.readFile(file, "utf8"));
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${path.basename(file)} must contain an object`);
   return value;
-}
-
-/** Committed blob bytes in one git process; checkout filters never apply. */
-function readBlobs(root, shas) {
-  const blobs = new Map();
-  const wanted = [...new Set(shas)];
-  if (!wanted.length) return blobs;
-  const out = execFileSync("git", ["cat-file", "--batch"], { cwd: root, input: `${wanted.join("\n")}\n`, stdio: ["pipe", "pipe", "pipe"], maxBuffer: 200_000_000, timeout: 30_000 });
-  for (let offset = 0; offset < out.length;) {
-    const end = out.indexOf(10, offset);
-    const header = end === -1 ? null : /^([0-9a-f]{40}) blob (\d+)$/.exec(out.subarray(offset, end).toString("utf8"));
-    if (!header) throw new Error("Source contract blobs could not be read from the source commit");
-    const size = Number(header[2]);
-    blobs.set(header[1], out.subarray(end + 1, end + 1 + size));
-    offset = end + 1 + size + 1;
-  }
-  return blobs;
 }
 
 async function artifactFiles(workspace) {
@@ -68,7 +53,7 @@ export async function createPublicationStamp(workspace) {
   if (!/^[a-f0-9]{40}$/.test(sourceCommit)) throw new Error("Publication requires a committed Git checkout");
   const relativeRoot = path.relative(repoRoot, designSystemRoot).split(path.sep).join("/");
   const prefix = relativeRoot ? `${relativeRoot}/` : "";
-  const contractPaths = ["timds.json", "tokens.json", "media.json", "docs", "components", "assets"].map((name) => `${prefix}${name}`);
+  const contractPaths = ["timds.json", "tokens.json", "media.json", ".timds/parent.json", "docs", "components", "assets"].map((name) => `${prefix}${name}`);
   // The build must come from the committed contract, which is what is hashed.
   if (git(repoRoot, ["diff", "--name-only", sourceCommit, "--", ...contractPaths]).trim() || git(repoRoot, ["ls-files", "--others", "--exclude-standard", "--", ...contractPaths]).trim()) {
     throw new Error("Commit the source contract before publishing; the artifact must match its source commit");
@@ -77,11 +62,12 @@ export async function createPublicationStamp(workspace) {
   // ordering. Blob sizes come from the tree and bytes from the objects, so a
   // checkout filter cannot change the digest. Symlinks and gitlinks are
   // ignored, as publication discovery does.
-  const readable = (relative) => ["timds.json", "tokens.json", "media.json"].includes(relative) || /^(docs\/.*\.(md|mdx)|components\/.*\.(json|md|mdx))$/i.test(relative);
+  const readable = (relative) => ["timds.json", "tokens.json", "media.json", ".timds/parent.json"].includes(relative) || /^(docs\/.*\.(md|mdx)|components\/.*\.(json|md|mdx))$/i.test(relative);
   const records = [];
   for (const record of git(repoRoot, ["ls-tree", "-rzl", "--full-tree", sourceCommit, "--", ...contractPaths]).split("\0").filter(Boolean)) {
     const [header, filePath] = record.split(/\t(.*)/s);
     const match = /^100(?:644|755) blob ([0-9a-f]{40}) +(\d+)$/.exec(header);
+    if (filePath === `${prefix}.timds/parent.json` && !match) throw new Error("Offshoot lineage must be a regular source file");
     if (!match) continue;
     const relative = filePath.slice(prefix.length);
     const bytes = Number(match[2]);
@@ -97,8 +83,9 @@ export async function createPublicationStamp(workspace) {
   const manifest = JSON.parse(sourceByPath.get("timds.json").content);
   const tokens = JSON.parse(sourceByPath.get("tokens.json").content);
   const media = sourceByPath.has("media.json") ? JSON.parse(sourceByPath.get("media.json").content) : null;
+  const lineage = sourceByPath.has(".timds/parent.json") ? parentLineage(validateParentRecord(JSON.parse(sourceByPath.get(".timds/parent.json").content))) : null;
   const contentDigest = publicationDigest({ manifest, tokens, media, sourceFiles, artifactFiles: await artifactFiles(workspace) });
-  const stamp = { schemaVersion: 1, systemId: workspace.manifest.systemId, version: workspace.manifest.version, sourceCommit, contentDigest };
+  const stamp = { schemaVersion: 1, systemId: workspace.manifest.systemId, version: workspace.manifest.version, sourceCommit, contentDigest, lineage };
   if (!/^[a-zA-Z0-9][a-zA-Z0-9._/-]{1,159}$/.test(stamp.systemId) || !/^[a-zA-Z0-9][a-zA-Z0-9._+-]{0,99}$/.test(stamp.version)) throw new Error("Publication requires a safe system identity and version label");
   return stamp;
 }
@@ -171,7 +158,8 @@ export async function publishArtifactRef(workspace, { repository = process.env.G
 }
 
 function matchesStamp(actual, expected) {
-  return stampFields.every((field) => actual?.[field] === expected[field]);
+  return stampFields.every((field) => actual?.[field] === expected[field]) &&
+    JSON.stringify(parentLineage(actual?.lineage ?? null)) === JSON.stringify(parentLineage(expected.lineage ?? null));
 }
 
 /** The public stamp URL `publishRelease` verifies for a published root. */

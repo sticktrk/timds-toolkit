@@ -111,6 +111,11 @@ change. Work only in the Design System the user gave you.
   refreshes while unmodified; a local change leaves that file behind on later
   upgrades, so prefer \`tokens/*.json\`, \`system.css\`, and the pages. When a change needs a protected file, say so in your hand-off
   instead of working around it.
+- \`.timds/parent.json\` is protected ancestry. Declare reviewed reusable
+  structure in \`.timds/stock.json\`, the only editable file under
+  \`.timds/\`: schemaVersion 1 and a \`paths\` array naming exact existing
+  \`src/pages/**/*.html\`, \`src/styles/**/*.css\`, or \`src/layout.html\`
+  files. Globs and symbolic links are refused by \`run_check\`.
 - Edit authored tokens, source, documentation, components, navigation, and
   lightweight assets. Preserve the framework and visual language unless the
   user asks for a migration or redesign.
@@ -265,7 +270,7 @@ function protectedByPattern(workspace, dsRelative) {
   const segments = dsRelative.split("/");
   if (segments.some((segment) => PROTECTED_SEGMENTS.has(segment))) return true;
   if (PROTECTED_BASENAMES.has(segments.at(-1))) return true;
-  if (PROTECTED_DIRECTORIES.includes(segments[0])) return true;
+  if (PROTECTED_DIRECTORIES.includes(segments[0]) && dsRelative !== '.timds/stock.json') return true;
   if (workspace.contractGroups && ["tokens.json", "media.json"].includes(dsRelative)) return true;
   if (PROTECTED_FILES.includes(dsRelative) || RELEASE_AUTOMATION_FILES.includes(dsRelative)) return true;
   const videoLocal = videoLocalDirectory(workspace);
@@ -505,7 +510,7 @@ export async function runStructuredCheck(workspace) {
       errors.push(caught instanceof Error ? caught.message : String(caught));
     }
     const warnings = [...(checked?.machine?.warnings ?? []), ...(checked?.video?.warnings ?? [])];
-    const derived = await readDerivedLayer(workspace.designSystemRoot, checked?.manifest ?? workspace.manifest)
+    const derived = await readDerivedLayer(workspace.designSystemRoot, checked?.manifest ?? workspace.manifest, {parentRecord: checked?.parentRecord ?? workspace.parentRecord})
       .catch(() => ({ brand: null, stale: false }));
     return {
       status: errors.length ? "failed" : warnings.length ? "warnings" : "passed",
@@ -543,12 +548,13 @@ async function describe(workspace) {
     return DIRECTORY_PURPOSES[name] ?? "Authored files";
   };
   const prefix = surface === "." ? "" : `${surface}/`;
-  const derived = await readDerivedLayer(workspace.designSystemRoot, workspace.manifest);
+  const derived = await readDerivedLayer(workspace.designSystemRoot, workspace.manifest, {parentRecord: workspace.parentRecord});
   return {
     systemId: workspace.manifest.systemId,
     name: workspace.manifest.name,
     description: workspace.manifest.description || null,
     version: workspace.manifest.version,
+    lineage: derived.lineage ?? null,
     layout: workspace.layout,
     authoredSurface: surface === "." ? "**" : `${surface}/**`,
     authoredDirectories: [...directories.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([name, fileCount]) => ({
@@ -558,7 +564,7 @@ async function describe(workspace) {
     })),
     authoredFiles: topFiles,
     protectedPaths: [
-      ...PROTECTED_DIRECTORIES.map((name) => `${prefix}${name}/**`),
+      ...PROTECTED_DIRECTORIES.map((name) => `${prefix}${name}/**${name === '.timds' ? ` (except ${prefix}.timds/stock.json)` : ''}`),
       ...PROTECTED_FILES.map((name) => `${prefix}${name}`),
       ...RELEASE_AUTOMATION_FILES.map((name) => `${prefix}${name}`),
       ...(videoLocalDirectory(workspace) && !PROTECTED_DIRECTORIES.includes(videoLocalDirectory(workspace)) ? [`${prefix}${videoLocalDirectory(workspace)}/**`] : []),
@@ -800,10 +806,10 @@ export function registerDesignSystemTools(server, { resolveWorkspace, hooks = {}
     },
   }, async (args) => {
     const workspace = await workspaceFor(args);
-    const derived = await readDerivedLayer(workspace.designSystemRoot, workspace.manifest);
+    const derived = await readDerivedLayer(workspace.designSystemRoot, workspace.manifest, {parentRecord: workspace.parentRecord});
     const content = derived[args.name];
     if (content === null || content === undefined) throw new Error(`${args.name} has not been derived yet; call run_check first`);
-    return { name: args.name, system: derived.system, stale: derived.stale, content };
+    return { name: args.name, system: derived.system, lineage: derived.lineage ?? null, stale: derived.stale, content };
   });
 
   tool("list_media", {

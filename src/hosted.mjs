@@ -125,6 +125,7 @@ export function createHostProvider({ url, token, resolveToken, fetchImpl = fetch
     consumerUpdates: (id, consumerId) => request("GET", `/${encodeURIComponent(id)}/consumers/${encodeURIComponent(consumerId)}/updates`, undefined, 'sources'),
     consumerUpdate: (id, consumerId, label) => request("GET", `/${encodeURIComponent(id)}/consumers/${encodeURIComponent(consumerId)}/updates/${encodeURIComponent(label)}`, undefined, 'sources'),
     consumerInstall: (consumerId) => request("GET", `/app/install?consumerId=${encodeURIComponent(consumerId)}`, undefined, 'github'),
+    releaseSource: (id, version = 'latest') => request("GET", `/${encodeURIComponent(id)}/releases/${encodeURIComponent(version)}/source`, undefined, 'design-systems'),
     principals: (id) => request("GET", `/${encodeURIComponent(id)}/principals`, undefined, 'design-systems'),
     rollback: (id, input) => request("POST", `/${encodeURIComponent(id)}/rollback`, input, 'design-systems'),
     activeWork: (id) => request("GET", `/${encodeURIComponent(id)}/active-work`, undefined, 'design-systems'),
@@ -295,6 +296,9 @@ export async function sessionChanges(root, state, note) {
   const files = await localFiles(root, base);
   const grouped = files.has(".timds/contract-layout.json");
   const changed = new Map([...files].filter(([name, bytes]) => !(grouped && ["tokens.json", "media.json"].includes(name)) && !same(base.get(name), bytes)));
+  // A session may receive the immutable ancestry in its source snapshot, but
+  // only shoot/feed/sever or host provisioning may change that record.
+  if (!same(base.get('.timds/parent.json'), files.get('.timds/parent.json'))) throw new Error('.timds/parent.json is protected lineage; sessions cannot create, edit or delete it');
   if ([...changed.values()].reduce((total, bytes) => total + bytes.length, 0) > MAX_CHANGESET_BYTES) throw new Error("Change set exceeds 10 MiB; upload media to the asset store");
   return { files, changes: { baseRevision: state.session.baseRevision, lastUpdateHash: state.session.lastUpdateHash ?? state.session.baseRevision, changedFiles: encodeFiles(changed), deletedPaths: [...base.keys()].filter((name) => !files.has(name)).sort(), ...(note ? { note } : {}) } };
 }

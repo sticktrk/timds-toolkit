@@ -4,6 +4,15 @@ import type {VideoBoardCatalogSummary} from "./video-producer.mjs";
 
 export type SystemStamp = { id: string; name: string; version: string };
 
+/** Public ancestry of an offshoot at one parent release; no grants or creator identity. */
+export type SystemLineage = {
+  systemId: string;
+  sourceId: string;
+  version: string;
+  commit: string;
+  mode: "full" | "structure";
+};
+
 /* ── tokens.json ─────────────────────────────────────────────────────────── */
 
 export type TokenKind = "color" | "font-family" | "length" | "gradient" | "duration" | "easing" | "number" | "other";
@@ -153,6 +162,7 @@ export type IndexPage = { id: string; url: string; markdownUrl?: string; view: s
 export type IndexDocument = {
   schemaVersion: 1;
   system: SystemStamp;
+  lineage?: SystemLineage | null;
   pageCount: number;
   tokens: { url: string; count: number; stylesheets: number; roles: number };
   brand: { url: string; logos: number; imagery: number; guidance: number };
@@ -346,6 +356,8 @@ export type Provenance = {
   systemId?: string;
   entry?: string;
   files?: Partial<Record<DerivedFileName, string>>;
+  /** Absent in older stamps; readers expose null for ordinary systems. */
+  lineage?: SystemLineage | null;
 };
 
 export type DerivedLayer = {
@@ -356,6 +368,7 @@ export type DerivedLayer = {
   /** Local only: the layer was derived for a version other than the manifest's. */
   stale: boolean;
   provenance: Provenance | null;
+  lineage: SystemLineage | null;
   index: IndexDocument | null;
   tokens: TokensDocument | null;
   brand: BrandKit | null;
@@ -385,7 +398,8 @@ export const DERIVED_LAYER_FILES: Readonly<Record<DerivedFileName, string>>;
 export const PROVENANCE_FILE: ".timds-artifact.json";
 export function derivedLayerPaths(entry?: string): Record<DerivedFileName, string>;
 export function derivedFilePath(designSystemRoot: string, manifest: { artifact?: { entry?: string } }, name: DerivedFileName): string;
-export function readDerivedLayer(designSystemRoot: string, manifest: { systemId?: string; name?: string; version?: string; artifact?: { entry?: string } }): Promise<DerivedLayer>;
+/** parentRecord is a validated ancestry snapshot scoped to this workspace operation. */
+export function readDerivedLayer(designSystemRoot: string, manifest: { systemId?: string; name?: string; version?: string; artifact?: { entry?: string } }, options?: { parentRecord?: SystemLineage | null }): Promise<DerivedLayer>;
 export function fetchDerivedLayer(publicBase: string, options?: { fetchImpl?: typeof fetch }): Promise<DerivedLayer>;
 export function summarizeBrandKit(kit: BrandKit | null | undefined): BrandKitSummary | null;
 export function describeBrandKit(summary: BrandKitSummary | null): string;

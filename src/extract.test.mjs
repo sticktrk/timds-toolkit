@@ -215,7 +215,10 @@ test("extractArtifact derives tokens.json from the stylesheets the pages load", 
     ] }];
 
     const bundle = { schemaVersion: 1, fileCount: 1, bytes: 60, files: [{ path: "public/email/template.html" }] };
-    const result = await extractArtifact({ artifactRoot, manifest, formats, bundle, write: true });
+    const lineage = { systemId: "example/parent", sourceId: "00000000-0000-4000-8000-000000000101", version: "1.0.0", commit: "a".repeat(40), mode: "full" };
+    const result = await extractArtifact({ artifactRoot, manifest, formats, bundle, lineage, write: true });
+    assert.deepEqual(result.index.lineage, lineage);
+    assert.deepEqual(JSON.parse(await fs.readFile(path.join(artifactRoot, "design-system/index.json"), "utf8")).lineage, lineage);
     assert.ok(!result.pages.some((entry) => entry.title === "Email template"), "the bundle directory is not walked for pages");
     assert.deepEqual(result.index.bundle, { url: "/design-system/bundle.json", files: 1, bytes: 60 });
     assert.equal(result.counts.tokens, 8);

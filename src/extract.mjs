@@ -631,7 +631,7 @@ export async function deriveTokensFromArtifact({ artifactRoot, manifest }) {
  * system keeps none; its page is history, not guidance, and is skipped by the
  * walk while its document is written beside index.json.
  */
-export async function extractArtifact({ artifactRoot, manifest, mediaCatalog = { assets: [] }, video = null, designs = null, formats = null, bundle = null, changelog = null, plannedPages = [], write = true }) {
+export async function extractArtifact({ artifactRoot, manifest, mediaCatalog = { assets: [] }, lineage = null, video = null, designs = null, formats = null, bundle = null, changelog = null, plannedPages = [], write = true }) {
   const config = normalizeMachineConfig(manifest.machine);
   if (!config.enabled) return { enabled: false, pages: [], written: [] };
 
@@ -706,6 +706,7 @@ export async function extractArtifact({ artifactRoot, manifest, mediaCatalog = {
   const index = {
     schemaVersion: EXTRACT_SCHEMA_VERSION,
     system: { id: manifest.systemId, name: manifest.name, version: manifest.version },
+    lineage,
     pageCount: pages.length,
     tokens: { url: tokensUrl, count: tokens.count, stylesheets: tokens.stylesheets.length, roles: Object.keys(tokens.roles).length },
     brand: { url: brandUrl, logos: brand.logos.length, imagery: brand.imagery.length, guidance: Object.keys(brand.guidance).length },

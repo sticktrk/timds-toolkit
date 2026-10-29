@@ -15,6 +15,8 @@ const KIT = {
   imagery: [],
   guidance: { voice: { source: "convention", blocks: [] } },
 };
+const LINEAGE = { systemId: "example/parent", sourceId: "00000000-0000-4000-8000-000000000101", version: "1.0.0", commit: "a".repeat(40), mode: "structure" };
+const PARENT = { schemaVersion: 1, ...LINEAGE, baseline: { site: { views: [{ id: "brand", label: "Brand", pages: [{ slug: "", title: "Brand", planned: true }] }] }, formats: null } };
 
 test("derived file paths follow the artifact entry directory", () => {
   assert.deepEqual(derivedLayerPaths("design-system/index.html"), {
@@ -33,6 +35,7 @@ test("reads the local derived layer, tolerating files check has not written and 
     const empty = await readDerivedLayer(root, manifest);
     assert.equal(empty.derived, false);
     assert.equal(empty.stale, false);
+    assert.equal(empty.lineage, null);
     assert.deepEqual([empty.index, empty.tokens, empty.brand, empty.llms, empty.formats, empty.designs, empty.changelog, empty.bundle], [null, null, null, null, null, null, null, null]);
     assert.deepEqual(empty.source, { kind: "local", root, artifactRoot: path.join(root, "dist") });
 
@@ -48,6 +51,9 @@ test("reads the local derived layer, tolerating files check has not written and 
     assert.equal(partial.formats.groups[0].formats[0].id, "business-card");
     assert.equal(partial.tokens, null);
     assert.equal(partial.bundle, null);
+    await fs.mkdir(path.join(root, ".timds"), { recursive: true });
+    await fs.writeFile(path.join(root, ".timds/parent.json"), JSON.stringify(PARENT));
+    assert.deepEqual((await readDerivedLayer(root, manifest)).lineage, LINEAGE, "local readers expose ancestry without its feed baseline");
     await fs.writeFile(path.join(root, "dist", "design-system", "bundle.json"), JSON.stringify({ schemaVersion: 1, fileCount: 1, files: [{ path: "src/styles/a.css" }] }));
     assert.equal((await readDerivedLayer(root, manifest)).bundle.files[0].path, "src/styles/a.css");
 
@@ -101,6 +107,8 @@ test("fetches the published derived layer from the provenance stamp alone", asyn
   assert.deepEqual(layer.source, { kind: "published", base: "https://cdn.example.com/artifact" });
   assert.deepEqual(layer.system, KIT.system);
   assert.equal(layer.provenance.sourceCommit, "a".repeat(40));
+  assert.equal(layer.lineage, null);
+  assert.equal(layer.provenance.lineage, null);
   assert.equal(layer.brand.roles["color.accent"].value, "#111");
   assert.equal(layer.tokens, null); // not published: null, exactly as locally
   assert.equal(layer.formats, null); // a system without a format catalog publishes none
@@ -114,6 +122,11 @@ test("fetches the published derived layer from the provenance stamp alone", asyn
   const legacy = { ...served, ".timds-artifact.json": JSON.stringify({ schemaVersion: 1, sourceCommit: "b".repeat(40), version: "2.0.0", entry: "design-system/index.html" }) };
   const legacyLayer = await fetchDerivedLayer("https://cdn.example.com/artifact", { fetchImpl: async (url) => new Response(legacy[url.replace("https://cdn.example.com/artifact/", "")] ?? "x", { status: legacy[url.replace("https://cdn.example.com/artifact/", "")] ? 200 : 404 }) });
   assert.equal(legacyLayer.brand.system.version, "2.0.0");
+  assert.equal(legacyLayer.lineage, null);
+  served[".timds-artifact.json"] = JSON.stringify({ schemaVersion: 1, sourceCommit: "a".repeat(40), version: "2.0.0", entry: "design-system/index.html", lineage: LINEAGE });
+  const offshootLayer = await fetchDerivedLayer("https://cdn.example.com/artifact", { fetchImpl });
+  assert.deepEqual(offshootLayer.lineage, LINEAGE);
+  assert.deepEqual(offshootLayer.provenance.lineage, LINEAGE);
   // A stamp whose file map predates designs still looks for designs.json where the entry says.
   const partial = { ...served, "design-system/designs.json": JSON.stringify({ schemaVersion: 1, designs: [] }), ".timds-artifact.json": JSON.stringify({ schemaVersion: 1, sourceCommit: "c".repeat(40), version: "2.0.0", entry: "design-system/index.html", files: { index: "design-system/index.json", tokens: "design-system/tokens.json", brand: "design-system/brand.json", llms: "design-system/llms.txt" } }) };
   const partialLayer = await fetchDerivedLayer("https://cdn.example.com/artifact", { fetchImpl: async (url) => new Response(partial[url.replace("https://cdn.example.com/artifact/", "")] ?? "x", { status: partial[url.replace("https://cdn.example.com/artifact/", "")] ? 200 : 404 }) });

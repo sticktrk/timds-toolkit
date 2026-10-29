@@ -47,11 +47,15 @@
 // and `upgrade` runs the sync on every adopted system from then on. The sync
 // ends with the workspace check and rolls back everything it wrote when that
 // check fails, so it never leaves a system broken.
+// An offshoot carries .timds/parent.json: its catalogs come from `feed`, so
+// ordinary starter sync and upgrade refresh only the toolkit plumbing and
+// preserve both structural baselines and every parent-record byte.
 import { createHash } from "node:crypto";
 import { existsSync, promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
+import { readParentRecord } from "./offshoot-contract.mjs";
 
 const templatesRoot = fileURLToPath(new URL("../templates/", import.meta.url));
 
@@ -573,10 +577,14 @@ export async function syncStarter({ designSystemRoot, version, check = null, dec
     throw new Error(`${designSystemRoot} has no ${STARTER_SITE_FILE}, so it is not a starter-based Design System; starter sync only applies to systems scaffolded by timds init`);
   }
   if (record === undefined) record = await readStarterRecord(designSystemRoot);
+  // An offshoot's structural stock comes from its parent, through `feed`.
+  // A toolkit upgrade still keeps its engine current, but must not append
+  // the seed's catalogs or author its fragments into the child's structure.
+  const parent = await readParentRecord(designSystemRoot);
   const stock = await stockStarter();
   const files = [];
   const writes = [];
-  const recordedFiles = {};
+  const recordedFiles = parent ? { ...record?.files } : {};
   const plan = (relative, status, content, current, note) => {
     files.push(note ? { note, path: relative, status } : { path: relative, status });
     if (content !== null && content !== undefined && content !== current) writes.push({ content, current, file: resolve(relative), relative });
@@ -614,70 +622,74 @@ export async function syncStarter({ designSystemRoot, version, check = null, dec
   //    stock is never a baseline, since a field equal to it needs no merge
   //    and a kept edit is only news when the stock moved away from what the
   //    client could have synced from.
-  const currentSite = parseJson(siteText, STARTER_SITE_FILE);
-  const siteBaselines = record ? [record.baseline.site] : await Promise.all(historicalSiteSnapshots.map(async (name) => parseJson(await template(name), name)));
-  const fragmentPages = new Map(starterManagedFragments.map(([relative]) => {
-    const [, view, name] = relative.match(/^src\/pages\/([^/]+)\/([^/]+)\.html$/);
-    return [pageId(view, name === "index" ? "" : name), { relative }];
-  }));
-  const declaredBefore = declaredPageIds(currentSite);
-  const findPage = (site, id) => {
-    for (const view of Array.isArray(site?.views) ? site.views : []) {
-      const page = (Array.isArray(view?.pages) ? view.pages : []).find((candidate) => pageId(view.id, candidate?.slug ?? "") === id);
-      if (page) return page;
+  let merged = { changes: { addedPages: [], addedViews: [], advanced: [], kept: [] } };
+  let mergedFormats = { changes: { addedFormats: [], addedGroups: [], advanced: [], kept: [], skipped: [] } };
+  if (!parent) {
+    const currentSite = parseJson(siteText, STARTER_SITE_FILE);
+    const siteBaselines = record ? [record.baseline.site] : await Promise.all(historicalSiteSnapshots.map(async (name) => parseJson(await template(name), name)));
+    const fragmentPages = new Map(starterManagedFragments.map(([relative]) => {
+      const [, view, name] = relative.match(/^src\/pages\/([^/]+)\/([^/]+)\.html$/);
+      return [pageId(view, name === "index" ? "" : name), { relative }];
+    }));
+    const declaredBefore = declaredPageIds(currentSite);
+    const findPage = (site, id) => {
+      for (const view of Array.isArray(site?.views) ? site.views : []) {
+        const page = (Array.isArray(view?.pages) ? view.pages : []).find((candidate) => pageId(view.id, candidate?.slug ?? "") === id);
+        if (page) return page;
+      }
+      return null;
+    };
+    const fragmentsToWrite = new Set();
+    const authoredPages = new Set();
+    const fragmentPlans = new Map();
+    for (const [id, { relative }] of fragmentPages) {
+      const desired = stock.texts[relative];
+      const planned = await planStockFile(resolve(relative), desired, { knownHashes: knownStarterHashes(relative, record) });
+      if (planned.status !== "created") {
+        fragmentPlans.set(relative, { desired, planned });
+        continue;
+      }
+      // An absent fragment is written when the sync adds its page, and when the
+      // page is declared but still planned: a planned page has no content to
+      // lose, and the stock overview is the primitive the view starts from (the
+      // client's own title and summary stay). A page the client declares as
+      // authored keeps whatever fragment plans they have.
+      const stockPage = findPage(stock.site, id);
+      const declaredPage = findPage(currentSite, id);
+      if (stockPage?.planned !== true && (!declaredBefore.has(id) || declaredPage?.planned === true)) {
+        fragmentsToWrite.add(id);
+        if (declaredBefore.has(id)) authoredPages.add(id);
+        fragmentPlans.set(relative, { desired, planned });
+      } else {
+        fragmentPlans.set(relative, { desired, planned: { ...planned, status: "skipped", write: false } });
+      }
     }
-    return null;
-  };
-  const fragmentsToWrite = new Set();
-  const authoredPages = new Set();
-  const fragmentPlans = new Map();
-  for (const [id, { relative }] of fragmentPages) {
-    const desired = stock.texts[relative];
-    const planned = await planStockFile(resolve(relative), desired, { knownHashes: knownStarterHashes(relative, record) });
-    if (planned.status !== "created") {
-      fragmentPlans.set(relative, { desired, planned });
-      continue;
-    }
-    // An absent fragment is written when the sync adds its page, and when the
-    // page is declared but still planned: a planned page has no content to
-    // lose, and the stock overview is the primitive the view starts from (the
-    // client's own title and summary stay). A page the client declares as
-    // authored keeps whatever fragment plans they have.
-    const stockPage = findPage(stock.site, id);
-    const declaredPage = findPage(currentSite, id);
-    if (stockPage?.planned !== true && (!declaredBefore.has(id) || declaredPage?.planned === true)) {
-      fragmentsToWrite.add(id);
-      if (declaredBefore.has(id)) authoredPages.add(id);
-      fragmentPlans.set(relative, { desired, planned });
-    } else {
-      fragmentPlans.set(relative, { desired, planned: { ...planned, status: "skipped", write: false } });
-    }
-  }
-  const fragmentExists = (id) => {
-    if (fragmentsToWrite.has(id)) return true;
-    const [view, ...rest] = id.split("/");
-    return existsSync(resolve(`src/pages/${view}/${rest.length ? rest.join("/") : "index"}.html`));
-  };
-  const merged = mergeSiteModel(currentSite, stock.site, siteBaselines, { authoredPages, fragmentExists });
-  const siteChanged = !isDeepStrictEqual(merged.site, currentSite);
-  const nextSiteText = formatSiteJson(merged.site);
-  plan(STARTER_SITE_FILE, siteChanged ? "updated" : "current", siteChanged ? nextSiteText : null, siteText);
+    const fragmentExists = (id) => {
+      if (fragmentsToWrite.has(id)) return true;
+      const [view, ...rest] = id.split("/");
+      return existsSync(resolve(`src/pages/${view}/${rest.length ? rest.join("/") : "index"}.html`));
+    };
+    merged = mergeSiteModel(currentSite, stock.site, siteBaselines, { authoredPages, fragmentExists });
+    const siteChanged = !isDeepStrictEqual(merged.site, currentSite);
+    const nextSiteText = formatSiteJson(merged.site);
+    plan(STARTER_SITE_FILE, siteChanged ? "updated" : "current", siteChanged ? nextSiteText : null, siteText);
 
-  const formatsText = await readOptional(resolve(STARTER_FORMATS_FILE));
-  const currentFormats = formatsText === null ? null : parseJson(formatsText, STARTER_FORMATS_FILE);
-  const formatBaselines = record ? [record.baseline.formats] : [];
-  const mergedFormats = mergeFormatCatalog(currentFormats, stock.formats, formatBaselines, declaredPageIds(merged.site));
-  const formatsChanged = currentFormats === null || !isDeepStrictEqual(mergedFormats.catalog, currentFormats);
-  plan(STARTER_FORMATS_FILE, currentFormats === null ? "created" : formatsChanged ? "updated" : "current", formatsChanged ? formatFormatsJson(mergedFormats.catalog) : null, formatsText);
+    const formatsText = await readOptional(resolve(STARTER_FORMATS_FILE));
+    const currentFormats = formatsText === null ? null : parseJson(formatsText, STARTER_FORMATS_FILE);
+    const formatBaselines = record ? [record.baseline.formats] : [];
+    mergedFormats = mergeFormatCatalog(currentFormats, stock.formats, formatBaselines, declaredPageIds(merged.site));
+    const formatsChanged = currentFormats === null || !isDeepStrictEqual(mergedFormats.catalog, currentFormats);
+    plan(STARTER_FORMATS_FILE, currentFormats === null ? "created" : formatsChanged ? "updated" : "current", formatsChanged ? formatFormatsJson(mergedFormats.catalog) : null, formatsText);
 
-  // 3. Fragments, now that the site model says which pages exist. A
-  //    customized fragment is this system's own page: kept, --force or not.
-  for (const [relative, { desired, planned }] of fragmentPlans) {
-    if (planned.status !== "skipped") recordFile(relative, planned);
-    const note = planned.status === "skipped"
-      ? "its page is declared as authored by this system; copy the stock fragment by hand if wanted"
-      : planned.status === "customized" ? "this system's own page; never replaced, --force included" : undefined;
-    plan(relative, planned.status, planned.write ? desired : null, planned.current, note);
+    // 3. Fragments, now that the site model says which pages exist. A
+    //    customized fragment is this system's own page: kept, --force or not.
+    for (const [relative, { desired, planned }] of fragmentPlans) {
+      if (planned.status !== "skipped") recordFile(relative, planned);
+      const note = planned.status === "skipped"
+        ? "its page is declared as authored by this system; copy the stock fragment by hand if wanted"
+        : planned.status === "customized" ? "this system's own page; never replaced, --force included" : undefined;
+      plan(relative, planned.status, planned.write ? desired : null, planned.current, note);
+    }
   }
 
   // 4. The layout shell gains the links it lacks (stylesheets, the changelog on its version chip) and nothing else.
@@ -697,7 +709,7 @@ export async function syncStarter({ designSystemRoot, version, check = null, dec
   }
 
   // 5. Write, record, check; roll everything back when the check fails.
-  const nextRecord = { baseline: { formats: stock.formats, site: stock.site }, files: recordedFiles, ...(record?.plumbing ? { plumbing: record.plumbing } : {}), schemaVersion: 1, version };
+  const nextRecord = { baseline: parent ? record?.baseline ?? parent.baseline : { formats: stock.formats, site: stock.site }, files: recordedFiles, ...(record?.plumbing ? { plumbing: record.plumbing } : {}), schemaVersion: 1, version };
   const recordPath = resolve(STARTER_RECORD_FILE);
   const previousRecordText = await readOptional(recordPath);
   const recordChanged = previousRecordText !== `${JSON.stringify(nextRecord, null, 2)}\n`;

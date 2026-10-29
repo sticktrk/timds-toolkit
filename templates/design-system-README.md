@@ -122,6 +122,64 @@ formats without touching what this system declares. A
 system scaffolded before the record existed opts in once with
 `__TIMDS_CLI__ starter sync`.
 
+## Offshoots
+
+Local `shoot` currently runs through the npm distribution; do not substitute
+`timds-cli` for that creation step. After reviewing and committing the new npm
+offshoot, binary users explicitly adopt it with
+`timds-cli installation adopt --binary --apply`. Feed and sever retain the
+selected execution mode.
+
+An offshoot starts from a parent's immutable published source and keeps a
+parent link for later updates. The designer's agent runs the toolkit on the
+designer's behalf. To create a new local system:
+
+```bash
+__TIMDS_CLI__ shoot example/core --system-id example/child --root ../child --mode structure --version RELEASE
+```
+
+The destination must be new or empty. An absolute or `./` / `../` local Git
+checkout can replace the system ID; pass its `--source-id UUID` and optionally
+`--ref REF` to select a committed tree. New child IDs are lowercase. Custom
+dependencies install with lifecycle scripts disabled; `--install` explicitly
+permits a reviewed custom installer or npm lifecycle scripts. Creation still
+runs the declared build/check. Full mode carries every source layer. Structure
+mode carries
+verified toolkit plumbing, navigation, whole format catalogs, token names
+and role mappings. Missing page bodies become planned pages; values become
+CSS `initial`, which `check` reports as unresolved warnings. Media and website
+designs are omitted and neutral shell files fill missing stock. These warnings
+describe foundations still to author before the system is a finished brand.
+
+The optional parent-authored `.timds/stock.json` explicitly declares reusable
+structure: `{"schemaVersion":1,"paths":["src/styles/system.css"]}`. Publish
+the declaration before shooting off. Paths name exact existing regular HTML
+files under `src/pages/`, CSS files under `src/styles/`, or `src/layout.html`.
+Globs, links, media, designs and configuration are refused.
+
+`.timds/parent.json` records schema version 1, the parent system ID and source
+UUID, version, source commit, mode and `baseline: {site, formats}`. It is
+protected ancestry, preserved by starter sync and upgrade. For an offshoot,
+those commands update toolkit plumbing while leaving catalogs to the parent
+feed and authored fragments to this system. Layout maintenance remains limited
+to missing stock stylesheet links and the changelog version-chip link.
+
+`__TIMDS_CLI__ feed [--version RELEASE]` advances unchanged catalog fields,
+appends missing entries with pages planned, and keeps local edits as grafts.
+Use `--from ../parent` for a local committed parent tree with the saved source
+UUID. A reported graft shading a parent change can be kept or edited to let
+the parent through. Plumbing follows its ownership record; `--force PATH`
+reaches only named plumbing. Authored pages, styles, layout, tokens and media
+are never replaced. Feed requires clean files where it writes, checks the
+workspace and rolls its writes back on failure. The baseline advances only
+on success.
+
+`__TIMDS_CLI__ sever` permanently removes the local parent baseline after
+confirmation; `--yes` records explicit confirmation. Source remains and the
+system becomes independent. Feed and sever run outside hosted sessions.
+A severed hosted system additionally needs its host catalog lineage updated
+before publication; this local command does not change the host catalog.
+
 Declare framework-specific local commands as argument arrays in `timds.json`:
 
 ```json

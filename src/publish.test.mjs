@@ -341,3 +341,36 @@ test('file-tree publication verifies bytes before the publisher and public stamp
   await assert.rejects(publishReleaseFromFiles({ stamp, sourceFiles, artifactFiles: [...input.artifactFiles, { path: 'injected.txt', content: Buffer.from('changed') }], publisher: async () => { calls++; } }), /differs from the supplied/);
   assert.equal(calls, 1);
 });
+
+test('publication ancestry comes from the committed parent record and agrees across file-tree and Git adapters', async t => {
+  const { createPublicationStampFromFiles, publishReleaseFromFiles } = await import('./publish.mjs');
+  const f = await fixture(t);
+  const original = await createPublicationStamp(f.workspace);
+  const lineage = { systemId: 'example/parent', sourceId: '00000000-0000-4000-8000-000000000101', version: '1.0.0', commit: 'a'.repeat(40), mode: 'full' };
+  const parent = { schemaVersion: 1, ...lineage, baseline: { site: { views: [{ id: 'brand', label: 'Brand', pages: [{ slug: '', title: 'Brand' }] }] }, formats: null } };
+  await f.write('.timds/parent.json', JSON.stringify(parent));
+  await assert.rejects(createPublicationStamp(f.workspace), /Commit the source contract/);
+  f.git('add', '.timds/parent.json'); f.git('commit', '-qm', 'Record parent');
+  const stamp = await createPublicationStamp(f.workspace);
+  assert.deepEqual(stamp.lineage, lineage);
+  assert.equal(stamp.contentDigest, original.contentDigest, 'ancestry is provenance outside the existing snapshot digest');
+  const sourceFiles = f.git('ls-tree', '-r', '-z', 'HEAD').split('\0').filter(Boolean).map(record => {
+    const [header, name] = record.split('\t'), [mode, , oid] = header.split(' ');
+    return { path: name, mode, content: execFileSync('git', ['cat-file', 'blob', oid], { cwd: f.root }) };
+  });
+  assert.deepEqual(createPublicationStampFromFiles({ sourceCommit: f.head(), sourceFiles, artifactFiles: publicationFixture().artifactFiles }), stamp);
+  const result = await publishReleaseFromFiles({ stamp, sourceFiles, artifactFiles: publicationFixture().artifactFiles,
+    publisher: async ({stamp: received}) => { assert.deepEqual(received.lineage, lineage); return resultFor(received); },
+    fetchImpl: async () => json(stamp),
+  });
+  assert.equal(result.status, 'published');
+  await assert.rejects(publishReleaseFromFiles({ stamp, sourceFiles, artifactFiles: publicationFixture().artifactFiles,
+    publisher: async ({stamp: received}) => resultFor(received),
+    fetchImpl: async () => json({ ...stamp, lineage: { ...lineage, version: '2.0.0' } }),
+  }), /public root does not serve/);
+  let published = false;
+  await assert.rejects(publishReleaseFromFiles({ stamp: { ...stamp, lineage: { ...lineage, commit: 'b'.repeat(40) } }, sourceFiles, artifactFiles: publicationFixture().artifactFiles, publisher: async () => { published = true; } }), /differs from the supplied/);
+  assert.equal(published, false);
+  await f.write('.timds/parent.json', JSON.stringify({ ...parent, version: '2.0.0' }));
+  await assert.rejects(createPublicationStamp(f.workspace), /Commit the source contract/);
+});
