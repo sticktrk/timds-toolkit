@@ -186,6 +186,41 @@ test("feed refuses dirty writes, mismatched identity, corrupt parent plumbing an
   assert.equal(await read(root, "tokens.json"), texts["tokens.json"]);
 });
 
+test("feed checks prospective dirty writes before customization prompts and ignores unrelated authored edits", async (t) => {
+  const { root, texts } = await fixture(t, { git: true, plumbing: "recorded" });
+  await write(root, "scripts/build.mjs", "// committed child engine\n");
+  execFileSync("git", ["add", "scripts/build.mjs"], { cwd: root });
+  execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-qm", "Customize engine"], { cwd: root });
+  await write(root, "src/site.json", `${texts["src/site.json"]}\n`);
+  let prompts = 0;
+  const decideCustomized = async () => { prompts++; return "replace"; };
+  await assert.rejects(feedOffshoot({ designSystemRoot: root, source: nextSource(), decideCustomized }), /Feed refuses to run over uncommitted changes/);
+  assert.equal(prompts, 0);
+  assert.equal(await read(root, "scripts/build.mjs"), "// committed child engine\n");
+  assert.equal(await read(root, ".timds/parent.json"), texts[".timds/parent.json"]);
+  await write(root, "src/site.json", texts["src/site.json"]);
+  await write(root, "src/pages/web/index.html", "<h1>Uncommitted authored page</h1>\n");
+  const report = await feedOffshoot({ designSystemRoot: root, source: nextSource(), decideCustomized });
+  assert.equal(prompts, 1);
+  assert.equal(await read(root, "scripts/build.mjs"), nextScript);
+  assert.equal(await read(root, "src/pages/web/index.html"), "<h1>Uncommitted authored page</h1>\n");
+  assert.equal((await readJson(root, ".timds/starter.json")).files["scripts/build.mjs"], hash(nextScript));
+  assert.equal(report.files.filter((file) => file.path === "scripts/build.mjs").length, 1);
+});
+
+test("feed rechecks dirty writes after a customization decision", async (t) => {
+  const { root, texts } = await fixture(t, { git: true, plumbing: "recorded" });
+  await write(root, "scripts/build.mjs", "// committed child engine\n");
+  execFileSync("git", ["add", "scripts/build.mjs"], { cwd: root });
+  execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-qm", "Customize engine"], { cwd: root });
+  await assert.rejects(feedOffshoot({ designSystemRoot: root, source: nextSource(), decideCustomized: async () => {
+    await write(root, "src/site.json", `${texts["src/site.json"]}\n`);
+    return "replace";
+  } }), /Feed refuses to run over uncommitted changes/);
+  assert.equal(await read(root, "scripts/build.mjs"), "// committed child engine\n");
+  assert.equal(await read(root, ".timds/parent.json"), texts[".timds/parent.json"]);
+});
+
 test("ordinary starter sync updates only plumbing in an offshoot and preserves parent and structural baselines", async (t) => {
   const { root, texts } = await fixture(t);
   const originalRecord = await readJson(root, ".timds/starter.json");
@@ -195,5 +230,23 @@ test("ordinary starter sync updates only plumbing in an offshoot and preserves p
   assert.deepEqual(nextRecord.baseline, originalRecord.baseline);
   assert.equal(nextRecord.files["src/pages/web/index.html"], originalRecord.files["src/pages/web/index.html"]);
   assert.equal(nextRecord.version, "0.1.999");
+  await assert.rejects(fs.access(path.join(root, "src/pages/use/index.html")), { code: "ENOENT" });
+});
+
+test("offshoot starter sync maintains layout plumbing links and version chip with full rollback", async (t) => {
+  const { root, texts } = await fixture(t);
+  const layout = '<!doctype html>\n<head>\n<link rel="stylesheet" href="/styles/viewer.css">\n</head>\n<body><header>Child shell</header><span class="appbar__version">v{{version}}</span><main>{{content}}</main></body>\n';
+  await write(root, "src/layout.html", layout);
+  await assert.rejects(syncStarter({ designSystemRoot: root, version: "0.1.999", check: async () => { throw new Error("layout build failed"); } }), /rolled back.*layout build failed/);
+  assert.equal(await read(root, "src/layout.html"), layout);
+  assert.equal(await read(root, ".timds/starter.json"), texts[".timds/starter.json"]);
+  const report = await syncStarter({ designSystemRoot: root, version: "0.1.999" });
+  const updated = await read(root, "src/layout.html");
+  assert.match(updated, /<link rel="stylesheet" href="\/styles\/canvas\.css">/);
+  assert.match(updated, /<a class="appbar__version" href="\/changelog\/" title="Changelog">v\{\{version\}\}<\/a>/);
+  assert.match(updated, /<header>Child shell<\/header>/);
+  assert.ok(report.written.includes("src/layout.html"));
+  for (const file of [".timds/parent.json", "src/site.json", "src/formats.json", "src/pages/web/index.html"]) assert.equal(await read(root, file), texts[file], file);
+  assert.deepEqual((await readJson(root, ".timds/starter.json")).baseline, JSON.parse(texts[".timds/starter.json"]).baseline);
   await assert.rejects(fs.access(path.join(root, "src/pages/use/index.html")), { code: "ENOENT" });
 });

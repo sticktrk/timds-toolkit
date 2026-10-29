@@ -185,7 +185,8 @@ local `shoot` from immutable hosted or Git source and confirmed `sever`;
 `src/feed.mjs` reuses the starter's catalog merges with parent stock, verified
 plumbing, dirty-file guards and rollback. While a parent record exists,
 ordinary starter sync updates plumbing only and preserves its structural
-baselines. Public lineage appears in derived readers and publication stamps;
+baselines, while maintaining the narrow layout link/version-chip boundary.
+Public lineage appears in derived readers and publication stamps;
 session edits cannot change the parent record. See `docs/offshoots.md`.
 
 `templates/` is copied verbatim (with `__PLACEHOLDER__` substitution) by `init`

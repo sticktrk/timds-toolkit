@@ -510,7 +510,7 @@ export async function runStructuredCheck(workspace) {
       errors.push(caught instanceof Error ? caught.message : String(caught));
     }
     const warnings = [...(checked?.machine?.warnings ?? []), ...(checked?.video?.warnings ?? [])];
-    const derived = await readDerivedLayer(workspace.designSystemRoot, checked?.manifest ?? workspace.manifest)
+    const derived = await readDerivedLayer(workspace.designSystemRoot, checked?.manifest ?? workspace.manifest, {parentRecord: checked?.parentRecord ?? workspace.parentRecord})
       .catch(() => ({ brand: null, stale: false }));
     return {
       status: errors.length ? "failed" : warnings.length ? "warnings" : "passed",
@@ -548,7 +548,7 @@ async function describe(workspace) {
     return DIRECTORY_PURPOSES[name] ?? "Authored files";
   };
   const prefix = surface === "." ? "" : `${surface}/`;
-  const derived = await readDerivedLayer(workspace.designSystemRoot, workspace.manifest);
+  const derived = await readDerivedLayer(workspace.designSystemRoot, workspace.manifest, {parentRecord: workspace.parentRecord});
   return {
     systemId: workspace.manifest.systemId,
     name: workspace.manifest.name,
@@ -806,7 +806,7 @@ export function registerDesignSystemTools(server, { resolveWorkspace, hooks = {}
     },
   }, async (args) => {
     const workspace = await workspaceFor(args);
-    const derived = await readDerivedLayer(workspace.designSystemRoot, workspace.manifest);
+    const derived = await readDerivedLayer(workspace.designSystemRoot, workspace.manifest, {parentRecord: workspace.parentRecord});
     const content = derived[args.name];
     if (content === null || content === undefined) throw new Error(`${args.name} has not been derived yet; call run_check first`);
     return { name: args.name, system: derived.system, lineage: derived.lineage ?? null, stale: derived.stale, content };

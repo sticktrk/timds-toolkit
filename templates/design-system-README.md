@@ -138,9 +138,13 @@ designer's behalf. To create a new local system:
 __TIMDS_CLI__ shoot example/core --system-id example/child --root ../child --mode structure --version RELEASE
 ```
 
-The destination must be new or empty. A local Git checkout can replace the
-system ID; pass its `--source-id UUID` and optionally `--ref REF` to select a
-committed tree. Full mode carries every source layer. Structure mode carries
+The destination must be new or empty. An absolute or `./` / `../` local Git
+checkout can replace the system ID; pass its `--source-id UUID` and optionally
+`--ref REF` to select a committed tree. New child IDs are lowercase. Custom
+dependencies install with lifecycle scripts disabled; `--install` explicitly
+permits a reviewed custom installer or npm lifecycle scripts. Creation still
+runs the declared build/check. Full mode carries every source layer. Structure
+mode carries
 verified toolkit plumbing, navigation, whole format catalogs, token names
 and role mappings. Missing page bodies become planned pages; values become
 CSS `initial`, which `check` reports as unresolved warnings. Media and website
@@ -157,7 +161,8 @@ Globs, links, media, designs and configuration are refused.
 UUID, version, source commit, mode and `baseline: {site, formats}`. It is
 protected ancestry, preserved by starter sync and upgrade. For an offshoot,
 those commands update toolkit plumbing while leaving catalogs to the parent
-feed and authored fragments and layout to this system.
+feed and authored fragments to this system. Layout maintenance remains limited
+to missing stock stylesheet links and the changelog version-chip link.
 
 `__TIMDS_CLI__ feed [--version RELEASE]` advances unchanged catalog fields,
 appends missing entries with pages planned, and keeps local edits as grafts.

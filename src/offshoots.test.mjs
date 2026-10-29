@@ -88,6 +88,71 @@ test('local source is pinned to Git bytes and requires a truthful source identit
   assert.equal(JSON.parse(Buffer.from(transformed.files.find(file => file.path === 'timds.json').content, 'base64')).sourceId, undefined);
 });
 
+test('bare system IDs stay hosted when a same-named local checkout exists', async t => {
+  const {root, directory, source} = await fixture(t);
+  const checkout = path.join(directory, 'example/core');
+  await fs.mkdir(path.dirname(checkout));
+  await fs.rename(root, checkout);
+  const snapshot = path.join(directory, 'source.json');
+  await fs.writeFile(snapshot, json(source));
+  const script = `
+    import {readFileSync} from 'node:fs';
+    const {loadOffshootSource} = await import(process.argv[1]);
+    const source = JSON.parse(readFileSync(process.argv[2], 'utf8'));
+    let requests = 0;
+    const hosted = await loadOffshootSource('example/core', {portalUrl:'https://host.example', token:'timds_test', fetchImpl:async () => {requests++; return new Response(JSON.stringify({apiVersion:1,...source}));}});
+    const relative = await loadOffshootSource('./example/core', {sourceId:source.parent.sourceId});
+    const explicit = await loadOffshootSource('example/core', {local:true, sourceId:source.parent.sourceId});
+    console.log(JSON.stringify({requests, hosted:hosted.parent, relative:relative.parent, explicit:explicit.parent}));
+  `;
+  const result = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', script, new URL('./offshoots.mjs', import.meta.url).href, snapshot], {cwd: directory, encoding: 'utf8'}));
+  assert.deepEqual(result, {requests: 1, hosted: source.parent, relative: source.parent, explicit: source.parent});
+  await assert.rejects(loadOffshootSource(path.join(directory, 'missing'), {fetchImpl: () => {throw new Error('must not contact host');}}), /Local parent must be an existing Git directory/);
+});
+
+test('local source batches Git blob reads while retaining binary bytes, executable modes and links', async t => {
+  const {root, directory} = await fixture(t);
+  const bytes = Buffer.from([0, 255, 10, 13, 128, 1]);
+  await fs.mkdir(path.join(root, 'assets'));
+  for (let index = 0; index < 64; index++) await fs.writeFile(path.join(root, 'assets', `${index}.bin`), bytes);
+  await fs.writeFile(path.join(root, 'scripts/executable.mjs'), '// executable\n', {mode: 0o755});
+  await fs.symlink('0.bin', path.join(root, 'assets/link.bin'));
+  git(root, 'add', '--all'); git(root, 'commit', '-qm', 'Binary source');
+  const trace = path.join(directory, 'git-trace');
+  const script = `const {loadOffshootSource}=await import(process.argv[1]); console.log(JSON.stringify(await loadOffshootSource(process.argv[2], {sourceId:process.argv[3]})));`;
+  const source = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', script, new URL('./offshoots.mjs', import.meta.url).href, root, sourceId], {encoding: 'utf8', env: {...process.env, GIT_TRACE: trace}, maxBuffer: 10 * 1024 * 1024}));
+  const files = decodeOffshootSource(source), calls = await fs.readFile(trace, 'utf8');
+  assert.deepEqual(Buffer.from(files.get('assets/63.bin')), bytes);
+  assert.equal(files.get('scripts/executable.mjs').mode, '100755');
+  assert.equal(files.get('assets/link.bin').mode, '120000');
+  assert.equal(files.get('assets/link.bin').toString(), '0.bin');
+  assert.equal((calls.match(/built-in: git cat-file --batch/g) || []).length, 1);
+  assert.doesNotMatch(calls, /cat-file (?:blob|-s)\b/);
+});
+
+test('local source rejects oversize blobs and aggregate snapshots before reading their bytes', async t => {
+  const {root} = await fixture(t);
+  await fs.mkdir(path.join(root, 'assets'));
+  await fs.writeFile(path.join(root, 'assets/oversize.bin'), Buffer.alloc(10 * 1024 * 1024 + 1));
+  git(root, 'add', '--all'); git(root, 'commit', '-qm', 'Oversize blob');
+  await assert.rejects(loadOffshootSource(root, {sourceId}), /Offshoot source exceeds file limits/);
+  await fs.rm(path.join(root, 'assets/oversize.bin'));
+  const bytes = Buffer.alloc(9 * 1024 * 1024);
+  for (let index = 0; index < 6; index++) await fs.writeFile(path.join(root, 'assets', `${index}.bin`), bytes);
+  git(root, 'add', '--all'); git(root, 'commit', '-qm', 'Oversize tree');
+  await assert.rejects(loadOffshootSource(root, {sourceId}), /Offshoot source exceeds file limits/);
+});
+
+test('new offshoot IDs use the host lowercase rule and remain within the local manifest length', async t => {
+  const {directory, source} = await fixture(t), destination = path.join(directory, 'invalid-child');
+  for (const systemId of ['Example/Child', 'example/Child', `example/${'x'.repeat(153)}`]) {
+    await assert.rejects(shootOffshoot({destination, source, systemId}), /lowercase URL-safe --system-id of at most 160/);
+    await assert.rejects(fs.access(destination), {code: 'ENOENT'});
+  }
+  const result = await transformOffshoot(source, {systemId: 'example/child.with_under-score'});
+  assert.equal(JSON.parse(Buffer.from(result.files.find(file => file.path === 'timds.json').content, 'base64')).systemId, 'example/child.with_under-score');
+});
+
 test('CLI full shoot installs a custom toolchain from the exact copied lock before checking', async t => {
   const {root, directory} = await fixture(t), destination = path.join(directory, 'custom-child');
   await fs.mkdir(path.join(root, 'build-tool'));

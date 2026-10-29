@@ -398,7 +398,8 @@ export const DERIVED_LAYER_FILES: Readonly<Record<DerivedFileName, string>>;
 export const PROVENANCE_FILE: ".timds-artifact.json";
 export function derivedLayerPaths(entry?: string): Record<DerivedFileName, string>;
 export function derivedFilePath(designSystemRoot: string, manifest: { artifact?: { entry?: string } }, name: DerivedFileName): string;
-export function readDerivedLayer(designSystemRoot: string, manifest: { systemId?: string; name?: string; version?: string; artifact?: { entry?: string } }): Promise<DerivedLayer>;
+/** parentRecord is a validated ancestry snapshot scoped to this workspace operation. */
+export function readDerivedLayer(designSystemRoot: string, manifest: { systemId?: string; name?: string; version?: string; artifact?: { entry?: string } }, options?: { parentRecord?: SystemLineage | null }): Promise<DerivedLayer>;
 export function fetchDerivedLayer(publicBase: string, options?: { fetchImpl?: typeof fetch }): Promise<DerivedLayer>;
 export function summarizeBrandKit(kit: BrandKit | null | undefined): BrandKitSummary | null;
 export function describeBrandKit(summary: BrandKitSummary | null): string;

@@ -933,7 +933,8 @@ check before creation completes.
 catalog fields advance, missing entries are added as planned pages, and local
 grafts stay. Authored source is never replaced; failed checks roll back the
 feed. Ordinary upgrades keep plumbing current and leave the parent's structure
-alone. `timds sever` confirms before removing the parent baseline. See
+alone, while maintaining the layout's stock stylesheet and version-chip links.
+`timds sever` confirms before removing the parent baseline. See
 [offshoots](docs/offshoots.md) for local Git parents, stock declarations,
 lineage readers and the hosted catalog boundary.
 

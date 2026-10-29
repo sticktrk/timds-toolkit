@@ -690,22 +690,22 @@ export async function syncStarter({ designSystemRoot, version, check = null, dec
         : planned.status === "customized" ? "this system's own page; never replaced, --force included" : undefined;
       plan(relative, planned.status, planned.write ? desired : null, planned.current, note);
     }
+  }
 
-    // 4. The layout shell gains the links it lacks (stylesheets, the changelog on its version chip) and nothing else.
-    const layoutText = await readOptional(resolve(STARTER_LAYOUT_FILE));
-    if (layoutText === null) {
-      plan(STARTER_LAYOUT_FILE, "skipped", null, null, "absent");
-    } else {
-      const links = insertStylesheetLinks(layoutText, await template("starter/src/layout.html"));
-      const chip = linkVersionChip(links.html);
-      const changed = links.inserted.length > 0 || chip.linked;
-      const status = changed ? "updated" : links.unplaced.length ? "customized" : "current";
-      const notes = [];
-      if (links.inserted.length) notes.push(`linked ${links.inserted.join(", ")}`);
-      if (chip.linked) notes.push("the version chip now opens /changelog/");
-      if (links.unplaced.length) notes.push(`could not place ${links.unplaced.join(", ")}; link it in <head> by hand`);
-      plan(STARTER_LAYOUT_FILE, status, changed ? chip.html : null, layoutText, notes.length ? notes.join("; ") : undefined);
-    }
+  // 4. The layout shell gains the links it lacks (stylesheets, the changelog on its version chip) and nothing else.
+  const layoutText = await readOptional(resolve(STARTER_LAYOUT_FILE));
+  if (layoutText === null) {
+    plan(STARTER_LAYOUT_FILE, "skipped", null, null, "absent");
+  } else {
+    const links = insertStylesheetLinks(layoutText, await template("starter/src/layout.html"));
+    const chip = linkVersionChip(links.html);
+    const changed = links.inserted.length > 0 || chip.linked;
+    const status = changed ? "updated" : links.unplaced.length ? "customized" : "current";
+    const notes = [];
+    if (links.inserted.length) notes.push(`linked ${links.inserted.join(", ")}`);
+    if (chip.linked) notes.push("the version chip now opens /changelog/");
+    if (links.unplaced.length) notes.push(`could not place ${links.unplaced.join(", ")}; link it in <head> by hand`);
+    plan(STARTER_LAYOUT_FILE, status, changed ? chip.html : null, layoutText, notes.length ? notes.join("; ") : undefined);
   }
 
   // 5. Write, record, check; roll everything back when the check fails.

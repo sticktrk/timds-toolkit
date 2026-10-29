@@ -117,6 +117,7 @@
     "src/publish.mjs",
     "src/artifact-files.mjs",
     "src/publication-snapshot.mjs",
+    "src/git-blobs.mjs",
     "src/hosted.mjs",
     "src/contract-groups.mjs",
     "src/offshoots.mjs",

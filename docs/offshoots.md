@@ -4,6 +4,8 @@ An offshoot starts from one immutable parent release and keeps a structural
 feed baseline. A starter is a seed: its structure comes from the toolkit.
 An offshoot's structure comes from its parent; ordinary toolkit upgrades keep
 its plumbing current without adding the starter's pages or changing ancestry.
+They also maintain the layout's missing stock stylesheet links and changelog
+version-chip link, within the starter's existing narrow layout boundary.
 
 The host provisions hosted offshoots and owns grants, source identities and
 publication lineage. These commands create and maintain a local repository.
@@ -41,16 +43,22 @@ npm run timds -- shoot ../parent --ref v2026.10.29-1 \
 Supply the parent's source UUID with `--source-id` (or its explicit
 `timds.json` `sourceId`); the toolkit never invents a hosted identity.
 `--ref` defaults to `HEAD`. An optional `--version` must match that tree's
-manifest version. The new system needs its own URL-safe system ID.
+manifest version. The new system needs its own lowercase URL-safe system ID,
+up to 160 characters. A positional local path starts with `./` or `../`, or
+is absolute; a bare `org/name` always selects the host even when a directory
+of that name exists. Feed's explicit `--from PATH` always selects local Git.
 
 Shoot requires a new or empty destination, initializes its own Git repository,
 sets its provider to `local`, and runs the workspace check. Failure removes
 the new tree, restoring an initially empty directory. No dependencies or
 runtime are copied from the parent's working directory. For a full parent with
-a custom build toolchain, the CLI runs its declared `workspace.install`, or
-`npm ci` against its exact lockfile when it has package dependencies, before
-checking. Custom tools retain their external prerequisites. The stock starter
-builds without installing dependencies.
+a custom build toolchain, the CLI runs `npm ci --ignore-scripts` against its
+exact lockfile before checking. It does not run a custom `workspace.install`
+by default. After reviewing the source, `--install` explicitly permits that
+command, or npm lifecycle scripts when there is no custom installer. The
+workspace's declared build/check commands still run as part of creation.
+Custom tools retain their external prerequisites. The stock starter builds
+without installing dependencies.
 
 ## Full and structure
 

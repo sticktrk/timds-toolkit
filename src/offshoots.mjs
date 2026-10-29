@@ -9,6 +9,7 @@ import { promisify } from 'node:util';
 import { cleanPortalUrl, resolveAccessToken, savedPortalUrl } from './auth.mjs';
 import { createHostProvider } from './hosted.mjs';
 import { readParentRecord, validateParentRecord, validateStockRecord } from './offshoot-contract.mjs';
+import { readBlobs } from './git-blobs.mjs';
 
 const exec = promisify(execFile);
 const json = value => `${JSON.stringify(value, null, 2)}\n`;
@@ -78,7 +79,7 @@ const neutralLayout = '<!doctype html>\n<html lang="en"><head><meta charset="utf
 /** Pure transform, keeping full and structure creation testable without a host. */
 export async function transformOffshoot(source, {mode = 'full', systemId, name} = {}) {
   if (!['full', 'structure'].includes(mode)) throw new Error('Offshoot mode must be full or structure');
-  if (typeof systemId !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._-]*(?:\/[a-zA-Z0-9][a-zA-Z0-9._-]*)*$/.test(systemId) || systemId.length > 160 || systemId === source.parent?.systemId) throw new Error('Choose a new, URL-safe --system-id for the offshoot');
+  if (typeof systemId !== 'string' || !/^[a-z0-9][a-z0-9._-]*(?:\/[a-z0-9][a-z0-9._-]*)*$/.test(systemId) || systemId.length > 160 || systemId === source.parent?.systemId) throw new Error('Choose a new, lowercase URL-safe --system-id of at most 160 characters for the offshoot');
   if (name !== undefined && (typeof name !== 'string' || !name.trim() || name.length > 200)) throw new Error('Offshoot name must be between 1 and 200 characters');
   const original = decodeOffshootSource(source), manifest = parse(original, 'timds.json');
   const site = parse(original, 'src/site.json'), formats = parse(original, 'src/formats.json', false);
@@ -145,19 +146,25 @@ export async function transformOffshoot(source, {mode = 'full', systemId, name} 
 async function localSource(directory, options) {
   const git = async args => (await exec('git', ['-C', directory, ...args], {encoding: 'buffer', maxBuffer: MAX_SOURCE * 2})).stdout;
   const commit = (await git(['rev-parse', '--verify', `${options.ref || 'HEAD'}^{commit}`])).toString().trim();
-  const tree = (await git(['ls-tree', '-rz', '--full-tree', commit])).toString('utf8').split('\0').filter(Boolean);
+  const tree = (await git(['ls-tree', '-rzl', '--full-tree', commit])).toString('utf8').split('\0').filter(Boolean);
   if (tree.length > MAX_FILES) throw new Error('Offshoot source has too many files');
-  const files = []; let total = 0;
+  const records = []; let total = 0;
   for (const entry of tree) {
-    const match = /^(\d+) (\w+) ([a-f0-9]+)\t([\s\S]+)$/.exec(entry);
+    const match = /^(\d+) (\w+) ([a-f0-9]{40}) +([0-9]+|-)\t([\s\S]+)$/.exec(entry);
     if (!match || match[2] !== 'blob') throw new Error('Offshoot source cannot contain submodules');
-    const [, mode, , hash, file] = match;
+    const [, mode, , hash, sizeText, file] = match;
     sourcePath(file);
-    const size = Number((await git(['cat-file', '-s', hash])).toString());
+    const size = Number(sizeText);
     total += size;
-    if (size > MAX_FILE || total > MAX_SOURCE) throw new Error('Offshoot source exceeds file limits');
-    files.push(encode(file, await git(['cat-file', 'blob', hash]), mode));
+    if (!Number.isSafeInteger(size) || size > MAX_FILE || total > MAX_SOURCE) throw new Error('Offshoot source exceeds file limits');
+    records.push({file, hash, mode, size});
   }
+  const blobs = readBlobs(directory, records.map(record => record.hash), {maxBytes: MAX_SOURCE, maxBlobBytes: MAX_FILE});
+  const files = records.map(({file, hash, mode, size}) => {
+    const bytes = blobs.get(hash);
+    if (!bytes || bytes.length !== size) throw new Error(`Offshoot source blob disagrees with its tree: ${file}`);
+    return encode(file, bytes, mode);
+  });
   const manifest = parse(decodeOffshootSource({files}), 'timds.json');
   if (options.version && options.version !== 'latest' && options.version !== manifest.version) throw new Error('The local Git revision does not declare the requested version; select it with --ref');
   if (!options.sourceId && !manifest.sourceId) throw new Error('A local parent needs --source-id UUID (the source identity); --ref selects its immutable Git revision');
@@ -166,8 +173,12 @@ async function localSource(directory, options) {
 
 export async function loadOffshootSource(systemOrPath, options = {}) {
   if (typeof systemOrPath !== 'string' || !systemOrPath) throw new Error('Choose a parent system or local Git path');
-  const directory = path.resolve(systemOrPath), info = await fs.stat(directory).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
-  if (info?.isDirectory()) return localSource(directory, options);
+  const local = options.local === true || path.isAbsolute(systemOrPath) || /^\.{1,2}(?:[\\/]|$)/.test(systemOrPath);
+  if (local) {
+    const directory = path.resolve(systemOrPath), info = await fs.stat(directory).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
+    if (!info?.isDirectory()) throw new Error(`Local parent must be an existing Git directory: ${systemOrPath}`);
+    return localSource(directory, options);
+  }
   if (options.ref) throw new Error('--ref applies only to a local parent Git checkout');
   const portalUrl = cleanPortalUrl(options.portalUrl || await savedPortalUrl(options));
   const provider = createHostProvider({url: portalUrl, resolveToken: context => resolveAccessToken(portalUrl, {...options, ...context}), fetchImpl: options.fetchImpl});

@@ -828,7 +828,7 @@ export async function createDesignSystemReadMcpServer({ root = process.cwd(), pu
         if (prepared && next !== prepared) await prepared.dispose();
         prepared = next;
         const workspace = await loadWorkspace(prepared.root, { allowNpm: Boolean(prepared.binaryStock) });
-        const layer = await readDerivedLayer(prepared.root, workspace.manifest);
+        const layer = await readDerivedLayer(prepared.root, workspace.manifest, {parentRecord: workspace.parentRecord});
         layer.source = { kind: "draft", draft, revision: prepared.snapshot.session.baseRevision };
         const { catalog } = await readMediaCatalog(prepared.root);
         return { layer, media: catalog, published: null, pinned: null };
@@ -858,7 +858,7 @@ export async function createDesignSystemReadMcpServer({ root = process.cwd(), pu
     resolveSystem: async ({ version, draft: requestedDraft } = {}) => {
         if (requestedDraft) throw new Error("Start the read server with --draft NAME --system-id ID to read a draft");
       const workspace = await loadWorkspace(repoRoot);
-      const layer = await readDerivedLayer(workspace.designSystemRoot, workspace.manifest);
+      const layer = await readDerivedLayer(workspace.designSystemRoot, workspace.manifest, {parentRecord: workspace.parentRecord});
       if (!layer.derived) throw new Error("Nothing has been derived yet; run timds check first");
       checkVersion(layer, version);
       const { catalog } = await readMediaCatalog(workspace.designSystemRoot);

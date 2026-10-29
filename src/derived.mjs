@@ -77,7 +77,7 @@ async function readOptional(filePath, parse) {
  * is null rather than an error, and `stale` says the layer was derived for a
  * version other than the manifest's, so a consumer knows to rerun `check`.
  */
-export async function readDerivedLayer(designSystemRoot, manifest) {
+export async function readDerivedLayer(designSystemRoot, manifest, {parentRecord = undefined} = {}) {
   const indexPromise = readOptional(derivedFilePath(designSystemRoot, manifest, "index"), JSON.parse);
   const [index, tokens, brand, llms, formats, designs, changelog, bundle] = await Promise.all([
     indexPromise,
@@ -90,7 +90,7 @@ export async function readDerivedLayer(designSystemRoot, manifest) {
     readOptional(derivedFilePath(designSystemRoot, manifest, "bundle"), JSON.parse),
   ]);
   const version = index?.system?.version ?? tokens?.system?.version ?? brand?.system?.version ?? null;
-  const lineage = parentLineage(await readParentRecord(designSystemRoot));
+  const lineage = parentLineage(parentRecord === undefined ? await readParentRecord(designSystemRoot) : parentRecord);
   return {
     source: { kind: "local", root: designSystemRoot, artifactRoot: path.join(designSystemRoot, "dist") },
     system: { id: manifest?.systemId ?? null, name: manifest?.name ?? null, version: manifest?.version ?? null },
