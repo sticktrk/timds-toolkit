@@ -606,9 +606,11 @@ export async function renderSite() {
   const warnings = [];
   const starter = existsSync(path.join(root, ".timds/starter.json")) ? await readJson(".timds/starter.json") : null;
   if (starter?.starter === "brand-kit" && (!data.copy.voice?.trim() || data.copy.voice === brandKitCopySamples.voice)) warnings.push("Brand kit voice is assumed; replace copy.voice with evidence-backed guidance before publishing.");
-  const hasDesigns = existsSync(path.join(source, "designs"));
+  // Structure offshoots omit authored design source, including an empty
+  // directory's marker. The selected kit still reserves its Designs section.
+  const hasDesigns = starter?.starter === "brand-kit" || existsSync(path.join(source, "designs"));
   // TimDS builds the designs to dist/designs/, so no view may claim that path.
-  if (hasDesigns && model.views.some((view) => view.id === "designs")) throw new Error("src/site.json may not declare a view named designs while src/designs/ exists; the designs are built there");
+  if (hasDesigns && model.views.some((view) => view.id === "designs")) throw new Error("src/site.json may not declare a view named designs while src/designs/ exists or the brand-kit starter reserves that route; the designs are built there");
   const layout = await readFile(path.join(source, "layout.html"), "utf8");
   if (!/\{\{\s*content\s*\}\}/.test(layout)) throw new Error("src/layout.html must contain {{content}}");
 
