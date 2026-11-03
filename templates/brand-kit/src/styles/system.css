@@ -139,7 +139,6 @@ code, pre { font-family: var(--font-mono); font-size: 0.85em; }
 .kit-copy { display: grid; align-content: center; gap: calc(var(--kit-type) * 0.2); }
 .kit-composition:not(.canvas--photo) .canvas-photo--background { inset: auto 0 0 auto; width: 38%; height: 42%; opacity: 0.22; }
 .kit-composition .canvas-logo:not([src]), .kit-composition .canvas-logo[src=""] { display: none; }
-.kit-brand:has(.canvas-logo[src]:not([src=""])) .canvas-mark { display: none; }
 .kit-banner .canvas-safe { flex-direction: row; align-items: center; gap: calc(var(--kit-type) * 0.5); }
 .kit-banner .kit-brand { flex: 0 0 20%; }
 .kit-banner .kit-copy { flex: 1; }

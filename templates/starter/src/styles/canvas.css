@@ -91,6 +91,12 @@
 :is(.canvas--ink, .canvas--bold, .canvas--photo, .canvas--accent[data-logo="dark"]):has(.canvas-logo[data-on-dark][src]:not([src=""])) .canvas-logo:not([data-on-dark]) { display: none; }
 :is(.canvas--ink, .canvas--bold, .canvas--photo, .canvas--accent[data-logo="dark"]) .canvas-logo[data-on-dark][src]:not([src=""]) { display: block; }
 :is(.canvas--ink, .canvas--bold, .canvas--photo, .canvas--accent[data-logo="dark"]):not(:has(.canvas-logo[data-on-dark][src]:not([src=""]))) .canvas-logo { background: var(--color-surface); padding: calc(var(--t) * 4); }
+/* Brand-kit wordmarks yield only to a logo this treatment can display. Keep
+   this in managed plumbing, with enough specificity to repair the original
+   overlay rule that hid the wordmark whenever either logo had a source. */
+.canvas .kit-brand:has(.canvas-logo[src]:not([src=""])) .canvas-mark { display: inline; }
+.canvas .kit-brand:has(.canvas-logo:not([data-on-dark])[src]:not([src=""])) .canvas-mark,
+.canvas:is(.canvas--ink, .canvas--bold, .canvas--photo, .canvas--accent[data-logo="dark"]) .kit-brand:has(.canvas-logo[data-on-dark][src]:not([src=""])) .canvas-mark { display: none; }
 .canvas .canvas-photo { width: 100%; max-width: 100%; height: 40%; object-fit: cover; object-position: var(--focal-position, 50% 50%); border-radius: var(--radius-media, var(--radius-md)); }
 .canvas .canvas-photo--background { position: absolute; inset: 0; z-index: -1; height: 100%; border-radius: 0; }
 .canvas .canvas-logo:not([src]), .canvas .canvas-logo[src=""], .canvas-photo:not([src]), .canvas-photo[src=""] { display: none; }
