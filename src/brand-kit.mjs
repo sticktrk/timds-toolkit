@@ -3,6 +3,11 @@
 // This pure module is also copied to scripts/brand-kit.mjs as shared starter
 // plumbing, so the viewer has the same defaults before npm dependencies exist.
 // It contains no crawling, inference, publishing, or client-specific behavior.
+//
+// A token slot's sample is the stock parent's own value and mirrors the
+// ordinary starter's foundations (templates/tokens.json), so an unfilled kit
+// reads like a stock system; its assumption is the rule a builder applies when
+// the source shows nothing, which may differ from the sample.
 
 const freeze = value => {
   if (value && typeof value === 'object' && !Object.isFrozen(value)) {
@@ -24,8 +29,8 @@ const element = (key, source, assumption, guidance) => slot(`element.${key}`, 'e
 const copy = (key, source, assumption, guidance, sample, page = 'brand/foundation', label = 'assumed') => slot(`copy.${key}`, 'copy', source, assumption, guidance, sample, page, label);
 
 export const brandKitSlots = freeze([
-  token('color.canvas', 'Most-used page background.', 'Use a white canvas.', 'Confirm the page ground before choosing any text pair.', '#ffffff', 'brand/color'),
-  token('color.surface', 'Card and panel backgrounds.', 'Use color.canvas.', 'Pair raised surfaces with color.ink and verify their boundary against the canvas.', '{color.canvas}', 'brand/color'),
+  token('color.canvas', 'Most-used page background.', 'Use a white canvas.', 'Confirm the page ground before choosing any text pair.', '#f5f7fa', 'brand/color'),
+  token('color.surface', 'Card and panel backgrounds.', 'Use color.canvas.', 'Pair raised surfaces with color.ink and verify their boundary against the canvas.', '#ffffff', 'brand/color'),
   token('color.ink', 'Body text color.', 'Choose text with contrast on color.canvas.', 'Keep reading text legible on canvas, surface and accent-soft.', '#17202a', 'brand/color'),
   token('color.muted', 'Secondary text color.', 'Mix ink 65% with canvas 35%.', 'Check secondary text on every ground where it appears.', '#5d6876', 'brand/color'),
   token('color.line', 'Borders and rules.', 'Mix ink 18% with canvas 82%.', 'Use this for boundaries, never as the only signal for an action.', '#dce1e8', 'brand/color'),
@@ -35,9 +40,9 @@ export const brandKitSlots = freeze([
   token('color.accent-2', 'A second chromatic color used in links or badges.', 'Use color.accent.', 'Keep a distinct second accent only when the evidence supports it.', '{color.accent}', 'brand/color'),
   token('color.ink-ground', 'The darkest section background, such as a footer.', 'Use color.ink.', 'Use this ground for Bold treatments and the photo scrim.', '{color.ink}', 'brand/color'),
   token('color.ink-ground-text', 'Text on the darkest section background.', 'Use color.surface.', 'Always pair the dark band with its own text token.', '{color.surface}', 'brand/color'),
-  token('font.display', 'The family used for h1 through h3.', 'Use font.body.', 'Confirm the heading family and its usable font files before delivery.', '{font.body}', 'brand/typography'),
-  token('font.body', 'The family used for paragraphs.', 'Use system-ui, sans-serif.', 'Choose a readable body family and retain a reliable fallback.', 'system-ui, sans-serif', 'brand/typography'),
-  token('font.mono', 'The family used for code.', 'Use ui-monospace, monospace.', 'Use the mono family for values and code rather than running copy.', 'ui-monospace, monospace', 'brand/typography'),
+  token('font.display', 'The family used for h1 through h3.', 'Use font.body.', 'Confirm the heading family and its usable font files before delivery.', 'Georgia, "Times New Roman", serif', 'brand/typography'),
+  token('font.body', 'The family used for paragraphs.', 'Use system-ui, sans-serif.', 'Choose a readable body family and retain a reliable fallback.', 'ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif', 'brand/typography'),
+  token('font.mono', 'The family used for code.', 'Use ui-monospace, monospace.', 'Use the mono family for values and code rather than running copy.', '"SFMono-Regular", Consolas, "Liberation Mono", monospace', 'brand/typography'),
   token('font.display-weight', 'The h1 font weight.', 'Use 700.', 'Use a weight the display family actually supplies.', '700', 'brand/typography'),
   token('font.body-weight', 'The paragraph font weight.', 'Use 400.', 'Keep reading text at a supported, comfortable weight.', '400', 'brand/typography'),
   ...[
@@ -50,7 +55,7 @@ export const brandKitSlots = freeze([
   token('type.display-leading', 'The h1 line-height.', 'Use 1.1.', 'Allow long headlines to wrap without collisions.', '1.1', 'brand/typography'),
   token('type.body-leading', 'The paragraph line-height.', 'Use 1.5.', 'Check reading rhythm with several lines of real copy.', '1.5', 'brand/typography'),
   token('radius.control', 'The primary button radius.', 'Use 8px.', 'Apply one control radius to buttons and fields.', '8px', 'web/spacing'),
-  token('radius.card', 'The card radius.', 'Use radius.control.', 'Use the card radius consistently for grouped content.', '{radius.control}', 'web/spacing'),
+  token('radius.card', 'The card radius.', 'Use radius.control.', 'Use the card radius consistently for grouped content.', '14px', 'web/spacing'),
   token('radius.media', 'The image radius.', 'Use radius.card.', 'Keep image corners aligned with their surrounding card.', '{radius.card}', 'web/spacing'),
   token('line.width', 'The button and field border width.', 'Use 1px.', 'Keep border weight consistent across controls and dividers.', '1px', 'web/spacing'),
   token('shadow.card', 'The card box-shadow.', 'Use none.', 'Add elevation only when the source uses it to explain hierarchy.', 'none', 'web/spacing'),
