@@ -51,7 +51,8 @@ __TIMDS_CLI__ dev
 `npm install` creates the lockfile in a fresh scaffold; commit it and use
 `npm ci` afterwards. `check` builds and validates the artifact. `brand` prints
 the derived brand kit with a fix for every gap; a fresh scaffold reports no
-logo and no voice guidance until you add them. `dev` starts the
+logo and no voice guidance until you add them in the ordinary starter;
+a brand kit has an authored Voice page and reports its assumed sample voice. `dev` starts the
 repository-declared authoring server. `preview` serves the exact generated
 static artifact that TimDS will publish.
 
@@ -94,12 +95,26 @@ tokens; the rest are declared as planned and built once someone writes them.
 | `src/layout.html` | The shell every page shares |
 | `src/styles/system.css`, `src/styles/canvas.css`, `src/styles/viewer.css` | The system's own styles, the format previews, and the documentation chrome |
 | `src/assets/` | Small optimized assets such as logos, copied into the artifact |
-| `scripts/build.mjs`, `dev.mjs`, `check.mjs`, `viewer.mjs` | The `workspace` commands declared in `timds.json` and the renderer they share |
+| `scripts/build.mjs`, `dev.mjs`, `check.mjs`, `viewer.mjs`, `brand-kit.mjs`, `src/scripts/compose.js` | Shared build, renderer, slot data and composer plumbing managed by starter sync |
 | `CHANGELOG.md` | Release notes, rendered at `/changelog/`; add to `## Unreleased`, leading with the area the change touches |
 | `media.json`, `media-local/` | Published media catalog and ignored originals |
 
 The starter `dev` server builds once and serves on `http://127.0.0.1:4321`. It
 does not watch files, so rerun `__TIMDS_CLI__ check` after an edit and reload.
+
+## Brand-kit systems
+
+When the starter record says `brand-kit`, the kit opens on its overview and
+organizes Brand, Web, Social, Ads, Email, Print, Events, Decks and Use separately.
+Its stock pages read tokens, copy and media slots in Minimal, Accent, Bold and
+Photo treatments. The designer's agent fills the data and records evidence;
+the owner reviews what is observed, assumed or unresolved. Copy stays in
+`src/copy.json`, small approved local media stays in `src/assets/` with its
+catalog record, and the Evidence page keeps captured facts and decisions.
+The composer uses the kit's Social, Ads and Email formats. Whole-page Designs
+begin empty and are authored for this system before a developer ports a release
+into the product. An upgrade keeps shared plumbing current and preserves these
+authored values and pages.
 
 ## Website designs
 
@@ -109,11 +124,11 @@ system's own stylesheets, one file per route and state
 (`pages/contact.html`, `pages/contact.sent.html`), and an engineer ports it to
 whatever runs production. `check` builds the designs to `/designs/` and
 allows JavaScript interactions and refuses inline styles,
-undeclared classes, relative references. The starter ships one sample design
-to replace; a system scaffolded before designs existed adopts them with
+undeclared classes, relative references. The ordinary starter ships one sample design
+to replace; a brand kit begins with an empty Designs directory; a system scaffolded before designs existed adopts them with
 `__TIMDS_CLI__ designs init`. `AGENTS.md` holds the rules.
 
-The scaffold itself stays current: `.timds/starter.json` records the starter
+The scaffold itself stays current: `.timds/starter.json` records the starter kind and its
 scripts, viewer stylesheets, views, and asset formats TimDS wrote, and every
 `__TIMDS_CLI__ upgrade` brings the stock scripts and viewer stylesheets to
 the installed release (they are TimDS's in a fresh scaffold; a local change
@@ -154,7 +169,7 @@ describe foundations still to author before the system is a finished brand.
 The optional parent-authored `.timds/stock.json` explicitly declares reusable
 structure: `{"schemaVersion":1,"paths":["src/styles/system.css"]}`. Publish
 the declaration before shooting off. Paths name exact existing regular HTML
-files under `src/pages/`, CSS files under `src/styles/`, or `src/layout.html`.
+files under `src/pages/`, CSS files under `src/styles/`, `src/layout.html`, or `src/copy.json`.
 Globs, links, media, designs and configuration are refused.
 
 `.timds/parent.json` records schema version 1, the parent system ID and source

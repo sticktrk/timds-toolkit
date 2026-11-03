@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add the slot-driven `brand-kit` starter for reusable website-to-kit parents: nine channel views, 24 formats in four treatments, an empty Designs directory, and a public typed slot contract shared with the viewer. Copy and local media placeholders report stock fallbacks, show explicit evidence labels, and render safely on light or inverted palettes. Starter selection and sync retain each kind's catalogs and authored boundaries; structure offshoots keep the composer and explicitly declared copy data. The shared Use composer, authoring guidance, contract tests and rendering checks ship together.
+
 - Preserve the parent's toolkit baseline when creating a structure offshoot, accept stock parents without a lockfile and additive source-export metadata, protect Git revision parsing, and keep no-op feed reports accurate. Reuse decoded source bytes and shared path/cleanliness rules, identify malformed published lineage by its URL, and type the full parent record separately from public lineage.
 
 - Keep offshoot starter sync and upgrades available while catalogs or authored overview fragments have uncommitted edits, since those files are outside their write boundary. Protect case aliases of the parent record in hosted sessions and MCP editing.

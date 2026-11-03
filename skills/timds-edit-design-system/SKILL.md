@@ -44,7 +44,7 @@ retain their declared prerequisites. The agent runs these steps for the designer
 
 ## Start from a fresh scaffold
 
-A new contract ships a dependency-free starter viewer whose colors, fonts, and
+The ordinary starter ships a dependency-free viewer whose colors, fonts, and
 copy are neutral placeholders. It passes `check` with two expected warnings:
 no `brand/voice` page and no annotated logo. Turning it into the client's
 system is ordinary design work:
@@ -72,6 +72,25 @@ system is ordinary design work:
 The scaffolded `AGENTS.md` carries the same starter map. Once the system moves
 to another framework, follow `timds.json` `workspace` and that framework's
 layout instead.
+
+## Fill a brand-kit system
+
+When `.timds/starter.json` says `starter: "brand-kit"`, use the kit's slot
+contract and keep its nine channel views. Fill authored token maps, string
+values in `src/copy.json`, media records and approved assets, and record capture
+facts and owner decisions on `brand/evidence`; do not regenerate the stock
+pages. Preserve confirmed/observed/assumed/unresolved labels, and never label
+arbitrary supplied copy as observed. Copy banks use newlines; numeric
+placeholders such as `{{copy:headlines.0}}` select a line, while the bare key
+renders the whole escaped string. Media placeholders use a catalog asset's
+regular path under `src/assets/`, alongside its existing stable public URL;
+missing keys use the sample wordmark or the Bold treatment, while an invalid
+explicit path fails. Run check and review the reported fallback keys, assumed
+voice diagnostic, missing-logo gap, and all four treatments on the actual
+palette. The Voice page already carries guidance; do not mark it planned to
+recreate the ordinary starter's warning. Designs begin empty; author whole
+pages there when requested. Run the toolkit for the designer, then prepare
+the released reference for the developer's port into the product.
 
 ## Shape pages for the derived layer
 
@@ -158,10 +177,13 @@ the reference the port must match, never the production site itself.
 ## The starter is synced by upgrade
 
 `.timds/starter.json` records the starter plumbing (`scripts/build.mjs`,
-`check.mjs`, `dev.mjs`, `viewer.mjs`, `src/styles/canvas.css`,
+`check.mjs`, `dev.mjs`, `viewer.mjs`, `brand-kit.mjs`,
+`src/scripts/compose.js`, `src/styles/canvas.css`,
 `src/styles/viewer.css`), the views in `src/site.json`, the formats in
 `src/formats.json`, and the Digital, Social, and Print overview fragments and
-the Use pages (Install and Using the system) the toolkit wrote. Every `upgrade` re-syncs an adopted system: the plumbing is
+the Use pages (Compose and Install) the toolkit wrote. Its `starter` field
+selects the stock catalogs, history and fragments; absent means `starter`.
+Brand-kit stock pages use the same unmodified-fragment boundary. Every `upgrade` re-syncs an adopted system: the plumbing is
 brought to stock, new views, planned pages, and formats are appended
 without removing, reordering, or retitling anything the system declares,
 and a missing stock stylesheet link is added to `src/layout.html`. In a
@@ -213,7 +235,7 @@ The parent designer alone decides which authored files are reusable structure.
 Write and publish `.timds/stock.json` as
 `{"schemaVersion":1,"paths":["src/pages/web/components.html","src/styles/system.css"]}`.
 Only exact existing regular HTML files under `src/pages/`, CSS files under
-`src/styles/`, or `src/layout.html` are accepted. No globs, symbolic links,
+`src/styles/`, `src/layout.html`, or `src/copy.json` are accepted. No globs, symbolic links,
 media, designs or configuration. This is the editable exception under `.timds/`
 for remote editing tools; `run_check` validates it before publication.
 
