@@ -63,6 +63,11 @@ async function ok(client, name, args = {}) {
 const STANDALONE_PROTECTED = [
   ".git/config",
   ".timds/installation.json",
+  ".TIMDS/installation.json",
+  ".timds/parent.json",
+  ".timds/PARENT.JSON",
+  ".TIMDS/parent.json",
+  ".TIMDS/PARENT.JSON",
   ".agents/skills/timds-edit-design-system/SKILL.md",
   ".github/workflows/timds-design-system.yml",
   "package.json",
@@ -92,6 +97,8 @@ test("refuses every protected path, traversal, and absolute path on a standalone
   }
   assert.equal(isProtectedPath(workspace, "src/index.html"), false);
   assert.equal(isProtectedPath(workspace, "src/pages/new.html"), false);
+  assert.equal(isProtectedPath(workspace, ".timds/stock.json"), false);
+  for (const record of ['.TIMDS/stock.json', '.timds/STOCK.JSON', '.TIMDS/STOCK.JSON']) assert.equal(isProtectedPath(workspace, record), false, record);
   for (const authored of ["scripts/build.mjs", "scripts/check.mjs", "scripts/dev.mjs", "scripts/optimize-images.mjs"]) {
     assert.equal(isProtectedPath(workspace, authored), false, authored);
   }
@@ -105,6 +112,11 @@ test("refuses every protected path, traversal, and absolute path on a standalone
     const deleted = await call(client, "delete_file", { path: protectedPath });
     assert.equal(deleted.isError, true, `delete ${protectedPath}`);
   }
+  const stock = JSON.stringify({ schemaVersion: 1, paths: ['src/styles/system.css'] });
+  await ok(client, 'write_file', { path: '.timds/stock.json', content: stock, note: 'Declare reusable source' });
+  assert.equal((await ok(client, 'read_file', { path: '.timds/stock.json' })).content, stock);
+  assert.ok((await ok(client, 'list_files')).files.some(file => file.path === '.timds/stock.json'));
+  await ok(client, 'delete_file', { path: '.timds/stock.json', note: 'Withdraw reusable source' });
   // The manifest was not touched.
   JSON.parse(await fs.readFile(path.join(repoRoot, "timds.json"), "utf8"));
   await assert.rejects(fs.access(path.join(repoRoot, "..", "outside.txt")));
@@ -209,14 +221,16 @@ test("restricts an embedded system to design-system/**", async (t) => {
   await fs.writeFile(path.join(repoRoot, "app.js"), "console.log('app')\n", "utf8");
   const workspace = await loadWorkspace(repoRoot);
   assert.equal(authoredSurfaceRoot(workspace), "design-system");
-  for (const outside of ["app.js", "README.md", "package.json", ".github/workflows/timds-design-system.yml", "design-system/timds.json", "design-system/media.json", "design-system/dist/index.html", "design-system/.timds/installation.json", "design-system/media-local/a.png", "design-system/.gitignore", "design-system/scripts/release.mjs"]) {
+  for (const outside of ["app.js", "README.md", "package.json", ".github/workflows/timds-design-system.yml", "design-system/timds.json", "design-system/media.json", "design-system/dist/index.html", "design-system/.timds/installation.json", "design-system/.TIMDS/PARENT.JSON", "design-system/media-local/a.png", "design-system/.gitignore", "design-system/scripts/release.mjs"]) {
     assert.equal(isProtectedPath(workspace, outside), true, outside);
   }
   assert.equal(isProtectedPath(workspace, "design-system/src/index.html"), false);
+  assert.equal(isProtectedPath(workspace, "design-system/.TIMDS/stock.json"), false);
 
   const client = await connect(await createDesignSystemMcpServer({ root: repoRoot }));
   assert.equal((await call(client, "write_file", { path: "app.js", content: "x" })).isError, true);
   assert.equal((await call(client, "read_file", { path: "app.js" })).isError, true);
+  assert.equal((await call(client, "write_file", { path: "design-system/.TIMDS/PARENT.JSON", content: "{}" })).isError, true);
   await ok(client, "write_file", { path: "design-system/src/extra.css", content: ":root{}\n" });
   const listed = await ok(client, "list_files", {});
   assert.ok(listed.files.length > 0);
@@ -235,6 +249,7 @@ test("run_check returns structured findings and read_derived serves the derived 
 
   const described = await ok(client, "describe_workspace", {});
   assert.equal(described.layout, "standalone");
+  assert.equal(described.lineage, null);
   assert.match(described.systemId, /\/core$/);
   assert.deepEqual(described.workspaceCommands.build, ["node", "scripts/build.mjs"]);
   assert.match(described.brandKit.report, /Roles|Brand kit/);
@@ -253,6 +268,7 @@ test("run_check returns structured findings and read_derived serves the derived 
   for (const name of ["brand", "tokens", "index"]) {
     const derived = await ok(client, "read_derived", { name });
     assert.equal(derived.name, name);
+    assert.equal(derived.lineage, null);
     assert.equal(derived.stale, false);
     assert.ok(derived.content && typeof derived.content === "object", name);
   }

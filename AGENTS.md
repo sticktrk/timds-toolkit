@@ -264,6 +264,25 @@ Local/git initialization keeps its existing release automation. Session API
 version 1 is implemented in `src/hosted.mjs`; CLI and MCP commands must share
 that implementation and keep files/token boundaries covered by tests.
 
+Offshoots record their immediate parent release and structural feed baseline
+in `.timds/parent.json`. Check validates it without mutation; sessions cannot
+create, edit or delete it. `.timds/stock.json` is a designer-authored exception
+under `.timds`: exact existing regular `src/pages/**/*.html`,
+`src/styles/**/*.css` and `src/layout.html` paths only, never globs or links.
+Structure creation includes those declarations, verified recorded plumbing,
+whole formats, planned pages and token `initial` placeholders reported as
+unresolved warnings. `shoot` creates a local independent repository without
+registering or publishing; `feed` reuses starter merges against the parent's
+baseline and never replaces authored source, even with force. Parent baselines
+advance only after a successful check, with rollback on failure. Ordinary
+starter sync/upgrade keeps offshoot plumbing current and preserves its parent
+record and catalog baselines; it still maintains missing stock stylesheet links
+and the changelog version-chip link within the narrow layout boundary.
+`sever` requires confirmation and removes only
+the local parent record; hosted catalog severing remains a host operation.
+Public derived readers and provenance expose lineage or null, never baselines.
+See `docs/offshoots.md` for the contract and command details.
+
 
 The multiplayer contract migration is an explicit exception to the authored
 aggregate boundary above: fresh init and upgrade split tokens/media into
