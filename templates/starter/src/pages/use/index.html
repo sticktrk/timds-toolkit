@@ -1,12 +1,103 @@
 <span class="eyebrow">Use</span>
-<h1 class="page-title">Using the system</h1>
-<p class="lede">{{name}} is published once and read many ways: as these pages in a browser, as one text file an AI tool reads, as a machine-readable layer a script joins, over MCP for an agent, as a pinned bundle a website loads, and as whole-page designs a developer ports. This page lays out each way in, who it is for, and what to take from it. Every way in reads the same published release, so every reader works from the same brand. To set one of them up, start at <a href="/use/install/">Install</a>.</p>
+<h1 class="page-title">Make something with {{name}}</h1>
+<p class="lede">Pick the format, say what it is for, and get the image back on brand: the right size, the brand's colors and type, and a caption ready to paste. Nothing to install and nothing to sign in to. Below the composer, every other way the system is read; <a href="{{page:overview}}">the overview</a> shows how it is organized.</p>
 <div class="rule"></div>
+
+<section class="block compose" id="compose">
+  <!-- A figure, so the derived layer reads the composer as illustration: the
+       lede above is the record. src/scripts/compose.js runs it against the
+       host's compose route; without a host, or with the allowance at zero,
+       the panel says so and the presets still show what the system makes. -->
+  <figure class="compose__app" data-compose data-name="{{name}}" data-state="loading">
+    <div class="compose__presets" role="radiogroup" aria-label="What to make">
+        <label class="preset">
+          <input type="radio" name="preset" value="fb-1080x1080" data-name="Facebook post" data-prompt="What is the post about?" checked>
+          <span class="preset__thumb" style="{{canvas:fb-1080x1080}}"><span class="preset__shape"></span></span>
+          <b>Facebook post</b><small>1080 × 1080</small>
+        </label>
+        <label class="preset">
+          <input type="radio" name="preset" value="ig-1080x1350" data-name="Instagram post" data-prompt="What is the post about?">
+          <span class="preset__thumb" style="{{canvas:ig-1080x1350}}"><span class="preset__shape"></span></span>
+          <b>Instagram post</b><small>1080 × 1350</small>
+        </label>
+        <label class="preset">
+          <input type="radio" name="preset" value="ig-1080x1920" data-name="Story" data-prompt="What is the story for?">
+          <span class="preset__thumb" style="{{canvas:ig-1080x1920}}"><span class="preset__shape"></span></span>
+          <b>Story</b><small>1080 × 1920</small>
+        </label>
+        <label class="preset">
+          <input type="radio" name="preset" value="meta-1080x1080" data-name="Meta ad" data-prompt="What is the ad selling, and to whom?">
+          <span class="preset__thumb" style="{{canvas:meta-1080x1080}}"><span class="preset__shape"></span></span>
+          <b>Meta ad</b><small>1080 × 1080</small>
+        </label>
+        <label class="preset">
+          <input type="radio" name="preset" value="li-1200x627" data-name="LinkedIn ad" data-prompt="What is the ad for, and who should see it?">
+          <span class="preset__thumb" style="{{canvas:li-1200x627}}"><span class="preset__shape"></span></span>
+          <b>LinkedIn ad</b><small>1200 × 627</small>
+        </label>
+        <label class="preset">
+          <input type="radio" name="preset" value="email-1200x400" data-name="Email header" data-prompt="What is the email about?">
+          <span class="preset__thumb" style="{{canvas:email-1200x400}}"><span class="preset__shape"></span></span>
+          <b>Email header</b><small>1200 × 400</small>
+        </label>
+    </div>
+
+    <div class="compose__bench">
+      <div class="compose__chat">
+        <div class="compose__transcript" aria-live="polite">
+          <div class="compose__empty">
+            <b>Tell it what you need.</b>
+            <span>Mention the offer, the audience, and the one line to say. It drafts on brand, and you can ask for changes until it is right.</span>
+            <div class="compose__chips">
+              <button type="button" class="compose__chip" data-prompt="Announce an event: the date, the place, and why someone should come.">Announce an event</button>
+              <button type="button" class="compose__chip" data-prompt="Promote an offer: what it is, who it is for, and when it ends.">Promote an offer</button>
+              <button type="button" class="compose__chip" data-prompt="Share a tip our customers will find useful.">Share a tip</button>
+              <button type="button" class="compose__chip" data-prompt="Welcome a new team member and say what they will be doing.">Welcome someone</button>
+            </div>
+          </div>
+        </div>
+        <div class="compose__notice" hidden></div>
+        <div class="compose__challenge" hidden></div>
+        <form class="compose__form">
+          <textarea class="compose__input" rows="1" aria-label="What to make" placeholder="What is the post about?"></textarea>
+          <button type="submit" class="button compose__send">Make it</button>
+        </form>
+        <div class="compose__foot">
+          <span class="compose__status"></span>
+          <button type="button" class="compose__reset" hidden>Start over</button>
+        </div>
+      </div>
+
+      <div class="compose__preview" role="group" aria-label="Preview">
+        <div class="compose__stagewrap">
+          <div class="compose__stage canvas-frame" style="{{canvas:fb-1080x1080}}">
+            <div class="canvas compose__canvas">
+              <div class="compose__placeholder">
+                <span class="canvas-mark">{{name}}</span>
+                <p class="compose__hint">Your Facebook post appears here.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="compose__actions">
+          <span class="compose__size">1080 × 1080 · PNG</span>
+          <a class="button button--secondary compose__download" href="#" download hidden>Download</a>
+        </div>
+        <div class="compose__captionbox">
+          <div class="compose__captionbar"><span>Caption</span><button type="button" class="compose__copy" disabled>Copy</button></div>
+          <div class="compose__caption">The caption to paste appears here.</div>
+        </div>
+      </div>
+    </div>
+  </figure>
+  <script src="/scripts/compose.js" defer></script>
+  <p class="note">Generated images approximate the brand's fonts and may redraw the mark. For anything that ships, take the real logo files, the type, and the palette from the Brand view.</p>
+</section>
 
 <section class="block" id="audiences">
   <div class="block__head">
-    <h2 class="h2">Who uses it, and how</h2>
-    <p>Each way in serves one kind of reader. Start from the row that describes you; the rest of this page explains each one.</p>
+    <h2 class="h2">Every other way in</h2>
+    <p>The composer above is one way to use the system. Each other way serves one kind of reader; start from the row that describes you, and the rest of this page explains each one.</p>
   </div>
   <table class="spec">
     <thead><tr><th>Reader</th><th>Way in</th><th>Start with</th></tr></thead>
@@ -36,7 +127,7 @@
       <tr><td><strong>A preview</strong></td><td>A live sample of the thing described. Its sample text is illustration, never a rule.</td></tr>
       <tr><td><strong>Planned</strong></td><td>A page declared in the navigation and not yet written. Nothing is published for it, so no reader receives placeholder guidance.</td></tr>
       <tr><td><strong>The version in the app bar</strong></td><td>The release these pages belong to. Every merged change becomes a new patch release.</td></tr>
-      <tr><td><strong>Markdown</strong></td><td>The check writes a mirror of every page at <code>index.md</code> beside it, the same content as plain text. This page's is <a href="/use/index.md"><code>/use/index.md</code></a>.</td></tr>
+      <tr><td><strong>Markdown</strong></td><td>The check writes a mirror of every page at <code>index.md</code> beside it, the same content as plain text. This page's is <a href="{{page:use}}index.md"><code>index.md</code></a>.</td></tr>
     </tbody>
   </table>
 </section>

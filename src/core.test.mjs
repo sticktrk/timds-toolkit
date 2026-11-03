@@ -66,7 +66,7 @@ async function jsonFailure(argv, expected) {
 /** Rewind a fresh standalone scaffold to the shape `init` produced before the asset views and format catalog existed. */
 async function rewindStarter(repoRoot) {
   await fs.cp(starterFixtureRoot, repoRoot, { force: true, recursive: true });
-  for (const relative of ["src/formats.json", "src/styles/canvas.css", "src/pages/digital", "src/pages/print", "src/pages/social", "src/pages/use", ".timds/starter.json"]) {
+  for (const relative of ["src/formats.json", "src/scripts/compose.js", "src/styles/canvas.css", "src/pages/digital", "src/pages/print", "src/pages/social", "src/pages/use", ".timds/starter.json"]) {
     await fs.rm(path.join(repoRoot, relative), { force: true, recursive: true });
   }
 }
@@ -994,6 +994,29 @@ test("initializes an embedded contract with a committed starter artifact", async
 });
 
 
+test("the starter viewer resolves Use links with and without a home view and rejects invalid homes", async t => {
+  const repoRoot = await temporaryDirectory(t);
+  await initializeRepository(repoRoot, { standalone: true });
+  const sitePath = path.join(repoRoot, "src/site.json");
+  const site = JSON.parse(await fs.readFile(sitePath, "utf8"));
+  const build = () => execFileSync(process.execPath, ["scripts/build.mjs"], { cwd: repoRoot, encoding: "utf8", stdio: "pipe" });
+  delete site.home;
+  await writeJson(sitePath, site);
+  build();
+  assert.match(await fs.readFile(path.join(repoRoot, "dist/use/index.html"), "utf8"), /<a href="\/">the overview<\/a>/);
+  assert.match(await fs.readFile(path.join(repoRoot, "dist/use/install/index.html"), "utf8"), /<a href="\/use\/#mcp">Using the system<\/a>/);
+  await assert.rejects(fs.access(path.join(repoRoot, "dist/overview/index.html")), { code: "ENOENT" });
+  for (const home of ["missing", "brand", "use/install"]) {
+    site.home = home;
+    await writeJson(sitePath, site);
+    assert.throws(build, error => /home must name a declared view/.test(error.stderr));
+  }
+  site.home = "use";
+  site.views.find(view => view.id === "use").pages.find(page => page.slug === "").planned = true;
+  await writeJson(sitePath, site);
+  assert.throws(build, error => /home names use, which is planned/.test(error.stderr));
+});
+
 test("the starter viewer renders its site model, and its build guards pages, placeholders, and color literals", async (t) => {
   const repoRoot = await temporaryDirectory(t);
   await initializeRepository(repoRoot, { standalone: true, name: "Client & Co" });
@@ -1004,12 +1027,22 @@ test("the starter viewer renders its site model, and its build guards pages, pla
   const declared = site.views.flatMap((view) => view.pages.map((page) => ({ ...page, id: page.slug ? `${view.id}/${page.slug}` : view.id })));
 
   // Every authored page is built into the shared shell; a planned page is declared but never built.
+  // The view site.json names as home is the front page, and the overview moves beside it.
+  assert.equal(site.home, "use");
   for (const page of declared) {
-    const built = path.join(repoRoot, "dist", page.id, "index.html");
+    const built = path.join(repoRoot, "dist", page.id === site.home ? "" : page.id, "index.html");
     if (page.planned) await assert.rejects(fs.access(built), page.id);
     else assert.match(await fs.readFile(built, "utf8"), /<main id="content"/, page.id);
   }
-  const overview = await read("dist/index.html");
+  const front = await read("dist/index.html");
+  assert.match(front, /<h1 class="page-title">Make something with Client &amp; Co<\/h1>/);
+  assert.match(front, /<script src="\/scripts\/compose\.js" defer><\/script>/, "the composer script is loaded from the copied scripts directory");
+  await fs.access(path.join(repoRoot, "dist/scripts/compose.js"));
+  assert.match(front, /<a class="appbar__view" href="\/" aria-current="true"><b>Use<\/b>/, "the Use view's app bar link is the front page");
+  assert.match(front, /style="--cw:1080;--ch:1350;--safe:64;/, "preset cards draw their format from the catalog");
+  assert.match(await read("dist/use/install/index.html"), /<a href="\/#mcp">Using the system<\/a>/, "{{page:use}} resolves to wherever the page is served");
+  await assert.rejects(fs.access(path.join(repoRoot, "dist/use/index.html")));
+  const overview = await read("dist/overview/index.html");
   assert.match(overview, /<h1 class="page-title">Client &amp; Co<\/h1>/);
   // The version chip opens the changelog TimDS renders outside the views; the starter build writes it so dev shows it.
   assert.match(overview, /<a class="appbar__version" href="\/changelog\/" title="Changelog">v\d{4}\.\d{2}\.\d{2}-1<\/a>/);
@@ -1040,7 +1073,7 @@ test("the starter viewer renders its site model, and its build guards pages, pla
 
   // The derived layer carries only authored guidance, so the brand kit still reports what the client has not supplied.
   const { designs, machine } = await checkWorkspace(repoRoot);
-  assert.deepEqual(machine.pages.map((page) => page.id), ["brand/color", "brand/typography", "digital", "index", "print", "social", "use", "use/install", "web/components", "web/spacing"], "design and changelog pages are not guidance");
+  assert.deepEqual(machine.pages.map((page) => page.id), ["brand/color", "brand/typography", "digital", "index", "overview", "print", "social", "use/install", "web/components", "web/spacing"], "design and changelog pages are not guidance; the Use page is the index and the overview sits beside it");
   assert.deepEqual(machine.index.changelog, { url: "/changelog.json", page: "/changelog/", releases: 1, latest: machine.index.system.version });
   assert.equal(JSON.parse(await read("dist/changelog.json")).releases[0].entries[0].area, "Maintenance");
   assert.equal(machine.counts.untyped, 0);
@@ -1230,6 +1263,7 @@ test("starter sync adopts a scaffold from before the asset views, and upgrade ke
     ["scripts/check.mjs", "updated"],
     ["scripts/dev.mjs", "current"],
     ["scripts/viewer.mjs", "updated"],
+    ["src/scripts/compose.js", "created"],
     ["src/styles/canvas.css", "created"],
     ["src/styles/viewer.css", "current"],
     ["src/site.json", "updated"],
@@ -1241,7 +1275,7 @@ test("starter sync adopts a scaffold from before the asset views, and upgrade ke
     ["src/pages/use/install.html", "created"],
     ["src/layout.html", "updated"],
   ]);
-  assert.deepEqual(result.site, { addedPages: ["web/email", "web/email-templates"], addedViews: ["digital", "social", "print", "use"], advanced: ["web.label", "web.blurb"], kept: [] });
+  assert.deepEqual(result.site, { addedPages: ["web/email", "web/email-templates"], addedViews: ["digital", "social", "print", "use"], advanced: ["home", "web.label", "web.blurb"], kept: [] });
   assert.deepEqual([result.formats.addedGroups, result.formats.addedFormats.length, result.formats.kept, result.formats.skipped], [["print", "digital", "social"], 48, [], []]);
   // Nothing here was customized, so the merged catalogs and refreshed files equal the stock scaffold's byte for byte.
   for (const relative of ["src/site.json", "src/formats.json", "src/layout.html", "scripts/viewer.mjs", "scripts/check.mjs", "src/styles/canvas.css", "src/pages/print/index.html", "src/pages/use/index.html"]) {
@@ -1350,7 +1384,8 @@ test("starter sync adds a view a newer scaffold declares to a system adopted und
     assert.equal(await read(relative), await fs.readFile(path.join(templatesRoot, "starter", relative), "utf8"), `${relative} is written byte for byte`);
   }
   assert.equal(await read("src/site.json"), await fs.readFile(path.join(templatesRoot, "starter/src/site.json"), "utf8"), "the view is appended as the scaffold declares it");
-  assert.ok(["use", "use/install"].every((id) => result.check.machine.pages.map((page) => page.id).includes(id)), "the check that follows builds both pages");
+  // The Use page is the front page now (site.json home), so the derived layer knows it as the index.
+  assert.ok(["index", "use/install"].every((id) => result.check.machine.pages.map((page) => page.id).includes(id)), "the check that follows builds both pages");
   const after = JSON.parse(await read(".timds/starter.json"));
   assert.equal(after.version, toolkitVersion);
   assert.ok(after.files["src/pages/use/index.html"], "the record now carries the fragment so later syncs can refresh it while unmodified");

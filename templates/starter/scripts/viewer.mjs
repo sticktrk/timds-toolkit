@@ -5,6 +5,9 @@
 // authored page. Rendering fills the shell's navigation from the site model
 // and each fragment's token tables from tokens.json, so a page never restates
 // a value and the navigation never drifts from the pages that exist.
+// site.json home may move a view's own page to / and its overview to
+// /overview/. {{page:ID}} resolves either address so stock fragments can
+// link the Use page wherever the system serves it.
 //
 // src/formats.json is the catalog of every asset format the system produces
 // (print sheets in inches, screen canvases in pixels), each tied to the page
@@ -23,8 +26,8 @@ import path from "node:path";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const source = path.join(root, "src");
 const destination = path.join(root, "dist");
-const copiedDirectories = ["assets", "styles"];
-const placeholder = /\{\{\s*([a-z]+)(?::([a-z0-9-]+))?\s*\}\}/g;
+const copiedDirectories = ["assets", "scripts", "styles"];
+const placeholder = /\{\{\s*([a-z]+)(?::([a-z0-9-]+(?:\/[a-z0-9-]+)*))?\s*\}\}/g;
 const colorValue = /^(?:#|rgba?\(|hsla?\(|oklch\(|oklab\(|color\()/i;
 const colorLiteral = /#[0-9a-f]{3,8}\b|\b(?:rgba?|hsla?|oklch|oklab)\(/i;
 
@@ -75,7 +78,7 @@ function compileTokens(tokens) {
 /** The site model: every declared page in navigation order, the overview first. */
 function readSiteModel(site) {
   if (!Array.isArray(site.views) || !site.views.length) throw new Error("src/site.json must declare at least one view");
-  const home = { id: "index", view: null, title: "Overview", file: "index.html", href: "/", output: "index.html", planned: false };
+  const home = { id: "overview", view: null, title: "Overview", file: "index.html", href: "/", output: "index.html", planned: false };
   const pages = [home];
   const views = [];
 
@@ -111,6 +114,19 @@ function readSiteModel(site) {
       return entry;
     });
     views.push({ id: view.id, label: view.label, blurb: view.blurb || "", pages: viewPages });
+  }
+
+  // `home` names the view whose own page is the front page: that page is
+  // served at / and the overview moves to /overview/. The starter leads with
+  // the Use page, which the toolkit keeps current, so a visitor lands on the
+  // composer while the client's own overview stays authored and reachable.
+  if (site.home !== undefined) {
+    const view = views.find((candidate) => candidate.id === site.home);
+    const front = view?.pages.find((page) => page.id === view.id);
+    if (!front) throw new Error(`src/site.json home must name a declared view with a page whose slug is empty; ${JSON.stringify(site.home)} is not one`);
+    if (front.planned) throw new Error(`src/site.json home names ${front.id}, which is planned; author src/pages/${front.file} or choose another view`);
+    Object.assign(front, { href: "/", output: "index.html" });
+    Object.assign(home, { href: "/overview/", output: "overview/index.html" });
   }
 
   return { home, pages, views };
@@ -261,6 +277,13 @@ function canvasVars(formats, id, file) {
     `--ui-t:${ui.top ?? 0}`, `--ui-b:${ui.bottom ?? 0}`, `--ui-l:${ui.left ?? 0}`, `--ui-r:${ui.right ?? 0}`,
     `--clear-l:${clear.left ?? 0}`, `--clear-r:${clear.right ?? 0}`,
   ].join(";");
+}
+
+function pageHref(model, id, file) {
+  const page = model.pages.find((candidate) => candidate.id === id);
+  if (!page) throw new Error(`src/pages/${file} uses {{page:${id}}}, but src/site.json declares no page ${id}`);
+  if (page.planned) throw new Error(`src/pages/${file} uses {{page:${id}}}, but that page is planned; author it or link another page`);
+  return page.href;
 }
 
 function renderSitemap(model, designs) {
@@ -485,6 +508,10 @@ export async function renderSite() {
       ...shared,
       canvas: (id) => canvasVars(formats, id, page.file),
       formats: (group) => renderFormatTable(formats, group, page.file),
+      // {{page:ID}} is a page's address (overview, use, use/install, ...), so a
+      // fragment the toolkit refreshes links the same page whether or not the
+      // system moved it to the front.
+      page: (id) => pageHref(model, id, page.file),
       sitemap: () => renderSitemap(model, designs),
       tokens: (group) => renderTokenTable(tokens, group, page.file),
     });
