@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Preserve existing home routes during starter sync so customized installation guidance keeps working through upgrades. Keep the brand-name fallback visible when only the hidden logo variant is filled, including existing kits through shared canvas plumbing, and cover both regressions with upgrade and browser checks.
+
 - Add the slot-driven `brand-kit` starter for reusable website-to-kit parents: nine channel views, 24 formats in four treatments, an empty Designs directory, and a public typed slot contract shared with the viewer. Copy and local media placeholders report stock fallbacks, show explicit evidence labels, and render safely on light or inverted palettes. Starter selection and sync retain each kind's catalogs and authored boundaries; structure offshoots keep the composer and explicitly declared copy data. The shared Use composer, authoring guidance, contract tests and rendering checks ship together.
 
 - Preserve the parent's toolkit baseline when creating a structure offshoot, accept stock parents without a lockfile and additive source-export metadata, protect Git revision parsing, and keep no-op feed reports accurate. Reuse decoded source bytes and shared path/cleanliness rules, identify malformed published lineage by its URL, and type the full parent record separately from public lineage.

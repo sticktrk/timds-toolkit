@@ -1241,6 +1241,50 @@ test("standalone publication treats a GitHub bootstrap commit as an initial cont
 });
 
 
+test("upgrade preserves pre-home routes and customized Install links", async (t) => {
+  const repoRoot = await temporaryDirectory(t);
+  gitInit(repoRoot);
+  await initializeRepository(repoRoot, { standalone: true, name: "Client & Co" });
+  const read = (relative) => fs.readFile(path.join(repoRoot, relative), "utf8");
+  const site = JSON.parse(await read("src/site.json"));
+  const record = JSON.parse(await read(".timds/starter.json"));
+  // Before 0.1.485 the overview occupied /, Use occupied /use/, and the
+  // Install fragment linked directly to that route. Preserve a client's
+  // addition while upgrading the recorded catalog to the current title.
+  delete site.home;
+  site.views.find(view => view.id === "use").pages.find(page => page.slug === "").title = "Using the system";
+  record.baseline.site = structuredClone(site);
+  record.version = "0.1.484";
+  const oldInstall = (await read("src/pages/use/install.html")).replaceAll("{{page:use}}", "/use/");
+  for (const anchor of ["mcp", "products", "change"]) assert.ok(oldInstall.includes(`/use/#${anchor}`));
+  record.files["src/pages/use/install.html"] = createHash("sha256").update(oldInstall).digest("hex");
+  const authoredInstall = `${oldInstall}\n<!-- This client's installation guidance. -->\n`;
+  const authoredOverview = await read("src/pages/index.html");
+  await writeJson(path.join(repoRoot, "src/site.json"), site);
+  await writeJson(path.join(repoRoot, ".timds/starter.json"), record);
+  await fs.writeFile(path.join(repoRoot, "src/pages/use/install.html"), authoredInstall);
+  commitAll(repoRoot, "Customize the pre-home Install page");
+  const before = await checkWorkspace(repoRoot);
+
+  const upgraded = await upgradeRepository(repoRoot);
+  assert.ok(upgraded.starter.check, "the changed catalog runs the full artifact check during upgrade");
+  assert.ok(upgraded.starter.site.advanced.includes("use.title"));
+  assert.equal(upgraded.starter.files.find(file => file.path === "src/pages/use/install.html").status, "customized");
+  assert.equal(JSON.parse(await read("src/site.json")).home, undefined);
+  assert.equal(await read("src/pages/use/install.html"), authoredInstall);
+  assert.equal(await read("src/pages/index.html"), authoredOverview);
+  assert.deepEqual(upgraded.starter.check.machine.pages.map(page => page.id), before.machine.pages.map(page => page.id), "guidance routes remain stable without duplicate aliases");
+  assert.match(await read("dist/use/install/index.html"), /href="\/use\/#mcp"/);
+  await fs.access(path.join(repoRoot, "dist/use/index.html"));
+  await assert.rejects(fs.access(path.join(repoRoot, "dist/overview/index.html")), { code: "ENOENT" });
+
+  commitAll(repoRoot, "Upgrade without moving the front page");
+  const repeated = await upgradeRepository(repoRoot);
+  assert.deepEqual(repeated.starter.written, []);
+  assert.equal(repeated.starter.recordWritten, false);
+  assert.equal(await read("src/pages/use/install.html"), authoredInstall);
+});
+
 test("starter sync adopts a scaffold from before the asset views, and upgrade keeps it current afterwards", async (t) => {
   const repoRoot = await temporaryDirectory(t);
   gitInit(repoRoot);
@@ -1277,10 +1321,13 @@ test("starter sync adopts a scaffold from before the asset views, and upgrade ke
     ["src/pages/use/install.html", "created"],
     ["src/layout.html", "updated"],
   ]);
-  assert.deepEqual(result.site, { addedPages: ["web/email", "web/email-templates"], addedViews: ["digital", "social", "print", "use"], advanced: ["home", "web.label", "web.blurb"], kept: [] });
+  assert.deepEqual(result.site, { addedPages: ["web/email", "web/email-templates"], addedViews: ["digital", "social", "print", "use"], advanced: ["web.label", "web.blurb"], kept: [] });
   assert.deepEqual([result.formats.addedGroups, result.formats.addedFormats.length, result.formats.kept, result.formats.skipped], [["print", "digital", "social"], 48, [], []]);
-  // Nothing here was customized, so the merged catalogs and refreshed files equal the stock scaffold's byte for byte.
-  for (const relative of ["src/site.json", "src/formats.json", "src/layout.html", "scripts/viewer.mjs", "scripts/check.mjs", "src/styles/canvas.css", "src/pages/print/index.html", "src/pages/use/index.html"]) {
+  // Structure and plumbing advance to stock while the original front page stays.
+  const stockSite = JSON.parse(await fs.readFile(path.join(templatesRoot, "starter/src/site.json"), "utf8"));
+  delete stockSite.home;
+  assert.deepEqual(JSON.parse(await read("src/site.json")), stockSite);
+  for (const relative of ["src/formats.json", "src/layout.html", "scripts/viewer.mjs", "scripts/check.mjs", "src/styles/canvas.css", "src/pages/print/index.html", "src/pages/use/index.html"]) {
     assert.equal(await read(relative), await fs.readFile(path.join(templatesRoot, "starter", relative), "utf8"), relative);
   }
   assert.doesNotMatch(await read("src/pages/index.html"), /Digital DS/, "the client's own overview fragment is never rewritten");
@@ -1362,7 +1409,10 @@ test("starter sync adds a view a newer scaffold declares to a system adopted und
   gitInit(repoRoot);
   await initializeRepository(repoRoot, { standalone: true, name: "Client & Co" });
   const read = (relative) => fs.readFile(path.join(repoRoot, relative), "utf8");
-  const dropUse = (site) => ({ ...site, views: site.views.filter((view) => view.id !== "use") });
+  const dropUse = (site) => {
+    const { home, ...rest } = site;
+    return { ...rest, views: site.views.filter((view) => view.id !== "use") };
+  };
   const record = JSON.parse(await read(".timds/starter.json"));
   assert.ok(record.files["src/pages/use/index.html"] && record.files["src/pages/use/install.html"], "a fresh scaffold records the Use fragments");
   delete record.files["src/pages/use/index.html"];
@@ -1385,9 +1435,10 @@ test("starter sync adds a view a newer scaffold declares to a system adopted und
   for (const relative of ["src/pages/use/index.html", "src/pages/use/install.html"]) {
     assert.equal(await read(relative), await fs.readFile(path.join(templatesRoot, "starter", relative), "utf8"), `${relative} is written byte for byte`);
   }
-  assert.equal(await read("src/site.json"), await fs.readFile(path.join(templatesRoot, "starter/src/site.json"), "utf8"), "the view is appended as the scaffold declares it");
-  // The Use page is the front page now (site.json home), so the derived layer knows it as the index.
-  assert.ok(["index", "use/install"].every((id) => result.check.machine.pages.map((page) => page.id).includes(id)), "the check that follows builds both pages");
+  const stockSite = JSON.parse(await fs.readFile(path.join(templatesRoot, "starter/src/site.json"), "utf8"));
+  delete stockSite.home;
+  assert.deepEqual(JSON.parse(await read("src/site.json")), stockSite, "the view is appended while the original overview remains the front page");
+  assert.ok(["use", "use/install"].every((id) => result.check.machine.pages.map((page) => page.id).includes(id)), "the check that follows builds both pages at their existing routes");
   const after = JSON.parse(await read(".timds/starter.json"));
   assert.equal(after.version, toolkitVersion);
   assert.ok(after.files["src/pages/use/index.html"], "the record now carries the fragment so later syncs can refresh it while unmodified");

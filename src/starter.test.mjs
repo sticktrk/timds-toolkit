@@ -97,19 +97,23 @@ test("mergeSiteModel appends what the client lacks, advances untouched stock fie
   assert.deepEqual([...declaredPageIds(site)], ["brand/logo", "brand/mascot", "video", "web/layout", "web/spacing", "web/email", "print", "print/letterheads"]);
 });
 
-test("the home page advances from its recorded baseline and preserves a system's own choice", () => {
-  const previous = { views: [] };
-  const next = { home: "use", views: [] };
-  const adopted = mergeSiteModel(previous, next, [previous]);
-  assert.deepEqual(adopted.site, next);
-  assert.deepEqual(adopted.changes.advanced, ["home"]);
-  const customized = mergeSiteModel({ home: "brand", views: [] }, next, [previous]);
-  assert.equal(customized.site.home, "brand");
-  assert.deepEqual(customized.changes.kept, [{ path: "home", current: "brand", stock: "use" }]);
-  assert.deepEqual(mergeSiteModel(customized.site, next, [next]).changes.kept, [], "an unchanged stock choice is not reported repeatedly");
-  const removed = mergeSiteModel(next, previous, [next]);
-  assert.equal(removed.site.home, undefined, "an untouched home advances back to the overview when the stock removes it");
-  assert.deepEqual(removed.changes.advanced, ["home"]);
+test("site merges preserve the existing home route, including an absent selection", () => {
+  const overview = { views: [] };
+  const use = { home: "use", views: [] };
+  const brand = { home: "brand", views: [] };
+  for (const [current, next, baseline] of [
+    [overview, use, overview], // An older scaffold keeps its overview at /.
+    [overview, use, use], // A designer removed a previously selected home.
+    [brand, use, overview], // A designer selected a different view.
+    [use, brand, use], // Even an unchanged stock selection owns its route.
+    [use, overview, use], // Removing the stock selection cannot move it either.
+  ]) {
+    const merged = mergeSiteModel(current, next, [baseline]);
+    assert.deepEqual(merged.site, current);
+    assert.deepEqual(merged.changes.advanced, []);
+    assert.deepEqual(merged.changes.kept, []);
+    assert.deepEqual(mergeSiteModel(merged.site, next, [next]), merged, "advancing the baseline stays idempotent");
+  }
 });
 
 test("mergeFormatCatalog admits a format only with a declared page and an unused id, and keeps client fields", () => {
