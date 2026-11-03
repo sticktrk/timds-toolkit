@@ -66,7 +66,7 @@ async function jsonFailure(argv, expected) {
 /** Rewind a fresh standalone scaffold to the shape `init` produced before the asset views and format catalog existed. */
 async function rewindStarter(repoRoot) {
   await fs.cp(starterFixtureRoot, repoRoot, { force: true, recursive: true });
-  for (const relative of ["src/formats.json", "src/scripts/compose.js", "src/styles/canvas.css", "src/pages/digital", "src/pages/print", "src/pages/social", "src/pages/use", ".timds/starter.json"]) {
+  for (const relative of ["src/formats.json", "scripts/brand-kit.mjs", "src/scripts/compose.js", "src/styles/canvas.css", "src/pages/digital", "src/pages/print", "src/pages/social", "src/pages/use", ".timds/starter.json"]) {
     await fs.rm(path.join(repoRoot, relative), { force: true, recursive: true });
   }
 }
@@ -1161,8 +1161,9 @@ test("designs init adopts website designs in a system scaffolded without them", 
   const repoRoot = await temporaryDirectory(t);
   await initializeRepository(repoRoot, { standalone: true });
   const read = (relative) => fs.readFile(path.join(repoRoot, relative), "utf8");
-  // Simulate the earlier scaffold: no designs, and a system stylesheet without the layout block.
+  // Simulate the earlier scaffold: no designs or shared slot helper, and no layout block.
   await fs.rm(path.join(repoRoot, "src/designs"), { recursive: true });
+  await fs.rm(path.join(repoRoot, "scripts/brand-kit.mjs"));
   const stylesheet = await read("src/styles/system.css");
   const stripped = stylesheet.replace(/\/\* ---- site layout ---- \*\/[\s\S]*?\/\* ---- end site layout ---- \*\/\n/, "");
   assert.notEqual(stripped, stylesheet);
@@ -1171,7 +1172,7 @@ test("designs init adopts website designs in a system scaffolded without them", 
 
   const result = await initializeDesigns(repoRoot);
   await fs.access(path.join(repoRoot, "src/designs/website/pages/contact.sent.html"));
-  assert.deepEqual(result.scripts, [{ path: "scripts/build.mjs", status: "customized" }, { path: "scripts/viewer.mjs", status: "current" }]);
+  assert.deepEqual(result.scripts, [{ path: "scripts/build.mjs", status: "customized" }, { path: "scripts/viewer.mjs", status: "current" }, { path: "scripts/brand-kit.mjs", status: "created" }]);
   assert.equal(result.stylesheet, "appended", "the stock token names let the layout block be restored");
   assert.deepEqual(result.missingClasses, []);
   assert.match(await read("src/styles/system.css"), /\/\* ---- site layout ---- \*\/[\s\S]*\.site-footer/);
@@ -1197,7 +1198,7 @@ test("designs init adopts website designs in a system scaffolded without them", 
   staleRecord.files["scripts/build.mjs"] = "stale";
   await writeJson(path.join(repoRoot, ".timds/starter.json"), staleRecord);
   const forced = await initializeDesigns(repoRoot, { force: true });
-  assert.deepEqual(forced.scripts.map((script) => script.status), ["updated", "current"]);
+  assert.deepEqual(forced.scripts.map((script) => script.status), ["updated", "current", "current"]);
   assert.doesNotMatch(await read("scripts/build.mjs"), /client change/);
   const stockBuild = await fs.readFile(path.join(templatesRoot, "starter/scripts/build.mjs"), "utf8");
   assert.equal(JSON.parse(await read(".timds/starter.json")).files["scripts/build.mjs"], createHash("sha256").update(stockBuild).digest("hex"));
@@ -1263,6 +1264,7 @@ test("starter sync adopts a scaffold from before the asset views, and upgrade ke
     ["scripts/check.mjs", "updated"],
     ["scripts/dev.mjs", "current"],
     ["scripts/viewer.mjs", "updated"],
+    ["scripts/brand-kit.mjs", "created"],
     ["src/scripts/compose.js", "created"],
     ["src/styles/canvas.css", "created"],
     ["src/styles/viewer.css", "current"],

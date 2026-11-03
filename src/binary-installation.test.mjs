@@ -175,6 +175,27 @@ test('stock draft recognition rejects custom scripts even when the snapshot reco
   assert.equal(await isStockWorkspace(root, await read(root, 'timds.json')), false);
 });
 
+test('stock draft recognition verifies the viewer helper but keeps older viewers compatible', async t => {
+  const root = await fixture(t);
+  const manifest = await read(root, 'timds.json');
+  const helper = path.join(root, 'scripts/brand-kit.mjs');
+  const stock = await fs.readFile(helper);
+  assert.equal(await isStockWorkspace(root, manifest), true);
+  await fs.rm(helper);
+  assert.equal(await isStockWorkspace(root, manifest), false, 'a current viewer cannot run without its helper');
+  await fs.writeFile(helper, Buffer.concat([stock, Buffer.from('\nconsole.log("custom helper");\n')]));
+  const {createHash} = await import('node:crypto');
+  const record = await read(root, '.timds/starter.json');
+  record.files['scripts/brand-kit.mjs'] = createHash('sha256').update(await fs.readFile(helper)).digest('hex');
+  await fs.writeFile(path.join(root, '.timds/starter.json'), JSON.stringify(record));
+  assert.equal(await isStockWorkspace(root, manifest), false, 'a snapshot hash cannot approve executable helper changes');
+  await fs.writeFile(helper, stock);
+  assert.equal(await isStockWorkspace(root, manifest), true);
+  await fs.copyFile(path.join(packageRoot, 'src/fixtures/starter-before-formats/scripts/viewer.mjs'), path.join(root, 'scripts/viewer.mjs'));
+  await fs.rm(helper);
+  assert.equal(await isStockWorkspace(root, manifest), true, 'a recognized older viewer has no helper dependency');
+});
+
 test('binary global skill installation renders hosted instructions without npm bootstrapping', async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'timds binary skills '));
   t.after(() => fs.rm(root, {recursive: true, force: true}));

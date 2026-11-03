@@ -1,0 +1,177 @@
+/* Slot aliases serve shared viewer plumbing without adding foundation keys. */
+:root {
+  --font-sans: var(--font-body); --font-serif: var(--font-display);
+  --radius-sm: var(--radius-control); --radius-md: var(--radius-card);
+  --radius-round: calc(var(--radius-control) * 100); --size-line: var(--line-width);
+  --size-content: calc(var(--space-12) * 25); --size-sidebar: calc(var(--space-12) * 5);
+  --size-header: calc(var(--space-8) * 2);
+  --kit-chrome-ground: var(--color-surface); --kit-chrome-ink: var(--color-ink);
+}
+/* The design system itself: base styles and the components a product adopts.
+   Every value is a custom property from tokens.css, which the build writes
+   from tokens.json. Documentation chrome lives in viewer.css. */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { color-scheme: light; scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-body);
+  font-size: var(--type-body);
+  line-height: var(--type-body-leading);
+  font-weight: var(--font-body-weight);
+}
+
+img { display: block; max-width: 100%; height: auto; }
+button, input { font: inherit; }
+a { color: inherit; }
+code, pre { font-family: var(--font-mono); font-size: 0.85em; }
+:focus-visible { outline: 3px solid color-mix(in srgb, var(--color-accent) 42%, transparent); outline-offset: 3px; }
+
+/* ---- button ---- */
+.button {
+  display: inline-flex;
+  min-height: 2.875rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--space-6);
+  border: var(--line-width) solid var(--color-accent);
+  border-radius: var(--radius-control);
+  background: var(--color-accent);
+  color: var(--color-accent-ink);
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color var(--motion-fast) ease, border-color var(--motion-fast) ease;
+}
+
+.button:hover { background: var(--color-accent); color: var(--color-accent-ink); text-decoration: underline; }
+.button--secondary { border-color: var(--color-accent); background: var(--color-canvas); color: var(--color-accent); }
+.button--secondary:hover { border-color: var(--color-accent); background: var(--color-accent-soft); color: var(--color-ink); }
+
+/* ---- field ---- */
+.field { display: flex; flex-direction: column; gap: var(--space-2); }
+.field label { font-size: var(--type-small); font-weight: 700; }
+.field input {
+  min-height: 3rem;
+  padding: 0 var(--space-3);
+  border: var(--line-width) solid var(--color-muted);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-ink);
+}
+.field small { color: var(--color-muted); font-size: var(--type-small); }
+
+/* ---- site layout ---- */
+/* The pieces a whole page is composed from; the website design under
+   /designs/ uses only these and the components above. */
+.wrap { width: min(100% - 2 * var(--space-6), var(--size-content)); margin-inline: auto; }
+
+.site-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  min-height: var(--size-header);
+  padding-block: var(--space-3);
+  border-bottom: var(--line-width) solid var(--color-line);
+}
+.site-header__brand { font-family: var(--font-display); font-size: var(--type-lead); font-weight: 700; text-decoration: none; }
+.site-nav { display: flex; flex-wrap: wrap; gap: var(--space-4); }
+.site-nav a { color: var(--color-muted); text-decoration: none; }
+.site-nav a:hover, .site-nav a[aria-current="page"] { color: var(--color-accent); }
+
+.hero { padding-block: var(--space-12); }
+.hero h1 { margin: 0 0 var(--space-4); font-family: var(--font-display); font-size: var(--type-display); line-height: 1.1; }
+.hero p { max-width: 36rem; margin: 0 0 var(--space-6); color: var(--color-muted); font-size: var(--type-lead); }
+.hero .button + .button { margin-left: var(--space-3); }
+
+.section { padding-block: var(--space-8); border-top: var(--line-width) solid var(--color-line); }
+.section h2 { margin: 0 0 var(--space-3); font-family: var(--font-display); font-size: var(--type-title); line-height: 1.2; }
+.section p { max-width: 40rem; margin: 0 0 var(--space-4); }
+
+.form { display: grid; gap: var(--space-4); max-width: 28rem; }
+.form .button { justify-self: start; }
+
+.notice {
+  padding: var(--space-4) var(--space-6);
+  border: var(--line-width) solid var(--color-line);
+  border-radius: var(--radius-card);
+  background: var(--color-accent-soft);
+  color: var(--color-ink);
+}
+
+.site-footer { padding-block: var(--space-6); background: var(--color-ink-ground); color: var(--color-ink-ground-text); font-size: var(--type-small); }
+/* ---- end site layout ---- */
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  * { transition-duration: 0.01ms !important; }
+}
+/* Brand elements use the exact foundation slots, with a named ink per ground. */
+.link { color: var(--color-accent-2); text-decoration: underline; text-underline-offset: var(--space-1); }
+.card { padding: var(--space-6); border: var(--line-width) solid var(--color-line); border-radius: var(--radius-card); background: var(--color-surface); color: var(--color-ink); box-shadow: var(--shadow-card); }
+.eyebrow { color: var(--color-accent); font-size: var(--type-label); font-weight: var(--font-display-weight); letter-spacing: 0.16em; text-transform: uppercase; }
+.headline { margin: 0 0 var(--space-4); font-family: var(--font-display); font-size: var(--type-display); font-weight: var(--font-display-weight); letter-spacing: var(--type-display-tracking); line-height: var(--type-display-leading); text-transform: var(--type-display-case); text-wrap: balance; }
+.headline em { color: var(--color-accent); font-style: italic; }
+.element-rule { width: calc(var(--space-2) * 5); height: calc(var(--line-width) * 2); margin: var(--space-4) 0; border: 0; background: var(--color-accent); color: var(--color-accent-ink); }
+.badge { display: inline-flex; padding: var(--space-1) var(--space-2); border-radius: var(--radius-control); background: var(--color-accent-soft); color: var(--color-ink); font-size: var(--type-label); }
+.site-header, .hero, .section { background: var(--color-canvas); color: var(--color-ink); }
+/* The composition type follows its catalog frame, across screen and print. */
+.kit-preview { margin: 0; }
+.kit-guides { margin: 0 0 var(--space-4); }
+.kit-preview figcaption { margin-top: var(--space-2); color: var(--color-muted); font-size: var(--type-small); }
+.kit-composition { --kit-type: calc(var(--u) * min(var(--cw) / 12, var(--ch) / 6)); }
+.kit-composition .canvas-display { font-size: var(--kit-type); overflow-wrap: anywhere; white-space: pre-line; }
+.kit-composition .canvas-eyebrow { font-size: calc(var(--kit-type) * 0.22); }
+.kit-composition .canvas-body { font-size: calc(var(--kit-type) * 0.28); }
+.kit-composition .canvas-mark { font-size: calc(var(--kit-type) * 0.34); }
+.canvas.kit-composition .canvas-logo { height: calc(var(--kit-type) * 0.6); }
+.kit-composition .canvas-foot, .kit-composition .canvas-count { font-size: calc(var(--kit-type) * 0.22); }
+.kit-composition .canvas-button { font-size: calc(var(--kit-type) * 0.24); padding: calc(var(--kit-type) * 0.14) calc(var(--kit-type) * 0.28); border-radius: var(--radius-control); white-space: pre-line; }
+.kit-composition .canvas-rule { width: calc(var(--kit-type) * 0.8); height: calc(var(--kit-type) * 0.04); }
+.kit-composition .canvas-badge { font-size: calc(var(--kit-type) * 0.22); padding: calc(var(--kit-type) * 0.08) calc(var(--kit-type) * 0.16); }
+.kit-brand { display: flex; justify-content: space-between; align-items: center; gap: var(--space-2); }
+.kit-copy { display: grid; align-content: center; gap: calc(var(--kit-type) * 0.2); }
+.kit-composition:not(.canvas--photo) .canvas-photo--background { inset: auto 0 0 auto; width: 38%; height: 42%; opacity: 0.22; }
+.kit-composition .canvas-logo:not([src]), .kit-composition .canvas-logo[src=""] { display: none; }
+.kit-brand:has(.canvas-logo[src]:not([src=""])) .canvas-mark { display: none; }
+.kit-banner .canvas-safe { flex-direction: row; align-items: center; gap: calc(var(--kit-type) * 0.5); }
+.kit-banner .kit-brand { flex: 0 0 20%; }
+.kit-banner .kit-copy { flex: 1; }
+.kit-banner .canvas-display { font-size: calc(var(--kit-type) * 1.5); line-height: var(--type-display-leading); }
+.kit-banner .canvas-eyebrow, .kit-banner .canvas-body, .kit-banner .canvas-rule, .kit-banner .canvas-foot > span:first-child { display: none; }
+.kit-banner .canvas-mark { font-size: calc(var(--kit-type) * 0.9); }
+.kit-banner .canvas-button { font-size: calc(var(--kit-type) * 0.8); }
+.kit-banner .canvas-foot { flex: 0 0 20%; }
+.kit-component-grid, .kit-marks { display: grid; gap: var(--space-6); }
+.kit-logo-plate { margin: 0; display: grid; min-height: calc(var(--space-12) * 3); place-items: center; padding: var(--space-6); background: var(--color-surface); color: var(--color-ink); }
+.kit-logo-plate--dark { background: var(--color-ink-ground); color: var(--color-ink-ground-text); }
+.kit-logo-plate img { max-height: calc(var(--space-12) * 2); }
+.kit-logo-plate img[src=""], .kit-photo-slot img[src=""] { display: none; }
+.kit-logo-plate:has(img[src]:not([src=""])) > span { display: none; }
+.kit-photo-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)); gap: var(--space-4); margin: 0; }
+.kit-photo-slot { margin: 0; display: grid; min-height: calc(var(--space-12) * 3); align-content: center; gap: var(--space-3); padding: var(--space-4); border: var(--line-width) solid var(--color-line); border-radius: var(--radius-media); background: var(--color-surface); color: var(--color-ink); font-size: var(--type-small); }
+.kit-photo-slot img { width: 100%; aspect-ratio: 3 / 2; object-fit: cover; object-position: var(--focal-position, 50% 50%); border-radius: var(--radius-media); }
+.kit-launch { margin: 0; border: var(--line-width) solid var(--color-line); background: var(--color-canvas); color: var(--color-ink); }
+.kit-type { display: grid; gap: var(--space-4); background: var(--color-surface); color: var(--color-ink); }
+/* Keep shared viewer chrome paired on inverted brand palettes as well. */
+body.brand-kit .appbar, body.brand-kit .sidenav { background: var(--kit-chrome-ground); color: var(--kit-chrome-ink); }
+body.brand-kit .content { background: var(--color-canvas); color: var(--color-ink); }
+body.brand-kit .appbar__cta, body.brand-kit .msg--assistant::before { background: var(--color-accent); color: var(--color-accent-ink); }
+body.brand-kit .appbar__cta:hover { background: var(--color-accent); color: var(--color-accent-ink); text-decoration: underline; }
+body.brand-kit .appbar__view:hover, body.brand-kit .sidenav a:hover, body.brand-kit .sidenav a[aria-current="page"] { background: var(--color-accent-soft); color: var(--color-ink); }
+body.brand-kit .preset, body.brand-kit .compose__chat, body.brand-kit .compose__form, body.brand-kit .compose__captionbox { background: var(--color-surface); color: var(--color-ink); }
+body.brand-kit .preset:has(input:checked), body.brand-kit .msg--user { background: var(--color-accent-soft); color: var(--color-ink); }
+body.brand-kit .compose__notice, body.brand-kit .compose__stagewrap { background-color: var(--color-canvas); color: var(--color-ink); }
+@media (prefers-color-scheme: dark) {
+  html { color-scheme: dark; }
+  :root { --kit-chrome-ground: var(--color-ink-ground); --kit-chrome-ink: var(--color-ink-ground-text); }
+  body.brand-kit .appbar__view, body.brand-kit .appbar__view small, body.brand-kit .appbar__version, body.brand-kit .appbar__version:hover, body.brand-kit .sidenav a, body.brand-kit .sidenav__planned, body.brand-kit .sidenav__group { color: var(--kit-chrome-ink); }
+  body.brand-kit .appbar__view[aria-current], body.brand-kit .appbar__view[aria-current] small, body.brand-kit .appbar__view:hover small { background: var(--color-accent-soft); color: var(--color-ink); }
+  body.brand-kit .appbar__view:hover, body.brand-kit .sidenav a:hover, body.brand-kit .sidenav a[aria-current="page"] { background: var(--color-accent-soft); color: var(--color-ink); }
+}

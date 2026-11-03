@@ -43,7 +43,8 @@
     "./contract-groups": "./src/contract-groups.mjs",
     "./consumer-draft-preview": "./src/consumer-draft-preview.mjs",
     "./merge": "./src/merge.mjs",
-    "./publication-snapshot": "./src/publication-snapshot.mjs"
+    "./publication-snapshot": "./src/publication-snapshot.mjs",
+    "./brand-kit": "./src/brand-kit.mjs"
   },
   "scripts": {
     "test": "npm run typecheck && node --test .github/scripts/*.test.mjs src/*.test.mjs video/*.test.mjs && tsx --test video/*.test.tsx",
@@ -132,7 +133,9 @@
     "src/executable-register.mjs",
     "src/executable-loader.mjs",
     "src/binary-installation.mjs",
-    "src/video-runtime.mjs"
+    "src/video-runtime.mjs",
+    "src/brand-kit.mjs",
+    "src/brand-kit.d.mts"
   ],
   "dependencies": {
     "@anthropic-ai/sdk": "0.125.0",

@@ -14,42 +14,88 @@
 
 .canvas-frame { container-type: inline-size; width: 100%; }
 .canvas-frame--actual { width: calc(var(--cw) * 1px); max-width: 100%; }
+/* Print previews keep their catalog aspect ratio; only their reading width is
+   capped here. Neither frame repeats a trim, bleed, or safe-area value. */
+.canvas-frame--business-card { max-width: 28rem; }
+.canvas-frame--name-badge { max-width: 22rem; }
+.canvas-deck-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 28rem), 1fr)); gap: var(--space-6); }
+.canvas-deck-grid > figure { min-width: 0; margin: 0; }
 
 .canvas {
   --u: calc(100cqw / var(--cw));
   --pt: calc(var(--u) / 72);
   --t: var(--u);
+  --canvas-ground: var(--color-surface);
+  --canvas-ink: var(--color-ink);
+  --canvas-secondary: var(--color-muted);
+  --canvas-detail: var(--color-accent);
+  --canvas-button-ground: var(--color-accent);
+  --canvas-button-ink: var(--color-accent-ink, var(--color-surface));
   position: relative;
+  isolation: isolate;
   overflow: hidden;
   aspect-ratio: var(--cw) / var(--ch);
-  background: var(--color-surface);
-  color: var(--color-ink);
-  font-family: var(--font-sans);
+  background: var(--canvas-ground);
+  color: var(--canvas-ink);
+  font-family: var(--font-body, var(--font-sans));
   font-size: calc(var(--t) * 16);
   line-height: 1.3;
   box-shadow: 0 1px 2px color-mix(in srgb, var(--color-ink) 16%, transparent);
 }
 .canvas--print { --t: var(--pt); font-size: calc(var(--t) * 10); line-height: 1.45; }
-.canvas--ink { background: var(--color-ink); color: var(--color-surface); }
+.canvas--minimal { --canvas-ground: var(--color-canvas); }
+.canvas--accent {
+  --canvas-ground: var(--color-accent);
+  --canvas-ink: var(--color-accent-ink, var(--color-surface));
+  --canvas-secondary: var(--canvas-ink);
+  --canvas-detail: var(--color-accent-soft);
+  --canvas-button-ground: var(--canvas-ink);
+  --canvas-button-ink: var(--canvas-ground);
+}
+.canvas--ink, .canvas--bold, .canvas--photo {
+  --canvas-ground: var(--color-ink-ground, var(--color-ink));
+  --canvas-ink: var(--color-ink-ground-text, var(--color-surface));
+  --canvas-secondary: var(--canvas-ink);
+  --canvas-detail: var(--color-accent);
+  --canvas-button-ground: var(--canvas-ink);
+  --canvas-button-ink: var(--canvas-ground);
+}
+/* A photo without a source is the Bold treatment. The scrim sits above the
+   image and below the safe-area content, and always uses that same ground. */
+.canvas--photo::before { content: ""; position: absolute; inset: 0; z-index: 0; background: color-mix(in srgb, var(--canvas-ground) 88%, transparent); pointer-events: none; }
 .canvas *, .canvas *::before, .canvas *::after { box-sizing: border-box; }
 .canvas img { display: block; max-width: none; }
 
 /* ---- the pieces a template is composed from ---- */
-.canvas-safe { position: absolute; inset: calc(var(--safe) * var(--u)); display: flex; flex-direction: column; justify-content: space-between; gap: calc(var(--t) * 8); }
+.canvas-safe { position: absolute; z-index: 1; inset: calc(var(--safe) * var(--u)); display: flex; flex-direction: column; justify-content: space-between; gap: calc(var(--t) * 8); }
 .canvas-safe--row { flex-direction: row; align-items: center; }
 .canvas-safe--row .canvas-button { align-self: center; }
 .canvas-eyebrow { font-size: calc(var(--t) * 10); font-weight: 800; letter-spacing: 0.16em; text-transform: uppercase; color: var(--color-accent); }
-.canvas--ink .canvas-eyebrow { color: var(--color-accent-soft); }
-.canvas-display { margin: 0; font-family: var(--font-serif); font-size: calc(var(--t) * 28); font-weight: 500; letter-spacing: -0.02em; line-height: 1.05; text-wrap: balance; }
+.canvas--accent .canvas-eyebrow, .canvas--ink .canvas-eyebrow, .canvas--bold .canvas-eyebrow, .canvas--photo .canvas-eyebrow { color: var(--canvas-ink); }
+.canvas-display { margin: 0; font-family: var(--font-display, var(--font-serif)); font-size: calc(var(--t) * 28); font-weight: var(--font-display-weight, 500); letter-spacing: var(--type-display-tracking, -0.02em); text-transform: var(--type-display-case, none); line-height: var(--type-display-leading, 1.05); text-wrap: balance; }
 .canvas-display em { font-style: italic; color: var(--color-accent); }
-.canvas--ink .canvas-display em { color: var(--color-accent-soft); }
-.canvas-body { margin: 0; font-size: calc(var(--t) * 12); color: var(--color-muted); }
-.canvas--ink .canvas-body { color: var(--color-line); }
-.canvas-rule { width: calc(var(--t) * 40); height: calc(var(--t) * 2); background: var(--color-accent); }
-.canvas-mark { font-family: var(--font-serif); font-size: calc(var(--t) * 14); font-weight: 700; }
-.canvas-button { display: inline-block; align-self: start; padding: calc(var(--t) * 6) calc(var(--t) * 14); border-radius: calc(var(--t) * 3); background: var(--color-accent); color: var(--color-surface); font-size: calc(var(--t) * 11); font-weight: 700; }
-.canvas--ink .canvas-button { background: var(--color-surface); color: var(--color-ink); }
-.canvas-foot { display: flex; justify-content: space-between; gap: calc(var(--t) * 8); font-size: calc(var(--t) * 8); color: var(--color-muted); }
+.canvas--accent .canvas-display em, .canvas--ink .canvas-display em, .canvas--bold .canvas-display em, .canvas--photo .canvas-display em { color: var(--canvas-ink); }
+.canvas-body { margin: 0; font-size: calc(var(--t) * 12); color: var(--canvas-secondary); }
+.canvas-rule { width: calc(var(--t) * 40); height: calc(var(--t) * 2); background: var(--canvas-detail); }
+.canvas-mark { font-family: var(--font-display, var(--font-serif)); font-size: calc(var(--t) * 14); font-weight: 700; }
+.canvas-button { display: inline-block; align-self: start; padding: calc(var(--t) * 6) calc(var(--t) * 14); border-radius: calc(var(--t) * 3); background: var(--canvas-button-ground); color: var(--canvas-button-ink); font-size: calc(var(--t) * 11); font-weight: 700; }
+.canvas-foot { display: flex; justify-content: space-between; gap: calc(var(--t) * 8); font-size: calc(var(--t) * 8); color: var(--canvas-secondary); }
+
+/* Logo alternatives are paired images; data-on-dark identifies the variant.
+   Accent uses data-logo="auto": the viewer chooses from the computed ink.
+   Before enhancement the primary sits on a surface plate; an explicit
+   data-logo="dark" or "light" remains a supported authored choice. */
+.canvas .canvas-logo { width: auto; max-width: 45%; height: calc(var(--t) * 24); object-fit: contain; object-position: left center; }
+.canvas .canvas-logo[data-on-dark] { display: none; }
+.canvas--accent[data-logo="auto"] .canvas-logo:not([data-on-dark]) { background: var(--color-surface); padding: calc(var(--t) * 4); }
+:is(.canvas--ink, .canvas--bold, .canvas--photo, .canvas--accent[data-logo="dark"]):has(.canvas-logo[data-on-dark][src]:not([src=""])) .canvas-logo:not([data-on-dark]) { display: none; }
+:is(.canvas--ink, .canvas--bold, .canvas--photo, .canvas--accent[data-logo="dark"]) .canvas-logo[data-on-dark][src]:not([src=""]) { display: block; }
+:is(.canvas--ink, .canvas--bold, .canvas--photo, .canvas--accent[data-logo="dark"]):not(:has(.canvas-logo[data-on-dark][src]:not([src=""]))) .canvas-logo { background: var(--color-surface); padding: calc(var(--t) * 4); }
+.canvas .canvas-photo { width: 100%; max-width: 100%; height: 40%; object-fit: cover; object-position: var(--focal-position, 50% 50%); border-radius: var(--radius-media, var(--radius-md)); }
+.canvas .canvas-photo--background { position: absolute; inset: 0; z-index: -1; height: 100%; border-radius: 0; }
+.canvas .canvas-logo:not([src]), .canvas .canvas-logo[src=""], .canvas-photo:not([src]), .canvas-photo[src=""] { display: none; }
+.canvas-badge { align-self: start; display: inline-flex; padding: calc(var(--t) * 3) calc(var(--t) * 7); border-radius: var(--radius-control, var(--radius-sm)); background: var(--color-accent-soft); color: var(--color-ink); font-size: calc(var(--t) * 9); font-weight: var(--font-body-weight, 400); }
+.canvas-count { font-family: var(--font-mono); font-size: calc(var(--t) * 9); color: var(--canvas-ink); font-variant-numeric: tabular-nums; }
 
 /* ---- guides: the safe area dashed, platform bands and keep-clear regions
    hatched, shown while the block's "Show guides" box is checked ---- */
