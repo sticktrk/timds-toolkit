@@ -176,13 +176,24 @@ test('a failed brand-kit sync restores its pages, shared modules and record toge
 
 test('structure shoots preserve the selected brand-kit starter and its explicitly declared source', async t => {
   const { root, directory, read } = await fixture(t);
+  await fs.mkdir(path.join(root, 'src/designs/parent-only/pages'), { recursive: true });
+  await fs.writeFile(path.join(root, 'src/designs/parent-only/design.json'), json({ title: 'Parent design' }));
+  await fs.writeFile(path.join(root, 'src/designs/parent-only/pages/index.html'), '<h1>A parent-owned page</h1>\n');
+  git(root, 'add', '--all'); git(root, 'commit', '-qm', 'Authored parent design');
   const source = await loadOffshootSource(root, { sourceId: '11111111-1111-4111-8111-111111111111' });
+  assert.ok(source.files.some(file => file.path === 'src/designs/parent-only/pages/index.html'));
   const child = path.join(directory, 'child');
-  await quiet(() => shootOffshoot({ destination: child, source, mode: 'structure', systemId: 'example/child', check: checkWorkspace }));
+  let checked;
+  await quiet(() => shootOffshoot({ destination: child, source, mode: 'structure', systemId: 'example/child', check: async target => { checked = await checkWorkspace(target); } }));
   assert.equal((await readStarterRecord(child)).starter, 'brand-kit');
   for (const relative of brandKitStockPaths) assert.equal(await fs.readFile(path.join(child, relative), 'utf8'), await read(relative), relative);
   assert.equal(await fs.readFile(path.join(child, 'scripts/brand-kit.mjs'), 'utf8'), await read('scripts/brand-kit.mjs'));
   await assert.rejects(fs.access(path.join(child, 'src/pages/brand/evidence.html')), { code: 'ENOENT' });
+  await assert.rejects(fs.access(path.join(child, 'src/designs')), { code: 'ENOENT' });
+  assert.deepEqual(checked.designs, { enabled: true, designCount: 0, pageCount: 0, stateCount: 0, journeyCount: 0, warnings: [] });
+  assert.match(await fs.readFile(path.join(child, 'dist/index.html'), 'utf8'), /href="\/designs\/"/);
+  assert.match(await fs.readFile(path.join(child, 'dist/designs/index.html'), 'utf8'), /No website designs yet/);
+  await assert.rejects(fs.access(path.join(child, 'dist/designs/parent-only')), { code: 'ENOENT' });
 });
 
 test('an old record without a starter kind continues to select the original scaffold', async t => {

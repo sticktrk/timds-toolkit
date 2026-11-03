@@ -522,12 +522,17 @@ function renderDirectory({ name, basePrefix, designs, stylesheets }) {
 
 /**
  * Render every design in memory. Returns null when the system has no designs
- * directory. `files` maps artifact-relative output paths to HTML and CSS, the
- * directory page and its stylesheet included.
+ * directory, except a brand kit keeps its empty directory page after a
+ * structure offshoot omits authored design source. `files` maps artifact-relative
+ * output paths to HTML and CSS, the directory page and its stylesheet included.
  */
 export async function renderDesigns({ designSystemRoot, manifest = null }) {
   const catalog = await readDesignCatalog(designSystemRoot);
-  if (!catalog.exists) return null;
+  if (!catalog.exists) {
+    const recordPath = path.join(designSystemRoot, ".timds/starter.json");
+    const starter = existsSync(recordPath) ? await readJson(recordPath, ".timds/starter.json") : null;
+    if (starter?.starter !== "brand-kit") return null;
+  }
   const resolved = await readManifestLike(designSystemRoot, manifest);
   const entryDirectory = path.posix.dirname(String(resolved.artifact?.entry || "index.html"));
   const prefixDirectory = entryDirectory === "." ? "" : entryDirectory;
@@ -604,8 +609,9 @@ export async function renderDesigns({ designSystemRoot, manifest = null }) {
 
 /**
  * Write the rendered designs into the built artifact. The previous designs
- * output is removed first so a renamed route leaves nothing behind. A system
- * without a designs directory writes nothing and reports zero.
+ * output is removed first so a renamed route leaves nothing behind. An ordinary
+ * system without a designs directory writes nothing and reports zero; a brand
+ * kit keeps its empty directory page without creating authored source.
  */
 export async function buildDesigns(designSystemRoot, { manifest = null } = {}) {
   const rendered = await renderDesigns({ designSystemRoot, manifest });
