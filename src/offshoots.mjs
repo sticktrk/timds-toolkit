@@ -8,14 +8,13 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { cleanPortalUrl, resolveAccessToken, savedPortalUrl } from './auth.mjs';
 import { createHostProvider } from './hosted.mjs';
-import { readParentRecord, validateParentRecord, validateStockRecord } from './offshoot-contract.mjs';
+import { isPlumbingPath, readParentRecord, validateParentRecord, validateStockRecord } from './offshoot-contract.mjs';
 import { readBlobs } from './git-blobs.mjs';
 
 const exec = promisify(execFile);
 const json = value => `${JSON.stringify(value, null, 2)}\n`;
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const MAX_FILE = 10 * 1024 * 1024, MAX_SOURCE = 50 * 1024 * 1024, MAX_FILES = 4000;
-const plumbingPath = file => /^(?:scripts\/[a-z0-9.-]+\.mjs|src\/styles\/(?:viewer|canvas)\.css)$/.test(file);
 const encode = (file, bytes, mode = '100644') => ({path: file, mode, encoding: 'base64', content: Buffer.from(bytes).toString('base64')});
 
 function sourcePath(file) {
@@ -23,19 +22,17 @@ function sourcePath(file) {
   return file;
 }
 
-/** Decode and bound untrusted host exports before using any of their paths. */
-export function decodeOffshootSource(source) {
-  if (!source || !Array.isArray(source.files) || source.files.length > MAX_FILES) throw new Error('Invalid offshoot source snapshot');
-  const files = new Map(), portable = new Set();
+/** Validate native snapshots as well as decoded exports before using paths. */
+function validateSourceFiles(files) {
+  if (!(files instanceof Map) || files.size > MAX_FILES) throw new Error('Invalid offshoot source snapshot');
+  const portable = new Set();
   let total = 0;
-  for (const file of source.files) {
-    const name = sourcePath(file.path), folded = name.normalize('NFC').toLowerCase();
-    if (portable.has(folded) || file.encoding !== 'base64' || typeof file.content !== 'string' || file.content.length > Math.ceil(MAX_FILE / 3) * 4 || !['100644', '100755', '120000'].includes(file.mode)) throw new Error(`Invalid or colliding offshoot source file: ${name}`);
-    const bytes = Buffer.from(file.content, 'base64');
+  for (const [file, bytes] of files) {
+    const name = sourcePath(file), folded = name.normalize('NFC').toLowerCase();
+    if (portable.has(folded) || !Buffer.isBuffer(bytes) || !['100644', '100755', '120000'].includes(bytes.mode)) throw new Error(`Invalid or colliding offshoot source file: ${name}`);
     total += bytes.length;
-    if (bytes.toString('base64') !== file.content || bytes.length > MAX_FILE || total > MAX_SOURCE) throw new Error('Offshoot source exceeds file limits or has invalid encoding');
-    bytes.mode = file.mode;
-    portable.add(folded); files.set(name, bytes);
+    if (bytes.length > MAX_FILE || total > MAX_SOURCE) throw new Error('Offshoot source exceeds file limits');
+    portable.add(folded);
   }
   for (const [name, bytes] of files) {
     const segments = name.split('/');
@@ -57,6 +54,26 @@ export function decodeOffshootSource(source) {
   return files;
 }
 
+/** Decode public wire snapshots once; internal Maps still receive all guards. */
+export function decodeOffshootSource(source) {
+  if (source?.files instanceof Map) return validateSourceFiles(source.files);
+  if (!source || !Array.isArray(source.files) || source.files.length > MAX_FILES) throw new Error('Invalid offshoot source snapshot');
+  const files = new Map();
+  let total = 0;
+  for (const file of source.files) {
+    const name = sourcePath(file.path);
+    if (files.has(name) || file.encoding !== 'base64' || typeof file.content !== 'string' || file.content.length > Math.ceil(MAX_FILE / 3) * 4) throw new Error(`Invalid or colliding offshoot source file: ${name}`);
+    const bytes = Buffer.from(file.content, 'base64');
+    total += bytes.length;
+    if (bytes.toString('base64') !== file.content || bytes.length > MAX_FILE || total > MAX_SOURCE) throw new Error('Offshoot source exceeds file limits or has invalid encoding');
+    bytes.mode = file.mode;
+    files.set(name, bytes);
+  }
+  return validateSourceFiles(files);
+}
+
+const encodedFiles = files => [...files].map(([file, bytes]) => encode(file, bytes, bytes.mode));
+
 function parse(files, file, required = true) {
   const bytes = files.get(file);
   if (!bytes) { if (!required) return null; throw new Error(`Offshoot source requires ${file}`); }
@@ -77,14 +94,15 @@ function placeholderTokens(tokens) {
 const neutralLayout = '<!doctype html>\n<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{{title}} · {{name}}</title><link rel="stylesheet" href="/tokens.css"><link rel="stylesheet" href="/styles/system.css"><link rel="stylesheet" href="/styles/viewer.css"></head><body><header><a href="/">{{name}}</a><nav>{{views}}</nav></header><nav>{{sidenav}}</nav><main>{{content}}{{pagenav}}</main></body></html>\n';
 
 /** Pure transform, keeping full and structure creation testable without a host. */
-export async function transformOffshoot(source, {mode = 'full', systemId, name} = {}) {
+async function transformDecodedOffshoot(source, {mode = 'full', systemId, name} = {}) {
   if (!['full', 'structure'].includes(mode)) throw new Error('Offshoot mode must be full or structure');
   if (typeof systemId !== 'string' || !/^[a-z0-9][a-z0-9._-]*(?:\/[a-z0-9][a-z0-9._-]*)*$/.test(systemId) || systemId.length > 160 || systemId === source.parent?.systemId) throw new Error('Choose a new, lowercase URL-safe --system-id of at most 160 characters for the offshoot');
   if (name !== undefined && (typeof name !== 'string' || !name.trim() || name.length > 200)) throw new Error('Offshoot name must be between 1 and 200 characters');
   const original = decodeOffshootSource(source), manifest = parse(original, 'timds.json');
   const site = parse(original, 'src/site.json'), formats = parse(original, 'src/formats.json', false);
   const baseline = {site: mode === 'structure' ? structureSite(site) : site, formats};
-  const parent = validateParentRecord({schemaVersion: 1, ...source.parent, mode, baseline});
+  const {systemId: parentId, sourceId, version, commit} = source.parent || {};
+  const parent = validateParentRecord({schemaVersion: 1, systemId: parentId, sourceId, version, commit, mode, baseline});
   if (manifest.systemId !== parent.systemId || manifest.version !== parent.version) throw new Error('The parent source identity or version disagrees with its release');
   const stock = parse(original, '.timds/stock.json', false);
   if (stock) {
@@ -98,7 +116,7 @@ export async function transformOffshoot(source, {mode = 'full', systemId, name} 
     if (starter.schemaVersion !== 1 || starter.plumbing !== 'toolkit' || !starter.files || typeof starter.files !== 'object' || Array.isArray(starter.files)) throw new Error('Structure offshoots require recorded toolkit plumbing');
     result = new Map();
     for (const [file, digest] of Object.entries(starter.files)) {
-      if (!plumbingPath(file)) continue;
+      if (!isPlumbingPath(file)) continue;
       const bytes = original.get(file);
       if (!bytes || bytes.mode === '120000' || sha256(bytes) !== digest) throw new Error(`The parent has customized toolkit plumbing: ${file}`);
       result.set(file, bytes);
@@ -118,7 +136,9 @@ export async function transformOffshoot(source, {mode = 'full', systemId, name} 
     if (!result.has('src/pages/index.html')) set('src/pages/index.html', '<h1>{{name}}</h1><p>Design System structure. Author the planned pages and replace placeholder tokens.</p>\n{{sitemap}}\n');
     set('media.json', '{"schemaVersion":2,"assets":[]}\n'); set('media/assets.json', '{}\n');
     set('CHANGELOG.md', `# Changelog\n\n## Unreleased\n\n## ${manifest.version}\n\n- Initial structure.\n`);
-    set('.timds/starter.json', json({...starter, baseline: {site: planned, formats}}));
+    // The toolkit and parent feed have independent three-way merge baselines.
+    // Retain the toolkit baseline so severing cannot adopt parent edits as stock.
+    set('.timds/starter.json', original.get('.timds/starter.json'));
     set('timds.json', json({schemaVersion: manifest.schemaVersion, systemId, name: name || `${manifest.name} offshoot`, description: 'Design System structure with placeholder foundations.', version: manifest.version, artifact: manifest.artifact, workspace: {dev: ['node', 'scripts/dev.mjs'], build: ['node', 'scripts/build.mjs'], check: ['node', 'scripts/check.mjs']}, bundle: {include: ['dist/tokens.css', 'dist/styles/system.css']}, brand: {roles: manifest.brand?.roles || {}}}));
   }
   const current = parse(result, 'timds.json');
@@ -127,7 +147,8 @@ export async function transformOffshoot(source, {mode = 'full', systemId, name} 
   set('timds.json', json(current));
   const packageName = systemId.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '');
   for (const file of ['package.json', 'package-lock.json']) {
-    const pkg = parse(result, file);
+    const pkg = parse(result, file, file !== 'package-lock.json');
+    if (!pkg) continue;
     pkg.name = packageName; if (file === 'package-lock.json' && pkg.packages?.['']) pkg.packages[''].name = packageName;
     if (mode === 'structure' && file === 'package.json') {
       for (const key of Object.keys(pkg)) if (!['name', 'version', 'type', 'private', 'dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies', 'peerDependenciesMeta', 'overrides', 'engines'].includes(key)) delete pkg[key];
@@ -137,15 +158,19 @@ export async function transformOffshoot(source, {mode = 'full', systemId, name} 
   }
   if (result.has('cloudflare.config.ts')) set('cloudflare.config.ts', result.get('cloudflare.config.ts').toString('utf8').replace(/name\s*:\s*["'][^"']+["']/, `name:${JSON.stringify(packageName)}`));
   set('.timds/parent.json', json(parent));
-  const files = [...result].map(([file, bytes]) => encode(file, bytes, bytes.mode));
-  decodeOffshootSource({files});
-  return {parent, files};
+  return {parent, files: validateSourceFiles(result)};
+}
+
+/** Public transforms retain the wire export shape; creation keeps native bytes. */
+export async function transformOffshoot(source, options = {}) {
+  const result = await transformDecodedOffshoot(source, options);
+  return {...result, files: encodedFiles(result.files)};
 }
 
 /** Read exact Git bytes; a dirty worktree cannot change the chosen parent. */
 async function localSource(directory, options) {
   const git = async args => (await exec('git', ['-C', directory, ...args], {encoding: 'buffer', maxBuffer: MAX_SOURCE * 2})).stdout;
-  const commit = (await git(['rev-parse', '--verify', `${options.ref || 'HEAD'}^{commit}`])).toString().trim();
+  const commit = (await git(['rev-parse', '--verify', '--end-of-options', `${options.ref || 'HEAD'}^{commit}`])).toString().trim();
   const tree = (await git(['ls-tree', '-rzl', '--full-tree', commit])).toString('utf8').split('\0').filter(Boolean);
   if (tree.length > MAX_FILES) throw new Error('Offshoot source has too many files');
   const records = []; let total = 0;
@@ -160,32 +185,35 @@ async function localSource(directory, options) {
     records.push({file, hash, mode, size});
   }
   const blobs = readBlobs(directory, records.map(record => record.hash), {maxBytes: MAX_SOURCE, maxBlobBytes: MAX_FILE});
-  const files = records.map(({file, hash, mode, size}) => {
-    const bytes = blobs.get(hash);
-    if (!bytes || bytes.length !== size) throw new Error(`Offshoot source blob disagrees with its tree: ${file}`);
-    return encode(file, bytes, mode);
-  });
+  const files = new Map(records.map(({file, hash, mode, size}) => {
+    const blob = blobs.get(hash);
+    if (!blob || blob.length !== size) throw new Error(`Offshoot source blob disagrees with its tree: ${file}`);
+    const bytes = Buffer.from(blob); bytes.mode = mode;
+    return [file, bytes];
+  }));
   const manifest = parse(decodeOffshootSource({files}), 'timds.json');
   if (options.version && options.version !== 'latest' && options.version !== manifest.version) throw new Error('The local Git revision does not declare the requested version; select it with --ref');
   if (!options.sourceId && !manifest.sourceId) throw new Error('A local parent needs --source-id UUID (the source identity); --ref selects its immutable Git revision');
   return {parent: {systemId: manifest.systemId, sourceId: options.sourceId || manifest.sourceId, version: manifest.version, commit}, files};
 }
 
-export async function loadOffshootSource(systemOrPath, options = {}) {
+/** CLI operations retain validated native bytes; public callers receive wire files. */
+export async function loadOffshootSource(systemOrPath, options = {}, {decoded = false} = {}) {
   if (typeof systemOrPath !== 'string' || !systemOrPath) throw new Error('Choose a parent system or local Git path');
   const local = options.local === true || path.isAbsolute(systemOrPath) || /^\.{1,2}(?:[\\/]|$)/.test(systemOrPath);
   if (local) {
     const directory = path.resolve(systemOrPath), info = await fs.stat(directory).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
     if (!info?.isDirectory()) throw new Error(`Local parent must be an existing Git directory: ${systemOrPath}`);
-    return localSource(directory, options);
+    const result = await localSource(directory, options);
+    return decoded ? result : {...result, files: encodedFiles(result.files)};
   }
   if (options.ref) throw new Error('--ref applies only to a local parent Git checkout');
   const portalUrl = cleanPortalUrl(options.portalUrl || await savedPortalUrl(options));
   const provider = createHostProvider({url: portalUrl, resolveToken: context => resolveAccessToken(portalUrl, {...options, ...context}), fetchImpl: options.fetchImpl});
   const source = await provider.releaseSource(systemOrPath, options.version || 'latest');
   if (source.parent?.systemId !== systemOrPath || (options.version && options.version !== 'latest' && source.parent?.version !== options.version)) throw new Error('The host returned a different parent release');
-  decodeOffshootSource(source);
-  return {parent: source.parent, files: source.files};
+  const files = decodeOffshootSource(source);
+  return {parent: source.parent, files: decoded ? files : source.files};
 }
 
 /** Create all files only after validation, and remove the new tree on failure. */
@@ -193,10 +221,10 @@ export async function shootOffshoot({destination, source, mode = 'full', systemI
   const target = path.resolve(destination);
   const existing = await fs.lstat(target).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
   if (existing && (!existing.isDirectory() || existing.isSymbolicLink() || (await fs.readdir(target)).length)) throw new Error('Shoot requires a new or empty --root destination');
-  const transformed = await transformOffshoot(source, {mode, systemId, name});
+  const transformed = await transformDecodedOffshoot(source, {mode, systemId, name});
   await fs.mkdir(target, {recursive: true});
   try {
-    for (const [file, bytes] of decodeOffshootSource(transformed)) {
+    for (const [file, bytes] of transformed.files) {
       const output = path.join(target, file);
       await fs.mkdir(path.dirname(output), {recursive: true});
       if (bytes.mode === '120000') await fs.symlink(bytes.toString('utf8'), output);
@@ -211,7 +239,7 @@ export async function shootOffshoot({destination, source, mode = 'full', systemI
     if (existing) await fs.mkdir(target);
     throw error;
   }
-  return {designSystemRoot: target, parent: transformed.parent, files: transformed.files.map(file => file.path)};
+  return {designSystemRoot: target, parent: transformed.parent, files: [...transformed.files.keys()]};
 }
 
 export async function severOffshoot(root, {confirmed = false} = {}) {

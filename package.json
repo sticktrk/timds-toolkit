@@ -122,6 +122,8 @@
     "src/contract-groups.mjs",
     "src/offshoots.mjs",
     "src/offshoot-contract.mjs",
+    "src/offshoot-contract.d.mts",
+    "src/clean-tree.mjs",
     "src/feed.mjs",
     "src/draft-source.mjs",
     "src/consumer-draft-preview.mjs",

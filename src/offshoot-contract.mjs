@@ -7,6 +7,10 @@ import { normalizeFormatCatalog } from './formats.mjs';
 
 export const PARENT_RECORD_FILE = '.timds/parent.json';
 export const STOCK_RECORD_FILE = '.timds/stock.json';
+// Boundary classifiers cover portable aliases; disk readers use canonical names.
+export const isLineagePath = value => typeof value === 'string' && value.toLowerCase() === PARENT_RECORD_FILE;
+export const isDesignerRecordPath = value => typeof value === 'string' && value.toLowerCase() === STOCK_RECORD_FILE;
+export const isPlumbingPath = value => typeof value === 'string' && /^(?:scripts\/[a-z0-9.-]+\.mjs|src\/styles\/(?:viewer|canvas)\.css)$/.test(value);
 const object = value => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const onlyKeys = (value, keys) => Object.keys(value).every(key => keys.includes(key));
 
@@ -54,15 +58,18 @@ export function parentLineage(record) {
   return { systemId, sourceId, version, commit, mode };
 }
 
-async function regularPath(root, relative, { optional = false } = {}) {
+/** Resolve an existing regular file, refusing links in its root or ancestors.
+ * Optional reads return null when a target or an ancestor does not exist. */
+export async function regularPath(root, relative, { optional = false } = {}) {
+  if (typeof relative !== 'string' || !relative || /[\x00-\x1f\x7f\\]/.test(relative) || path.posix.isAbsolute(relative) || /^[a-z]:/i.test(relative) || relative.split('/').some(part => !part || part === '.' || part === '..')) throw new Error('A regular file path must be relative without traversal');
   let current = root;
   const parts = relative.split('/');
-  for (const [index, part] of parts.entries()) {
-    current = path.join(current, part);
+  for (const [index, part] of ['', ...parts].entries()) {
+    if (part) current = path.join(current, part);
     let info;
     try { info = await fs.lstat(current); }
     catch (error) { if (optional && error.code === 'ENOENT') return null; throw error; }
-    if (info.isSymbolicLink() || (index === parts.length - 1 ? !info.isFile() : !info.isDirectory())) throw new Error(`${relative} must be an existing regular file without symbolic links`);
+    if (info.isSymbolicLink() || (index === parts.length ? !info.isFile() : !info.isDirectory())) throw new Error(`${relative} must be an existing regular file without symbolic links`);
   }
   return current;
 }

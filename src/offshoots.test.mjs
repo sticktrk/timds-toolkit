@@ -4,7 +4,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { checkWorkspace, initializeRepository, runCli, runWithOutputSink } from './core.mjs';
+import { checkWorkspace, initializeRepository, runCli, runWithOutputSink, syncStarterWorkspace } from './core.mjs';
 import { decodeOffshootSource, loadOffshootSource, severOffshoot, shootOffshoot, transformOffshoot } from './offshoots.mjs';
 import { packageRoot } from './executable.mjs';
 
@@ -69,6 +69,53 @@ test('shoot creates full and structure offshoots that pass a real workspace chec
   assert.match(await fs.readFile(path.join(skeleton, 'src/styles/system.css'), 'utf8'), /Replace placeholder tokens/);
 });
 
+test('structure keeps the toolkit baseline distinct from its parent feed through sever and sync', async t => {
+  const {root, directory} = await fixture(t);
+  const read = relative => fs.readFile(path.join(root, relative), 'utf8');
+  const starterText = await read('.timds/starter.json');
+  const site = JSON.parse(await read('src/site.json'));
+  site.views.find(view => view.id === 'brand').label = 'Parent foundations';
+  const formats = JSON.parse(await read('src/formats.json'));
+  formats.print.formats.letterhead.name = 'Parent correspondence';
+  await fs.writeFile(path.join(root, 'src/site.json'), json(site));
+  await fs.writeFile(path.join(root, 'src/formats.json'), json(formats));
+  git(root, 'add', '--all'); git(root, 'commit', '-qm', 'Parent catalog grafts');
+  const source = await loadOffshootSource(root, {sourceId});
+  const destination = path.join(directory, 'baseline-child');
+  const {parent} = await shootOffshoot({destination, source, mode: 'structure', systemId: 'example/baseline-child', check: checkWorkspace});
+  assert.equal(await fs.readFile(path.join(destination, '.timds/starter.json'), 'utf8'), starterText);
+  assert.equal(parent.baseline.site.views.find(view => view.id === 'brand').label, 'Parent foundations');
+  await severOffshoot(destination, {confirmed: true});
+  git(destination, 'config', 'user.name', 'Test'); git(destination, 'config', 'user.email', 'test@example.com');
+  git(destination, 'add', '--all'); git(destination, 'commit', '-qm', 'Independent child');
+  await runWithOutputSink(() => {}, () => syncStarterWorkspace(destination));
+  const childSite = JSON.parse(await fs.readFile(path.join(destination, 'src/site.json'), 'utf8'));
+  const childFormats = JSON.parse(await fs.readFile(path.join(destination, 'src/formats.json'), 'utf8'));
+  assert.equal(childSite.views.find(view => view.id === 'brand').label, 'Parent foundations');
+  assert.equal(childFormats.print.formats.letterhead.name, 'Parent correspondence');
+});
+
+test('stock full and structure offshoots do not require a package lockfile', async t => {
+  const {directory, source} = await fixture(t);
+  source.files = source.files.filter(file => file.path !== 'package-lock.json');
+  for (const mode of ['full', 'structure']) {
+    const destination = path.join(directory, `unlocked-${mode}`);
+    await shootOffshoot({destination, source, mode, systemId: `example/unlocked-${mode}`, check: checkWorkspace});
+    assert.equal(JSON.parse(await fs.readFile(path.join(destination, 'package.json'), 'utf8')).name, `example-unlocked-${mode}`);
+    await assert.rejects(fs.access(path.join(destination, 'package-lock.json')), {code: 'ENOENT'});
+  }
+});
+
+test('shoot selects only parent lineage fields from extensible host export metadata', async t => {
+  const {source} = await fixture(t);
+  source.parent = {...source.parent, schemaVersion: 17, mode: 'export', baseline: {private: true}, exportedAt: '2026-11-03T00:00:00Z'};
+  const transformed = await transformOffshoot(source, {systemId: 'example/export-child'});
+  assert.deepEqual(Object.keys(transformed.parent), ['schemaVersion', 'systemId', 'sourceId', 'version', 'commit', 'mode', 'baseline']);
+  assert.equal(transformed.parent.schemaVersion, 1);
+  assert.equal(transformed.parent.mode, 'full');
+  assert.equal(transformed.parent.commit, source.parent.commit);
+});
+
 test('local source is pinned to Git bytes and requires a truthful source identity and version', async t => {
   const {root, source} = await fixture(t);
   await fs.writeFile(path.join(root, 'src/pages/brand/color.html'), 'Uncommitted change');
@@ -128,6 +175,58 @@ test('local source batches Git blob reads while retaining binary bytes, executab
   assert.equal(files.get('assets/link.bin').toString(), '0.bin');
   assert.equal((calls.match(/built-in: git cat-file --batch/g) || []).length, 1);
   assert.doesNotMatch(calls, /cat-file (?:blob|-s)\b/);
+});
+
+test('decoded creation keeps Git and host bytes native across load, transform and write', async t => {
+  const {root, directory, source} = await fixture(t);
+  const from = Buffer.from, stringify = Buffer.prototype.toString;
+  let decodes = 0, encodes = 0;
+  t.mock.method(Buffer, 'from', function(value, encoding, ...args) {
+    if (encoding === 'base64') decodes++;
+    return from(value, encoding, ...args);
+  });
+  t.mock.method(Buffer.prototype, 'toString', function(encoding, ...args) {
+    if (encoding === 'base64') encodes++;
+    return stringify.call(this, encoding, ...args);
+  });
+  const local = await loadOffshootSource(root, {sourceId}, {decoded: true});
+  assert.ok(local.files instanceof Map);
+  const result = await shootOffshoot({destination: path.join(directory, 'native-local'), source: local, systemId: 'example/native-local'});
+  assert.deepEqual(result.files, [...local.files.keys(), '.timds/parent.json']);
+  assert.equal(decodes, 0);
+  assert.equal(encodes, 0);
+  const hosted = await loadOffshootSource('example/core', {portalUrl: 'https://host.example', token: 'timds_test', fetchImpl: async () => new Response(json({apiVersion: 1, ...source}))}, {decoded: true});
+  await shootOffshoot({destination: path.join(directory, 'native-hosted'), source: hosted, systemId: 'example/native-hosted'});
+  assert.equal(decodes, source.files.length, 'each wire file is decoded exactly once');
+  assert.equal(encodes, source.files.length, 'only canonical base64 input validation re-encodes wire files');
+});
+
+test('native snapshots and caller-mutated wire snapshots retain source validation guards', async t => {
+  const {root, directory, source} = await fixture(t);
+  const native = await loadOffshootSource(root, {sourceId}, {decoded: true});
+  const file = (content, mode = '100644') => Object.assign(Buffer.from(content), {mode});
+  for (const [name, bytes] of [
+    ['../escape', file('')],
+    ['src/link', file('../../outside', '120000')],
+    ['src/missing-link', file('missing', '120000')],
+    ['src/bad-mode', file('', '100600')],
+    ['src/oversize', file(Buffer.alloc(10 * 1024 * 1024 + 1))],
+    ['TIMDS.JSON', file('{}')],
+  ]) {
+    const destination = path.join(directory, 'invalid-native');
+    await assert.rejects(shootOffshoot({destination, source: {...native, files: new Map([...native.files, [name, bytes]])}, systemId: 'example/invalid-native'}), /Unsafe|Missing|Invalid|colliding|limits/);
+    await assert.rejects(fs.access(destination), {code: 'ENOENT'});
+  }
+  source.files.push({path: '../escape', mode: '100644', encoding: 'base64', content: ''});
+  await assert.rejects(shootOffshoot({destination: path.join(directory, 'invalid-wire'), source, systemId: 'example/invalid-wire'}), /Unsafe/);
+});
+
+test('local source treats option-shaped revisions as refs and ends Git option parsing', async t => {
+  const {root, directory} = await fixture(t);
+  const trace = path.join(directory, 'ref-trace');
+  const script = `const {loadOffshootSource}=await import(process.argv[1]); try {await loadOffshootSource(process.argv[2], {sourceId:process.argv[3], ref:'--help'});} catch {process.exitCode=7;}`;
+  assert.throws(() => execFileSync(process.execPath, ['--input-type=module', '-e', script, new URL('./offshoots.mjs', import.meta.url).href, root, sourceId], {encoding: 'utf8', env: {...process.env, GIT_TRACE: trace}, stdio: 'pipe'}), error => error.status === 7);
+  assert.match(await fs.readFile(trace, 'utf8'), /git rev-parse --verify --end-of-options \S*--help/);
 });
 
 test('local source rejects oversize blobs and aggregate snapshots before reading their bytes', async t => {

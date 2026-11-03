@@ -26,6 +26,7 @@ import {
 import { readDerivedLayer, summarizeBrandKit } from "./derived.mjs";
 import { readMediaCatalog } from "./media.mjs";
 import { runHostedCommand, sessionIgnoredMatcher } from "./hosted.mjs";
+import { isDesignerRecordPath, isLineagePath } from "./offshoot-contract.mjs";
 
 export const DESIGN_SYSTEM_MCP_SERVER_NAME = "timds-design-system";
 export const EDITING_GUIDE_URI = "timds://guide";
@@ -267,11 +268,11 @@ function designSystemRelative(workspace, repoRelative) {
 
 function protectedByPattern(workspace, dsRelative) {
   if (!dsRelative) return true; // the Design System root itself is not a file
-  if (dsRelative.toLowerCase() === '.timds/parent.json') return true;
+  if (isLineagePath(dsRelative)) return true;
   const segments = dsRelative.split("/");
   if (segments.some((segment) => PROTECTED_SEGMENTS.has(segment))) return true;
   if (PROTECTED_BASENAMES.has(segments.at(-1))) return true;
-  if (PROTECTED_DIRECTORIES.includes(segments[0]) && dsRelative !== '.timds/stock.json') return true;
+  if (PROTECTED_DIRECTORIES.includes(segments[0].toLowerCase()) && !isDesignerRecordPath(dsRelative)) return true;
   if (workspace.contractGroups && ["tokens.json", "media.json"].includes(dsRelative)) return true;
   if (PROTECTED_FILES.includes(dsRelative) || RELEASE_AUTOMATION_FILES.includes(dsRelative)) return true;
   const videoLocal = videoLocalDirectory(workspace);
