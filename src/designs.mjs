@@ -514,7 +514,7 @@ function renderDirectory({ name, basePrefix, designs, stylesheets }) {
       "        <h1>Website designs</h1>",
       '        <p class="td-directory-lede">Browse complete page designs built with this system. Open a page to explore its layout and interactions, or choose an alternate state.</p>',
       '      </div>',
-      ...(sections.length ? sections : ['      <p class="td-directory-empty">No website designs yet.</p>']),
+      ...(sections.length ? sections : ['      <p class="td-directory-empty">No website designs yet. A designer’s agent authors whole pages for this system on its components.</p>']),
       "    </main>",
     ],
   });

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="{{description}}">
+    <title>{{title}} · {{name}}</title>
+    <link rel="stylesheet" href="/tokens.css">
+    <link rel="stylesheet" href="/styles/system.css">
+    <link rel="stylesheet" href="/styles/canvas.css">
+    <link rel="stylesheet" href="/styles/viewer.css">
+  </head>
+  <body class="brand-kit">
+    <a class="skip-link" href="#content">Skip to content</a>
+    <header class="appbar">
+      <a class="appbar__brand" href="/">{{name}}</a>
+      <nav class="appbar__views" aria-label="Views">
+        {{views}}
+      </nav>
+      <a class="appbar__version" href="/changelog/" title="Changelog">v{{version}}</a>
+    </header>
+
+    <div class="layout">
+      <nav class="sidenav" aria-label="Pages">
+        {{sidenav}}
+      </nav>
+      <main id="content" class="content">
+        {{content}}
+        {{pagenav}}
+      </main>
+    </div>
+
+    <footer class="colophon">Stock samples are assumed. Review the Evidence page and confirm foundations before publication.</footer>
+  </body>
+</html>
