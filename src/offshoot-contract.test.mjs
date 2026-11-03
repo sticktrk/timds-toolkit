@@ -23,8 +23,8 @@ test('record paths classify portable aliases and plumbing has one shared grammar
   for (const file of ['.timds/stock.json', '.TIMDS/stock.json', '.timds/STOCK.JSON']) assert.equal(isDesignerRecordPath(file), true, file);
   for (const file of [null, '.timds/parent.json/child', 'src/.timds/parent.json', '.timds/stock.json']) assert.equal(isLineagePath(file), false, String(file));
   for (const file of [null, '.timds/stock.json/child', '.timds/parent.json']) assert.equal(isDesignerRecordPath(file), false, String(file));
-  for (const file of ['scripts/build.mjs', 'scripts/custom-engine.mjs', 'src/styles/viewer.css', 'src/styles/canvas.css']) assert.equal(isPlumbingPath(file), true, file);
-  for (const file of [null, 'scripts/../build.mjs', 'scripts/nested/build.mjs', 'src/styles/system.css', 'src/layout.html']) assert.equal(isPlumbingPath(file), false, String(file));
+  for (const file of ['scripts/build.mjs', 'scripts/custom-engine.mjs', 'src/scripts/compose.js', 'src/styles/viewer.css', 'src/styles/canvas.css']) assert.equal(isPlumbingPath(file), true, file);
+  for (const file of [null, 'scripts/../build.mjs', 'scripts/nested/build.mjs', 'src/scripts/custom.js', 'src/scripts/nested/compose.js', 'src/scripts/../compose.js', 'src/styles/system.css', 'src/layout.html']) assert.equal(isPlumbingPath(file), false, String(file));
 });
 
 test('shared regular-file resolution checks the root and ancestors before optional writes', async t => {
@@ -101,15 +101,19 @@ test('parent baselines preserve custom-renderer catalogs without imposing starte
 
 test('stock declarations name exact existing allowed regular source files', async t => {
   const directory = await root(t);
-  const paths = ['src/pages/brand/index.html', 'src/styles/system.css', 'src/layout.html'];
+  const paths = ['src/pages/brand/index.html', 'src/styles/system.css', 'src/layout.html', 'src/copy.json'];
   for (const file of paths) await write(directory, file, 'source');
   const record = { schemaVersion: 1, paths };
   assert.equal(await validateStockRecord(record, directory), record);
   await write(directory, '.timds/stock.json', json(record));
   assert.deepEqual(await readStockRecord(directory), record);
-  for (const file of ['src/pages/**/*.html', 'src/pages/../secret.html', 'src/pages//index.html', 'src/designs/page.html', 'src/assets/image.png', 'timds.json', 'src/styles/missing.css']) await assert.rejects(validateStockRecord({ schemaVersion: 1, paths: [file] }, directory), /stock.json/);
+  for (const file of ['src/pages/**/*.html', 'src/pages/../secret.html', 'src/pages//index.html', 'src/designs/page.html', 'src/assets/image.png', 'timds.json', 'src/styles/missing.css', 'src/copy-extra.json', 'src/nested/copy.json', 'src/copy.json/child', 'src/../copy.json', 'src/*.json']) await assert.rejects(validateStockRecord({ schemaVersion: 1, paths: [file] }, directory), /stock.json/);
   await assert.rejects(validateStockRecord({ schemaVersion: 1, paths: [...paths, paths[0]] }, directory), /unique exact/);
   await assert.rejects(validateStockRecord({ schemaVersion: 1, paths, automatic: true }, directory), /schemaVersion 1/);
+  await fs.rm(path.join(directory, 'src/copy.json'));
+  await assert.rejects(validateStockRecord({ schemaVersion: 1, paths: ['src/copy.json'] }, directory), /missing file/);
+  await fs.symlink(path.join(directory, 'src/layout.html'), path.join(directory, 'src/copy.json'));
+  await assert.rejects(validateStockRecord({ schemaVersion: 1, paths: ['src/copy.json'] }, directory), /regular file/);
   await fs.symlink(path.join(directory, 'src/styles/system.css'), path.join(directory, 'src/styles/link.css'));
   await assert.rejects(validateStockRecord({ schemaVersion: 1, paths: ['src/styles/link.css'] }, directory), /regular file/);
   await fs.symlink(path.join(directory, 'src/pages/brand'), path.join(directory, 'src/pages/linked'));

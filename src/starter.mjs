@@ -5,8 +5,8 @@
 // The starter has two layers, and the line between them is recorded in
 // .timds/starter.json rather than guessed:
 //
-// - Plumbing: the viewer, build, dev, and check scripts, and the viewer and
-//   canvas stylesheets. Who owns a local change to them is the record's
+// - Plumbing: the viewer, build, dev, check, and browser composer scripts,
+//   and the viewer and canvas stylesheets. Who owns a local change to them is the record's
 //   `plumbing` mode. A system scaffolded by `init` is `"toolkit"`: the
 //   plumbing is the toolkit's outright, so every sync brings it to stock,
 //   replacing a local change and saying so, without halting and without
@@ -73,6 +73,7 @@ export const starterPlumbingFiles = Object.freeze([
   ["scripts/check.mjs", "starter/scripts/check.mjs"],
   ["scripts/dev.mjs", "starter/scripts/dev.mjs"],
   ["scripts/viewer.mjs", "starter/scripts/viewer.mjs"],
+  ["src/scripts/compose.js", "starter/src/scripts/compose.js"],
   ["src/styles/canvas.css", "starter/src/styles/canvas.css"],
   ["src/styles/viewer.css", "starter/src/styles/viewer.css"],
 ]);
@@ -238,6 +239,9 @@ export function mergeSiteModel(current, next, baselines, { fragmentExists = () =
   const site = isObject(current) ? structuredClone(current) : {};
   if (!Array.isArray(site.views)) site.views = [];
   const changes = { addedPages: [], addedViews: [], advanced: [], kept: [] };
+  // The front page (`home`) advances like a label: a client that never set one takes the stock view, one that chose its own keeps it.
+  const hadHome = site.home !== undefined;
+  if (next.home !== undefined || hadHome) advanceOrKeep(changes, site, "home", next.home, baselines, "home");
   const plannedCopy = (view, page) => {
     const copy = structuredClone(page);
     const id = pageId(view, page.slug ?? "");
@@ -276,6 +280,8 @@ export function mergeSiteModel(current, next, baselines, { fragmentExists = () =
       }
     }
   }
+  // A home the sync added leads the file, as it does in the stock catalog; one the client placed stays where it is.
+  if (!hadHome && site.home !== undefined) return { changes, site: { home: site.home, ...Object.fromEntries(Object.entries(site).filter(([key]) => key !== "home")) } };
   return { changes, site };
 }
 
