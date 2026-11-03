@@ -73,11 +73,16 @@ Full copies every exported source layer, including authored content, before
 setting the new identity and immediate parent record. Local Git export refuses
 secrets, generated directories and submodules rather than importing them.
 
-Structure follows the host's transform revision 1:
+Structure retains verified plumbing and exact designer-declared stock. The host's
+matching transform revision is 2; its recorded revision 1 remains available for
+operations bound before composer and copy-file support:
 
 - `.timds/starter.json` must have `plumbing:"toolkit"` and hashes matching
   the parent's build, check, dev and viewer scripts. Only recorded
-  `scripts/*.mjs`, `src/styles/viewer.css` and `canvas.css` are plumbing.
+  `scripts/*.mjs`, `src/scripts/compose.js`, `src/styles/viewer.css` and
+  `canvas.css` are plumbing. The composer is copied only when its bytes match
+  the recorded hash, like the other plumbing; its Use page must be declared
+  as stock to remain authored in a structure offshoot.
 - Views retain IDs and labels; pages retain slugs, titles and groups. Pages
   without an explicitly included body are `planned:true`. Authored summaries,
   design references and other site metadata are omitted. Formats come whole.
@@ -112,10 +117,12 @@ A parent designer may author `.timds/stock.json` before publishing:
 ```
 
 Paths name exact existing regular `src/pages/**/*.html` or
-`src/styles/**/*.css` files, or `src/layout.html`. Globs, symbolic links,
+`src/styles/**/*.css` files, `src/layout.html`, or the one copy-data file
+`src/copy.json`. Globs, symbolic links,
 media, designs and configuration are refused. Check validates this declaration;
 the toolkit never infers whether authored content is safe to reuse. The
-declaration opts those bodies/styles into structure creation only. Included
+declaration opts those bodies, styles, and copy samples into structure creation
+only. The copy file stays authored afterwards, outside ordinary upgrades. Included
 pages must be self-contained: a link to an omitted design or asset fails the
 resulting workspace check. Feed never refreshes these authored files.
 

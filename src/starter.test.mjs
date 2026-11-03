@@ -97,6 +97,21 @@ test("mergeSiteModel appends what the client lacks, advances untouched stock fie
   assert.deepEqual([...declaredPageIds(site)], ["brand/logo", "brand/mascot", "video", "web/layout", "web/spacing", "web/email", "print", "print/letterheads"]);
 });
 
+test("the home page advances from its recorded baseline and preserves a system's own choice", () => {
+  const previous = { views: [] };
+  const next = { home: "use", views: [] };
+  const adopted = mergeSiteModel(previous, next, [previous]);
+  assert.deepEqual(adopted.site, next);
+  assert.deepEqual(adopted.changes.advanced, ["home"]);
+  const customized = mergeSiteModel({ home: "brand", views: [] }, next, [previous]);
+  assert.equal(customized.site.home, "brand");
+  assert.deepEqual(customized.changes.kept, [{ path: "home", current: "brand", stock: "use" }]);
+  assert.deepEqual(mergeSiteModel(customized.site, next, [next]).changes.kept, [], "an unchanged stock choice is not reported repeatedly");
+  const removed = mergeSiteModel(next, previous, [next]);
+  assert.equal(removed.site.home, undefined, "an untouched home advances back to the overview when the stock removes it");
+  assert.deepEqual(removed.changes.advanced, ["home"]);
+});
+
 test("mergeFormatCatalog admits a format only with a declared page and an unused id, and keeps client fields", () => {
   const next = {
     $comment: "Stock note.",
