@@ -172,6 +172,8 @@ lifecycle belong to the host.
   starter's one-entry-per-line style so diffs stay reviewable), managed
   overview fragments written for added or planned pages, a missing stylesheet
   link inserted into the layout, then `check` with full rollback on failure.
+  The existing `home` selection, including absence, stays authored routing;
+  sync and parent feeds never move the front page.
   `init` records a fresh scaffold as adopted. `src/fixtures/starter-before-
   formats/` is the pre-format-catalog scaffold the tests adopt from, and
   `templates/starter-history/<kind>/` holds the stock `site.json` versions

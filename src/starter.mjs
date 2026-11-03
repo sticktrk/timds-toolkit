@@ -256,15 +256,14 @@ function advanceOrKeep(changes, target, field, stock, candidates, label) {
  * A label, blurb, title, group, or summary still equal to a baseline advances
  * to the stock value; one the client changed is kept, and reported when the
  * stock value moved. `planned` is never changed on a declared page except for
- * the ids in `authoredPages`, whose fragments the caller writes.
+ * the ids in `authoredPages`, whose fragments the caller writes. `home` stays
+ * the system's routing choice, including its absence: moving it would break
+ * links in authored pages that the merge must preserve.
  */
 export function mergeSiteModel(current, next, baselines, { fragmentExists = () => false, authoredPages = new Set() } = {}) {
   const site = isObject(current) ? structuredClone(current) : {};
   if (!Array.isArray(site.views)) site.views = [];
   const changes = { addedPages: [], addedViews: [], advanced: [], kept: [] };
-  // The front page (`home`) advances like a label: a client that never set one takes the stock view, one that chose its own keeps it.
-  const hadHome = site.home !== undefined;
-  if (next.home !== undefined || hadHome) advanceOrKeep(changes, site, "home", next.home, baselines, "home");
   const plannedCopy = (view, page) => {
     const copy = structuredClone(page);
     const id = pageId(view, page.slug ?? "");
@@ -303,8 +302,6 @@ export function mergeSiteModel(current, next, baselines, { fragmentExists = () =
       }
     }
   }
-  // A home the sync added leads the file, as it does in the stock catalog; one the client placed stays where it is.
-  if (!hadHome && site.home !== undefined) return { changes, site: { home: site.home, ...Object.fromEntries(Object.entries(site).filter(([key]) => key !== "home")) } };
   return { changes, site };
 }
 
