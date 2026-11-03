@@ -152,6 +152,32 @@ function inspectPage(treatments, {accentOnly = false, expectedAccentLogo = null}
   return {failures, pairs, count};
 }
 
+// Inspect the actual rendered fallback, including the 0.1.485 authored overlay
+// that upgrades retain. The available media alone does not identify which logo
+// a treatment displays: light treatments cannot use an on-dark-only mark.
+function inspectLogoFallbacks() {
+  const probe = document.createElement('span');
+  probe.style.cssText = 'background:var(--color-surface);transition:none !important';
+  document.body.append(probe);
+  const surface = getComputedStyle(probe).backgroundColor;
+  probe.remove();
+  const visible = element => {
+    const style = getComputedStyle(element), rect = element.getBoundingClientRect();
+    return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+  };
+  return ['minimal', 'accent', 'bold', 'photo'].map(treatment => {
+    const canvas = document.querySelector(`.canvas--${treatment}`);
+    const primary = canvas.querySelector('.kit-brand .canvas-logo:not([data-on-dark])');
+    const alternate = canvas.querySelector('.kit-brand .canvas-logo[data-on-dark]');
+    const mark = canvas.querySelector('.kit-brand .canvas-mark');
+    return {
+      treatment, selection: canvas.dataset.logo,
+      visible: Object.entries({primary, alternate, mark}).filter(([, node]) => visible(node)).map(([name]) => name),
+      plate: getComputedStyle(primary).backgroundColor, surface,
+    };
+  });
+}
+
 try {
   await fs.mkdir(output, {recursive: true});
   await runWithOutputSink(() => {}, () => initializeRepository(root, {standalone: true, starter: 'brand-kit', name: 'Brand kit fixture', systemId: 'example/brand-kit'}));
@@ -231,30 +257,47 @@ try {
   await page._client().send('Emulation.setEmulatedMedia', {features: [{name: 'prefers-color-scheme', value: 'light'}]});
   await settleTheme();
   assert.ok((await page.evaluate(() => [...document.querySelectorAll('.canvas--accent')].map(node => node.dataset.logo))).every(value => value === 'light'), 'switching back restores the primary logo');
-  // A parent may have only its primary logo. An empty on-dark placeholder
-  // must neither hide that asset nor suppress its required surface plate.
+  // Every partial catalog must show exactly the usable logo or its wordmark.
+  // Existing kits keep their authored system.css, including the old blanket
+  // hide rule, so verify the managed canvas CSS repairs that version too.
   const media = await readJson(path.join(root, 'media.json'));
-  await writeGroupedMedia(root, {...media, assets: media.assets.filter(asset => asset.key !== 'logo-on-dark')});
-  await runWithOutputSink(() => {}, () => checkWorkspace(root));
-  await page.goto({url: `${origin}/social/posts/`, timeout: 15_000});
-  await page.evaluate(async () => { await Promise.all([...document.images].filter(image => image.getAttribute('src')).map(image => image.decode().catch(() => {}))); });
-  const fallback = await page.evaluate(() => {
-    const canvas = document.querySelector('.canvas--bold'), logo = canvas.querySelector('.canvas-logo:not([data-on-dark])'), alternate = canvas.querySelector('.canvas-logo[data-on-dark]');
-    const probe = document.createElement('span');
-    probe.style.cssText = 'background:var(--color-surface);transition:none !important';
-    document.body.append(probe);
-    const expected = getComputedStyle(probe).backgroundColor;
-    probe.remove();
+  results.logoFallbacks = [];
+  for (const [name, keys] of [['none', []], ['primary-only', ['logo']], ['alternate-only', ['logo-on-dark']], ['both', ['logo', 'logo-on-dark']]]) {
+    await writeGroupedMedia(root, {...media, assets: media.assets.filter(asset => !['logo', 'logo-on-dark'].includes(asset.key) || keys.includes(asset.key))});
+    for (const accent of ['light', 'dark']) {
+      const colors = structuredClone(stock);
+      if (accent === 'light') { colors.accent.value = '#f0ce70'; colors['accent-ink'].value = '#17202a'; }
+      await writeJson(colorFile, colors);
+      await runWithOutputSink(() => {}, () => checkWorkspace(root));
+      await page.goto({url: `${origin}/social/posts/`, timeout: 15_000});
+      await page.evaluate(async () => { await Promise.all([...document.images].filter(image => image.getAttribute('src')).map(image => image.decode().catch(() => {}))); });
+      for (const overlay of ['current', '0.1.485']) {
+        if (overlay === '0.1.485') await page.evaluate(() => {
+          const style = document.createElement('style');
+          style.textContent = '.kit-brand:has(.canvas-logo[src]:not([src=""])) .canvas-mark { display: none; }';
+          document.head.append(style);
+        });
+        const canvases = await page.evaluate(inspectLogoFallbacks);
+        for (const canvas of canvases) {
+          const label = `${name}, ${accent} Accent, ${overlay} overlay, ${canvas.treatment}`;
+          const dark = canvas.treatment === 'bold' || canvas.treatment === 'photo' || (canvas.treatment === 'accent' && accent === 'dark');
+          const expected = dark && keys.includes('logo-on-dark') ? 'alternate' : keys.includes('logo') ? 'primary' : 'mark';
+          if (canvas.treatment === 'accent') assert.equal(canvas.selection, accent, `${label}: automatic logo selection`);
+          assert.deepEqual(canvas.visible, [expected], `${label}: show exactly the usable logo or wordmark`);
+          if (dark && expected === 'primary') assert.equal(canvas.plate, canvas.surface, `${label}: primary fallback receives its surface plate`);
+        }
+        results.logoFallbacks.push({name, accent, overlay, canvases});
+      }
+    }
+  }
+  console.log(`Brand kit logo fallbacks: checked ${results.logoFallbacks.reduce((total, result) => total + result.canvases.length, 0)} treatment/media combinations across current and retained 0.1.485 overlays`);
+  const focal = await page.evaluate(() => {
     const photo = document.querySelector('.canvas-photo');
     photo.style.setProperty('transition', 'none', 'important');
     photo.style.setProperty('--focal-position', '20% 30%');
-    return {primary: getComputedStyle(logo).display, alternate: getComputedStyle(alternate).display, plate: getComputedStyle(logo).backgroundColor, expected, focal: getComputedStyle(photo).objectPosition};
+    return getComputedStyle(photo).objectPosition;
   });
-  assert.notEqual(fallback.primary, 'none', 'the primary logo survives an empty alternate');
-  assert.equal(fallback.alternate, 'none', 'an empty alternate is hidden');
-  assert.equal(fallback.plate, fallback.expected, 'the primary logo receives its surface plate');
-  assert.equal(fallback.focal, '20% 30%', 'photos read the focal custom property');
-  results.logoFallback = fallback;
+  assert.equal(focal, '20% 30%', 'photos read the focal custom property');
   await writeJson(path.join(output, 'report.json'), results);
   assert.equal(results.errors.length, 0, `Brand-kit rendering failed:\n${results.errors.join('\n')}`);
   console.log(`Brand-kit visual evidence: ${output}`);

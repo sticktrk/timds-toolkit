@@ -102,6 +102,12 @@ tokens; the rest are declared as planned and built once someone writes them.
 The starter `dev` server builds once and serves on `http://127.0.0.1:4321`. It
 does not watch files, so rerun `__TIMDS_CLI__ check` after an edit and reload.
 
+Fresh ordinary scaffolds select `home: "use"` in `src/site.json`, serving Use at
+`/` and the overview at `/overview/`. With `home` unset, the overview stays at
+`/` and Use stays at `/use/`. Starter sync, upgrade and parent feeds preserve
+this routing choice, including its absence, so existing authored links keep
+working.
+
 ## Brand-kit systems
 
 When the starter record says `brand-kit`, the kit opens on its overview and

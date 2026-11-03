@@ -123,7 +123,9 @@ fragments the starter mirrors from the golden system
 (`starterManagedFragments`), written when the sync adds or authors their page
 and refreshed only while unmodified. `src/layout.html` only gains a missing
 stock stylesheet link and the changelog link on its version chip. Every other fragment, `tokens.json`, `system.css`, and
-the rest of authored source stay outside the boundary. Recorded plumbing
+the rest of authored source stay outside the boundary. The site's `home`
+selection, including its absence, is authored routing: sync and parent feeds
+preserve it so existing links and guidance routes remain stable. Recorded plumbing
 that was customized is asked about file by file when the sync or upgrade runs
 in a terminal, and otherwise reported and replaced only by an explicit
 `timds starter sync --force <path>` that names each file; `upgrade --force` covers the managed boundary

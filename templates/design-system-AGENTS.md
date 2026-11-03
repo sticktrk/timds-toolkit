@@ -279,7 +279,11 @@ declares to `src/site.json` and `src/formats.json` without removing,
 reordering, or retitling anything declared here; writes the Digital, Social,
 and Print overview fragments and the Use page (`use`, every way the system is
 consumed) when it adds or authors their page; and adds a
-missing stock stylesheet link to `src/layout.html`. It never touches other
+missing stock stylesheet link to `src/layout.html`. The existing `src/site.json`
+`home` choice, including leaving it unset, is preserved so authored links and
+guidance routes stay stable. Fresh ordinary scaffolds start with Use at `/`;
+systems with `home` unset keep their overview at `/` and Use at `/use/`.
+It never touches other
 fragments, `tokens.json`, `system.css`, or `timds.json`. In the recorded
 mode a file changed here is reported as customized and kept unless the
 person running the sync in a terminal chooses to replace it when asked
