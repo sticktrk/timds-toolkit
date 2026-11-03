@@ -174,8 +174,9 @@ lifecycle belong to the host.
   link inserted into the layout, then `check` with full rollback on failure.
   `init` records a fresh scaffold as adopted. `src/fixtures/starter-before-
   formats/` is the pre-format-catalog scaffold the tests adopt from, and
-  `templates/starter-history/` holds the stock `site.json` versions the
-  bootstrap compares against. See `AGENTS.md` for the boundary.
+  `templates/starter-history/<kind>/` holds the stock `site.json` versions
+  the bootstrap compares against. The `starter` field selects the stock
+  catalogs and managed fragments; absent means the ordinary `starter`. See `AGENTS.md` for the boundary.
 
 ### Templates and managed files
 
@@ -191,7 +192,16 @@ session edits cannot change the parent record. See `docs/offshoots.md`.
 
 `templates/` is copied verbatim (with `__PLACEHOLDER__` substitution) by `init`
 and `video init`. `templates/starter/` is the standalone repo scaffold including
-its release scripts; `templates/*.yml` are the stock workflows. The starter
+its release scripts; `templates/*.yml` are the stock workflows.
+`templates/brand-kit/` overlays only the second starter's catalogs, token and
+copy samples, stock declaration, styles, layout, pages and empty Designs
+structure. `init --starter brand-kit` records that kind; it never copies the
+ordinary starter's authored page tree or sample design into the overlay.
+`src/brand-kit.mjs` is the public pure-data slot contract, exported as
+`@dtconcepts/timds/brand-kit` with `.d.mts` declarations. Init and starter sync
+copy it to managed `scripts/brand-kit.mjs`; the viewer imports that copy, so
+stock samples and guidance work before dependencies are installed. Slot
+rules, samples, page ids and stock paths have one source. The starter
 is client-owned once copied, except the plumbing and catalogs `starter sync`
 keeps current (see above): `scripts/viewer.mjs` renders
 `src/site.json` (views and pages, authored or `planned`), `src/layout.html`,
@@ -199,10 +209,19 @@ and the fragments under `src/pages/` into `dist/`, filling `{{tokens:GROUP}}`
 tables from `tokens.json` and `{{formats:GROUP}}` tables and `{{canvas:ID}}`
 preview variables from `src/formats.json` (the catalog of print sheets and
 screen canvases, each tied to its page; `src/styles/canvas.css` is the
-script-free preview engine), and lists the designs under `src/designs/` in the
-app bar and sitemap. The starter's views mirror the golden client system
+script-free preview engine). `{{copy:KEY}}` renders escaped strings from
+`src/copy.json`, with optional numeric bank indexes; `{{media:KEY}}` emits a
+bounded local catalog asset path; `{{slots:GROUP_OR_KEY}}` renders the exported
+slot guidance and labels. Missing values use the contract's samples and are
+reported. The viewer lists designs in the app bar even when the directory is
+empty. Shared `src/scripts/compose.js` powers Use against the host's relative
+compose route; the ordinary starter opens on Use, while the kit opens on its
+overview. The starter's views mirror the golden client system
 (Brand, Web DS, Digital DS, Social DS, Print DS); keep them in step with it. Planned pages are never built, so a fresh scaffold
-keeps its two expected brand warnings. The sample design uses the site layout
+keeps its two expected brand warnings. The kit instead authors its Voice page,
+reports the assumed sample voice, and reports no logo until its media is filled.
+Its template formats render in Minimal, Accent, Bold and Photo treatments.
+The ordinary starter's sample design uses the site layout
 block in `src/styles/system.css` (between its marker comments), which
 `designs init` appends to a migrating system that kept the starter tokens.
 `templates/design-system-AGENTS.md`, `design-system-CLAUDE.md`, and

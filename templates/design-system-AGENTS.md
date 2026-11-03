@@ -54,8 +54,9 @@ repository root, so each one is also a slash command.
    version.
 3. Run `__TIMDS_CLI__ check`, then `__TIMDS_CLI__ brand`. `check` builds
    `dist/` and validates it; `brand` lists what the brand kit still lacks,
-   with the fix for each gap. A fresh scaffold passes with two expected
-   warnings: no `brand/voice` page and no annotated logo.
+   with the fix for each gap. The ordinary starter passes with two expected
+   warnings: no `brand/voice` page and no annotated logo. A brand kit authors
+   its Voice page, reports its assumed sample voice, and still needs a logo.
 4. Read `.agents/skills/timds-edit-design-system/SKILL.md` at the repository
    root before design work, and `.agents/skills/timds-create-video/SKILL.md`
    before video work. They hold the full procedures; this file holds the
@@ -71,12 +72,13 @@ repository root, so each one is also a slash command.
 | --- | --- | --- |
 | `tokens/*.json` | Authored design tokens | Edit |
 | `src/site.json` | The views and every page in them; the one place that declares which pages exist | Edit |
+| `src/copy.json` | Brand-kit copy slots as strings, when present | Edit the words and retain the keys |
 | `src/formats.json` | Every print sheet and screen canvas the system produces, each tied to the page that shows it; previews and spec tables read it | Edit |
 | `src/pages/` | One content fragment per authored page | Edit |
 | `src/designs/` | Website designs: whole pages in HTML with JavaScript on the system's stylesheets, one directory per design | Edit |
 | `src/layout.html` | The shell every page shares: app bar, page navigation, content slot | Edit |
 | `src/styles/`, `src/assets/` | The system's styles, the viewer chrome, and small optimized assets | Edit |
-| `scripts/build.mjs`, `dev.mjs`, `check.mjs`, `viewer.mjs` | The `workspace` commands that `timds.json` runs and the renderer they share | Edit only when the viewer needs it |
+| `scripts/build.mjs`, `dev.mjs`, `check.mjs`, `viewer.mjs`, `brand-kit.mjs`, `src/scripts/compose.js` | Shared build, viewer, slot data and composer plumbing | Managed by starter sync; use authored tokens, pages and styles for design changes |
 | `CHANGELOG.md` | Designer-facing release notes, rendered at `/changelog/` in the built system | Add to `## Unreleased`, leading with the area the change touches |
 | `README.md`, `AGENTS.md` | This system's own documentation | Keep accurate as the system changes |
 | `timds.json` | Manifest: identity, version, artifact entry, workspace commands, the `bundle` globs naming what a website loads | Only `brand` and `machine` mappings; the rest is protected |
@@ -150,6 +152,22 @@ built from the same few blocks.
 If this system has moved to another framework, `timds.json` `workspace` names
 the real commands and this section no longer applies. Replace it with that
 framework's layout.
+
+## Brand-kit systems
+
+When `.timds/starter.json` records `starter: "brand-kit"`, this system has
+Brand, Web, Social, Ads, Email, Print, Events, Decks and Use views, with the
+overview at `/` and an empty Designs directory. Stock pages read foundation
+tokens, `src/copy.json` and media slots; keep their guidance in the pages and
+put captured facts and owner decisions on `brand/evidence`. Fill data instead
+of regenerating every page. Labels are confirmed, observed, assumed and
+unresolved; text alone never proves its provenance. `{{copy:headlines.0}}`
+selects a newline-delimited bank entry; bare `{{copy:headlines}}` shows the
+whole escaped bank. `{{media:logo}}` reads an asset's regular `src/assets/`
+path while its catalog retains the stable public URL. Missing marks use a
+sample wordmark; missing photos use Bold. Check fallback diagnostics and all
+four treatments after changing data. The designer's agent runs the skills;
+the designer reviews and the developer later ports released whole-page designs.
 
 ## Website designs
 
@@ -238,7 +256,7 @@ clean.
   the `list_designs` and `read_design` tools. A product pairs a route with
   its design in its `timds.consumer.json` (`"/": "website:/"`), and its
   pull-request preview then shows the design beside the route.
-- The starter ships one sample design, `website`, composed from the site
+- The ordinary starter ships one sample design, `website`, composed from the site
   layout pieces on `web/components`. Replace it with the client's pages, or
   remove `src/designs/` entirely; `check` ignores a system without it. A
   system scaffolded before designs existed adopts them with
@@ -247,10 +265,11 @@ clean.
 ## The starter stays current through upgrade
 
 The scaffold's plumbing and structure are kept current by TimDS, the way its
-skills are: `.timds/starter.json` records what the toolkit wrote, and every
+skills are: `.timds/starter.json` records the selected starter kind and what the toolkit wrote, and every
 `__TIMDS_CLI__ upgrade` re-syncs it (a system scaffolded before the record
 existed opts in once with `__TIMDS_CLI__ starter sync`). The sync brings
 the stock `scripts/build.mjs`, `check.mjs`, `dev.mjs`, `viewer.mjs`,
+`brand-kit.mjs`, `src/scripts/compose.js`,
 `src/styles/canvas.css`, and `src/styles/viewer.css` to the installed
 release: in a system scaffolded by `init` they are the toolkit's outright
 (`"plumbing": "toolkit"` in the record), so a local change to them is
@@ -311,7 +330,7 @@ A parent designer declares reusable authored components in a published
 `.timds/stock.json`, for example
 `{"schemaVersion":1,"paths":["src/pages/web/components.html","src/styles/system.css"]}`.
 Paths name exact existing regular HTML files under `src/pages/`, CSS files
-under `src/styles/`, or `src/layout.html`. Globs, symbolic links, media,
+under `src/styles/`, `src/layout.html`, or `src/copy.json`. Globs, symbolic links, media,
 designs and configuration are refused. The toolkit never infers reusable stock.
 
 `__TIMDS_CLI__ feed` reads the selected parent release; add `--version RELEASE`
@@ -443,7 +462,7 @@ them, logos, asset formats), so what reaches the kit reaches every tool.
 - Never commit full-resolution images, video masters, B-roll, source audio, or other large originals to Git or `dist/`.
 - This phase supports public assets only. Put originals under ignored `media-local/` and register them with `__TIMDS_CLI__ assets add FILE --key LOGICAL_KEY`.
 - Run `__TIMDS_CLI__ login` once, then `__TIMDS_CLI__ assets publish`. `submit` also publishes changed staged files before validation.
-- The starter viewer does not resolve logical keys. Reference a published asset by the `publicUrl` in its `media.json` record; the derived layer joins the asset back to that record by URL. A framework viewer can resolve keys with `resolveMediaSource` and serve staged local files with `localMediaResponse` from `@dtconcepts/timds/media`.
+- The starter viewer resolves `{{media:KEY}}` to a catalog asset's optional regular `src/assets/` path; its published URL and metadata remain in the media catalog. Missing keys use labeled stock fallbacks. An explicitly named missing path, a link, or traversal fails the build. Existing pages may still reference a published asset by its stable `publicUrl`. A framework viewer can resolve keys with `resolveMediaSource` and serve staged local files with `localMediaResponse` from `@dtconcepts/timds/media`.
 - Staging records the current catalog checksum. Publication refuses conflicting replacements and asset-ID reuse across logical keys. Keep reviewed derivatives: remove stale entries from `.timds/local-media.json` or restore them with `assets pull KEY --force`. Restage with `assets add` only for a reviewed, intentional replacement, never to push an old original over an optimized key.
 - TimDS measures video and audio metadata with `ffprobe` during `assets add`; use `__TIMDS_CLI__ assets backfill-metadata` to repair older records from stable public URLs without re-uploading them.
 - Keep only the returned stable record in `media.json`. Never place access tokens, R2 credentials, object keys, expiring signed URLs, `.timds/local-media.json`, or raw `media-local/` files in Git.
