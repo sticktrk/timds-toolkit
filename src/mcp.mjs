@@ -267,6 +267,7 @@ function designSystemRelative(workspace, repoRelative) {
 
 function protectedByPattern(workspace, dsRelative) {
   if (!dsRelative) return true; // the Design System root itself is not a file
+  if (dsRelative.toLowerCase() === '.timds/parent.json') return true;
   const segments = dsRelative.split("/");
   if (segments.some((segment) => PROTECTED_SEGMENTS.has(segment))) return true;
   if (PROTECTED_BASENAMES.has(segments.at(-1))) return true;

@@ -6,6 +6,9 @@ An offshoot's structure comes from its parent; ordinary toolkit upgrades keep
 its plumbing current without adding the starter's pages or changing ancestry.
 They also maintain the layout's missing stock stylesheet links and changelog
 version-chip link, within the starter's existing narrow layout boundary.
+Uncommitted catalogs and authored fragments do not block this plumbing sync;
+its cleanliness check covers only the plumbing, layout and starter record it
+may write. Feed checks its own catalog and plumbing write paths separately.
 
 The host provisions hosted offshoots and owns grants, source identities and
 publication lineage. These commands create and maintain a local repository.

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Keep offshoot starter sync and upgrades available while catalogs or authored overview fragments have uncommitted edits, since those files are outside their write boundary. Protect case aliases of the parent record in hosted sessions and MCP editing.
+
 - Harden offshoot review findings: accept custom-renderer parent catalogs, maintain layout plumbing links, disable automatic install lifecycle scripts unless explicitly requested, make local source selection unambiguous, use lowercase child IDs and batched Git exports, reuse ancestry per workspace operation, check feed cleanliness before prompts, and expose the complete CLI flags.
 
 - Add local offshoot creation with `shoot`, parent catalog updates with `feed`, and confirmed detachment with `sever`. Validate parent and designer-declared stock records, preserve authored grafts with rollback on failed checks, and expose lineage in derived readers and publication provenance. Local creation uses the npm distribution; binary selection remains an explicit adoption after creation.

@@ -166,6 +166,23 @@ test('sessions retain parent lineage and refuse creating, changing or deleting i
   await assert.rejects(sessionChanges(plain.root, await plain.state()), /protected lineage/);
 });
 
+test('sessions protect parent lineage through portable case aliases', async t => {
+  const record = JSON.stringify({ schemaVersion: 1, systemId: 'example/parent' });
+  for (const alias of ['.timds/PARENT.JSON', '.TIMDS/parent.json', '.TIMDS/PARENT.JSON']) {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'timds-hosted-lineage-alias-'));
+    t.after(() => fs.rm(root, { recursive: true, force: true }));
+    await fs.mkdir(path.dirname(path.join(root, alias)), { recursive: true });
+    await fs.writeFile(path.join(root, alias), record);
+    const state = { files: [file(alias, record)], session: { baseRevision: 'base' } };
+    assert.deepEqual((await sessionChanges(root, state)).changes.changedFiles, []);
+    await assert.rejects(sessionChanges(root, { ...state, files: [] }), /protected lineage/, `create ${alias}`);
+    await fs.writeFile(path.join(root, alias), `${record}\n`);
+    await assert.rejects(sessionChanges(root, state), /protected lineage/, `edit ${alias}`);
+    await fs.rm(path.join(root, alias));
+    await assert.rejects(sessionChanges(root, state), /protected lineage/, `delete ${alias}`);
+  }
+});
+
 test("pull preserves local edits, reports both-side conflicts, and never partially applies a conflict", async (t) => {
   const f = await fixture(t, [file("a.txt", "base"), file("b.txt", "base")]);
   await fs.writeFile(path.join(f.root, "a.txt"), "ours");

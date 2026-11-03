@@ -42,7 +42,7 @@ import { normalizeProvider, runHostedCommand, sessionReference, workspaceProvide
 import { buildBundle, describeBundle, normalizeBundleConfig } from "./bundle.mjs";
 import { DESIGNS_SOURCE_DIRECTORY, buildDesigns, checkDesigns, declaredClasses, readDesignCatalog, renderDesigns } from "./designs.mjs";
 import { CHANGELOG_FILE, CHANGELOG_OUTPUT_DIRECTORY, buildChangelog, readUnreleasedNotes, renderChangelog, versionDate } from "./changelog.mjs";
-import { STARTER_RECORD_FILE, describeStarterSync, forceReplaceable, isStarterSystem, knownStarterHashes, planStockFile, readStarterRecord, recordFreshStarter, recordStarterFiles, starterPlumbingFiles, starterSyncPaths, syncStarter } from "./starter.mjs";
+import { STARTER_LAYOUT_FILE, STARTER_RECORD_FILE, describeStarterSync, forceReplaceable, isStarterSystem, knownStarterHashes, planStockFile, readStarterRecord, recordFreshStarter, recordStarterFiles, starterPlumbingFiles, starterSyncPaths, syncStarter } from "./starter.mjs";
 import { extractArtifact, normalizeMachineConfig } from "./extract.mjs";
 import { readFormatCatalog } from "./formats.mjs";
 import { normalizeBrandGuidance } from "./brand.mjs";
@@ -1339,16 +1339,19 @@ export async function upgradeRepository(repoRootInput, { autoRelease = false, de
 }
 
 /**
- * The sync rewrites the catalogs and the layout whole, so it refuses to run
- * over uncommitted changes to any file it may write: the rollback would
- * still restore them, but the sync's diff would no longer be reviewable on
- * its own. A workspace that is not a git checkout has nothing to compare.
+ * Refuse uncommitted changes to any file the sync may write, so its diff
+ * stays reviewable on its own. Offshoot catalogs and fragments are outside
+ * this write boundary. A workspace that is not a git checkout has nothing
+ * to compare.
  */
 async function requireCleanStarterFiles(workspace) {
   if ((await workspaceProvider(workspace.repoRoot))?.kind === "hosted") return;
   const toplevel = await git(["rev-parse", "--show-toplevel"], workspace.repoRoot, { allowFailure: true });
   if (toplevel.code !== 0) return;
-  const pathspecs = starterSyncPaths.map((relative) => path.relative(workspace.repoRoot, path.join(workspace.designSystemRoot, ...relative.split("/"))).split(path.sep).join("/"));
+  const syncPaths = workspace.parentRecord
+    ? [...starterPlumbingFiles.map(([relative]) => relative), STARTER_LAYOUT_FILE, STARTER_RECORD_FILE]
+    : starterSyncPaths;
+  const pathspecs = syncPaths.map((relative) => path.relative(workspace.repoRoot, path.join(workspace.designSystemRoot, ...relative.split("/"))).split(path.sep).join("/"));
   const status = await git(["status", "--porcelain", "--untracked-files=all", "--", ...pathspecs], workspace.repoRoot);
   if (status.stdout.trim()) {
     throw Object.assign(new Error(`Starter sync refuses to run over uncommitted changes to the files it writes:\n${status.stdout.trim()}\nCommit or stash them first, so the sync's own diff stays reviewable`), { failureCode: "dirty_worktree" });
