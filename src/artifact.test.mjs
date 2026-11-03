@@ -372,6 +372,7 @@ test("publishExtractedIndex uploads assets and mirrors first, then index, llms.t
       sourceCommit: "a".repeat(40),
       version: "1.2.3",
       systemId: "client/system",
+      lineage: null,
       entry: "design-system/index.html",
       files: { index: "design-system/index.json", tokens: "design-system/tokens.json", brand: "design-system/brand.json", llms: "design-system/llms.txt", llmsFull: "design-system/llms-full.txt", formats: "design-system/formats.json", designs: "design-system/designs.json", changelog: "design-system/changelog.json", bundle: "design-system/bundle.json" },
     });
@@ -379,7 +380,11 @@ test("publishExtractedIndex uploads assets and mirrors first, then index, llms.t
     // advertise it must not publish it again, even if that file is invalid.
     await fs.writeFile(path.join(designSystemRoot, "dist/design-system/index.json"), JSON.stringify(INDEX));
     await fs.writeFile(path.join(designSystemRoot, "dist/design-system/formats.json"), "{obsolete");
+    const lineage = { systemId: "example/parent", sourceId: "00000000-0000-4000-8000-000000000101", version: "1.0.0", commit: "a".repeat(40), mode: "full" };
+    await fs.mkdir(path.join(designSystemRoot, ".timds"), { recursive: true });
+    await fs.writeFile(path.join(designSystemRoot, ".timds/parent.json"), JSON.stringify({ schemaVersion: 1, ...lineage, baseline: { site: { views: [{ id: "brand", label: "Brand", pages: [{ slug: "", title: "Brand" }] }] }, formats: null } }));
     const withoutFormats = await publishExtractedIndex(workspace, { token: "timds_test_token", fetchImpl, sourceCommit: "a".repeat(40) });
+    assert.deepEqual(JSON.parse(puts.get(".timds-artifact.json")).lineage, lineage);
     assert.equal(withoutFormats.formatsUrl, null);
     assert.ok(!sessions.at(-1).files.some((file) => file.path.endsWith("formats.json")));
 

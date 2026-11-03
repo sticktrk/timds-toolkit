@@ -83,7 +83,9 @@ repository root, so each one is also a slash command.
 | `media.json` | Published media catalog | Written by `assets` commands, never by hand |
 | `media-local/` | Ignored full-resolution originals | Stage files here |
 | `dist/` | Generated artifact and derived layer | Never edit |
-| `.timds/`, release scripts, and the repository root's `.agents/skills/` and `.github/workflows/` | Managed tooling | Protected; see the last section |
+| `.timds/stock.json` | Explicit reusable source for structure offshoots | Declare reviewed exact source paths; see Offshoots |
+| `.timds/parent.json` | Parent release identity and feed baseline, when this system is an offshoot | Protected; changed only by shoot, feed, or confirmed sever |
+| Other `.timds/` files, release scripts, and the repository root's `.agents/skills/` and `.github/workflows/` | Managed tooling | Protected; see the last section |
 
 ## Starter viewer
 
@@ -271,6 +273,63 @@ that would fail `check` is rolled back. So: edit
 and `viewer.css` alone unless the change is meant to stay local, and expect
 new planned pages after an upgrade, which are primitives to author, not
 mistakes to delete.
+
+## Offshoots and parent stock
+
+Local `shoot` currently runs through the npm distribution; do not substitute
+`timds-cli` for that creation step. After reviewing and committing the new npm
+offshoot, binary users explicitly adopt it with
+`timds-cli installation adopt --binary --apply`. Feed and sever retain the
+selected execution mode.
+
+An offshoot starts from a parent's published source release and retains its
+ancestry in `.timds/parent.json`. The schema-1 record holds the parent's
+`systemId`, source UUID (`sourceId`), release `version`, source `commit`,
+`mode` (`full` or `structure`), and `baseline: {site, formats}` for future
+feeds. Do not edit or delete it as design work; hosted sessions refuse both.
+Ordinary starter sync and upgrade preserve it and update toolkit plumbing
+without importing the toolkit's catalogs or fragments into an offshoot. It
+still maintains missing stock stylesheet links and the changelog version-chip
+link within the narrow layout boundary.
+
+The designer's agent creates a new local offshoot with
+`__TIMDS_CLI__ shoot example/core --system-id example/child --root ../child --mode structure --version RELEASE`.
+Use an absolute or `./` / `../` local Git checkout in place of `example/core`
+with `--source-id UUID`;
+`--ref REF` selects the committed tree. The destination must be new or empty.
+New child IDs are lowercase. Custom dependencies install with lifecycle
+scripts disabled; `--install` explicitly permits a reviewed custom installer
+or npm lifecycle scripts. Creation still runs the declared build/check.
+A full offshoot carries all source layers. A structure offshoot keeps
+navigation, whole format catalogs, verified recorded plumbing, token names
+and role mappings. Missing page bodies become planned pages; token values
+become CSS `initial`, reported by `check` as unresolved warnings. Token descriptions,
+media and website designs are removed, and neutral shell files fill missing
+stock. Author and review the foundations before treating it as a finished brand.
+
+A parent designer declares reusable authored components in a published
+`.timds/stock.json`, for example
+`{"schemaVersion":1,"paths":["src/pages/web/components.html","src/styles/system.css"]}`.
+Paths name exact existing regular HTML files under `src/pages/`, CSS files
+under `src/styles/`, or `src/layout.html`. Globs, symbolic links, media,
+designs and configuration are refused. The toolkit never infers reusable stock.
+
+`__TIMDS_CLI__ feed` reads the selected parent release; add `--version RELEASE`
+to choose one or `--from ../parent` to read a local committed tree using the
+saved source UUID. Unchanged catalog fields advance, missing entries are
+appended with pages planned, and the child's edits remain as grafts. A graft
+covering a new parent change is reported so the designer can keep it or edit
+that field to let the parent through. Plumbing follows its recorded ownership.
+`--force PATH` applies only to named plumbing; authored pages, styles, layout,
+tokens and media are never replaced. Commit changes first: feed refuses
+uncommitted changes to files it writes, runs the workspace check and restores
+its writes if checking fails. Only success advances the parent baseline.
+
+Sever permanently removes the local baseline and requires confirmation
+(`__TIMDS_CLI__ sever --yes` for an explicitly authorized sever). Source stays
+in place and the system becomes independent. Feed and sever cannot run in a
+hosted session. Before publishing a severed hosted source, the host must also
+update its catalog lineage; local sever does not perform that operation.
 
 ## Write pages the derived layer can read
 
