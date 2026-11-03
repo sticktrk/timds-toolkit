@@ -6,7 +6,7 @@ import test from 'node:test';
 import { initializeRepository, checkWorkspace } from './core.mjs';
 import { readDerivedLayer } from './derived.mjs';
 import { createPublicationStampFromFiles } from './publication-snapshot.mjs';
-import { parentLineage, readParentRecord, readStockRecord, unresolvedTokenWarnings, validateOffshootRecords, validateParentRecord, validateStockRecord } from './offshoot-contract.mjs';
+import { isDesignerRecordPath, isLineagePath, isPlumbingPath, parentLineage, readParentRecord, readStockRecord, regularPath, unresolvedTokenWarnings, validateOffshootRecords, validateParentRecord, validateStockRecord } from './offshoot-contract.mjs';
 
 const parent = () => ({ schemaVersion: 1, systemId: 'example/core', sourceId: '00000000-0000-4000-8000-000000000001', version: '2026.10.29-1', commit: 'a'.repeat(40), mode: 'structure', baseline: { site: { views: [{ id: 'brand', label: 'Brand', pages: [{ slug: '', title: 'Overview', planned: true }] }] }, formats: null } });
 const json = value => `${JSON.stringify(value, null, 2)}\n`;
@@ -17,6 +17,28 @@ async function root(t) {
   return directory;
 }
 async function write(directory, file, content) { await fs.mkdir(path.dirname(path.join(directory, file)), { recursive: true }); await fs.writeFile(path.join(directory, file), content); }
+
+test('record paths classify portable aliases and plumbing has one shared grammar', () => {
+  for (const file of ['.timds/parent.json', '.TIMDS/parent.json', '.timds/PARENT.JSON']) assert.equal(isLineagePath(file), true, file);
+  for (const file of ['.timds/stock.json', '.TIMDS/stock.json', '.timds/STOCK.JSON']) assert.equal(isDesignerRecordPath(file), true, file);
+  for (const file of [null, '.timds/parent.json/child', 'src/.timds/parent.json', '.timds/stock.json']) assert.equal(isLineagePath(file), false, String(file));
+  for (const file of [null, '.timds/stock.json/child', '.timds/parent.json']) assert.equal(isDesignerRecordPath(file), false, String(file));
+  for (const file of ['scripts/build.mjs', 'scripts/custom-engine.mjs', 'src/styles/viewer.css', 'src/styles/canvas.css']) assert.equal(isPlumbingPath(file), true, file);
+  for (const file of [null, 'scripts/../build.mjs', 'scripts/nested/build.mjs', 'src/styles/system.css', 'src/layout.html']) assert.equal(isPlumbingPath(file), false, String(file));
+});
+
+test('shared regular-file resolution checks the root and ancestors before optional writes', async t => {
+  const directory = await root(t);
+  await write(directory, 'src/file.json', '{}');
+  assert.equal(await regularPath(directory, 'src/file.json'), path.join(directory, 'src/file.json'));
+  assert.equal(await regularPath(directory, 'src/missing.json', { optional: true }), null);
+  assert.equal(await regularPath(directory, 'missing/file.json', { optional: true }), null);
+  for (const relative of ['../outside.json', '/outside.json', 'C:/outside.json']) await assert.rejects(regularPath(directory, relative, { optional: true }), /relative without traversal/);
+  await assert.rejects(regularPath(directory, 'src/file.json/child', { optional: true }), /regular file without symbolic links/);
+  const linked = path.join(directory, 'linked-root');
+  await fs.symlink(directory, linked);
+  await assert.rejects(regularPath(linked, 'src/file.json', { optional: true }), /regular file without symbolic links/);
+});
 
 test('parent records retain the host baseline and expose only public lineage', async t => {
   const directory = await root(t);

@@ -374,3 +374,27 @@ test('publication ancestry comes from the committed parent record and agrees acr
   await f.write('.timds/parent.json', JSON.stringify({ ...parent, version: '2.0.0' }));
   await assert.rejects(createPublicationStamp(f.workspace), /Commit the source contract/);
 });
+
+for (const embedded of [false, true]) test(`publication recognizes portable lineage aliases in ${embedded ? 'embedded' : 'standalone'} source`, async t => {
+  const { createPublicationStampFromFiles } = await import('./publish.mjs');
+  const f = await fixture(t, embedded);
+  const lineage = { systemId: 'example/parent', sourceId: '00000000-0000-4000-8000-000000000101', version: '1.0.0', commit: 'a'.repeat(40), mode: 'full' };
+  const parent = { schemaVersion: 1, ...lineage, baseline: { site: { views: [] }, formats: null } };
+  const alias = '.TIMDS/PARENT.JSON';
+  await f.write(alias, JSON.stringify(parent));
+  await assert.rejects(createPublicationStamp(f.workspace), /Commit the source contract/);
+  f.git('add', '--all'); f.git('commit', '-qm', 'Record portable parent alias');
+  assert.deepEqual((await createPublicationStamp(f.workspace)).lineage, lineage);
+  await f.write(alias, JSON.stringify({ ...parent, version: '2.0.0' }));
+  await assert.rejects(createPublicationStamp(f.workspace), /Commit the source contract/);
+
+  const input = publicationFixture();
+  const sourceFiles = [
+    { path: 'timds.json', content: JSON.stringify(input.manifest) },
+    { path: 'tokens.json', content: JSON.stringify(input.tokens) },
+    { path: alias, content: JSON.stringify(parent) },
+  ];
+  const options = { sourceCommit: f.head(), sourceFiles, artifactFiles: input.artifactFiles };
+  assert.deepEqual(createPublicationStampFromFiles(options).lineage, lineage);
+  assert.throws(() => createPublicationStampFromFiles({ ...options, sourceFiles: [...sourceFiles, { path: '.timds/parent.json', content: JSON.stringify(parent) }] }), /Duplicate publication lineage paths/);
+});

@@ -48,6 +48,19 @@ test('shoot suppresses lifecycle and custom installation scripts unless --instal
   }
 });
 
+test('shoot requires a committed exact lock before installing a custom full toolchain', async t => {
+  const { root, directory } = await workspaceFixture(t);
+  const manifest = JSON.parse(await fs.readFile(path.join(root, 'timds.json'), 'utf8'));
+  manifest.workspace.build = ['node', 'scripts/custom-build.mjs'];
+  await fs.writeFile(path.join(root, 'timds.json'), json(manifest));
+  await fs.writeFile(path.join(root, 'scripts/custom-build.mjs'), "await import('./build.mjs');\n");
+  await fs.rm(path.join(root, 'package-lock.json'), { force: true });
+  git(root, 'add', '--all'); git(root, 'commit', '-qm', 'Custom toolchain without a lock');
+  const destination = path.join(directory, 'no-lock');
+  await assert.rejects(runWithOutputSink(() => {}, () => runCli(['shoot', root, '--root', destination, '--system-id', 'example/no-lock', '--source-id', sourceId])), /custom build toolchain requires an exact package-lock.json; commit it in the parent/);
+  await assert.rejects(fs.access(destination), { code: 'ENOENT' });
+});
+
 test('workspace operations reuse one parent snapshot and later resolutions see changed lineage', async t => {
   const {root} = await workspaceFixture(t);
   const parentFile = path.join(root, '.timds/parent.json');

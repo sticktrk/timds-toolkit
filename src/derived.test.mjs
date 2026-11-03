@@ -143,6 +143,21 @@ test("summarizes a kit for doctor in one line", () => {
   assert.equal(describeBrandKit(summarizeBrandKit(null)), "Brand kit: not derived; run timds check");
 });
 
+test("invalid published lineage names the remote provenance URL before reading derived files", async () => {
+  const base = "https://cdn.example.com/artifact";
+  for (const lineage of [{ ...LINEAGE, sourceId: "invalid" }, { ...LINEAGE, commit: "invalid" }, { ...LINEAGE, mode: "invalid" }]) {
+    const requested = [];
+    await assert.rejects(fetchDerivedLayer(base, { fetchImpl: async url => {
+      requested.push(url);
+      return Response.json({ schemaVersion: 1, version: "2.0.0", lineage });
+    } }), error => {
+      assert.ok(error.message.startsWith(`${base}/.timds-artifact.json is not valid: `), error.message);
+      return true;
+    });
+    assert.deepEqual(requested, [`${base}/.timds-artifact.json`]);
+  }
+});
+
 test("a published index controls whether an old CDN catalog is still served", async () => {
   const index = { system: KIT.system, pages: [], formats: { url: "/formats.json", groups: 0, count: 0 } };
   const catalog = { schemaVersion: 1, system: KIT.system, count: 0, groups: [] };

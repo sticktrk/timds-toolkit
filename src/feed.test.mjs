@@ -6,6 +6,8 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { feedOffshoot, describeFeed } from "./feed.mjs";
+import { loadOffshootSource } from "./offshoots.mjs";
+import { runCli, runWithOutputSink } from "./core.mjs";
 import { syncStarter } from "./starter.mjs";
 
 const json = (value) => `${JSON.stringify(value, null, 2)}\n`;
@@ -86,8 +88,48 @@ test("feed advances unchanged fields, preserves grafts and authored source, and 
   assert.match(describeFeed(report).join("\n"), /Your graft shades the parent's change at web.label/);
   const again = await feedOffshoot({ designSystemRoot: root, source, check: async () => { throw new Error("must not check an unchanged feed"); } });
   assert.deepEqual(again.written, []);
+  assert.deepEqual(again.files.filter((file) => [".timds/starter.json", ".timds/parent.json"].includes(file.path)).map((file) => [file.path, file.status]), [[".timds/starter.json", "current"], [".timds/parent.json", "current"]]);
+  assert.ok(again.files.every((file) => file.status === "current"));
+  assert.doesNotMatch(describeFeed(again).join("\n"), /\bupdated\b/);
   assert.deepEqual(again.site.kept, []);
   assert.deepEqual(again.formats.kept, []);
+});
+
+test("feed accepts additive parent export fields while persisting only the lineage contract", async (t) => {
+  for (const mode of ["full", "structure"]) {
+    const { root, parent } = await fixture(t, { mode });
+    const source = nextSource();
+    const expectedIdentity = structuredClone(source.parent);
+    Object.assign(source.parent, { schemaVersion: 7, mode: "future-mode", releaseMetadata: { published: true }, baseline: "export metadata" });
+    await feedOffshoot({ designSystemRoot: root, source });
+    const actual = await readJson(root, ".timds/parent.json");
+    assert.deepEqual(Object.keys(actual).sort(), ["schemaVersion", "systemId", "sourceId", "version", "commit", "mode", "baseline"].sort());
+    assert.deepEqual({ systemId: actual.systemId, sourceId: actual.sourceId, version: actual.version, commit: actual.commit }, expectedIdentity);
+    assert.equal(actual.schemaVersion, 1);
+    assert.equal(actual.mode, parent.mode);
+    assert.equal(source.parent.releaseMetadata.published, true, "the exported source is not mutated");
+  }
+});
+
+test("no-op feed --json reports unchanged bookkeeping records as current", async (t) => {
+  const { root } = await fixture(t);
+  const sourceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "timds-feed-source-"));
+  t.after(() => fs.rm(sourceRoot, { recursive: true, force: true }));
+  for (const file of nextSource().files) await write(sourceRoot, file.path, Buffer.from(file.content, "base64"));
+  execFileSync("git", ["init", "-q"], { cwd: sourceRoot });
+  execFileSync("git", ["add", "."], { cwd: sourceRoot });
+  execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-qm", "Parent release"], { cwd: sourceRoot });
+  const source = await loadOffshootSource(sourceRoot, { local: true, sourceId: identity.sourceId });
+  await feedOffshoot({ designSystemRoot: root, source });
+  await write(root, "timds.json", json({ systemId: "example/child", name: "Child", version: "1.0.0" }));
+  const output = [];
+  await runWithOutputSink((line) => output.push(line), () => runCli(["feed", "--root", root, "--from", sourceRoot, "--json"]));
+  const report = JSON.parse(output.join("\n"));
+  assert.deepEqual(report.written, []);
+  assert.equal(report.recordWritten, false);
+  assert.equal(report.check, null);
+  assert.ok(report.files.every((file) => file.status === "current"));
+  assert.deepEqual(report.files.filter((file) => file.path.startsWith(".timds/")).map((file) => [file.path, file.status]), [[".timds/starter.json", "current"], [".timds/parent.json", "current"]]);
 });
 
 test("structure feed retains neutral structure catalogs without parent prose or bodies", async (t) => {
@@ -182,7 +224,7 @@ test("feed refuses dirty writes, mismatched identity, corrupt parent plumbing an
   await assert.rejects(feedOffshoot({ designSystemRoot: root, source: corrupt }), /customized recorded plumbing/);
   await fs.rm(path.join(root, "scripts/build.mjs"));
   await fs.symlink("../tokens.json", path.join(root, "scripts/build.mjs"));
-  await assert.rejects(feedOffshoot({ designSystemRoot: root, source: nextSource() }), /cannot write through a symbolic link/);
+  await assert.rejects(feedOffshoot({ designSystemRoot: root, source: nextSource() }), /regular file without symbolic links/);
   assert.equal(await read(root, "tokens.json"), texts["tokens.json"]);
 });
 

@@ -62,6 +62,10 @@ command, or npm lifecycle scripts when there is no custom installer. The
 workspace's declared build/check commands still run as part of creation.
 Custom tools retain their external prerequisites. The stock starter builds
 without installing dependencies.
+Stock builds do not require a `package-lock.json`; when one exists, its
+resolutions are retained and only the root package name changes. A custom
+toolchain that needs dependency installation still requires its exact lockfile
+unless `--install` selects a reviewed `workspace.install` command.
 
 ## Full and structure
 
@@ -85,10 +89,13 @@ Structure follows the host's transform revision 1:
   They use the viewer's `{{title}}`, `{{name}}`, `{{views}}`, `{{sidenav}}`,
   `{{content}}`, `{{pagenav}}` and `{{sitemap}}` placeholders.
 - The package keeps dependency/runtime fields and standard `timds` and
-  `build:preview` scripts; exact lockfile resolutions remain. Installation
+  `build:preview` scripts; existing exact lockfile resolutions remain. Installation
   metadata selects the recorded toolkit release. `timds.json` keeps the
   artifact contract and brand roles, selects the verified standalone workspace
   scripts, and bundles `dist/tokens.css` and `dist/styles/system.css`.
+- The starter record keeps the parent's recorded toolkit baseline. The
+  separate parent record holds the structural feed baseline, so detaching
+  does not turn inherited design choices into toolkit defaults.
 
 The retained toolchain allowlist is `package.json`, `package-lock.json`,
 `.timds/installation.json`, `.timds/contract-layout.json`,
@@ -144,6 +151,8 @@ Feed runs check and advances the parent version, commit and catalog baseline
 only on success. A failure restores all source files and both records. The
 check may regenerate ignored build output. Feeding is unavailable inside a
 hosted session; a hosted Request to do this remains host follow-up work.
+Repeating a feed at the same release leaves unchanged files reported as
+`current` in both the terminal report and `--json` output.
 
 ## Records and readers
 

@@ -2,12 +2,11 @@
 // three-way catalog merge and plumbing ownership, and never copies authored
 // source: a page, system stylesheet, layout, token or media remains the child's.
 import { createHash } from "node:crypto";
-import { execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { promisify } from "node:util";
-import { readParentRecord, validateParentRecord } from "./offshoot-contract.mjs";
+import { isPlumbingPath, readParentRecord, regularPath, validateParentRecord } from "./offshoot-contract.mjs";
+import { requireCleanPaths } from "./clean-tree.mjs";
 import { decodeOffshootSource, structureSite } from "./offshoots.mjs";
 import { compareDesignSystemVersions, parseDesignSystemVersion } from "./changelog.mjs";
 import {
@@ -16,9 +15,8 @@ import {
   mergeFormatCatalog, mergeSiteModel, planStockFile, readStarterRecord,
 } from "./starter.mjs";
 
-const invoke = promisify(execFile);
 const PARENT_FILE = ".timds/parent.json";
-const plumbingPath = (value) => /^(?:scripts\/[a-z0-9.-]+\.mjs|src\/styles\/(?:viewer|canvas)\.css)$/.test(value);
+const cleanTreeMessage = "Feed refuses to run over uncommitted changes to the files it writes";
 const sha256 = (text) => createHash("sha256").update(text).digest("hex");
 const json = (value) => `${JSON.stringify(value, null, 2)}\n`;
 const object = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -39,28 +37,8 @@ function sourceJson(files, name, required = true) {
   catch { throw new Error(`The parent source ${name} is invalid JSON`); }
 }
 
-async function safeTarget(root, relative) {
-  const segments = relative.split("/");
-  let current = root;
-  for (const segment of ["", ...segments]) {
-    if (segment) current = path.join(current, segment);
-    try {
-      const stat = await fs.lstat(current);
-      if (stat.isSymbolicLink()) throw new Error(`Feed cannot write through a symbolic link: ${relative}`);
-      if (current === path.join(root, relative) && !stat.isFile()) throw new Error(`Feed target must be a regular file: ${relative}`);
-    } catch (error) { if (error.code !== "ENOENT") throw error; }
-  }
-  return path.join(root, relative);
-}
-
-async function requireClean(root, relatives) {
-  root = await fs.realpath(root);
-  let toplevel;
-  try { toplevel = (await invoke("git", ["rev-parse", "--show-toplevel"], { cwd: root })).stdout.trim(); }
-  catch (error) { if (error.code === 128) return; throw error; }
-  const paths = relatives.map((relative) => path.relative(toplevel, path.join(root, relative)).split(path.sep).join("/"));
-  const { stdout } = await invoke("git", ["--literal-pathspecs", "status", "--porcelain", "--untracked-files=all", "--", ...paths], { cwd: toplevel });
-  if (stdout.trim()) throw new Error(`Feed refuses to run over uncommitted changes to the files it writes:\n${stdout.trim()}\nCommit or stash them first`);
+async function targetPath(root, relative) {
+  return (await regularPath(root, relative, { optional: true })) ?? path.join(root, relative);
 }
 
 /** Feed a verified published source snapshot (the same shape as source export).
@@ -70,8 +48,9 @@ export async function feedOffshoot({ designSystemRoot, source, check = null, for
   const parent = await readParentRecord(designSystemRoot);
   if (!parent) throw new Error("This system has no .timds/parent.json; only an offshoot can be fed");
   if (await optional(path.join(designSystemRoot, ".timds/session.json"))) throw new Error("Feed is not available in a hosted session; feed the source repository instead");
-  if (!source || !Array.isArray(source.files) || !object(source.parent)) throw new Error("Feed requires a published parent source snapshot");
-  const identity = source.parent;
+  if (!source || !(Array.isArray(source.files) || source.files instanceof Map) || !object(source.parent)) throw new Error("Feed requires a published parent source snapshot");
+  const { systemId, sourceId, version, commit } = source.parent;
+  const identity = { systemId, sourceId, version, commit };
   if (identity.systemId !== parent.systemId || identity.sourceId !== parent.sourceId) throw new Error("The source snapshot belongs to a different parent system or source");
   if (parseDesignSystemVersion(identity.version) && parseDesignSystemVersion(parent.version) && compareDesignSystemVersions(identity.version, parent.version) < 0) throw new Error(`Feed requires a parent release at or after ${parent.version}; ${identity.version} is older`);
   const sourceFiles = decodeOffshootSource(source);
@@ -88,16 +67,18 @@ export async function feedOffshoot({ designSystemRoot, source, check = null, for
   const stockRecord = sourceJson(sourceFiles, STARTER_RECORD_FILE, false);
   if (parent.mode === "structure" && (stockRecord?.schemaVersion !== 1 || stockRecord.plumbing !== "toolkit" || !object(stockRecord.files))) throw new Error("Structure feed requires recorded toolkit plumbing in the parent");
   const stockFiles = object(stockRecord?.files) ? stockRecord.files : {};
-  const selected = Object.keys(stockFiles).filter(plumbingPath);
+  const selected = Object.keys(stockFiles).filter(isPlumbingPath);
   if (force.some((relative) => !selected.includes(relative))) throw new Error("Feed --force replaces only named plumbing files in the parent's recorded stock; authored content is never replaced");
   const plumbing = record?.plumbing ?? "recorded";
   const files = [], writes = [], pendingCustomized = [], nextFiles = { ...record?.files };
   const plan = async (relative, content, status, note, desiredMode) => {
-    const file = await safeTarget(designSystemRoot, relative);
+    const file = await targetPath(designSystemRoot, relative);
     const current = await optional(file);
     const originalMode = current === null ? null : (await fs.stat(file)).mode & 0o777;
     const mode = desiredMode ?? originalMode ?? 0o644;
     const modeChanged = content !== null && mode !== originalMode;
+    const changed = content !== null && (content !== current || modeChanged);
+    if (!changed && status === "updated") status = "current";
     if (modeChanged && current !== null && status === "current") status = "updated";
     const reported = { path: relative, status, ...(note ? { note } : {}) };
     const reportedIndex = files.findIndex((entry) => entry.path === relative);
@@ -105,7 +86,7 @@ export async function feedOffshoot({ designSystemRoot, source, check = null, for
     else files[reportedIndex] = reported;
     const writeIndex = writes.findIndex((entry) => entry.relative === relative);
     if (writeIndex !== -1) writes.splice(writeIndex, 1);
-    if (content !== null && (content !== current || modeChanged)) {
+    if (changed) {
       writes.push({ file, relative, current, content, mode, originalMode });
     }
   };
@@ -122,7 +103,7 @@ export async function feedOffshoot({ designSystemRoot, source, check = null, for
       continue;
     }
     const bytes = entry;
-    await safeTarget(designSystemRoot, relative);
+    await regularPath(designSystemRoot, relative, { optional: true });
     const desired = bytes.toString("utf8");
     const planned = await planStockFile(path.join(designSystemRoot, relative), desired, { force: plumbing === "toolkit" || force.includes(relative), knownHashes: [record?.files?.[relative]].filter(Boolean) });
     const note = planned.forced ? (plumbing === "toolkit" ? "the toolkit's plumbing; a local change was replaced" : "replaced with --force") : undefined;
@@ -132,9 +113,9 @@ export async function feedOffshoot({ designSystemRoot, source, check = null, for
     if (planned.status !== "customized") nextFiles[relative] = stockFiles[relative];
     await plan(relative, planned.write || planned.status === "current" ? desired : null, planned.status, note, entry.mode === "100755" ? 0o755 : 0o644);
   }
-  const currentSite = JSON.parse(await fs.readFile(await safeTarget(designSystemRoot, STARTER_SITE_FILE), "utf8"));
+  const currentSite = JSON.parse(await fs.readFile(await regularPath(designSystemRoot, STARTER_SITE_FILE), "utf8"));
   const merged = mergeSiteModel(currentSite, site, [parent.baseline.site]);
-  const currentFormatsText = await optional(await safeTarget(designSystemRoot, STARTER_FORMATS_FILE));
+  const currentFormatsText = await optional(await targetPath(designSystemRoot, STARTER_FORMATS_FILE));
   const currentFormats = currentFormatsText === null ? null : JSON.parse(currentFormatsText);
   const mergedFormats = formats === null
     ? { catalog: currentFormats, changes: { addedFormats: [], addedGroups: [], advanced: [], kept: [], skipped: [] } }
@@ -150,7 +131,7 @@ export async function feedOffshoot({ designSystemRoot, source, check = null, for
     // answer is keep; unrelated authored files are never part of this guard.
     const prospective = new Set([...writes.map((write) => write.relative), ...pendingCustomized.map(({ relative }) => relative)]);
     if (record && pendingCustomized.some(({ relative }) => nextFiles[relative] !== stockFiles[relative])) prospective.add(STARTER_RECORD_FILE);
-    await requireClean(designSystemRoot, [...prospective]);
+    await requireCleanPaths(designSystemRoot, [...prospective], { message: cleanTreeMessage });
     for (const { relative, entry, desired, planned } of pendingCustomized) {
       const preview = await fs.mkdtemp(path.join(os.tmpdir(), "timds-feed-diff-"));
       const templatePath = path.join(preview, path.basename(relative));
@@ -168,7 +149,7 @@ export async function feedOffshoot({ designSystemRoot, source, check = null, for
   }
   const report = { designSystemRoot, parent: nextParent, previousParent: parent, files, written: writes.map((write) => write.relative), site: merged.changes, formats: mergedFormats.changes, plumbing, check: null, record: path.join(designSystemRoot, PARENT_FILE), recordWritten: writes.some((write) => write.relative === PARENT_FILE) };
   if (!writes.length) return report;
-  await requireClean(designSystemRoot, writes.map((write) => write.relative));
+  await requireCleanPaths(designSystemRoot, writes.map((write) => write.relative), { message: cleanTreeMessage });
   try {
     for (const write of writes) {
       await fs.mkdir(path.dirname(write.file), { recursive: true });

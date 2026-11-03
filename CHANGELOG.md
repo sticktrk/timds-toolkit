@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Preserve the parent's toolkit baseline when creating a structure offshoot, accept stock parents without a lockfile and additive source-export metadata, protect Git revision parsing, and keep no-op feed reports accurate. Reuse decoded source bytes and shared path/cleanliness rules, identify malformed published lineage by its URL, and type the full parent record separately from public lineage.
+
 - Keep offshoot starter sync and upgrades available while catalogs or authored overview fragments have uncommitted edits, since those files are outside their write boundary. Protect case aliases of the parent record in hosted sessions and MCP editing.
 
 - Harden offshoot review findings: accept custom-renderer parent catalogs, maintain layout plumbing links, disable automatic install lifecycle scripts unless explicitly requested, make local source selection unambiguous, use lowercase child IDs and batched Git exports, reuse ancestry per workspace operation, check feed cleanliness before prompts, and expose the complete CLI flags.

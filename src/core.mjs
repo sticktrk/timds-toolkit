@@ -4,6 +4,7 @@ import { hasContractGroups, migrateContractGroups, syncContractViews } from "./c
 import { parentLineage, readParentRecord, validateOffshootRecords } from "./offshoot-contract.mjs";
 import { loadOffshootSource, severOffshoot, shootOffshoot } from "./offshoots.mjs";
 import { describeFeed, feedOffshoot } from "./feed.mjs";
+import { requireCleanPaths } from "./clean-tree.mjs";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { spawn } from "node:child_process";
 import { linkClaudeSkills } from "./agent-skills.mjs";
@@ -464,6 +465,7 @@ export async function loadWorkspace(repoRootInput = process.cwd(), { editing = f
   const { catalog: mediaCatalog, catalogPath: mediaCatalogPath } = await readMediaCatalog(designSystemRoot, { grouped: !editing });
   // Resolve ancestry once per workspace operation. Callers pass this snapshot
   // through extraction/readers; a later request loads it anew after feed/sever.
+  /** @type {import('./offshoot-contract.mjs').ParentRecord | null} */
   const parentRecord = await readParentRecord(designSystemRoot);
   return { designSystemRoot, layout, manifest, manifestPath, mediaCatalog, mediaCatalogPath, repoRoot, scopePath, contractGroups: Boolean(contractGroups), parentRecord };
 }
@@ -1346,16 +1348,13 @@ export async function upgradeRepository(repoRootInput, { autoRelease = false, de
  */
 async function requireCleanStarterFiles(workspace) {
   if ((await workspaceProvider(workspace.repoRoot))?.kind === "hosted") return;
-  const toplevel = await git(["rev-parse", "--show-toplevel"], workspace.repoRoot, { allowFailure: true });
-  if (toplevel.code !== 0) return;
   const syncPaths = workspace.parentRecord
     ? [...starterPlumbingFiles.map(([relative]) => relative), STARTER_LAYOUT_FILE, STARTER_RECORD_FILE]
     : starterSyncPaths;
-  const pathspecs = syncPaths.map((relative) => path.relative(workspace.repoRoot, path.join(workspace.designSystemRoot, ...relative.split("/"))).split(path.sep).join("/"));
-  const status = await git(["status", "--porcelain", "--untracked-files=all", "--", ...pathspecs], workspace.repoRoot);
-  if (status.stdout.trim()) {
-    throw Object.assign(new Error(`Starter sync refuses to run over uncommitted changes to the files it writes:\n${status.stdout.trim()}\nCommit or stash them first, so the sync's own diff stays reviewable`), { failureCode: "dirty_worktree" });
-  }
+  await requireCleanPaths(workspace.designSystemRoot, syncPaths, {
+    message: 'Starter sync refuses to run over uncommitted changes to the files it writes',
+    remedy: "Commit or stash them first, so the sync's own diff stays reviewable",
+  });
 }
 
 /**
@@ -1926,7 +1925,7 @@ export async function runCli(argv) {
   if (command === "shoot") {
     if (positional.length !== 1 || !options.systemId) throw new Error(`Usage: ${shootUsage}`);
     if (isBinaryRuntime()) throw new Error('Local shoot currently requires the npm CLI. Create and commit the offshoot with npm run timds -- shoot, then explicitly select binary execution with timds-cli installation adopt --binary --apply.');
-    const source = await loadOffshootSource(positional[0], options);
+    const source = await loadOffshootSource(positional[0], options, {decoded: true});
     const result = await shootOffshoot({destination: options.root || path.resolve(options.systemId.split('/').at(-1)), source, mode: options.mode || 'full', systemId: options.systemId, name: options.name, check: async destination => {
       const workspace = await loadWorkspace(destination);
       if ((options.mode || 'full') === 'full' && !await isStockWorkspace(destination, workspace.manifest)) {
@@ -1934,6 +1933,7 @@ export async function runCli(argv) {
         else {
           const pkg = await readJsonObject(path.join(destination, 'package.json'), 'package.json');
           if (Object.keys({...pkg.dependencies, ...pkg.devDependencies, ...pkg.optionalDependencies}).length) {
+            if (!existsSync(path.join(destination, 'package-lock.json'))) throw new Error("The parent's custom build toolchain requires an exact package-lock.json; commit it in the parent before shooting the offshoot, or use --install with a reviewed workspace.install command.");
             output(`Installing the full offshoot build toolchain from its exact lockfile${options.install ? '' : ' with lifecycle scripts disabled'}.`);
             await execute(['npm', 'ci', ...(options.install ? [] : ['--ignore-scripts'])], {cwd: destination, env: {...process.env, npm_config_audit: 'false', npm_config_fund: 'false'}});
           }
@@ -1950,7 +1950,7 @@ export async function runCli(argv) {
     const workspace = await loadWorkspace(root);
     const parent = workspace.parentRecord;
     if (!parent) throw new Error('This system has no parent to feed');
-    const source = await loadOffshootSource(options.from || parent.systemId, {...options, local: Boolean(options.from), sourceId: options.sourceId || parent.sourceId, portalUrl: options.portalUrl || workspace.manifest.provider?.url});
+    const source = await loadOffshootSource(options.from || parent.systemId, {...options, local: Boolean(options.from), sourceId: options.sourceId || parent.sourceId, portalUrl: options.portalUrl || workspace.manifest.provider?.url}, {decoded: true});
     const result = await feedOffshoot({designSystemRoot: workspace.designSystemRoot, source, check: () => checkWorkspace(root), force: positional, decideCustomized: positional.length ? null : terminalPlumbingPrompt()});
     if (options.json) output(JSON.stringify(result, null, 2));
     else { for (const line of describeFeed(result)) output(line); output(result.written.length ? 'Review and commit the feed.' : 'The parent feed is current.'); }

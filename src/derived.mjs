@@ -131,11 +131,14 @@ export async function fetchDerivedLayer(publicBase, { fetchImpl = fetch } = {}) 
       throw new Error(`${url} is not valid: ${caught instanceof Error ? caught.message : String(caught)}`);
     }
   };
-  const stamp = await get(PROVENANCE_FILE, JSON.parse, { required: true });
   // An immutable publication's stamp owns its ancestry. Older releases have
-  // no lineage field and remain ordinary systems to this reader.
-  const lineage = parentLineage(stamp.lineage ?? null);
-  const provenance = { ...stamp, lineage };
+  // no lineage field and remain ordinary systems to this reader. Validate
+  // within the remote parser so a bad stamp names its published URL.
+  const provenance = await get(PROVENANCE_FILE, raw => {
+    const stamp = JSON.parse(raw);
+    return { ...stamp, lineage: parentLineage(stamp.lineage ?? null) };
+  }, { required: true });
+  const lineage = provenance.lineage;
   // A stamp written before designs existed names no designs file; it then
   // sits where the entry says, and is simply absent for an older publish.
   const paths = { ...derivedLayerPaths(provenance.entry), ...(provenance.files ?? {}) };

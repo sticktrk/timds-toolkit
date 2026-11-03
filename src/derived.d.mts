@@ -1,17 +1,11 @@
 /** The derived layer: generated, contract-shaped documents a consumer reads without TimDS internals. */
 import type {RuntimeIdentity, RuntimeRequirements} from "./runtime.mjs";
 import type {VideoBoardCatalogSummary} from "./video-producer.mjs";
+import type {SystemLineage, ParentRecord} from "./offshoot-contract.mjs";
+
+export type {SystemLineage, ParentRecord} from "./offshoot-contract.mjs";
 
 export type SystemStamp = { id: string; name: string; version: string };
-
-/** Public ancestry of an offshoot at one parent release; no grants or creator identity. */
-export type SystemLineage = {
-  systemId: string;
-  sourceId: string;
-  version: string;
-  commit: string;
-  mode: "full" | "structure";
-};
 
 /* ── tokens.json ─────────────────────────────────────────────────────────── */
 
@@ -399,7 +393,7 @@ export const PROVENANCE_FILE: ".timds-artifact.json";
 export function derivedLayerPaths(entry?: string): Record<DerivedFileName, string>;
 export function derivedFilePath(designSystemRoot: string, manifest: { artifact?: { entry?: string } }, name: DerivedFileName): string;
 /** parentRecord is a validated ancestry snapshot scoped to this workspace operation. */
-export function readDerivedLayer(designSystemRoot: string, manifest: { systemId?: string; name?: string; version?: string; artifact?: { entry?: string } }, options?: { parentRecord?: SystemLineage | null }): Promise<DerivedLayer>;
+export function readDerivedLayer(designSystemRoot: string, manifest: { systemId?: string; name?: string; version?: string; artifact?: { entry?: string } }, options?: { parentRecord?: ParentRecord | null }): Promise<DerivedLayer>;
 export function fetchDerivedLayer(publicBase: string, options?: { fetchImpl?: typeof fetch }): Promise<DerivedLayer>;
 export function summarizeBrandKit(kit: BrandKit | null | undefined): BrandKitSummary | null;
 export function describeBrandKit(summary: BrandKitSummary | null): string;
