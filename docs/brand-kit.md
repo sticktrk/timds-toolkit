@@ -1,6 +1,8 @@
-# Brand kit starter: design proposal
+# Brand kit starter contract
 
-Status: draft for discussion, 2026-11-03. Nothing here is implemented.
+The `brand-kit` starter is selected explicitly with `init --starter brand-kit`.
+Its slot export, overlay, renderer, sync behavior and authoring guidance ship
+together in the same toolkit release.
 
 A second starter template, `templates/brand-kit/`, scaffolds the **stock
 parent** a website-to-kit pipeline shoots structure-mode offshoots from. The
@@ -11,9 +13,9 @@ composer that makes the first
 one. Where `templates/starter/` mirrors the golden agency-scale system, the
 brand kit is sized to one brand and built so an automated pass can fill it.
 
-The bar is the three published systems: treatments in Minimal, Accent and
-Bold, canvases with safe areas, a mark and a photo in every template, copy
-that sounds like the brand. A kit should get there from a crawl plus stated
+The kit provides Minimal, Accent, Bold and Photo treatments, canvases with
+safe areas, mark and photo slots in every template, and copy supplied by the
+brand. A kit should get there from a crawl plus stated
 assumptions, and the owner should see which is which.
 
 ## 1. The chain
@@ -37,29 +39,30 @@ deliberate design of those five, plus the data contract the builder fills.
 
 ## 2. The split: the starter owns pages, the builder owns data
 
-Today the builder writes ten pages of HTML and the tokens. That makes every
-page's guidance live in the pipeline and makes the kit unupgradeable. Proposed:
+Pages and data have separate owners so shared guidance can advance without
+replacing the brand's values:
 
-- **The starter owns every page**: brand guidance, the component library, the
+- **The starter owns every stock page except builder-owned Evidence**: brand guidance, the component library, the
   templates, the Use pages. They are stock, written against slots, and read
   the same on every brand. They say, per slot, what was observed, what was
   assumed and why, and what the owner should check.
-- **The builder owns data only**: `tokens.json` (values with their label),
+- **The builder owns data only**: the authored `tokens/*.json` maps (values with their label),
   `src/copy.json` (the brand's words), the media catalog and `src/assets/`
   (marks, photos, icons), and one `brand/evidence` page of captured facts
   (screenshots, spacing distribution, pages crawled) for a designer.
 
-The viewer gains two placeholders beside `{{tokens:GROUP}}`: `{{copy:KEY}}`
+The viewer supports two placeholders beside `{{tokens:GROUP}}`: `{{copy:KEY}}`
 and `{{media:KEY}}`. Both fall back to the stock sample when the key is
-unfilled, so a template renders before the builder has run and shows
-"assumed" rather than a hole afterwards.
+unfilled, so a template renders before the builder has run. The slot table
+shows assumed or unresolved provenance instead of presenting a sample as an
+observed fact. A missing copy file remains valid for the ordinary starter.
 
 ## 3. The slot vocabulary
 
 Every slot has a key, a source the crawler reads it from, an assumption rule
 when it is missing, and the guidance line the page shows. Labels stay the
 four the pipeline uses: **confirmed** (owner kept it), **observed** (on the
-site), **assumed** (our rule filled it; today's "proposed"), **unresolved**
+site), **assumed** (a documented rule filled it), **unresolved**
 (the site disagrees with itself; the owner decides).
 
 ### Foundations (tokens)
@@ -69,8 +72,8 @@ site), **assumed** (our rule filled it; today's "proposed"), **unresolved**
 | color.canvas | most-used page background | `#ffffff` |
 | color.surface | card / panel background | canvas |
 | color.ink | body text color | text on canvas by contrast |
-| color.muted | secondary text | ink mixed 35% into canvas |
-| color.line | borders, rules | ink mixed 82% into canvas |
+| color.muted | secondary text | ink 65% mixed with canvas 35% |
+| color.line | borders, rules | ink 18% mixed with canvas 82% |
 | color.accent | primary button background | most chromatic palette color |
 | color.accent-ink | primary button text | black or white by contrast on accent |
 | color.accent-soft | hover / selected ground | accent mixed 12% into canvas |
@@ -91,7 +94,7 @@ site), **assumed** (our rule filled it; today's "proposed"), **unresolved**
 | radius.media | image radius | radius.card |
 | line.width | button / field border | 1 px |
 | shadow.card | card box-shadow | none |
-| space.1 … space.12 | observed spacing distribution | 4 8 12 16 24 32 48 |
+| space.1 / 2 / 3 / 4 / 6 / 8 / 12 | observed spacing distribution | 4 / 8 / 12 / 16 / 24 / 32 / 48 px |
 | space.density | median section padding, bucketed | `regular` (tight / regular / airy) |
 | motion.fast | button transition duration | 150 ms |
 
@@ -170,7 +173,7 @@ samples before a crawl; after one they are the brand's.
 The composer's presets are the Social, Ads and Email formats, so the first
 thing a visitor makes after the kit opens works.
 
-Pieces `canvas.css` needs beyond today: `.canvas--accent`, `.canvas--photo`
+Shared pieces in `canvas.css`: `.canvas--accent`, `.canvas--photo`
 with a scrim, `.canvas-logo` (an `img` from `{{media:logo}}` with the
 on-dark swap), `.canvas-photo` with a focal position, `.canvas-badge`,
 `.canvas-count` (carousel "2 / 5"), a deck grid, and the business-card and
@@ -207,69 +210,124 @@ for it, and the Designs directory and Install page say that whole pages are
 authored per system by a designer's agent. The actual designs are each
 system's own.
 
-About thirty authored pages and thirty planned.
+The contract declares 33 authored pages, including the overview and builder-owned
+Evidence page, and 24 planned pages. Each of the 24 formats names an authored
+page. Carousel previews cover cover, point and last stages; deck previews cover
+title, section, content and closing slides, each in all four treatments.
 
 ## 6. Formats, tokens, stock
 
 `src/formats.json` holds exactly the formats in §4, each naming its template
-page. `tokens.json` holds exactly the slots in §3, so the coverage score is
-filled slots over slots that matter. `.timds/stock.json` declares the layout,
+page. `tokens/*.json` holds exactly the 40 foundation slots in §3; `tokens.json` is
+the generated compatibility view. The full exported vocabulary has 75 slots,
+including media, copy and elements. Coverage compares filled values against
+these defined slots rather than unrelated tokens. `.timds/stock.json` declares the layout,
 `system.css`, every page under `src/pages/` except `brand/evidence`, and
-`src/copy.json` once stock admits it (§8).
+`src/copy.json`. The Evidence page is never declared stock.
 
 `system.css` is the starter's, extended with the elements above and hardened:
 every ground names its ink, no assumption that canvas is light, the dark
-color-scheme block the builder already appends reads `ink-ground` slots.
+color-scheme block reads the `ink-ground` pair for viewer chrome. Shared
+viewer aliases live in `system.css`, not as extra foundation tokens.
 
-## 7. The crawler and builder (the pipeline repository, MVP, modifiable)
+## 7. Pipeline integration
 
-Capture to add, per page, from computed styles on sampled elements:
+A website-to-kit pipeline may fill the data from captured evidence. Crawling,
+model inference, source authorization and owner approval belong to that
+pipeline, outside this package. Relevant evidence includes computed element
+styles, heading behavior, content images and their focal hints, icon sets,
+canonical identity, social and contact links, button labels and heading copy.
 
-- buttons (exists), plus the second button style, links, fields, cards
-  (`[class*=card]`, `article`, bordered or shadowed blocks), badges, the
-  header and footer grounds, section backgrounds for accent-2 and ink-ground;
-- h1 letter-spacing, transform, line-height; small uppercase labels for the
-  eyebrow;
-- the largest six content images with natural size, aspect and a focal hint
-  (face or center of mass is a later step; start with center), and whether
-  they are photographic; SVG or transparent art as illustration;
-- favicon and touch icons; social, mailto and tel links; `og:` and meta
-  description; nav labels; button label bank; h1/h2 bank.
+The pipeline fills the token and media key maps, writes `src/copy.json`,
+places optimized local assets in `src/assets/`, and authors `brand/evidence`.
+It does not regenerate the other stock pages. `src/brand-kit.mjs`, exported as
+`@dtconcepts/timds/brand-kit`, supplies each slot's key, group, kind, source,
+assumption rule, guidance, sample, default label and owning page. It also
+exports the foundation and copy samples, views, authored/planned page ids,
+stock paths and treatment pairs. The renderer uses this same module, copied
+as managed `scripts/brand-kit.mjs`, so the pages and a pipeline read one list.
 
-Builder: fill tokens from the slot rules, write `copy.json` and the media
-catalog, copy assets, write `brand/evidence`, stop writing other pages. The
-assumption rules are data the toolkit exports (`src/brand-kit.mjs`): slot
-key, source, rule, guidance. The builder applies the rules; the stock pages
-quote the guidance. The two cannot drift because they read one list.
+### Values and labels
 
-## 8. Toolkit changes, in order
+Token values remain strings with optional `label` metadata using the four
+labels above. The slot table displays token labels and the catalog's media
+labels when supplied. Copy values are strings only; supplying arbitrary text
+does not prove it was observed or confirmed. Copy and element slot labels
+retain the contract's sample label, with decisions and evidence recorded on
+the Evidence page. No inferred provenance is silently promoted to confirmed.
 
-1. **Structure shoots keep the composer and the copy file.** `isPlumbingPath`
-   (and a host `transform-v2`) admit `src/scripts/compose.js`;
-   `.timds/stock.json` admits `src/copy.json`. Without the first, no
-   structure offshoot has a working Use page today. Designs need nothing:
-   a shoot drops them and the kit ships none.
-2. **Viewer placeholders** `{{copy:KEY}}` and `{{media:KEY}}` with stock
-   fallbacks, in `templates/starter/scripts/viewer.mjs` (shared plumbing).
-3. **`templates/brand-kit/` overlay**: `site.json`, `formats.json`,
-   `tokens.json`, `copy.json`, `stock.json`, `system.css`, `layout.html`,
-   pages, an empty `src/designs/`. `init --starter brand-kit`; `.timds/starter.json`
-   records `starter`; `starter sync` reads it for baselines and fragments;
-   `templates/starter-history/brand-kit/`.
-4. **`src/brand-kit.mjs`**: the slot list with rules and guidance, the builder
-   page and stock contract, exported for the pipeline and asserted by tests.
-5. **Tests**: fresh kit passes `check`; every template renders on the stock
-   samples and on an inverted palette with no color literals; every format
-   names an existing page; slot keys in `tokens.json`, `copy.json` and the
-   pages agree with the export.
-6. Docs and skills: this file becomes `docs/brand-kit.md`; AGENTS.md gains
-   the rule that the brand kit mirrors the slot contract the way the starter
-   mirrors the golden system; scaffolded entry points describe the kit.
+`src/copy.json` uses short keys such as `name`, `headlines` and `voice`.
+Headline and CTA banks are newline-delimited strings. `{{copy:headlines}}`
+renders the whole escaped value; `{{copy:headlines.0}}` selects the first
+non-empty line, and subsequent numeric indexes select later lines. A missing
+entry falls back to that stock bank entry and is reported. HTML characters
+are escaped in both ordinary and indexed placeholders.
 
-Publishing the first parent needs no host change: scaffold with
-`--provider hosted`, provision through the advanced route, publish `main`,
-grant the service principal structure offshoots. A host starter kind can
-follow.
+Media uses the existing catalog keys, such as `logo` and `photo-1`. An asset
+may additionally name a regular local file through `path: "src/assets/..."`.
+The catalog still requires its existing stable public URL and media metadata.
+The viewer emits the matching `/assets/...` path, refuses traversal and
+symbolic links, and rejects an explicitly named file that does not exist.
+On grouped systems, `media/*.json` is canonical and `media.json` is generated.
+An unfilled logo uses the visible wordmark sample; an unfilled photo uses the
+Bold treatment. No generated sample mark is represented as an approved logo.
+
+Accent previews declare `data-logo="auto"`. The viewer enhancement reads the
+computed `accent-ink` color and selects the on-dark mark for light ink or the
+primary mark for dark ink, updating the choice when the color scheme changes.
+The canvas geometry and variant swap remain CSS; before enhancement, the
+primary mark has a surface plate. Review the actual assets on their intended
+grounds as well as the named text pairs.
+
+### Diagnostics and checks
+
+Build reports the copy/media keys that used stock samples. A fresh kit also
+reports that its voice is assumed; replacing `copy.voice` with reviewed
+guidance clears that diagnostic. Its authored Voice & Tone page is valid
+guidance, so it does not report the ordinary starter's missing-voice-page
+warning. The derived brand reports no annotated logo until a real logo slot
+is filled. The ordinary starter retains its two expected brand warnings.
+
+Tests check the exact slot, copy, page and stock vocabulary; render every
+format and stage on stock and inverted palettes; and verify computed
+canvas/ink pairs. The viewer rejects color literals in source stylesheets.
+Each non-planned catalog page has exactly one fragment and every format
+names a declared page. Whole-page designs begin empty.
+
+## 8. Initialization and sync
+
+An operator or agent scaffolds the kit with:
+
+```bash
+timds init --standalone --starter brand-kit --root PATH
+```
+
+The default remains `starter`. Initialization selects one overlay, then
+records `starter: "brand-kit"` in `.timds/starter.json`; an absent field means
+`starter` for older records. `templates/brand-kit/` contains only the changed
+catalogs, foundation samples, copy, stock declaration, stylesheet, layout and
+pages, plus an empty Designs directory. Shared renderer, canvas, composer and
+build scripts come from the ordinary starter; the slot data module comes from
+`src/brand-kit.mjs`. No shared plumbing is duplicated in the overlay.
+
+Starter sync selects the stock catalogs, managed fragments, template paths
+and history by that record. Histories live under
+`templates/starter-history/<kind>/`. A fresh kit's first sync is a no-op.
+Catalogs merge against the kit baseline, stock fragments refresh only while
+unmodified, and authored tokens, copy, media, evidence, system styles and
+layout content retain their ownership boundaries. No ordinary upgrade
+converts one starter kind into another or resets these authored values.
+
+A structure shoot retains recorded `src/scripts/compose.js`, declared
+`src/copy.json`, and the selected starter kind. It still requires verified
+plumbing hashes and exact regular stock paths. The child keeps its parent's
+structural feed baseline, while ordinary toolkit sync refreshes plumbing.
+
+Publishing a stock parent is an operator action after scaffolding with
+`--provider hosted`: provision the source through the advanced route, publish
+`main`, then reserve a structure grant for the pipeline's service principal.
+The toolkit does not provision that parent or reserve grants. A Studio starter
+kind is separate host work.
 
 ## 9. Decisions taken (2026-11-03)
 

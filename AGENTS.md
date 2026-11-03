@@ -108,7 +108,7 @@ an existing starter-based system opts in once with `timds starter sync`, and
 every `upgrade` syncs an adopted system from then on. Inside that boundary the
 toolkit may touch exactly three kinds of things: the starter plumbing
 (`scripts/build.mjs`, `check.mjs`, `dev.mjs`, `viewer.mjs`,
-`src/scripts/compose.js`, `src/styles/canvas.css`, `src/styles/viewer.css`),
+`brand-kit.mjs`, `src/scripts/compose.js`, `src/styles/canvas.css`, `src/styles/viewer.css`),
 which a fresh `init`
 records as the toolkit's outright (`plumbing: "toolkit"`: every sync brings
 it to stock, replacing a local change and reporting it, never halting) and an
@@ -238,6 +238,26 @@ The golden repository's own workflow opens a `golden-mirror` issue here
 when a merged pull request touched its structure-bearing files (navigation
 model, catalogs and content modules, shared stylesheets, layout). Work the
 issue with the steps above and close it from the mirror pull request.
+
+## The brand kit mirrors its slot contract
+
+`templates/brand-kit/` is a second starter overlay, selected by
+`init --starter brand-kit`; it does not mirror the golden system's authored
+content. It mirrors the slots, samples, views, page ids and exact stock paths
+exported by `src/brand-kit.mjs`. Change the overlay, export, declarations,
+rendering tests, docs and skills together in one release. Shared plumbing
+stays in the ordinary starter; its managed `scripts/brand-kit.mjs` is copied
+from that pure source module so the viewer and integrations use one contract.
+
+`.timds/starter.json` records `starter` (`starter` when absent). Starter sync
+selects catalogs, managed fragments, stock template paths and
+`templates/starter-history/<kind>/` from it. A brand-kit structure offshoot
+retains the kind. No upgrade changes kinds or replaces authored token maps,
+copy, media, evidence, system styles, or customized fragments. The kit's
+`src/copy.json` is designer-owned data that may be explicitly declared stock;
+its existence does not add it to the upgrade write boundary. Keep the
+ordinary starter's compatibility and the kit's stock and inverted-palette
+rendering checks covered. See `docs/brand-kit.md`.
 
 ## Designers design in the system, developers ship it in the product
 
