@@ -298,7 +298,9 @@ export async function sessionChanges(root, state, note) {
   const changed = new Map([...files].filter(([name, bytes]) => !(grouped && ["tokens.json", "media.json"].includes(name)) && !same(base.get(name), bytes)));
   // A session may receive the immutable ancestry in its source snapshot, but
   // only shoot/feed/sever or host provisioning may change that record.
-  if (!same(base.get('.timds/parent.json'), files.get('.timds/parent.json'))) throw new Error('.timds/parent.json is protected lineage; sessions cannot create, edit or delete it');
+  // Case aliases reach the same record on case-insensitive filesystems.
+  const lineagePaths = new Set([...base.keys(), ...files.keys()].filter(name => name.toLowerCase() === '.timds/parent.json'));
+  if ([...lineagePaths].some(name => !same(base.get(name), files.get(name)))) throw new Error('.timds/parent.json is protected lineage; sessions cannot create, edit or delete it');
   if ([...changed.values()].reduce((total, bytes) => total + bytes.length, 0) > MAX_CHANGESET_BYTES) throw new Error("Change set exceeds 10 MiB; upload media to the asset store");
   return { files, changes: { baseRevision: state.session.baseRevision, lastUpdateHash: state.session.lastUpdateHash ?? state.session.baseRevision, changedFiles: encodeFiles(changed), deletedPaths: [...base.keys()].filter((name) => !files.has(name)).sort(), ...(note ? { note } : {}) } };
 }

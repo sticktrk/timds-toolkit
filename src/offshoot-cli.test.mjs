@@ -4,7 +4,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { checkWorkspace, extractWorkspace, initializeRepository, loadWorkspace, runCli, runWithOutputSink } from './core.mjs';
+import { checkWorkspace, extractWorkspace, initializeRepository, loadWorkspace, runCli, runWithOutputSink, syncStarterWorkspace, upgradeRepository } from './core.mjs';
 import { readDerivedLayer } from './derived.mjs';
 
 const sourceId = '11111111-1111-4111-8111-111111111111';
@@ -68,6 +68,42 @@ test('workspace operations reuse one parent snapshot and later resolutions see c
   const next = await loadWorkspace(root);
   assert.equal(next.parentRecord.version, '1.1.0');
   assert.equal(reads, 2, 'the cache does not survive a workspace resolution');
+});
+
+test('offshoot sync and upgrade allow dirty authored catalogs and fragments while guarding their plumbing writes', async t => {
+  for (const [name, operation] of [['sync', syncStarterWorkspace], ['upgrade', upgradeRepository]]) await t.test(name, async t => {
+    const {root} = await workspaceFixture(t);
+    const read = relative => fs.readFile(path.join(root, relative), 'utf8');
+    const parent = {schemaVersion: 1, systemId: 'example/parent', sourceId, version: '1.0.0', commit: '1'.repeat(40), mode: 'full', baseline: {site: JSON.parse(await read('src/site.json')), formats: JSON.parse(await read('src/formats.json'))}};
+    const parentText = json(parent);
+    await fs.writeFile(path.join(root, '.timds/parent.json'), parentText);
+    await fs.appendFile(path.join(root, 'scripts/dev.mjs'), '\n// Earlier toolkit plumbing.\n');
+    git(root, 'add', '--all'); git(root, 'commit', '-qm', 'Offshoot with earlier plumbing');
+    const authored = new Map();
+    for (const relative of ['src/site.json', 'src/formats.json', 'src/pages/use/index.html']) {
+      const next = `${await read(relative)}${relative.endsWith('.html') ? '\n<!-- Uncommitted authored overview. -->\n' : '\n'}`;
+      await fs.writeFile(path.join(root, relative), next);
+      authored.set(relative, next);
+    }
+    const result = await runWithOutputSink(() => {}, () => operation(root));
+    const sync = name === 'sync' ? result : result.starter;
+    assert.ok(sync.written.includes('scripts/dev.mjs'), 'the operation refreshes clean plumbing while authored changes are present');
+    assert.ok(sync.check, 'the changed plumbing passes the workspace check');
+    const assertAuthored = async () => {
+      for (const [relative, expected] of authored) assert.equal(await read(relative), expected, relative);
+      assert.equal(await read('.timds/parent.json'), parentText);
+    };
+    await assertAuthored();
+    git(root, 'add', 'scripts/dev.mjs', '.timds/starter.json'); git(root, 'commit', '-qm', 'Refresh toolkit plumbing');
+    for (const relative of ['scripts/dev.mjs', 'src/layout.html']) {
+      const original = await read(relative);
+      await fs.appendFile(path.join(root, relative), '\n');
+      await assert.rejects(runWithOutputSink(() => {}, () => operation(root)), /Starter sync refuses to run over uncommitted changes to the files it writes/);
+      assert.equal(await read(relative), `${original}\n`, 'the refusal preserves the dirty protected file');
+      await assertAuthored();
+      await fs.writeFile(path.join(root, relative), original);
+    }
+  });
 });
 
 test('help and usage errors expose every offshoot source and installation flag', async () => {
