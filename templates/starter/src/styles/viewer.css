@@ -168,3 +168,81 @@ pre { margin: var(--space-6) 0 0; padding: var(--space-4) var(--space-6); overfl
   .spec tr { padding: var(--space-3) 0; border-bottom: var(--size-line) solid var(--color-line); }
   .spec td { padding: var(--space-1) 0; border: 0; }
 }
+
+/* ---- compose: the Use page's workbench. A row of preset cards, each a
+   format from src/formats.json drawn at true proportion, a chat, and a
+   preview stage that shows the image in the selected canvas. The figure's
+   data-state (loading, ready, busy, off, exhausted) is set by
+   src/scripts/compose.js. ---- */
+.compose__app { margin: 0; }
+.compose__presets { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.preset { position: relative; display: flex; flex-direction: column; align-items: center; gap: 0.125rem; width: 6.75rem; padding: var(--space-3) var(--space-2) var(--space-2); border: var(--size-line) solid var(--color-line); border-radius: var(--radius-md); background: var(--color-surface); text-align: center; cursor: pointer; transition: border-color var(--motion-fast) ease, background-color var(--motion-fast) ease, transform var(--motion-fast) ease; }
+.preset:hover { border-color: var(--color-accent); transform: translateY(-1px); }
+.preset input { position: absolute; width: 1px; height: 1px; margin: 0; opacity: 0; pointer-events: none; }
+.preset:has(input:checked) { border-color: var(--color-accent); background: var(--color-accent-soft); box-shadow: inset 0 0 0 1px var(--color-accent); }
+.preset:has(input:focus-visible) { outline: 3px solid color-mix(in srgb, var(--color-accent) 42%, transparent); outline-offset: 2px; }
+.preset b { margin-top: var(--space-2); font-size: var(--type-small); line-height: 1.2; }
+.preset small { color: var(--color-muted); font-size: var(--type-label); line-height: 1.25; font-variant-numeric: tabular-nums; }
+.preset__thumb { display: grid; width: 2.75rem; height: 2.75rem; place-items: center; }
+.preset__shape { width: calc(min(1, var(--cw) / var(--ch)) * 100%); height: calc(min(1, var(--ch) / var(--cw)) * 100%); border: var(--size-line) solid var(--color-accent); border-radius: 2px; background: color-mix(in srgb, var(--color-accent) 16%, var(--color-surface)); transition: background-color var(--motion-fast) ease; }
+.preset:has(input:checked) .preset__shape { background: var(--color-accent); }
+
+.compose__bench { display: grid; grid-template-columns: minmax(0, 1fr) minmax(17rem, 23rem); gap: var(--space-6); margin-top: var(--space-6); }
+.compose__chat { display: flex; flex-direction: column; min-height: 31rem; border: var(--size-line) solid var(--color-line); border-radius: var(--radius-md); background: var(--color-surface); }
+.compose__transcript { display: flex; flex: 1; flex-direction: column; gap: var(--space-4); max-height: 34rem; padding: var(--space-6); overflow-y: auto; scrollbar-width: thin; }
+.compose__empty { max-width: 36ch; margin: auto 0; color: var(--color-muted); font-size: var(--type-small); }
+.compose__empty b { display: block; margin-bottom: var(--space-2); color: var(--color-ink); font-family: var(--font-serif); font-size: var(--type-lead); font-weight: 500; letter-spacing: -0.01em; }
+.compose__chips { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-4); }
+.compose__chip { padding: var(--space-1) var(--space-3); border: var(--size-line) solid var(--color-line); border-radius: var(--radius-round); background: var(--color-canvas); color: var(--color-ink); font: inherit; font-size: var(--type-small); cursor: pointer; transition: border-color var(--motion-fast) ease, background-color var(--motion-fast) ease; }
+.compose__chip:hover { border-color: var(--color-accent); background: var(--color-accent-soft); }
+.msg { max-width: 58ch; font-size: var(--type-small); line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.msg--user { align-self: flex-end; padding: var(--space-3) var(--space-4); border-radius: var(--radius-md) var(--radius-md) var(--radius-sm) var(--radius-md); background: var(--color-accent-soft); }
+.msg--assistant { display: grid; grid-template-columns: 1.5rem minmax(0, 1fr); gap: var(--space-3); }
+.msg--assistant::before { content: attr(data-initial); display: grid; width: 1.5rem; height: 1.5rem; place-items: center; border-radius: var(--radius-round); background: var(--color-accent); color: var(--color-surface); font-size: var(--type-label); font-weight: 800; }
+.msg.is-live > span::after { content: ""; display: inline-block; width: 0.5em; height: 1em; margin-left: 0.15em; background: var(--color-accent); vertical-align: -0.15em; animation: compose-blink 1s steps(2) infinite; }
+.msg--note > span { color: var(--color-muted); font-style: italic; }
+.msg--error > span { color: var(--color-ink); }
+.compose__notice { margin: 0 var(--space-6) var(--space-4); padding: var(--space-4) var(--space-4) var(--space-4) var(--space-6); border-left: 3px solid var(--color-accent); border-radius: var(--radius-sm); background: var(--color-canvas); font-size: var(--type-small); }
+.compose__notice b { display: block; margin-bottom: var(--space-1); }
+.compose__notice a { color: var(--color-accent); font-weight: 700; }
+.compose__challenge { margin: 0 var(--space-6) var(--space-4); }
+.compose__form { display: flex; align-items: flex-end; gap: var(--space-2); margin: 0 var(--space-4) var(--space-3); padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4); border: var(--size-line) solid var(--color-line); border-radius: var(--radius-md); background: var(--color-surface); transition: border-color var(--motion-fast) ease, box-shadow var(--motion-fast) ease; }
+.compose__form:focus-within { border-color: var(--color-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 22%, transparent); }
+.compose__input { flex: 1; min-height: 2.5rem; max-height: 10rem; padding: var(--space-2) 0; border: 0; background: none; color: var(--color-ink); font: inherit; line-height: 1.5; resize: none; }
+.compose__input:focus { outline: none; }
+.compose__input::placeholder { color: var(--color-muted); }
+.compose__send { min-height: 2.5rem; padding: 0 var(--space-4); }
+.compose__send:disabled { opacity: 0.55; cursor: default; }
+.compose__foot { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); min-height: 1.5rem; padding: 0 var(--space-6) var(--space-4); color: var(--color-muted); font-size: var(--type-label); }
+.compose__reset { padding: 0; border: 0; white-space: nowrap; background: none; color: var(--color-muted); font: inherit; font-size: var(--type-label); text-decoration: underline; text-underline-offset: 0.2em; cursor: pointer; }
+.compose__reset:hover { color: var(--color-ink); }
+.compose__app[data-state="loading"] .compose__form, .compose__app[data-state="off"] .compose__form, .compose__app[data-state="exhausted"] .compose__form { opacity: 0.5; pointer-events: none; }
+.compose__app[data-state="off"] .compose__chips, .compose__app[data-state="exhausted"] .compose__chips { display: none; }
+
+.compose__preview { display: flex; flex-direction: column; gap: var(--space-3); }
+.compose__stagewrap { display: grid; min-height: 18rem; place-items: center; padding: var(--space-6); border: var(--size-line) solid var(--color-line); border-radius: var(--radius-md); background: var(--color-canvas) radial-gradient(color-mix(in srgb, var(--color-line) 85%, transparent) 1px, transparent 1.5px) 0 0 / 12px 12px; }
+.compose__stage { width: min(100%, calc(16rem * var(--cw) / var(--ch))); }
+.compose__canvas { display: grid; place-items: center; text-align: center; }
+.compose__canvas img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.compose__placeholder { padding: calc(var(--t) * 60); }
+.compose__placeholder .canvas-mark { display: block; font-size: calc(var(--t) * 64); line-height: 1.1; }
+.compose__hint { margin: calc(var(--t) * 20) 0 0; color: var(--color-muted); font-size: calc(var(--t) * 34); line-height: 1.35; }
+.compose__app[data-state="busy"] .compose__canvas::before { content: ""; position: absolute; inset: 0; z-index: 1; background: linear-gradient(100deg, transparent 30%, color-mix(in srgb, var(--color-accent) 14%, transparent) 50%, transparent 70%) 0 0 / 200% 100%; animation: compose-shimmer 1.4s linear infinite; }
+.compose__actions { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); min-height: 2.5rem; }
+.compose__size { color: var(--color-muted); font-family: var(--font-mono); font-size: var(--type-label); }
+.compose__download { min-height: 2.5rem; padding: 0 var(--space-4); font-size: var(--type-small); }
+.compose__download[hidden] { display: none; }
+.compose__captionbox { border: var(--size-line) solid var(--color-line); border-radius: var(--radius-md); background: var(--color-surface); }
+.compose__captionbar { display: flex; align-items: center; justify-content: space-between; padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4); border-bottom: var(--size-line) solid var(--color-line); color: var(--color-muted); font-size: var(--type-label); font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; }
+.compose__copy { padding: var(--space-1) var(--space-3); border: var(--size-line) solid var(--color-line); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-ink); font: inherit; font-size: var(--type-label); font-weight: 700; cursor: pointer; }
+.compose__copy:hover:not(:disabled) { border-color: var(--color-accent); background: var(--color-accent-soft); }
+.compose__copy:disabled { color: var(--color-muted); cursor: default; }
+.compose__caption { min-height: 5.5rem; padding: var(--space-4); color: var(--color-muted); font-size: var(--type-small); line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.compose__caption.is-filled { color: var(--color-ink); }
+
+@keyframes compose-blink { to { opacity: 0; } }
+@keyframes compose-shimmer { to { background-position: -200% 0; } }
+
+@media (max-width: 60rem) {
+  .compose__bench { grid-template-columns: 1fr; }
+}

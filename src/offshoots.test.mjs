@@ -69,6 +69,38 @@ test('shoot creates full and structure offshoots that pass a real workspace chec
   assert.match(await fs.readFile(path.join(skeleton, 'src/styles/system.css'), 'utf8'), /Replace placeholder tokens/);
 });
 
+test('structure shoots retain the verified composer and explicitly declared copy samples', async t => {
+  const {root, directory} = await fixture(t);
+  const copy = json({name: 'Sample brand', tagline: 'A useful idea, clearly expressed.'});
+  await fs.writeFile(path.join(root, 'src/copy.json'), copy);
+  await fs.writeFile(path.join(root, '.timds/stock.json'), json({schemaVersion: 1, paths: [
+    'src/layout.html', 'src/styles/system.css', 'src/pages/use/index.html',
+    'src/pages/use/install.html', 'src/copy.json',
+  ]}));
+  git(root, 'add', '--all'); git(root, 'commit', '-qm', 'Reusable composer and copy samples');
+  const source = await loadOffshootSource(root, {sourceId});
+  const destination = path.join(directory, 'compose-child');
+  await shootOffshoot({destination, source, mode: 'structure', systemId: 'example/compose-child', check: checkWorkspace});
+  const read = relative => fs.readFile(path.join(destination, relative), 'utf8');
+  assert.equal(await read('src/copy.json'), copy, 'declared copy remains byte-identical');
+  const script = await fs.readFile(path.join(root, 'src/scripts/compose.js'), 'utf8');
+  assert.equal(await read('src/scripts/compose.js'), script);
+  assert.equal(await read('dist/scripts/compose.js'), script, 'the shared viewer copies the admitted script into the artifact');
+  const use = await read('dist/use/index.html');
+  assert.match(use, /<figure class="compose__app" data-compose/);
+  assert.match(use, /<script src="\/scripts\/compose\.js" defer><\/script>/);
+  assert.match(use, /<a href="\/">the overview<\/a>/, 'page placeholders follow the structure-mode route');
+  assert.match(await read('dist/use/install/index.html'), /<a href="\/use\/#mcp">Using the system<\/a>/);
+
+  const customized = structuredClone(source);
+  customized.files.find(file => file.path === 'src/scripts/compose.js').content = Buffer.from('// changed composer\n').toString('base64');
+  await assert.rejects(transformOffshoot(customized, {mode: 'structure', systemId: 'example/customized'}), /customized toolkit plumbing: src\/scripts\/compose\.js/);
+  const undeclared = structuredClone(source);
+  undeclared.files.find(file => file.path === '.timds/stock.json').content = Buffer.from(json({schemaVersion: 1, paths: ['src/styles/system.css']})).toString('base64');
+  const transformed = await transformOffshoot(undeclared, {mode: 'structure', systemId: 'example/undeclared'});
+  assert.ok(!transformed.files.some(file => file.path === 'src/copy.json'), 'authored copy is not inferred as reusable stock');
+});
+
 test('structure keeps the toolkit baseline distinct from its parent feed through sever and sync', async t => {
   const {root, directory} = await fixture(t);
   const read = relative => fs.readFile(path.join(root, relative), 'utf8');

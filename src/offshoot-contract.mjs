@@ -10,7 +10,7 @@ export const STOCK_RECORD_FILE = '.timds/stock.json';
 // Boundary classifiers cover portable aliases; disk readers use canonical names.
 export const isLineagePath = value => typeof value === 'string' && value.toLowerCase() === PARENT_RECORD_FILE;
 export const isDesignerRecordPath = value => typeof value === 'string' && value.toLowerCase() === STOCK_RECORD_FILE;
-export const isPlumbingPath = value => typeof value === 'string' && /^(?:scripts\/[a-z0-9.-]+\.mjs|src\/styles\/(?:viewer|canvas)\.css)$/.test(value);
+export const isPlumbingPath = value => typeof value === 'string' && /^(?:scripts\/[a-z0-9.-]+\.mjs|src\/scripts\/compose\.js|src\/styles\/(?:viewer|canvas)\.css)$/.test(value);
 const object = value => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const onlyKeys = (value, keys) => Object.keys(value).every(key => keys.includes(key));
 
@@ -92,7 +92,7 @@ export async function validateStockRecord(value, root) {
   if (!object(value) || value.schemaVersion !== 1 || !onlyKeys(value, ['schemaVersion', 'paths']) || !Array.isArray(value.paths) || value.paths.length > 4000) throw new Error(`${at} must contain schemaVersion 1 and up to 4000 paths`);
   const seen = new Set();
   for (const file of value.paths) {
-    if (typeof file !== 'string' || !/^src\/(?:pages\/.+\.html|styles\/.+\.css|layout\.html)$/.test(file) || /[\x00-\x1f\x7f\\*?\[\]{}]/.test(file) || file.split('/').some(part => !part || part === '.' || part === '..') || seen.has(file)) throw new Error(`${at} must name unique exact src/pages HTML files, src/styles CSS files or src/layout.html`);
+    if (typeof file !== 'string' || !/^src\/(?:pages\/.+\.html|styles\/.+\.css|layout\.html|copy\.json)$/.test(file) || /[\x00-\x1f\x7f\\*?\[\]{}]/.test(file) || file.split('/').some(part => !part || part === '.' || part === '..') || seen.has(file)) throw new Error(`${at} must name unique exact src/pages HTML files, src/styles CSS files, src/layout.html or src/copy.json`);
     seen.add(file);
     if (root) {
       try { await regularPath(root, file); }

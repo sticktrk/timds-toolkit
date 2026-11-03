@@ -108,7 +108,8 @@ an existing starter-based system opts in once with `timds starter sync`, and
 every `upgrade` syncs an adopted system from then on. Inside that boundary the
 toolkit may touch exactly three kinds of things: the starter plumbing
 (`scripts/build.mjs`, `check.mjs`, `dev.mjs`, `viewer.mjs`,
-`src/styles/canvas.css`, `src/styles/viewer.css`), which a fresh `init`
+`src/scripts/compose.js`, `src/styles/canvas.css`, `src/styles/viewer.css`),
+which a fresh `init`
 records as the toolkit's outright (`plumbing: "toolkit"`: every sync brings
 it to stock, replacing a local change and reporting it, never halting) and an
 adopted system records by hash (`"recorded"`: replaced only while the file
@@ -268,7 +269,8 @@ Offshoots record their immediate parent release and structural feed baseline
 in `.timds/parent.json`. Check validates it without mutation; sessions cannot
 create, edit or delete it. `.timds/stock.json` is a designer-authored exception
 under `.timds`: exact existing regular `src/pages/**/*.html`,
-`src/styles/**/*.css` and `src/layout.html` paths only, never globs or links.
+`src/styles/**/*.css`, `src/layout.html` and `src/copy.json` paths only, never
+globs or links. The copy file remains authored source after creation.
 Structure creation includes those declarations, verified recorded plumbing,
 whole formats, planned pages and token `initial` placeholders reported as
 unresolved warnings. `shoot` creates a local independent repository without
