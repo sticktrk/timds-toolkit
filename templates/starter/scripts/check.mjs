@@ -8,4 +8,6 @@ if (literals.length) {
 }
 
 console.log(`Validated ${site.tokenGroups} token groups, ${site.formatCount} formats, and ${site.pages} authored pages`);
+if (site.fallbacks.length) console.log(`Stock samples used for unfilled slots: ${site.fallbacks.join(", ")}`);
+for (const warning of site.warnings) console.warn(`Warning: ${warning}`);
 if (site.planned.length) console.log(`Planned pages not yet authored: ${site.planned.join(", ")}`);

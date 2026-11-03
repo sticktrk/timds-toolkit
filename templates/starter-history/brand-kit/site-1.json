@@ -1,0 +1,123 @@
+{
+  "views": [
+    {
+      "id": "brand",
+      "label": "Brand",
+      "blurb": "The foundations",
+      "pages": [
+        { "slug": "foundation", "title": "Foundation", "summary": "The brand name, purpose, source evidence and assumptions." },
+        { "slug": "logo", "title": "Logo", "summary": "Marks, their grounds and what still needs approval." },
+        { "slug": "color", "title": "Color", "summary": "Palette slots and the ink paired with every ground." },
+        { "slug": "typography", "title": "Typography", "summary": "Font families, weights, scale and heading behavior." },
+        { "slug": "icons", "title": "Icons", "summary": "The compact mark, favicon and icon family." },
+        { "slug": "voice", "title": "Voice & Tone", "summary": "The sample voice, copy bank and claims to review." },
+        { "slug": "evidence", "title": "Evidence", "summary": "Captured observations, sources and unresolved decisions." }
+      ]
+    },
+    {
+      "id": "web",
+      "label": "Web",
+      "blurb": "Components and pages",
+      "pages": [
+        { "slug": "components", "title": "Components", "summary": "The elements every template and whole page uses." },
+        { "slug": "spacing", "title": "Spacing & shape", "summary": "Spacing, density, corners, borders, shadows and motion." },
+        { "slug": "layout", "title": "Layout", "summary": "A live launch-page demonstration on the shared components." },
+        { "slug": "photography", "title": "Photography", "summary": "The six photo slots, illustration and crop guidance." },
+        { "slug": "page-archetypes", "title": "Page archetypes", "summary": "Whole-page patterns to author for this system.", "planned": true },
+        { "slug": "email", "title": "Email principles", "summary": "Inbox constraints and component translation.", "planned": true },
+        { "slug": "email-templates", "title": "Email templates", "summary": "Reusable whole-message patterns.", "planned": true }
+      ]
+    },
+    {
+      "id": "social",
+      "label": "Social",
+      "blurb": "Posts and stories",
+      "pages": [
+        { "slug": "", "title": "Overview", "summary": "Treatments, the social format catalog and how previews are built." },
+        { "slug": "posts", "title": "Posts", "summary": "Square, portrait and story templates in four treatments." },
+        { "slug": "carousel", "title": "Carousel", "summary": "Cover, point and closing frames on one consistent grid." },
+        { "slug": "foundations", "title": "Brand on social", "summary": "How the brand behaves in a mobile feed.", "planned": true },
+        { "slug": "linkedin", "title": "LinkedIn specs", "summary": "Platform facts to confirm before use.", "planned": true },
+        { "slug": "linkedin-templates", "title": "LinkedIn templates", "summary": "Additional post and document patterns.", "planned": true },
+        { "slug": "video", "title": "Video", "summary": "Motion patterns and production guidance.", "planned": true },
+        { "slug": "shorts", "title": "Shorts", "summary": "Vertical motion with safe areas and captions.", "planned": true },
+        { "slug": "content", "title": "Pillars & cadence", "summary": "Topics and a sustainable publishing rhythm.", "planned": true }
+      ]
+    },
+    {
+      "id": "ads",
+      "label": "Ads",
+      "blurb": "Paid placements",
+      "pages": [
+        { "slug": "", "title": "Overview", "summary": "Treatments, the ad format catalog and delivery checks." },
+        { "slug": "paid-social", "title": "Meta and LinkedIn", "summary": "Feed, portrait and sponsored-content templates." },
+        { "slug": "display", "title": "Google display", "summary": "The core display set in four treatments." },
+        { "slug": "responsive", "title": "Responsive & PMax", "summary": "Responsive assets and text limits to confirm.", "planned": true },
+        { "slug": "business-profile", "title": "Business profile", "summary": "Profile updates and supported actions.", "planned": true },
+        { "slug": "compliance", "title": "Compliance", "summary": "Applicable claims and accessibility checks.", "planned": true }
+      ]
+    },
+    {
+      "id": "email",
+      "label": "Email",
+      "blurb": "One clear message",
+      "pages": [
+        { "slug": "", "title": "Overview", "summary": "Treatments, the email format catalog and delivery checks." },
+        { "slug": "banners", "title": "Header and signature", "summary": "Campaign headers and signature banners." },
+        { "slug": "message", "title": "One message", "summary": "A single-message layout on the system." },
+        { "slug": "principles", "title": "Email principles", "summary": "Rendering constraints and accessible fallbacks.", "planned": true },
+        { "slug": "templates", "title": "Templates", "summary": "Additional message patterns authored for this brand.", "planned": true }
+      ]
+    },
+    {
+      "id": "print",
+      "label": "Print",
+      "blurb": "Paper and display",
+      "pages": [
+        { "slug": "", "title": "Overview", "summary": "Treatments, the print format catalog and printer handoff." },
+        { "slug": "sheet", "title": "One-page sheet", "summary": "A compact letter-size information sheet." },
+        { "slug": "poster", "title": "Flyer and poster", "summary": "Two scales for a single, clear message." },
+        { "slug": "business-card", "title": "Business card", "summary": "A compact identity and contact frame." },
+        { "slug": "letterheads", "title": "Letterheads", "summary": "Correspondence and document grids.", "planned": true },
+        { "slug": "brochures", "title": "Brochures", "summary": "Folded collateral and panel order.", "planned": true },
+        { "slug": "booklets", "title": "Booklets", "summary": "Cover and interior page systems.", "planned": true },
+        { "slug": "notepads", "title": "Notepads", "summary": "Writable sheets and repeatable rules.", "planned": true },
+        { "slug": "banners", "title": "Banners", "summary": "Large-format messages read at distance.", "planned": true }
+      ]
+    },
+    {
+      "id": "events",
+      "label": "Events",
+      "blurb": "Gather and welcome",
+      "pages": [
+        { "slug": "", "title": "Overview", "summary": "Treatments, event formats and attendee-facing checks." },
+        { "slug": "poster", "title": "Event poster", "summary": "A poster led by one event message." },
+        { "slug": "social", "title": "Event post and story", "summary": "Event announcements in feed and story formats." },
+        { "slug": "badge", "title": "Name badge", "summary": "A readable attendee name and compact identity." },
+        { "slug": "webinar-banners", "title": "Webinar banners", "summary": "Registration and broadcast graphics.", "planned": true },
+        { "slug": "virtual-backgrounds", "title": "Virtual backgrounds", "summary": "Speaker-safe call backgrounds.", "planned": true },
+        { "slug": "covers", "title": "Eventbrite and Facebook covers", "summary": "Event covers sized for their destination.", "planned": true }
+      ]
+    },
+    {
+      "id": "decks",
+      "label": "Decks",
+      "blurb": "Present an idea",
+      "pages": [
+        { "slug": "", "title": "Overview", "summary": "Treatments, slide formats and a repeatable deck grid." },
+        { "slug": "slides", "title": "Slides", "summary": "Title, section, content and closing slide templates." },
+        { "slug": "templates", "title": "Presentation templates", "summary": "Whole-deck structures for recurring needs.", "planned": true },
+        { "slug": "webinar-titles", "title": "Webinar title slides", "summary": "Opening frames for live presentations.", "planned": true }
+      ]
+    },
+    {
+      "id": "use",
+      "label": "Use",
+      "blurb": "Make and connect",
+      "pages": [
+        { "slug": "", "title": "Compose", "summary": "Make a first asset from the system and a brief." },
+        { "slug": "install", "title": "Install", "summary": "Connect tools and author whole pages with a designer’s agent." }
+      ]
+    }
+  ]
+}

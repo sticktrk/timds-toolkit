@@ -1,0 +1,245 @@
+{
+  "social": {
+    "unit": "px",
+    "formats": {
+      "fb-1080x1080": {
+        "name": "Square post",
+        "width": 1080,
+        "height": 1080,
+        "safe": 54,
+        "page": "social/posts",
+        "file": "PNG or JPG"
+      },
+      "ig-1080x1350": {
+        "name": "Portrait post",
+        "width": 1080,
+        "height": 1350,
+        "safe": 54,
+        "page": "social/posts",
+        "file": "PNG or JPG"
+      },
+      "ig-1080x1920": {
+        "name": "Story",
+        "width": 1080,
+        "height": 1920,
+        "safe": 64,
+        "page": "social/posts",
+        "file": "PNG or JPG",
+        "ui": {
+          "top": 250,
+          "bottom": 340
+        }
+      },
+      "carousel-1080x1080": {
+        "name": "Carousel frame",
+        "width": 1080,
+        "height": 1080,
+        "safe": 54,
+        "page": "social/carousel",
+        "file": "PNG or JPG"
+      }
+    }
+  },
+  "ads": {
+    "unit": "px",
+    "formats": {
+      "meta-1080x1080": {
+        "name": "Meta feed",
+        "width": 1080,
+        "height": 1080,
+        "safe": 54,
+        "page": "ads/paid-social",
+        "file": "PNG or JPG"
+      },
+      "meta-1080x1350": {
+        "name": "Meta portrait",
+        "width": 1080,
+        "height": 1350,
+        "safe": 54,
+        "page": "ads/paid-social",
+        "file": "PNG or JPG"
+      },
+      "li-1200x627": {
+        "name": "LinkedIn sponsored",
+        "width": 1200,
+        "height": 627,
+        "safe": 31,
+        "page": "ads/paid-social",
+        "file": "PNG or JPG"
+      },
+      "gdn-300x250": {
+        "name": "Medium rectangle",
+        "width": 300,
+        "height": 250,
+        "safe": 13,
+        "page": "ads/display",
+        "file": "PNG or JPG"
+      },
+      "gdn-728x90": {
+        "name": "Leaderboard",
+        "width": 728,
+        "height": 90,
+        "safe": 5,
+        "page": "ads/display",
+        "file": "PNG or JPG"
+      },
+      "gdn-320x50": {
+        "name": "Mobile banner",
+        "width": 320,
+        "height": 50,
+        "safe": 3,
+        "page": "ads/display",
+        "file": "PNG or JPG"
+      },
+      "gdn-300x600": {
+        "name": "Half page",
+        "width": 300,
+        "height": 600,
+        "safe": 15,
+        "page": "ads/display",
+        "file": "PNG or JPG"
+      },
+      "gdn-1200x628": {
+        "name": "Landscape display",
+        "width": 1200,
+        "height": 628,
+        "safe": 31,
+        "page": "ads/display",
+        "file": "PNG or JPG"
+      }
+    }
+  },
+  "email": {
+    "unit": "px",
+    "formats": {
+      "email-1200x400": {
+        "name": "Email header",
+        "width": 1200,
+        "height": 400,
+        "safe": 20,
+        "page": "email/banners",
+        "file": "PNG or JPG"
+      },
+      "signature-1200x200": {
+        "name": "Signature banner",
+        "width": 1200,
+        "height": 200,
+        "safe": 10,
+        "page": "email/banners",
+        "file": "PNG or JPG"
+      },
+      "message-600": {
+        "name": "One-message HTML",
+        "width": 600,
+        "height": 800,
+        "safe": 30,
+        "page": "email/message",
+        "file": "HTML",
+        "note": "Width is the message constraint; preview height grows with authored content."
+      }
+    }
+  },
+  "print": {
+    "unit": "in",
+    "formats": {
+      "sheet-letter": {
+        "name": "One-page sheet",
+        "width": 8.5,
+        "height": 11,
+        "safe": 0.5,
+        "page": "print/sheet",
+        "bleed": 0.125,
+        "stock": "Confirm stock and finishing with the printer."
+      },
+      "flyer-11x17": {
+        "name": "Flyer",
+        "width": 11,
+        "height": 17,
+        "safe": 0.5,
+        "page": "print/poster",
+        "bleed": 0.125,
+        "stock": "Confirm stock and finishing with the printer."
+      },
+      "poster-18x24": {
+        "name": "Poster",
+        "width": 18,
+        "height": 24,
+        "safe": 0.75,
+        "page": "print/poster",
+        "bleed": 0.125,
+        "stock": "Confirm stock and finishing with the printer."
+      },
+      "business-card": {
+        "name": "Business card",
+        "width": 3.5,
+        "height": 2,
+        "safe": 0.125,
+        "page": "print/business-card",
+        "bleed": 0.125,
+        "stock": "Confirm stock and finishing with the printer."
+      }
+    }
+  },
+  "events-print": {
+    "unit": "in",
+    "formats": {
+      "event-poster": {
+        "name": "Event poster",
+        "width": 18,
+        "height": 24,
+        "safe": 0.75,
+        "page": "events/poster",
+        "bleed": 0.125,
+        "stock": "Confirm stock and finishing with the printer."
+      },
+      "name-badge": {
+        "name": "Name badge",
+        "width": 3.5,
+        "height": 2,
+        "safe": 0.125,
+        "page": "events/badge",
+        "bleed": 0.125,
+        "stock": "Confirm stock and finishing with the printer.",
+        "note": "Illustrative badge insert; confirm the holder trim before production."
+      }
+    }
+  },
+  "events": {
+    "unit": "px",
+    "formats": {
+      "event-post": {
+        "name": "Event post",
+        "width": 1080,
+        "height": 1080,
+        "safe": 54,
+        "page": "events/social",
+        "file": "PNG or JPG"
+      },
+      "event-story": {
+        "name": "Event story",
+        "width": 1080,
+        "height": 1920,
+        "safe": 64,
+        "page": "events/social",
+        "file": "PNG or JPG",
+        "ui": {
+          "top": 250,
+          "bottom": 340
+        }
+      }
+    }
+  },
+  "decks": {
+    "unit": "px",
+    "formats": {
+      "slide-1920x1080": {
+        "name": "Widescreen slide",
+        "width": 1920,
+        "height": 1080,
+        "safe": 96,
+        "page": "decks/slides",
+        "file": "PNG or JPG"
+      }
+    }
+  }
+}

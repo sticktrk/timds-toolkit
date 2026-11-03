@@ -56,6 +56,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { readParentRecord } from "./offshoot-contract.mjs";
+import { brandKitStockPaths } from "./brand-kit.mjs";
 
 const templatesRoot = fileURLToPath(new URL("../templates/", import.meta.url));
 
@@ -67,12 +68,21 @@ export const STARTER_LAYOUT_FILE = "src/layout.html";
 /** The record's `plumbing` modes: who a local change to a stock script or stylesheet belongs to. */
 export const STARTER_PLUMBING_MODES = Object.freeze(["toolkit", "recorded"]);
 
+export const STARTER_KINDS = Object.freeze(["starter", "brand-kit"]);
+
+/** Select only a shipped scaffold; absent records keep the original starter. */
+export function starterKind(value = "starter") {
+  if (!STARTER_KINDS.includes(value)) throw new Error(`Unknown starter ${JSON.stringify(value)}; choose ${STARTER_KINDS.join(" or ")}`);
+  return value;
+}
+
 /** Plumbing the sync replaces by hash: [design-system path, template name]. */
 export const starterPlumbingFiles = Object.freeze([
   ["scripts/build.mjs", "starter/scripts/build.mjs"],
   ["scripts/check.mjs", "starter/scripts/check.mjs"],
   ["scripts/dev.mjs", "starter/scripts/dev.mjs"],
   ["scripts/viewer.mjs", "starter/scripts/viewer.mjs"],
+  ["scripts/brand-kit.mjs", "../src/brand-kit.mjs"],
   ["src/scripts/compose.js", "starter/src/scripts/compose.js"],
   ["src/styles/canvas.css", "starter/src/styles/canvas.css"],
   ["src/styles/viewer.css", "starter/src/styles/viewer.css"],
@@ -94,15 +104,24 @@ export const starterManagedFragments = Object.freeze([
   ["src/pages/use/install.html", "starter/src/pages/use/install.html"],
 ]);
 
-/** Every file the sync may write, for a clean-tree guard before it runs. */
-export const starterSyncPaths = Object.freeze([
-  ...starterPlumbingFiles.map(([relative]) => relative),
-  ...starterManagedFragments.map(([relative]) => relative),
-  STARTER_SITE_FILE,
-  STARTER_FORMATS_FILE,
-  STARTER_LAYOUT_FILE,
-  STARTER_RECORD_FILE,
-]);
+/** Kind-specific stock pages share the same preservation rule as overviews. */
+export function starterFragments(kind = "starter") {
+  return starterKind(kind) === "starter" ? starterManagedFragments : brandKitStockPaths
+    .filter(relative => relative.startsWith("src/pages/"))
+    .map(relative => [relative, `brand-kit/${relative}`]);
+}
+
+/** Every file the selected sync may write, for clean-tree guards and rollback. */
+export function starterPaths(kind = "starter") {
+  return [
+    ...starterPlumbingFiles.map(([relative]) => relative),
+    ...starterFragments(kind).map(([relative]) => relative),
+    STARTER_SITE_FILE, STARTER_FORMATS_FILE, STARTER_LAYOUT_FILE, STARTER_RECORD_FILE,
+  ];
+}
+
+/** The original starter boundary, retained for existing callers. */
+export const starterSyncPaths = Object.freeze(starterPaths());
 
 /** The stylesheet links the sync adds to a layout that lacks them. */
 const starterLayoutStylesheets = Object.freeze(["/styles/canvas.css", "/styles/viewer.css"]);
@@ -139,7 +158,11 @@ export const legacyStarterFileHashes = new Map([
 ]);
 
 /** Stock catalogs earlier releases scaffolded, for a system without a record. */
-const historicalSiteSnapshots = ["starter-history/site-1.json", "starter-history/site-2.json"];
+async function historicalSiteSnapshots(kind) {
+  const directory = `starter-history/${starterKind(kind)}`;
+  const files = (await fs.readdir(path.join(templatesRoot, directory))).filter(name => /^site-\d+\.json$/.test(name)).sort();
+  return Promise.all(files.map(async name => parseJson(await template(`${directory}/${name}`), `${directory}/${name}`)));
+}
 
 const sha256 = (text) => createHash("sha256").update(text).digest("hex");
 const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -156,8 +179,8 @@ export async function template(name) {
 }
 
 /** The absolute path of the stock template behind a plumbing or fragment file, for a diff against it. */
-export function stockTemplatePath(relative) {
-  const entry = [...starterPlumbingFiles, ...starterManagedFragments].find(([candidate]) => candidate === relative);
+export function stockTemplatePath(relative, kind = "starter") {
+  const entry = [...starterPlumbingFiles, ...starterFragments(kind)].find(([candidate]) => candidate === relative);
   if (!entry) throw new Error(`${relative} is not a starter file the toolkit writes`);
   return path.join(templatesRoot, entry[1]);
 }
@@ -498,6 +521,7 @@ export async function readStarterRecord(designSystemRoot) {
   if (record.plumbing !== undefined && !STARTER_PLUMBING_MODES.includes(record.plumbing)) {
     throw new Error(`${STARTER_RECORD_FILE} has plumbing ${JSON.stringify(record.plumbing)}; it must be ${STARTER_PLUMBING_MODES.map((mode) => JSON.stringify(mode)).join(" or ")}`);
   }
+  starterKind(record.starter);
   return record;
 }
 
@@ -509,17 +533,18 @@ async function writeStarterRecord(designSystemRoot, record) {
 }
 
 /** The stock catalogs, managed file texts, and their hashes of the installed toolkit's starter, each template read once. */
-async function stockStarter() {
+async function stockStarter(kind = "starter") {
+  kind = starterKind(kind);
   const files = {};
   const texts = {};
-  for (const [relative, templateName] of [...starterPlumbingFiles, ...starterManagedFragments]) {
+  for (const [relative, templateName] of [...starterPlumbingFiles, ...starterFragments(kind)]) {
     texts[relative] = await template(templateName);
     files[relative] = sha256(texts[relative]);
   }
   return {
     files,
-    formats: parseJson(await template("starter/src/formats.json"), "the starter formats template"),
-    site: parseJson(await template("starter/src/site.json"), "the starter site template"),
+    formats: parseJson(await template(`${kind}/src/formats.json`), "the starter formats template"),
+    site: parseJson(await template(`${kind}/src/site.json`), "the starter site template"),
     texts,
   };
 }
@@ -529,13 +554,15 @@ async function stockStarter() {
  * the stock catalogs as the baseline, so the first `upgrade` already knows
  * what the toolkit wrote, with the plumbing the toolkit's outright.
  */
-export async function recordFreshStarter(designSystemRoot, version) {
-  const stock = await stockStarter();
+export async function recordFreshStarter(designSystemRoot, version, kind = "starter") {
+  kind = starterKind(kind);
+  const stock = await stockStarter(kind);
   return writeStarterRecord(designSystemRoot, {
     baseline: { formats: stock.formats, site: stock.site },
     files: stock.files,
     plumbing: "toolkit",
     schemaVersion: 1,
+    starter: kind,
     version,
   });
 }
@@ -587,7 +614,8 @@ export async function syncStarter({ designSystemRoot, version, check = null, dec
   // A toolkit upgrade still keeps its engine current, but must not append
   // the seed's catalogs or author its fragments into the child's structure.
   const parent = await readParentRecord(designSystemRoot);
-  const stock = await stockStarter();
+  const kind = starterKind(record?.starter);
+  const stock = await stockStarter(kind);
   const files = [];
   const writes = [];
   const recordedFiles = parent ? { ...record?.files } : {};
@@ -610,7 +638,7 @@ export async function syncStarter({ designSystemRoot, version, check = null, dec
     let planned = await planStockFile(resolve(relative), desired, { force: plumbingMode === "toolkit" || force.includes(relative), knownHashes: knownStarterHashes(relative, record) });
     let note = planned.forced ? (plumbingMode === "toolkit" ? "the toolkit's in this system; a local change was replaced" : "replaced with --force") : undefined;
     if (planned.status === "customized" && decideCustomized) {
-      const choice = await decideCustomized({ current: planned.current, desired, file: resolve(relative), path: relative, templatePath: stockTemplatePath(relative) });
+      const choice = await decideCustomized({ current: planned.current, desired, file: resolve(relative), path: relative, templatePath: stockTemplatePath(relative, kind) });
       if (choice === "replace") {
         planned = { ...planned, forced: true, status: "updated", write: true };
         note = "replaced at the prompt";
@@ -632,10 +660,10 @@ export async function syncStarter({ designSystemRoot, version, check = null, dec
   let mergedFormats = { changes: { addedFormats: [], addedGroups: [], advanced: [], kept: [], skipped: [] } };
   if (!parent) {
     const currentSite = parseJson(siteText, STARTER_SITE_FILE);
-    const siteBaselines = record ? [record.baseline.site] : await Promise.all(historicalSiteSnapshots.map(async (name) => parseJson(await template(name), name)));
-    const fragmentPages = new Map(starterManagedFragments.map(([relative]) => {
-      const [, view, name] = relative.match(/^src\/pages\/([^/]+)\/([^/]+)\.html$/);
-      return [pageId(view, name === "index" ? "" : name), { relative }];
+    const siteBaselines = record?.baseline.site ? [record.baseline.site] : await historicalSiteSnapshots(kind);
+    const fragmentPages = new Map(starterFragments(kind).map(([relative]) => {
+      const id = relative.slice("src/pages/".length, -".html".length).replace(/\/index$/, "");
+      return [id, { relative }];
     }));
     const declaredBefore = declaredPageIds(currentSite);
     const findPage = (site, id) => {
@@ -703,7 +731,7 @@ export async function syncStarter({ designSystemRoot, version, check = null, dec
   if (layoutText === null) {
     plan(STARTER_LAYOUT_FILE, "skipped", null, null, "absent");
   } else {
-    const links = insertStylesheetLinks(layoutText, await template("starter/src/layout.html"));
+    const links = insertStylesheetLinks(layoutText, await template(`${kind}/src/layout.html`));
     const chip = linkVersionChip(links.html);
     const changed = links.inserted.length > 0 || chip.linked;
     const status = changed ? "updated" : links.unplaced.length ? "customized" : "current";
@@ -715,7 +743,7 @@ export async function syncStarter({ designSystemRoot, version, check = null, dec
   }
 
   // 5. Write, record, check; roll everything back when the check fails.
-  const nextRecord = { baseline: parent ? record?.baseline ?? parent.baseline : { formats: stock.formats, site: stock.site }, files: recordedFiles, ...(record?.plumbing ? { plumbing: record.plumbing } : {}), schemaVersion: 1, version };
+  const nextRecord = { baseline: parent ? record?.baseline ?? parent.baseline : { formats: stock.formats, site: stock.site }, files: recordedFiles, ...(record?.plumbing ? { plumbing: record.plumbing } : {}), schemaVersion: 1, starter: kind, version };
   const recordPath = resolve(STARTER_RECORD_FILE);
   const previousRecordText = await readOptional(recordPath);
   const recordChanged = previousRecordText !== `${JSON.stringify(nextRecord, null, 2)}\n`;
@@ -726,6 +754,7 @@ export async function syncStarter({ designSystemRoot, version, check = null, dec
     files,
     formats: mergedFormats.changes,
     plumbing: plumbingMode,
+    starter: kind,
     record: recordPath,
     recordWritten: recordChanged,
     site: merged.changes,

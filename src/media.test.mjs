@@ -4,9 +4,19 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { publishStagedMedia, readLocalMediaManifest, readMediaCatalog, stageMediaFile } from "./media.mjs";
+import { publishStagedMedia, readLocalMediaManifest, readMediaCatalog, stageMediaFile, validateMediaCatalog } from "./media.mjs";
 
 const sha256 = (content) => createHash("sha256").update(content).digest("hex");
+
+test("published media may name a bounded local source copy and its provenance label", () => {
+  const asset = record("logo", "image", { path: "src/assets/marks/logo.svg", label: "observed" });
+  assert.deepEqual(validateMediaCatalog({ schemaVersion: 2, assets: [asset] }).assets[0], asset);
+  for (const path of ["../logo.svg", "src/assets/../logo.svg", "src/assets//logo.svg", "/src/assets/logo.svg", "src/assets/logo.svg?x", "src/assets/logo.svg#x", "src/assets\\logo.svg", "src/assets/*.svg", "src/copy.json"]) {
+    assert.throws(() => validateMediaCatalog({ assets: [{ ...asset, path }] }), /exact file under src\/assets/);
+  }
+  assert.throws(() => validateMediaCatalog({ assets: [{ ...asset, label: "proposed" }] }), /label must be/);
+  assert.throws(() => validateMediaCatalog({ assets: [{ ...asset, publicUrl: "" }] }), /publicUrl is required/, "a local preview copy does not relax the published catalog URL contract");
+});
 
 function record(key, content, overrides = {}) {
   return {
