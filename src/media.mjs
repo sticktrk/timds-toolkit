@@ -137,6 +137,13 @@ function normalizedCatalogAsset(value, index, schemaVersion) {
     ? boundedString(asset.publicUrl, `${label}.publicUrl`, 2_000)
     : stablePublicUrl(asset.publicUrl, `${label}.publicUrl`);
   if (publicUrl) stablePublicUrl(publicUrl, `${label}.publicUrl`);
+  // Optional source copy used by slot-driven previews. Public catalog entries
+  // still keep their stable URL; the viewer separately verifies local bytes.
+  const localPath = asset.path;
+  if (localPath !== undefined && (typeof localPath !== "string" || !/^src\/assets\/[a-zA-Z0-9._/-]+$/.test(localPath) || localPath.split("/").some(part => !part || part === "." || part === ".."))) {
+    throw new Error(`${label}.path must name an exact file under src/assets/`);
+  }
+  if (asset.label !== undefined && !["confirmed", "observed", "assumed", "unresolved"].includes(asset.label)) throw new Error(`${label}.label must be confirmed, observed, assumed, or unresolved`);
   return {
     bytes: validatedBytes(asset.bytes, `${label}.bytes`),
     contentType,
@@ -148,6 +155,8 @@ function normalizedCatalogAsset(value, index, schemaVersion) {
     sha256: validatedSha(asset.sha256, `${label}.sha256`),
     tags: normalizedTags(asset.tags, `${label}.tags`),
     title: boundedString(asset.title, `${label}.title`, 300, { required: true }),
+    ...(localPath === undefined ? {} : { path: localPath }),
+    ...(asset.label === undefined ? {} : { label: asset.label }),
     ...normalizedMediaMetadata(asset, label),
   };
 }
@@ -450,8 +459,10 @@ async function putMultipartFile(fetchImpl, upload, filePath, contentType, token)
 }
 
 function catalogRecord(asset, local) {
+  // media-local/ is staging, not a published src/assets/ preview copy.
+  const { path: stagingPath, ...metadata } = local;
   return normalizedCatalogAsset({
-    ...local,
+    ...metadata,
     id: asset.id,
     publicUrl: asset.publicUrl,
   }, 0, 2);

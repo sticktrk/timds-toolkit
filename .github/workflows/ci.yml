@@ -39,6 +39,9 @@ jobs:
       - run: npm run test:shared-upgrades
         env:
           TIMDS_VISUAL_OUTPUT: ${{ runner.temp }}/timds-visuals
+      - run: node scripts/check-brand-kit-rendering.mjs
+        env:
+          TIMDS_VISUAL_OUTPUT: ${{ runner.temp }}/timds-visuals/brand-kit
       - uses: actions/upload-artifact@v4
         if: always()
         with:

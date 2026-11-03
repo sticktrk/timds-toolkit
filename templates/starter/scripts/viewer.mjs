@@ -19,15 +19,16 @@
 // stylesheets, rendered by TimDS (see build.mjs). The viewer only lists them:
 // the app bar links /designs/ and the overview's sitemap names each one.
 import { existsSync } from "node:fs";
-import { cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { cp, lstat, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { brandKitCopySamples, brandKitMediaSamples, brandKitSlots, brandKitLabels } from "./brand-kit.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const source = path.join(root, "src");
 const destination = path.join(root, "dist");
 const copiedDirectories = ["assets", "scripts", "styles"];
-const placeholder = /\{\{\s*([a-z]+)(?::([a-z0-9-]+(?:\/[a-z0-9-]+)*))?\s*\}\}/g;
+const placeholder = /\{\{\s*([a-z]+)(?::([a-z0-9.-]+(?:\/[a-z0-9.-]+)*))?\s*\}\}/g;
 const colorValue = /^(?:#|rgba?\(|hsla?\(|oklch\(|oklab\(|color\()/i;
 const colorLiteral = /#[0-9a-f]{3,8}\b|\b(?:rgba?|hsla?|oklch|oklab)\(/i;
 
@@ -50,6 +51,100 @@ async function readJson(file) {
   } catch (error) {
     throw new Error(`${file} could not be read as JSON: ${error.message}`);
   }
+}
+
+/** Copy stays a string map. Media keys resolve only to regular local assets,
+ * never remote URLs or paths outside the published source asset directory. */
+async function readSlotData() {
+  const copy = existsSync(path.join(source, "copy.json")) ? await readJson("src/copy.json") : {};
+  if (!copy || typeof copy !== "object" || Array.isArray(copy) || Object.values(copy).some(value => typeof value !== "string")) {
+    throw new Error("src/copy.json must be an object of string values");
+  }
+  const media = new Map();
+  const add = (asset, key = asset?.key) => {
+    if (!asset || typeof asset !== "object" || typeof key !== "string" || key !== asset.key || media.has(key)) throw new Error("The media catalog has an invalid or duplicate slot key");
+    media.set(key, asset);
+  };
+  if (existsSync(path.join(root, ".timds/contract-layout.json"))) {
+    const groups = async directory => {
+      for (const entry of await readdir(path.join(root, directory), { withFileTypes: true })) {
+        if (entry.isDirectory()) await groups(`${directory}/${entry.name}`);
+        else if (entry.isFile() && entry.name.endsWith(".json")) {
+          const values = await readJson(`${directory}/${entry.name}`);
+          if (!values || typeof values !== "object" || Array.isArray(values)) throw new Error("Media groups must be key maps");
+          for (const [key, asset] of Object.entries(values)) add(asset, key);
+        } else throw new Error(`Invalid media group file ${entry.name}`);
+      }
+    };
+    await groups("media");
+  } else if (existsSync(path.join(root, "media.json"))) {
+    for (const asset of (await readJson("media.json")).assets || []) add(asset);
+  }
+  const paths = new Map();
+  for (const [key, asset] of media) {
+    const explicit = asset.path !== undefined;
+    const candidate = explicit ? asset.path : `src/assets/${asset.filename || ""}`;
+    if (typeof candidate !== "string" || !/^src\/assets\/[a-zA-Z0-9._/-]+$/.test(candidate) || candidate.split("/").some(part => !part || part === "." || part === "..")) {
+      if (explicit) throw new Error(`Media ${key} path must name an exact file under src/assets/`);
+      continue;
+    }
+    let current = root, present = true;
+    const parts = candidate.split("/");
+    for (const [index, part] of parts.entries()) {
+      current = path.join(current, part);
+      const info = await lstat(current).catch(error => { if (error.code === "ENOENT") return null; throw error; });
+      if (!info) { present = false; break; }
+      if (info.isSymbolicLink() || (index === parts.length - 1 ? !info.isFile() : !info.isDirectory())) throw new Error(`Media ${key} local path must be a regular file without symbolic links`);
+    }
+    if (!present) {
+      if (explicit) throw new Error(`Media ${key} names a missing local asset: ${candidate}`);
+      continue;
+    }
+    paths.set(key, `/${candidate.slice(4)}`);
+  }
+  return { copy, media, paths };
+}
+
+function slotRenderers(data, tokens, fallbacks) {
+  const shortKey = (key, prefix) => key?.startsWith(`${prefix}.`) ? key.slice(prefix.length + 1) : key;
+  const resolveCopy = key => {
+    key = shortKey(key, "copy");
+    const indexed = key?.match(/^(headlines|ctas)\.(\d+)$/);
+    if (indexed) {
+      const [, bank, index] = indexed;
+      const lines = resolveCopy(bank).split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+      if (lines[Number(index)]) return lines[Number(index)];
+      const sample = brandKitCopySamples[bank].split("\n")[Number(index)];
+      if (sample === undefined) throw new Error(`Copy slot ${bank} has no sample at index ${index}`);
+      fallbacks.add(`copy.${key}`);
+      return sample;
+    }
+    if (Object.hasOwn(data.copy, key) && data.copy[key].trim()) return data.copy[key];
+    if (!Object.hasOwn(brandKitCopySamples, key)) throw new Error(`Unknown copy slot ${key}; declare a string in src/copy.json`);
+    fallbacks.add(`copy.${key}`);
+    return brandKitCopySamples[key];
+  };
+  const resolveMedia = key => {
+    key = shortKey(key, "media");
+    if (data.paths.has(key)) return data.paths.get(key);
+    if (!Object.hasOwn(brandKitMediaSamples, key) && !data.media.has(key)) throw new Error(`Unknown media slot ${key}; declare it in the media catalog`);
+    fallbacks.add(`media.${key}`);
+    return brandKitMediaSamples[key] || "";
+  };
+  const slots = group => {
+    const selected = brandKitSlots.filter(slot => slot.group === group || slot.key === group);
+    if (!selected.length) throw new Error(`Unknown slot group ${group}`);
+    const rows = selected.map(slot => {
+      const key = slot.key.slice(slot.group.length + 1);
+      const record = slot.kind === "token" ? tokens[slot.group]?.[key] : slot.kind === "media" ? data.media.get(key) : null;
+      const label = record?.value === "initial" ? "unresolved" : record?.label || slot.label;
+      if (!brandKitLabels.includes(label)) throw new Error(`${slot.key} has an invalid label; use ${brandKitLabels.join(", ")}`);
+      const value = slot.kind === "token" ? record?.value || "initial" : slot.kind === "copy" ? resolveCopy(key) : slot.kind === "media" ? resolveMedia(key) || "No asset; sample treatment" : slot.sample;
+      return `<tr data-slot="${slot.key}"><td><code>${slot.key}</code></td><td>${escapeHtml(label)}</td><td>${escapeHtml(value)}</td><td>${escapeHtml(slot.source)}</td><td>${escapeHtml(slot.assumption)}</td><td>${escapeHtml(slot.guidance)}</td></tr>`;
+    });
+    return `<table class="spec slot-table"><thead><tr><th>Slot</th><th>Label</th><th>Value</th><th>Observed from</th><th>When missing</th><th>Check</th></tr></thead><tbody>${rows.join("\n")}</tbody></table>`;
+  };
+  return { copy: key => escapeHtml(resolveCopy(key)), media: key => escapeHtml(resolveMedia(key)), slots };
 }
 
 function compileTokens(tokens) {
@@ -309,14 +404,14 @@ function firstAuthored(view) {
   return view.pages.find((page) => !page.planned) || null;
 }
 
-function renderViews(model, current, designs) {
+function renderViews(model, current, designs, hasDesigns = designs.length > 0) {
   const views = model.views.map((view) => {
     const target = firstAuthored(view);
     const label = `<b>${escapeHtml(view.label)}</b>${view.blurb ? `<small>${escapeHtml(view.blurb)}</small>` : ""}`;
     if (!target) return `<span class="appbar__view is-planned">${label}</span>`;
     return `<a class="appbar__view" href="${target.href}"${view.id === current.view ? ' aria-current="true"' : ""}>${label}</a>`;
   });
-  if (designs.length) views.push('<a class="appbar__view" href="/designs/"><b>Designs</b><small>Whole pages</small></a>');
+  if (hasDesigns) views.push('<a class="appbar__view" href="/designs/"><b>Designs</b><small>Whole pages</small></a>');
   for (const page of model.pages) {
     if (page.promote && !page.planned) views.push(`<a class="appbar__cta" href="${page.href}"${page.id === current.id ? ' aria-current="page"' : ""}>${escapeHtml(page.promote)}</a>`);
   }
@@ -351,7 +446,9 @@ function renderSidenav(model, current) {
 // the page is served from: the dev server, the host's canonical path, or a
 // per-system hostname; the id comes from the derived layer); [data-tabs]
 // becomes a tablist of its .tabs__panel children; pre[data-copy] gets a copy
-// button. Without the script every panel shows under its own label and every
+// button. Accent previews with data-logo="auto" select the logo variant from
+// their computed text ink; CSS keeps a primary logo on a plate until then.
+// Without the script every panel shows under its own label and every
 // snippet reads as written, so nothing a page says depends on it.
 const enhancements = `<script>
 (() => {
@@ -365,6 +462,32 @@ const enhancements = `<script>
       const id = index && index.system && index.system.id;
       if (id) for (const node of document.querySelectorAll("[data-system-id]")) node.textContent = id;
     }).catch(() => {});
+  }
+  const autoLogos = [...document.querySelectorAll('.canvas--accent[data-logo="auto"]')];
+  if (autoLogos.length) {
+    for (const node of autoLogos) node.setAttribute("data-logo-auto", "");
+    const sample = document.createElement("canvas");
+    sample.width = sample.height = 1;
+    const context = sample.getContext("2d", { willReadFrequently: true });
+    const selectLogos = () => {
+      if (!context) return;
+      for (const node of autoLogos) {
+        // Canvas normalizes any computed CSS color space to sRGB bytes.
+        context.clearRect(0, 0, 1, 1);
+        context.fillStyle = getComputedStyle(node).color;
+        context.fillRect(0, 0, 1, 1);
+        const channels = [...context.getImageData(0, 0, 1, 1).data].slice(0, 3)
+          .map(value => value / 255)
+          .map(value => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
+        const lightness = channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+        node.dataset.logo = lightness > 0.179 ? "dark" : "light";
+      }
+    };
+    selectLogos();
+    // Re-read the rendered ink after a color-scheme media change settles.
+    matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+      requestAnimationFrame(() => requestAnimationFrame(selectLogos));
+    });
   }
   for (const tabs of document.querySelectorAll("[data-tabs]")) {
     const panels = [...tabs.querySelectorAll(":scope > .tabs__panel")];
@@ -477,8 +600,15 @@ export async function renderSite() {
   const model = readSiteModel(await readJson("src/site.json"));
   const formats = readFormats(existsSync(path.join(source, "formats.json")) ? await readJson("src/formats.json") : null, model);
   const designs = await designList();
+  const data = await readSlotData();
+  const fallbacks = new Set();
+  const slotValues = slotRenderers(data, tokens, fallbacks);
+  const warnings = [];
+  const starter = existsSync(path.join(root, ".timds/starter.json")) ? await readJson(".timds/starter.json") : null;
+  if (starter?.starter === "brand-kit" && (!data.copy.voice?.trim() || data.copy.voice === brandKitCopySamples.voice)) warnings.push("Brand kit voice is assumed; replace copy.voice with evidence-backed guidance before publishing.");
+  const hasDesigns = existsSync(path.join(source, "designs"));
   // TimDS builds the designs to dist/designs/, so no view may claim that path.
-  if (designs.length && model.views.some((view) => view.id === "designs")) throw new Error("src/site.json may not declare a view named designs while src/designs/ exists; the designs are built there");
+  if (hasDesigns && model.views.some((view) => view.id === "designs")) throw new Error("src/site.json may not declare a view named designs while src/designs/ exists; the designs are built there");
   const layout = await readFile(path.join(source, "layout.html"), "utf8");
   if (!/\{\{\s*content\s*\}\}/.test(layout)) throw new Error("src/layout.html must contain {{content}}");
 
@@ -506,6 +636,7 @@ export async function renderSite() {
     if ((fragment.match(/<h1[\s>]/gi) || []).length !== 1) throw new Error(`${file} must contain exactly one <h1>`);
     const content = fill(fragment, file, {
       ...shared,
+      ...slotValues,
       canvas: (id) => canvasVars(formats, id, page.file),
       formats: (group) => renderFormatTable(formats, group, page.file),
       // {{page:ID}} is a page's address (overview, use, use/install, ...), so a
@@ -518,7 +649,7 @@ export async function renderSite() {
     rendered.set(page.output, fill(layout, "src/layout.html", {
       ...shared,
       title: escapeHtml(page.title),
-      views: renderViews(model, page, designs),
+      views: renderViews(model, page, designs, hasDesigns),
       sidenav: renderSidenav(model, page),
       pagenav: `${renderPagenav(authored, page)}\n        ${enhancements}`,
       content: content.trim(),
@@ -527,6 +658,8 @@ export async function renderSite() {
 
   return {
     designs,
+    fallbacks: [...fallbacks].sort(),
+    warnings,
     files: rendered,
     formatCount: formats.byId.size,
     formatGroups: formats.groups.size,
@@ -573,4 +706,6 @@ export async function build() {
   await writeFile(path.join(destination, "tokens.json"), `${JSON.stringify(site.tokens, null, 2)}\n`, "utf8");
 
   console.log(`Built starter viewer with ${site.pages} pages and ${site.tokenCount} tokens`);
+  if (site.fallbacks.length) console.log(`Stock samples used for unfilled slots: ${site.fallbacks.join(", ")}`);
+  for (const warning of site.warnings) console.warn(`Warning: ${warning}`);
 }
