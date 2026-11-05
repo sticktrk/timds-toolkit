@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { annotationFor, buildBrandKit, eachBrandKitMedia, mediaFormat, normalizeBrandGuidance, parseAnnotation, resolveFontSources, resolveGuidance } from "./brand.mjs";
+import { annotationFor, auditBrandValues, buildBrandKit, contrastRatio, eachBrandKitMedia, mediaFormat, normalizeBrandGuidance, parseAnnotation, resolveFontSources, resolveGuidance } from "./brand.mjs";
 import { parseHtml, findOne, walk } from "./html.mjs";
 
 const parentsOf = (root) => {
@@ -202,4 +202,35 @@ test("fills guidance groups by convention and by manifest reference, with block 
     () => buildBrandKit({ manifest: { systemId: "s", name: "S", version: "1", brand: { guidance: { voice: ["brand/tone"] } } }, tokens: {}, pages }),
     /brand\.guidance does not match the built pages/,
   );
+});
+
+test("contrast ratio follows WCAG for hex colors and declines anything else", () => {
+  assert.equal(contrastRatio("#000", "#ffffff"), 21);
+  assert.equal(contrastRatio("#FFF", "#fff"), 1);
+  assert.ok(Math.abs(contrastRatio("#1C1C1C", "#000000") - 1.23) < 0.01);
+  assert.equal(contrastRatio("rgb(0 0 0)", "#fff"), null);
+  assert.equal(contrastRatio(undefined, "#fff"), null);
+});
+
+test("the audit names an accent that is the text, an accent lost on the background, and a type scale out of order", () => {
+  const role = (value) => ({ token: "--x", value, kind: "color", source: "convention" });
+  const base = (name, resolved) => ({ name, resolved, base: true });
+  // A crawl-filled kit: black accent on a grey page, the hero size filed as the lede.
+  const crawled = auditBrandValues({
+    roles: { "color.accent": role("#1C1C1C"), "color.text": role("#000000"), "color.background": role("#DCDCDC") },
+    tokens: [base("--type-display", "23px"), base("--type-title", "24px"), base("--type-lead", "59px"), base("--type-body", "16px")],
+  });
+  assert.equal(crawled.length, 2);
+  assert.match(crawled[0], /^color\.accent \(#1C1C1C\) is almost color\.text \(#000000\)/);
+  assert.match(crawled[1], /^type scale is out of order \(--type-display 23px, --type-title 24px, --type-lead 59px, --type-body 16px\)/);
+  // A lime accent on white is faithful to a site and invisible as an action.
+  assert.deepEqual(auditBrandValues({ roles: { "color.accent": role("#B9FF00"), "color.text": role("#000"), "color.background": role("#fff") } }).map((warning) => warning.split(":")[0]), ["color.accent (#B9FF00) has 1.2"]);
+  // The starter's own values pass, in rem as well as px, and a fluid scale is not judged.
+  const ordered = { roles: { "color.accent": role("#2457d6"), "color.text": role("#17202a"), "color.background": role("#f5f7fa") } };
+  assert.deepEqual(auditBrandValues({ ...ordered, tokens: [base("--type-display", "3rem"), base("--type-title", "2rem"), base("--type-lead", "18px"), base("--type-body", "1em")] }), []);
+  assert.deepEqual(auditBrandValues({ ...ordered, tokens: [base("--type-display", "clamp(2.25rem, 4.5vw, 3.5rem)"), base("--type-title", "2rem"), base("--type-lead", "59px"), base("--type-body", "16px")] }), []);
+  // A theme scope's override is not the scale; an incomplete scale is not judged; a missing role is not a failure.
+  assert.deepEqual(auditBrandValues({ ...ordered, tokens: [{ name: "--type-display", resolved: "10px", base: false }, base("--type-title", "24px"), base("--type-lead", "59px"), base("--type-body", "16px")] }), []);
+  assert.deepEqual(auditBrandValues({ roles: { "color.accent": role("#000") } }), []);
+  assert.deepEqual(auditBrandValues(), []);
 });
