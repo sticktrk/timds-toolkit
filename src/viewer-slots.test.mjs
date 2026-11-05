@@ -89,3 +89,32 @@ test('slot guidance renders the contract and retained provenance labels', async 
   await write('tokens/color.json', json(colors));
   assert.throws(run, /invalid label/);
 });
+
+test('a crawl-filled scale and accent reach check as warnings while the viewer chrome keeps its own order', async t => {
+  const { root, read, write, run } = await fixture(t);
+  // The scaffold keeps its tokens in group maps. The hero size filed as the lede, a small h1 as the display step, and the black button as the accent.
+  const type = JSON.parse(await read('tokens/type.json'));
+  Object.assign(type, { display: { value: '23px' }, title: { value: '24px' }, lead: { value: '59px' }, body: { value: '16px' } });
+  await write('tokens/type.json', json(type));
+  const color = JSON.parse(await read('tokens/color.json'));
+  Object.assign(color, { accent: { value: '#1C1C1C' }, ink: { value: '#000000' }, canvas: { value: '#DCDCDC' } });
+  await write('tokens/color.json', json(color));
+  run();
+  const { machine } = await checkWorkspace(root);
+  assert.deepEqual(machine.warnings.map(warning => warning.split(':')[0]), [
+    'guidance group voice is empty',
+    'no asset is annotated data-timds-role="logo"; the brand kit has no logo',
+    'color.accent (#1C1C1C) is almost color.text (#000000)',
+    'type scale is out of order (--type-display 23px, --type-title 24px, --type-lead 59px, --type-body 16px)',
+  ]);
+  // The tokens are the system's: the stylesheet still carries the declared values.
+  assert.match(await read('dist/tokens.css'), /--type-lead: 59px;/);
+  // The chrome binds its title, h2 and lede to the guarded scale, which reads those tokens with fallbacks.
+  const viewer = await read('dist/styles/viewer.css');
+  assert.match(viewer, /--viewer-display: max\(var\(--type-display, 2\.25rem\)/);
+  assert.match(viewer, /\.page-title \{[^}]*font-size: var\(--viewer-display\)/);
+  assert.match(viewer, /\.h2 \{[^}]*font-size: var\(--viewer-title\)/);
+  assert.match(viewer, /\.lede \{[^}]*font-size: var\(--viewer-lead\)/);
+  assert.doesNotMatch(viewer, /font-size: var\(--type-(?:display|lead|title)\)/);
+  assert.match(viewer, /\.appbar__cta \{[^}]*color: var\(--viewer-accent-ink\)/);
+});

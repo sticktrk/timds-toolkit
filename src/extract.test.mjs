@@ -228,8 +228,10 @@ test("extractArtifact derives tokens.json from the stylesheets the pages load", 
     assert.equal(result.counts.formats, 2);
     assert.deepEqual(result.index.tokens, { url: "/design-system/tokens.json", count: 8, stylesheets: 4, roles: 5 });
     assert.deepEqual(result.index.formats, { url: "/design-system/formats.json", groups: 1, count: 2 });
-    assert.equal(result.warnings.length, 4);
+    assert.equal(result.warnings.length, 5);
     assert.match(result.warnings[0], /brand role color\.background is not filled/);
+    // --accent resolves to the navy that fills color.text, so the readability audit names it.
+    assert.ok(result.warnings.some((warning) => /^color\.accent \(#0a1729\) is almost color\.text \(#0a1729\)/.test(warning)));
     assert.ok(!result.warnings.some((warning) => warning.includes("no logo")));
     assert.ok(!result.warnings.some((warning) => warning.includes("has no source")), "both font roles have a source");
     assert.match(result.warnings.at(-1), /format business-card \(Business card\) names the page print\/business-cards, which the built artifact does not contain/);
