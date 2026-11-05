@@ -1620,7 +1620,13 @@ replace), the publishing defaults available, the designs setup state, and the
 check the upgrade ran itself. A committed customization of a starter file is
 not a failure: the file is kept, listed under `starter.customized` (and
 `starter.replaceable` when `starter sync --force` may replace it), and the
-result is still `"ok": true`. A refused or failed upgrade exits non-zero and
+result is still `"ok": true`. The viewer, build and check scripts are one
+renderer: while one of them is customized and kept, the others' refreshes and
+every refreshed or new stock page (the Digital, Social and Print overviews and
+the Use pages) are listed as `skipped` with a note naming the kept file, since
+a stock page the kept renderer has never seen may use placeholders it cannot
+build; `starter sync --force` on the kept file brings them in on the next
+sync. A refused or failed upgrade exits non-zero and
 still prints `{ "ok": false, "error": { "code": "...", "message": "..." } }`,
 with `error.step` naming the command a `--version` selection stopped at. The
 codes a host job can branch on:
@@ -2013,8 +2019,12 @@ manifest, and release preparation changes only its version.
 
 New systems author `tokens/<group>.json` and `media/<group>.json`.
 `timds upgrade` migrates legacy aggregates without changing token values or
-media records and refuses conflicting existing group files. The layout record
-is `.timds/contract-layout.json`; old systems remain readable until upgraded.
+media records and refuses conflicting existing group files. The groups are
+adopted only when they validate as the contract the aggregates never checked:
+a legacy token value that names a plain custom property, such as
+`var(--theme-body, var(--text))`, keeps the aggregate layout and the upgrade
+reports why under `contractMigration.reason`. The layout record is
+`.timds/contract-layout.json`; old systems remain readable until upgraded.
 A token group file is a key map such as `{"600":{"value":"#2457d6"}}` in
 `tokens/color.brand.json`. Media maps use full logical asset keys as keys.
 `check` validates group structure, duplicate keys, token references, cycles,
