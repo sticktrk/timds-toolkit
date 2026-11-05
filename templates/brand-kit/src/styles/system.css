@@ -158,9 +158,11 @@ code, pre { font-family: var(--font-mono); font-size: 0.85em; }
 .kit-launch { margin: 0; border: var(--line-width) solid var(--color-line); background: var(--color-canvas); color: var(--color-ink); }
 .kit-type { display: grid; gap: var(--space-4); background: var(--color-surface); color: var(--color-ink); }
 /* The shared viewer chrome reads the same slots as the ordinary starter (the
-   app bar on surface, the page navigation on canvas, ink throughout), so an
-   inverted palette pairs on its own; only the kit's own inks are named here. */
-body.brand-kit .content { background: var(--color-canvas); color: var(--color-ink); }
+   app bar on surface, the page navigation on canvas, ink throughout), named
+   here so an inverted palette pairs on its own and the rendering check reads
+   each ground from the element itself. */
+body.brand-kit .appbar { background: var(--color-surface); color: var(--color-ink); }
+body.brand-kit .sidenav, body.brand-kit .content { background: var(--color-canvas); color: var(--color-ink); }
 body.brand-kit .appbar__cta, body.brand-kit .msg--assistant::before { background: var(--color-accent); color: var(--color-accent-ink); }
 body.brand-kit .appbar__cta:hover { background: var(--color-accent); color: var(--color-accent-ink); text-decoration: underline; }
 body.brand-kit .appbar__view:hover, body.brand-kit .sidenav a:hover, body.brand-kit .sidenav a[aria-current="page"] { background: var(--color-accent-soft); color: var(--color-ink); }

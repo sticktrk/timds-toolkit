@@ -104,8 +104,10 @@ function inspectPage(treatments, {accentOnly = false, expectedAccentLogo = null}
     if (contrast(groundValue, inkValue) < 4.5) failures.push(`${name} pair has contrast ${contrast(groundValue, inkValue).toFixed(2)} (<4.5)`);
   };
   if (!accentOnly) checkPair(document.body, 'color.canvas', 'color.ink', 'body');
-  const dark = matchMedia('(prefers-color-scheme: dark)').matches;
-  for (const chrome of accentOnly ? [] : document.querySelectorAll('.appbar, .sidenav')) checkPair(chrome, dark ? 'color.ink-ground' : 'color.surface', dark ? 'color.ink-ground-text' : 'color.ink', describe(chrome));
+  // The chrome keeps one pairing whatever the system prefers: the app bar on
+  // the surface, the page navigation on the canvas, ink on both. A dark
+  // preference never splits the chrome from the content.
+  for (const chrome of accentOnly ? [] : document.querySelectorAll('.appbar, .sidenav')) checkPair(chrome, chrome.classList.contains('sidenav') ? 'color.canvas' : 'color.surface', 'color.ink', describe(chrome));
   for (const canvas of document.querySelectorAll(accentOnly ? '.canvas--accent' : '.canvas')) {
     const treatment = treatments.find(item => canvas.classList.contains(`canvas--${item.id}`) || (item.id === 'bold' && canvas.classList.contains('canvas--ink')));
     if (canvas.classList.contains('compose__canvas')) checkPair(canvas, 'color.surface', 'color.ink', 'composer');
