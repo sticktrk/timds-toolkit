@@ -340,3 +340,16 @@ kind is separate host work.
    so. Focal detection is a later crawler step.
 4. `accent-2` and `ink-ground` are captured slots, derived from accent and
    ink only when the site has none.
+
+## Values a crawl gets wrong
+
+A builder fills the slots from what a site shows, and a site can be faithful
+and still unusable as a system: a black call to action makes a black accent,
+a grey page makes a grey surface, and a hero set in a small `h1` files the
+hero size as the lede. The kit's data stays what the builder wrote; two
+guards keep that from hiding the kit itself. The starter viewer keeps its own
+page title, h2 and lede in order whatever the scale says, and sets text on
+the accent in `color.accent-ink`. `check` reports an accent that is nearly
+the text color, an accent below 3:1 on the background, and a fixed type scale
+whose steps are out of order, so a designer corrects the slot rather than the
+page.
