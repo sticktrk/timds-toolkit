@@ -38,6 +38,13 @@ test('the brand-kit slot export owns the exact foundation, copy, page and stock 
     assert.ok(Object.isFrozen(slot), slot.key);
   }
   assert.deepEqual(await json('tokens.json'), brandKitFoundationTokens);
+  // A stock parent reads like the ordinary starter: its foundation samples are the starter's own.
+  const stock = JSON.parse(await fs.readFile(path.join(root, 'templates/tokens.json'), 'utf8'));
+  for (const [kit, starter] of [['color.canvas', 'color.canvas'], ['color.surface', 'color.surface'], ['color.ink', 'color.ink'], ['color.accent', 'color.accent'], ['font.display', 'font.serif'], ['font.body', 'font.sans'], ['font.mono', 'font.mono']]) {
+    const [group, key] = kit.split('.');
+    const [stockGroup, stockKey] = starter.split('.');
+    assert.equal(brandKitFoundationTokens[group][key].value, stock[stockGroup][stockKey].value, kit);
+  }
   assert.deepEqual(await json('src/copy.json'), brandKitCopySamples);
   assert.ok(Object.values(await json('src/copy.json')).every(value => typeof value === 'string'));
   assert.deepEqual(await json('src/site.json'), {views: brandKitViews});
@@ -99,6 +106,12 @@ test('the built kit quotes every slot key and its exported guidance without a pr
     assert.ok(html.includes(escapeHtml(slot.guidance)), `${slot.key}: guidance`);
   }
   assert.doesNotMatch(html, /\{\{(?:copy|media|slots|canvas):/);
+  // Consecutive slot placeholders read as one table: one header row, every slot its own row.
+  const foundation = site.files.get('brand/foundation/index.html');
+  assert.equal((foundation.match(/<table class="spec slot-table">/g) || []).length, 1);
+  assert.equal((foundation.match(/<tr data-slot="copy\./g) || []).length, 8);
+  // The kit stylesheet never splits the chrome from the content by system preference.
+  assert.doesNotMatch(await fs.readFile(path.join(directory, 'src/styles/system.css'), 'utf8'), /prefers-color-scheme/);
   assert.match(site.files.get('index.html'), /href="\/designs\/"/);
   assert.deepEqual(await colorLiterals(), []);
   // Voice guidance is authored, but its neutral sample is not brand evidence.

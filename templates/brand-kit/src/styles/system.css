@@ -5,7 +5,6 @@
   --radius-round: calc(var(--radius-control) * 100); --size-line: var(--line-width);
   --size-content: calc(var(--space-12) * 25); --size-sidebar: calc(var(--space-12) * 5);
   --size-header: calc(var(--space-8) * 2);
-  --kit-chrome-ground: var(--color-surface); --kit-chrome-ink: var(--color-ink);
 }
 /* The design system itself: base styles and the components a product adopts.
    Every value is a custom property from tokens.css, which the build writes
@@ -158,19 +157,15 @@ code, pre { font-family: var(--font-mono); font-size: 0.85em; }
 .kit-photo-slot img { width: 100%; aspect-ratio: 3 / 2; object-fit: cover; object-position: var(--focal-position, 50% 50%); border-radius: var(--radius-media); }
 .kit-launch { margin: 0; border: var(--line-width) solid var(--color-line); background: var(--color-canvas); color: var(--color-ink); }
 .kit-type { display: grid; gap: var(--space-4); background: var(--color-surface); color: var(--color-ink); }
-/* Keep shared viewer chrome paired on inverted brand palettes as well. */
-body.brand-kit .appbar, body.brand-kit .sidenav { background: var(--kit-chrome-ground); color: var(--kit-chrome-ink); }
-body.brand-kit .content { background: var(--color-canvas); color: var(--color-ink); }
+/* The shared viewer chrome reads the same slots as the ordinary starter (the
+   app bar on surface, the page navigation on canvas, ink throughout), named
+   here so an inverted palette pairs on its own and the rendering check reads
+   each ground from the element itself. */
+body.brand-kit .appbar { background: var(--color-surface); color: var(--color-ink); }
+body.brand-kit .sidenav, body.brand-kit .content { background: var(--color-canvas); color: var(--color-ink); }
 body.brand-kit .appbar__cta, body.brand-kit .msg--assistant::before { background: var(--color-accent); color: var(--color-accent-ink); }
 body.brand-kit .appbar__cta:hover { background: var(--color-accent); color: var(--color-accent-ink); text-decoration: underline; }
 body.brand-kit .appbar__view:hover, body.brand-kit .sidenav a:hover, body.brand-kit .sidenav a[aria-current="page"] { background: var(--color-accent-soft); color: var(--color-ink); }
 body.brand-kit .preset, body.brand-kit .compose__chat, body.brand-kit .compose__form, body.brand-kit .compose__captionbox { background: var(--color-surface); color: var(--color-ink); }
 body.brand-kit .preset:has(input:checked), body.brand-kit .msg--user { background: var(--color-accent-soft); color: var(--color-ink); }
 body.brand-kit .compose__notice, body.brand-kit .compose__stagewrap { background-color: var(--color-canvas); color: var(--color-ink); }
-@media (prefers-color-scheme: dark) {
-  html { color-scheme: dark; }
-  :root { --kit-chrome-ground: var(--color-ink-ground); --kit-chrome-ink: var(--color-ink-ground-text); }
-  body.brand-kit .appbar__view, body.brand-kit .appbar__view small, body.brand-kit .appbar__version, body.brand-kit .appbar__version:hover, body.brand-kit .sidenav a, body.brand-kit .sidenav__planned, body.brand-kit .sidenav__group { color: var(--kit-chrome-ink); }
-  body.brand-kit .appbar__view[aria-current], body.brand-kit .appbar__view[aria-current] small, body.brand-kit .appbar__view:hover small { background: var(--color-accent-soft); color: var(--color-ink); }
-  body.brand-kit .appbar__view:hover, body.brand-kit .sidenav a:hover, body.brand-kit .sidenav a[aria-current="page"] { background: var(--color-accent-soft); color: var(--color-ink); }
-}
