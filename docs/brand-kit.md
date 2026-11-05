@@ -158,7 +158,12 @@ Derived from the color slots; nothing to crawl.
 
 Every template is a stock page built from the canvas pieces, in the four
 treatments, filled from slots. The pages exist and render on the stock
-samples before a crawl; after one they are the brand's.
+samples before a crawl; after one they are the brand's. The foundation
+samples are the ordinary starter's own values (`templates/tokens.json`: a serif
+display family, a sans body, a tinted canvas under white surfaces), so a stock
+parent reads like a stock system; the "assumed when missing" rules above are
+what a builder applies when the source shows nothing, and the two may differ.
+Consecutive slot placeholders on a page render as one table with one header.
 
 | Group | Templates | Formats |
 | --- | --- | --- |

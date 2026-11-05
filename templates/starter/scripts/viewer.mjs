@@ -142,9 +142,16 @@ function slotRenderers(data, tokens, fallbacks) {
       const value = slot.kind === "token" ? record?.value || "initial" : slot.kind === "copy" ? resolveCopy(key) : slot.kind === "media" ? resolveMedia(key) || "No asset; sample treatment" : slot.sample;
       return `<tr data-slot="${slot.key}"><td><code>${slot.key}</code></td><td>${escapeHtml(label)}</td><td>${escapeHtml(value)}</td><td>${escapeHtml(slot.source)}</td><td>${escapeHtml(slot.assumption)}</td><td>${escapeHtml(slot.guidance)}</td></tr>`;
     });
-    return `<table class="spec slot-table"><thead><tr><th>Slot</th><th>Label</th><th>Value</th><th>Observed from</th><th>When missing</th><th>Check</th></tr></thead><tbody>${rows.join("\n")}</tbody></table>`;
+    return `${slotTableOpen}${rows.join("\n")}</tbody></table>`;
   };
   return { copy: key => escapeHtml(resolveCopy(key)), media: key => escapeHtml(resolveMedia(key)), slots };
+}
+
+const slotTableOpen = '<table class="spec slot-table"><thead><tr><th>Slot</th><th>Label</th><th>Value</th><th>Observed from</th><th>When missing</th><th>Check</th></tr></thead><tbody>';
+
+/** Consecutive {{slots:...}} placeholders read as one table: the header row is drawn once and every slot keeps its own row. */
+function mergeSlotTables(html) {
+  return html.replace(/<\/tbody><\/table>\s*<table class="spec slot-table"><thead>[^]*?<\/thead><tbody>/g, "\n");
 }
 
 function compileTokens(tokens) {
@@ -636,7 +643,7 @@ export async function renderSite() {
     const file = `src/pages/${page.file}`;
     const fragment = await readFile(path.join(source, "pages", page.file), "utf8");
     if ((fragment.match(/<h1[\s>]/gi) || []).length !== 1) throw new Error(`${file} must contain exactly one <h1>`);
-    const content = fill(fragment, file, {
+    const content = mergeSlotTables(fill(fragment, file, {
       ...shared,
       ...slotValues,
       canvas: (id) => canvasVars(formats, id, page.file),
@@ -647,7 +654,7 @@ export async function renderSite() {
       page: (id) => pageHref(model, id, page.file),
       sitemap: () => renderSitemap(model, designs),
       tokens: (group) => renderTokenTable(tokens, group, page.file),
-    });
+    }));
     rendered.set(page.output, fill(layout, "src/layout.html", {
       ...shared,
       title: escapeHtml(page.title),

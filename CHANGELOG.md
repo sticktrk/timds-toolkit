@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Make a stock brand kit read like the ordinary starter: the foundation samples are the starter's own (serif display, sans body, a tinted canvas under white surfaces, the starter's card radius), the kit stylesheet no longer darkens the app bar and page navigation under a dark system preference while the content stays light, and consecutive slot placeholders render as one table with one header row instead of a header before every slot.
+
 - Keep the starter viewer readable on a system whose values arrived out of order: the chrome's page title, h2 and lede are kept in order by the viewer stylesheet while an ordered scale passes through unchanged, and text set on the accent reads `color.accent-ink` when the system declares it. `check` now warns when the accent is nearly the text color, when it falls below 3:1 on the background, or when the fixed type scale puts a smaller step above a larger one; the tokens themselves are never rewritten.
 
 - Preserve existing home routes during starter sync so customized installation guidance keeps working through upgrades. Keep the brand-name fallback visible when only the hidden logo variant is filled, including existing kits through shared canvas plumbing, and cover both regressions with upgrade and browser checks.
