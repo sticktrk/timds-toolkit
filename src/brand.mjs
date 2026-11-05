@@ -139,6 +139,77 @@ export function resolveFontSources(roles, { faces = [], stylesheets = [] } = {})
   return { resolved, unsourced };
 }
 
+/* ── readability audit ──────────────────────────────────────────────────── */
+
+const HEX_COLOR = /^#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
+const FIXED_LENGTH = /^(\d+|\d*\.\d+)(px|rem|em)$/i;
+/** The conventional type scale, largest step first. */
+const TYPE_SCALE = Object.freeze(["--type-display", "--type-title", "--type-lead", "--type-body"]);
+
+/** A hex color's sRGB channels in 0..1, or null for any other notation. */
+function hexChannels(value) {
+  const match = HEX_COLOR.exec(String(value ?? "").trim());
+  if (!match) return null;
+  const hex = match[1].length <= 4 ? [...match[1]].map((digit) => digit + digit).join("") : match[1];
+  return [0, 2, 4].map((offset) => parseInt(hex.slice(offset, offset + 2), 16) / 255);
+}
+
+/** WCAG relative luminance of sRGB channels. */
+function luminance([red, green, blue]) {
+  const linear = (channel) => (channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4);
+  return 0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue);
+}
+
+/** The WCAG contrast ratio of two hex colors (1 to 21), or null when either is not a hex color. */
+export function contrastRatio(left, right) {
+  const first = hexChannels(left);
+  const second = hexChannels(right);
+  if (!first || !second) return null;
+  const [high, low] = [luminance(first), luminance(second)].sort((a, b) => b - a);
+  return (high + 0.05) / (low + 0.05);
+}
+
+/** A fixed length in CSS pixels (rem and em at the 16px root), or null for a fluid or unitless value. */
+function pixels(value) {
+  const match = FIXED_LENGTH.exec(String(value ?? "").trim());
+  return match ? parseFloat(match[1]) * (match[2].toLowerCase() === "px" ? 1 : 16) : null;
+}
+
+/**
+ * Readability warnings on the resolved roles and the conventional type scale.
+ * A value a crawl fills can be faithful to its source and still unusable as
+ * a system: an accent that is the text color, an accent that vanishes on the
+ * background, a lede larger than the display step. Only plain hex colors and
+ * fixed px/rem/em lengths are judged; a color function or a fluid scale
+ * passes without comment. The starter viewer keeps its own chrome readable
+ * whatever the values (`src/styles/viewer.css`); these name what every
+ * consumer reads.
+ */
+export function auditBrandValues({ roles = {}, tokens = [] } = {}) {
+  const warnings = [];
+  const value = (role) => roles[role]?.value;
+  const accent = value("color.accent");
+  const text = value("color.text");
+  const background = value("color.background");
+  const againstText = contrastRatio(accent, text);
+  if (againstText !== null && againstText < 1.5) {
+    warnings.push(`color.accent (${accent}) is almost color.text (${text}): actions, links and highlights read as body text; pick an accent a reader can tell from the text`);
+  }
+  const onBackground = contrastRatio(accent, background);
+  if (onBackground !== null && onBackground < 3) {
+    warnings.push(`color.accent (${accent}) has ${onBackground.toFixed(1)}:1 contrast on color.background (${background}): below 3:1 an action or a highlight is hard to see`);
+  }
+  const scale = new Map();
+  for (const token of tokens) if (token.base && TYPE_SCALE.includes(token.name)) scale.set(token.name, token.resolved);
+  if (TYPE_SCALE.every((name) => scale.has(name))) {
+    const sizes = TYPE_SCALE.map((name) => pixels(scale.get(name)));
+    if (sizes.every((size) => size !== null) && sizes.some((size, index) => index > 0 && size > sizes[index - 1])) {
+      warnings.push(`type scale is out of order (${TYPE_SCALE.map((name) => `${name} ${scale.get(name)}`).join(", ")}): display is the largest step and body the smallest; the viewer keeps its own headings and lede in order, but every consumer reads these values as the system's scale`);
+    }
+  }
+  return warnings;
+}
+
 /**
  * The brand kit: role colors and fonts plus every annotated logo and image,
  * each with its media record and the page block that presents it. An asset
@@ -197,6 +268,7 @@ export function buildBrandKit({ manifest, tokens, pages, renderBlock, fonts = {}
   for (const { role, family } of fontSources.unsourced) {
     warnings.push(`font role ${role} (${family}) has no source: no loaded stylesheet declares an @font-face for it and no page links an external stylesheet that serves it, so a consumer cannot obtain the font`);
   }
+  warnings.push(...auditBrandValues(tokens));
 
   return {
     kit: {
