@@ -40,6 +40,24 @@ test('check rejects missing references, cycles, media key mismatch and symlinked
   await fs.rm(tokenPath); await fs.symlink('../tokens.json', tokenPath);
   await assert.rejects(syncContractViews(root), /symbolic link/);
 });
+test('migration leaves the aggregate layout in place, with the reason, when the groups would not validate', async t => {
+  const { root, tokens, media } = await fixture(t);
+  // A legacy token value that names a plain custom property passed every aggregate check; the groups refuse it.
+  tokens.color = { text: { value: 'var(--theme-body, var(--text))' } };
+  await fs.writeFile(path.join(root, 'tokens.json'), JSON.stringify(tokens));
+  const result = await migrateContractGroups(root);
+  assert.equal(result.migrated, false);
+  assert.match(result.reason, /^Contract groups were not adopted: Unknown token reference --theme-body\. tokens\.json and media\.json stay as they are/);
+  for (const relative of ['.timds/contract-layout.json', 'tokens', 'media']) await assert.rejects(fs.access(path.join(root, relative)), /ENOENT/, relative);
+  assert.deepEqual(JSON.parse(await fs.readFile(path.join(root, 'tokens.json'), 'utf8')), tokens);
+  assert.deepEqual(JSON.parse(await fs.readFile(path.join(root, 'media.json'), 'utf8')), media);
+  // Once the value names a token, the same migration adopts the groups.
+  tokens.color.text.value = 'var(--color-brand-600)';
+  await fs.writeFile(path.join(root, 'tokens.json'), JSON.stringify(tokens));
+  assert.equal((await migrateContractGroups(root)).migrated, true);
+  await fs.access(path.join(root, '.timds/contract-layout.json'));
+});
+
 test('migration refuses an existing authored group before writing a layout record', async t => {
   const { root } = await fixture(t);
   await fs.mkdir(path.join(root, 'tokens')); await fs.writeFile(path.join(root, 'tokens/color.brand.json'), '{}');

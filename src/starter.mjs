@@ -28,6 +28,14 @@
 //   not on every sync. Nothing is removed, reordered, or retitled.
 // - Authored fragments the starter mirrors from the golden system (the
 //   Digital, Social, and Print overviews) and the toolkit's own Use pages,
+//   rendered by the stock viewer. The viewer, build and check scripts are one
+//   renderer: while any of them is customized and kept, the others' refreshes
+//   and every refreshed or new stock fragment wait (`skipped`, with a note
+//   naming the kept file). A stock page the kept renderer has never seen may
+//   use placeholders it cannot build, and a stock check script expects the
+//   stock viewer beside it; either would fail the sync's own check and roll
+//   the whole upgrade back, where holding them lets the dependency, skill and
+//   record changes land.
 //   Install and every way to consume a system, are written when the sync adds
 //   their page and refreshed only while they still match what the toolkit
 //   wrote. A fragment that differs is this system's own page and is never
@@ -103,6 +111,9 @@ export const starterManagedFragments = Object.freeze([
   ["src/pages/use/index.html", "starter/src/pages/use/index.html"],
   ["src/pages/use/install.html", "starter/src/pages/use/install.html"],
 ]);
+
+/** The plumbing that renders the stock fragments; a kept customization of either holds those fragments back. */
+export const starterRendererFiles = Object.freeze(["scripts/viewer.mjs", "scripts/build.mjs", "scripts/check.mjs"]);
 
 /** Kind-specific stock pages share the same preservation rule as overviews. */
 export function starterFragments(kind = "starter") {
@@ -624,12 +635,13 @@ export async function syncStarter({ designSystemRoot, version, check = null, dec
   // keeps the hash last written for it, so a revert to that version is still
   // recognized as stock instead of staying customized until --force.
   const recordFile = (relative, planned) => {
-    if (planned.status !== "customized") recordedFiles[relative] = stock.files[relative];
+    if (planned.status !== "customized" && planned.status !== "skipped") recordedFiles[relative] = stock.files[relative];
     else if (typeof record?.files?.[relative] === "string") recordedFiles[relative] = record.files[relative];
   };
 
   // 1. Plumbing, by hash; or outright when the toolkit owns it.
   const plumbingMode = record?.plumbing ?? "recorded";
+  const plumbingPlans = [];
   for (const [relative] of starterPlumbingFiles) {
     const desired = stock.texts[relative];
     let planned = await planStockFile(resolve(relative), desired, { force: plumbingMode === "toolkit" || force.includes(relative), knownHashes: knownStarterHashes(relative, record) });
@@ -643,8 +655,20 @@ export async function syncStarter({ designSystemRoot, version, check = null, dec
         note = "kept at the prompt";
       }
     }
-    recordFile(relative, planned);
-    plan(relative, planned.status, planned.write ? desired : null, planned.current, note);
+    plumbingPlans.push({ relative, desired, planned, note });
+  }
+  // The viewer, build and check scripts are one renderer. While one of them is
+  // this system's own, the others stay at the version it works with; a stock
+  // check beside a kept viewer would fail the sync's own check.
+  const rendererKept = plumbingPlans.filter(({ relative, planned }) => starterRendererFiles.includes(relative) && planned.status === "customized").map(({ relative }) => relative);
+  const heldBack = (what) => `held back: ${rendererKept.join(" and ")} ${rendererKept.length === 1 ? "is" : "are"} this system's own and ${what}; port the renderer, or run timds starter sync --force ${rendererKept.join(" ")} to replace it`;
+  for (const entry of plumbingPlans) {
+    if (rendererKept.length && starterRendererFiles.includes(entry.relative) && entry.planned.status === "updated") {
+      entry.planned = { ...entry.planned, status: "skipped", write: false };
+      entry.note = heldBack("the stock version expects the stock renderer beside it");
+    }
+    recordFile(entry.relative, entry.planned);
+    plan(entry.relative, entry.planned.status, entry.planned.write ? entry.desired : null, entry.planned.current, entry.note);
   }
 
   // 2. The catalogs. The site model is merged first because formats and
@@ -673,10 +697,21 @@ export async function syncStarter({ designSystemRoot, version, check = null, dec
     const fragmentsToWrite = new Set();
     const authoredPages = new Set();
     const fragmentPlans = new Map();
+    // The stock pages are rendered by the stock viewer. While the viewer, or
+    // the build that drives it, is this system's own, a stock page it has not
+    // seen may use placeholders it cannot render; writing it would fail the
+    // sync's own check and roll the upgrade back, so the page waits instead.
     for (const [id, { relative }] of fragmentPages) {
       const desired = stock.texts[relative];
       const planned = await planStockFile(resolve(relative), desired, { knownHashes: knownStarterHashes(relative, record) });
+      if (rendererKept.length && (planned.status === "updated" || planned.status === "created")) {
+        fragmentPlans.set(relative, { desired, planned: { ...planned, status: "skipped", write: false }, note: heldBack("may not render the stock page") });
+        continue;
+      }
       if (planned.status !== "created") {
+        // A fragment that exists is an authored page, whatever the site model
+        // still says: the viewer refuses a planned page whose file exists.
+        if (findPage(currentSite, id)?.planned === true) authoredPages.add(id);
         fragmentPlans.set(relative, { desired, planned });
         continue;
       }
@@ -714,11 +749,11 @@ export async function syncStarter({ designSystemRoot, version, check = null, dec
 
     // 3. Fragments, now that the site model says which pages exist. A
     //    customized fragment is this system's own page: kept, --force or not.
-    for (const [relative, { desired, planned }] of fragmentPlans) {
+    for (const [relative, { desired, planned, note: heldBack }] of fragmentPlans) {
       if (planned.status !== "skipped") recordFile(relative, planned);
-      const note = planned.status === "skipped"
+      const note = heldBack ?? (planned.status === "skipped"
         ? "its page is declared as authored by this system; copy the stock fragment by hand if wanted"
-        : planned.status === "customized" ? "this system's own page; never replaced, --force included" : undefined;
+        : planned.status === "customized" ? "this system's own page; never replaced, --force included" : undefined);
       plan(relative, planned.status, planned.write ? desired : null, planned.current, note);
     }
   }
