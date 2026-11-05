@@ -222,6 +222,44 @@ test("planStockFile recognizes stock files by hash and replaces a customized one
   assert.deepEqual(await planStockFile(target, "new\n"), { current: "new\n", status: "current", write: false });
 });
 
+test("syncStarter holds the stock pages back while the renderer is this system's own, and writes them once it is stock again", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "timds-starter-"));
+  t.after(() => fs.rm(root, { force: true, recursive: true }));
+  await fs.cp(fixtureRoot, root, { recursive: true });
+  const viewer = path.join(root, "scripts", "viewer.mjs");
+  const customized = `${await fs.readFile(viewer, "utf8")}\n// this system's own renderer\n`;
+  await fs.writeFile(viewer, customized, "utf8");
+  const usePage = path.join(root, "src", "pages", "use", "index.html");
+  // The check sees the files as written: a stock page the kept viewer cannot
+  // render would fail it, so the sync must not have written one.
+  const first = await syncStarter({ check: async () => { await assert.rejects(fs.access(usePage), /ENOENT/); return "ok"; }, designSystemRoot: root, version: "0.0.0" });
+  assert.equal(first.check, "ok");
+  const viewerReport = first.files.find((file) => file.path === "scripts/viewer.mjs");
+  assert.equal(viewerReport.status, "customized");
+  assert.equal(await fs.readFile(viewer, "utf8"), customized, "the kept renderer is untouched");
+  for (const [relative] of starterManagedFragments) {
+    const report = first.files.find((file) => file.path === relative);
+    assert.equal(report.status, "skipped", relative);
+    assert.match(report.note, /^held back: scripts\/viewer\.mjs is this system's own/, relative);
+    await assert.rejects(fs.access(path.join(root, ...relative.split("/"))), /ENOENT/, relative);
+  }
+  for (const relative of ["scripts/build.mjs", "scripts/check.mjs"]) {
+    const report = first.files.find((file) => file.path === relative);
+    assert.equal(report.status, "skipped", relative);
+    assert.match(report.note, /^held back: scripts\/viewer\.mjs is this system's own and the stock version expects the stock renderer beside it/, relative);
+  }
+  assert.ok(first.written.includes("scripts/dev.mjs"), "plumbing outside the renderer is still brought in");
+  // Replacing the renderer lets the next sync bring the stock pages in.
+  const second = await syncStarter({ designSystemRoot: root, force: ["scripts/viewer.mjs"], version: "0.0.0" });
+  assert.equal(second.files.find((file) => file.path === "scripts/viewer.mjs").status, "updated");
+  for (const [relative] of starterManagedFragments) {
+    const report = second.files.find((file) => file.path === relative);
+    assert.ok(["created", "skipped"].includes(report.status), `${relative}: ${report.status}`);
+    if (report.status === "skipped") assert.doesNotMatch(report.note, /^held back/, relative);
+  }
+  assert.ok(await fs.readFile(usePage, "utf8"), "the Use page is written once the stock viewer renders it");
+});
+
 test("syncStarter restores every file and the record when the check fails afterwards", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "timds-starter-"));
   t.after(() => fs.rm(root, { force: true, recursive: true }));

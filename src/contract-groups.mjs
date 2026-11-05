@@ -109,10 +109,22 @@ export async function migrateContractGroups(root) {
     const existing = await fs.readFile(path.join(root, relative), 'utf8').catch(error => { if (error.code === 'ENOENT') return null; throw error; });
     if (existing !== null && existing !== content) throw new Error(`Contract migration would overwrite ${relative}; reconcile that group first`);
   }
-  for (const [relative, content] of writes) { await fs.mkdir(path.dirname(path.join(root, relative)), { recursive: true }); await fs.writeFile(path.join(root, relative), content); }
+  const created = [];
+  for (const [relative, content] of writes) { await fs.mkdir(path.dirname(path.join(root, relative)), { recursive: true }); await fs.writeFile(path.join(root, relative), content); created.push(relative); }
   await fs.mkdir(path.join(root, '.timds'), { recursive: true });
   await fs.writeFile(path.join(root, CONTRACT_LAYOUT_FILE), json({ schemaVersion: 1, mediaSchemaVersion: media.schemaVersion || 2, tokens: 'tokens/**/*.json', media: 'media/**/*.json', generated: ['tokens.json', 'media.json'] }));
-  return { migrated: true, ...(await syncContractViews(root)) };
+  created.push(CONTRACT_LAYOUT_FILE);
+  // The groups are adopted only when they validate as the contract the
+  // aggregate files never checked: a legacy token whose value names a plain
+  // custom property, say, would otherwise fail every check from here on and
+  // an upgrade with it. The aggregate layout stays, with the reason.
+  try {
+    return { migrated: true, ...(await syncContractViews(root)) };
+  } catch (caught) {
+    for (const relative of created.reverse()) await fs.rm(path.join(root, relative), { force: true });
+    for (const directory of ['tokens', 'media']) await fs.rmdir(path.join(root, directory)).catch(() => {});
+    return { migrated: false, reason: `Contract groups were not adopted: ${caught.message}. tokens.json and media.json stay as they are; make every var(--name) in a token value name a token, then run timds upgrade again.` };
+  }
 }
 export async function writeGroupedMedia(root, catalog) {
   if (!await hasContractGroups(root)) { await fs.writeFile(path.join(root, 'media.json'), json(catalog)); return; }

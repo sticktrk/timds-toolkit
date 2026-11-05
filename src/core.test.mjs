@@ -1488,16 +1488,34 @@ test("starter sync reports customized files, rolls back when they break the chec
   const record = JSON.parse(await read(".timds/starter.json"));
   assert.equal(record.files["scripts/dev.mjs"], undefined, "a customized file is not recorded as toolkit-written");
 
-  // A customized viewer cannot render the new overviews, so the sync is rolled back and says why.
+  // A customized viewer cannot render the new overviews, and the stock check
+  // expects the stock viewer beside it: the renderer and the stock pages wait,
+  // named, while the rest of the sync lands and the check still passes.
   await rewindStarter(repoRoot);
   const customizedViewer = `${await read("scripts/viewer.mjs")}\n// client change\n`;
   await fs.writeFile(path.join(repoRoot, "scripts/viewer.mjs"), customizedViewer);
-  await assert.rejects(syncStarterWorkspace(repoRoot), (error) => /Starter sync was rolled back because the workspace check failed afterwards: node scripts\/build\.mjs failed/.test(error.message)
-    && /Customized files were kept \(scripts\/dev\.mjs, scripts\/viewer\.mjs\); .* run timds starter sync --force scripts\/dev\.mjs scripts\/viewer\.mjs to replace them/.test(error.message));
+  const held = await syncStarterWorkspace(repoRoot);
+  assert.deepEqual(held.files.find((file) => file.path === "scripts/viewer.mjs"), { path: "scripts/viewer.mjs", status: "customized" });
+  for (const relative of ["scripts/build.mjs", "scripts/check.mjs"]) {
+    const file = held.files.find((entry) => entry.path === relative);
+    assert.equal(file.status, "skipped", relative);
+    assert.match(file.note, /^held back: scripts\/viewer\.mjs is this system's own and the stock version expects the stock renderer beside it; port the renderer, or run timds starter sync --force scripts\/viewer\.mjs to replace it$/, relative);
+    assert.equal(await read(relative), await fs.readFile(path.join(starterFixtureRoot, relative), "utf8"), `${relative} stays at the version the kept viewer works with`);
+  }
+  for (const [relative] of starterManagedFragments) {
+    const file = held.files.find((entry) => entry.path === relative);
+    assert.equal(file.status, "skipped", relative);
+    assert.match(file.note, /^held back: scripts\/viewer\.mjs is this system's own and may not render the stock page;/, relative);
+    await assert.rejects(fs.access(path.join(repoRoot, relative)), /ENOENT/, relative);
+  }
+  assert.ok(!held.written.some((relative) => relative.startsWith("src/pages/") || ["scripts/viewer.mjs", "scripts/build.mjs", "scripts/check.mjs"].includes(relative)), JSON.stringify(held.written));
+  assert.ok(held.written.includes("src/styles/canvas.css") && held.written.includes("src/formats.json"), "plumbing outside the renderer and the catalogs still land");
+  assert.equal(held.check.machine.warnings.length, 2, "the kept renderer still passes the check");
   assert.equal(await read("scripts/viewer.mjs"), customizedViewer);
-  await assert.rejects(fs.access(path.join(repoRoot, "src/formats.json")), /ENOENT/);
-  await assert.rejects(fs.access(path.join(repoRoot, ".timds/starter.json")), /ENOENT/);
-  assert.equal(await read("src/site.json"), await fs.readFile(path.join(starterFixtureRoot, "src/site.json"), "utf8"));
+  assert.deepEqual(forceReplaceable(held), ["scripts/dev.mjs", "scripts/viewer.mjs"]);
+  const heldRecord = JSON.parse(await read(".timds/starter.json"));
+  assert.equal(heldRecord.files["scripts/viewer.mjs"], undefined, "a kept renderer is not recorded as toolkit-written");
+  assert.equal(heldRecord.files["scripts/build.mjs"], undefined, "a held-back script keeps no stock hash it does not have");
 
   // --force names each customized plumbing file it replaces and nothing else; an overview fragment this system wrote itself is its own page and survives.
   const ownOverview = '<span class="eyebrow">Print</span>\n<h1 class="page-title">Our print</h1>\n<section class="block" id="rules"><h2 class="h2">Rules</h2><p>Paper first.</p></section>\n';
