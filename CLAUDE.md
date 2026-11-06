@@ -216,8 +216,16 @@ script-free preview engine). `{{copy:KEY}}` renders escaped strings from
 bounded local catalog asset path; `{{slots:GROUP_OR_KEY}}` renders the exported
 slot guidance and labels. Missing values use the contract's samples and are
 reported. The viewer lists designs in the app bar even when the directory is
-empty. Shared `src/scripts/compose.js` powers Use against the host's relative
-compose route; the ordinary starter opens on Use, while the kit opens on its
+empty. The ordinary starter opens on the Use view: its own page is the portal
+landing (`"layout": "landing"`, rendered without the side navigation: a hero,
+rails of asset cards from the catalog that deep-link the composer with
+`?format=ID`, the kit, three steps, every other way in), and `use/compose` is
+the composer, whose presets are every catalog format through
+`{{presets:GROUP}}`; shared `src/scripts/compose.js` powers it against the
+host's relative compose route. `{{count:formats|views|pages|designs}}` states
+a count, and `{{nearest:ID}}` is a page's address with a fallback to its
+view's first authored page (then the overview) while it is planned, so a
+managed fragment can link client pages before they exist. The kit opens on its
 overview. The starter's views mirror the golden client system
 (Brand, Web DS, Digital DS, Social DS, Print DS); keep them in step with it. Planned pages are never built, so a fresh scaffold
 keeps its two expected brand warnings. The kit instead authors its Voice page,

@@ -275,7 +275,9 @@ test("syncStarter refreshes a Use page still at an earlier release's stock bytes
     assert.equal(report.files.find((file) => file.path === relative).status, "updated", relative);
     assert.equal(await fs.readFile(path.join(root, ...relative.split("/")), "utf8"), await template(`starter/${relative}`), relative);
   }
-  assert.match(await fs.readFile(path.join(root, "src", "pages", "use", "index.html"), "utf8"), /data-compose/, "the refreshed Use page carries the composer");
+  assert.match(await fs.readFile(path.join(root, "src", "pages", "use", "index.html"), "utf8"), /class="portal-hero"/, "the refreshed Use page is the portal landing");
+  assert.ok(["created", "current"].includes(report.files.find((file) => file.path === "src/pages/use/compose.html").status), "the composer sits beside it as a managed fragment");
+  assert.match(await fs.readFile(path.join(root, "src", "pages", "use", "compose.html"), "utf8"), /data-compose/, "the composer page carries the composer");
   // One changed byte makes it this system's own page again.
   const usePage = path.join(root, "src", "pages", "use", "index.html");
   await fs.writeFile(usePage, `${await fs.readFile(path.join(released, "index.html"), "utf8")}\n`, "utf8");

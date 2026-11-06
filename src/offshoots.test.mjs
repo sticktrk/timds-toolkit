@@ -75,7 +75,7 @@ test('structure shoots retain the verified composer and explicitly declared copy
   await fs.writeFile(path.join(root, 'src/copy.json'), copy);
   await fs.writeFile(path.join(root, '.timds/stock.json'), json({schemaVersion: 1, paths: [
     'src/layout.html', 'src/styles/system.css', 'src/pages/use/index.html',
-    'src/pages/use/install.html', 'src/copy.json',
+    'src/pages/use/compose.html', 'src/pages/use/install.html', 'src/copy.json',
   ]}));
   git(root, 'add', '--all'); git(root, 'commit', '-qm', 'Reusable composer and copy samples');
   const source = await loadOffshootSource(root, {sourceId});
@@ -86,11 +86,12 @@ test('structure shoots retain the verified composer and explicitly declared copy
   const script = await fs.readFile(path.join(root, 'src/scripts/compose.js'), 'utf8');
   assert.equal(await read('src/scripts/compose.js'), script);
   assert.equal(await read('dist/scripts/compose.js'), script, 'the shared viewer copies the admitted script into the artifact');
-  const use = await read('dist/use/index.html');
+  const use = await read('dist/use/compose/index.html');
   assert.match(use, /<figure class="compose__app" data-compose/);
   assert.match(use, /<script src="\/scripts\/compose\.js" defer><\/script>/);
   assert.match(use, /<a href="\/">the overview<\/a>/, 'page placeholders follow the structure-mode route');
-  assert.match(await read('dist/use/install/index.html'), /<a href="\/use\/#mcp">Using the system<\/a>/);
+  assert.match(await read('dist/use/index.html'), /<a class="pill" href="\/use\/compose\/">Start making<\/a>/, 'the landing links the composer at its structure-mode route');
+  assert.match(await read('dist/use/install/index.html'), /<a href="\/use\/compose\/#mcp">Compose<\/a>/);
 
   const customized = structuredClone(source);
   customized.files.find(file => file.path === 'src/scripts/compose.js').content = Buffer.from('// changed composer\n').toString('base64');
