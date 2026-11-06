@@ -189,6 +189,7 @@ export const legacyStarterFileHashes = new Map([
     "b9d437b8d8df332d765ed65a1cd7f35e25f011efa94c3090aade69917e5b9940", // v0.1.481
     "8f95580c4578921acbcb6f312cf037e59a5758de494faa4d0e37776a8b2c590f", // v0.1.485
     "e16affb7ede1627f69c9c220ecea12f6649dcde7564c7b18fef1665e0c9ae12a", // v0.1.487
+    "436b9438b927fda8fea59f1ab18275653db7cb53dc678ae70c1337d768029da3", // v0.1.490
   ]],
   ["scripts/brand-kit.mjs", [
     "644ade30ac144dc71cb43a127fc456ece032be105ce325d1e9498fa54942d07b", // v0.1.485
@@ -206,6 +207,15 @@ export const legacyStarterFileHashes = new Map([
     "2f592695615a656474cf8034b3d757662fb3468ae5c674f0825b13982a378371", // v0.1.481
     "b03eb3fad31a447052de5a8e6a4f0fd75e919d5de126cee9762eaf9471cab6ae", // v0.1.484
     "31835d1a617c2a86ef27c7354b0367357ffb516ec7508130cfcc6d2e3db1debd", // v0.1.485
+  ]],
+  ["src/pages/digital/index.html", [
+    "6db0f5c312100e4df3dca3e022da8959633d3efac5a05de7d01af2af4593c717", // v0.1.451
+  ]],
+  ["src/pages/print/index.html", [
+    "3beb96006d13ad20ec6b50ba39ebab1e2b4ea6be1b7c3b4618d2a88061fa1e50", // v0.1.451
+  ]],
+  ["src/pages/social/index.html", [
+    "fa10c0442225ec7f67a3b88e2d8277793186e27036dbc257b39432b903e3fbe4", // v0.1.451
   ]],
 ]);
 

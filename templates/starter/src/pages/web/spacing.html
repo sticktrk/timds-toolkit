@@ -6,9 +6,21 @@
 <section class="block" id="scale">
   <div class="block__head">
     <h2 class="h2">Spacing scale</h2>
-    <p>Padding, margin, and gap all come from this scale. The step name is its multiple of 0.25rem.</p>
+    <p>Padding, margin, and gap all come from this scale. The step name is its multiple of the base unit, a quarter of the body size.</p>
   </div>
-  {{tokens:space}}
+  <figure class="steps">
+    <div class="step">1<span style="width:var(--space-1)"></span></div>
+    <div class="step">2<span style="width:var(--space-2)"></span></div>
+    <div class="step">3<span style="width:var(--space-3)"></span></div>
+    <div class="step">4<span style="width:var(--space-4)"></span></div>
+    <div class="step">6<span style="width:var(--space-6)"></span></div>
+    <div class="step">8<span style="width:var(--space-8)"></span></div>
+    <div class="step">12<span style="width:var(--space-12)"></span></div>
+  </figure>
+  <details class="spec-drawer">
+    <summary>Spec</summary>
+    {{tokens:space}}
+  </details>
 </section>
 
 <section class="block" id="radius">
@@ -20,21 +32,30 @@
     <div class="shape" style="border-radius:var(--radius-md)">md</div>
     <div class="shape" style="border-radius:var(--radius-round)">round</div>
   </figure>
-  {{tokens:radius}}
+  <details class="spec-drawer">
+    <summary>Spec</summary>
+    {{tokens:radius}}
+  </details>
 </section>
 
 <section class="block" id="layout-constants">
   <div class="block__head">
     <h2 class="h2">Layout constants</h2>
-    <p>Four values fix the page shell. Everything else is spacing.</p>
+    <p>Four values fix the page shell: the content width, the sidebar, the header, and the hairline. Everything else is spacing.</p>
   </div>
-  {{tokens:size}}
+  <details class="spec-drawer">
+    <summary>Spec</summary>
+    {{tokens:size}}
+  </details>
 </section>
 
 <section class="block" id="motion">
   <div class="block__head">
     <h2 class="h2">Motion</h2>
-    <p>Motion confirms a state change. Under <code>prefers-reduced-motion: reduce</code> every transition collapses, and nothing depends on animation to become readable.</p>
+    <p>Motion confirms a state change. When a person has asked their device for reduced motion, every transition collapses, and nothing depends on animation to become readable.</p>
   </div>
-  {{tokens:motion}}
+  <details class="spec-drawer">
+    <summary>Spec</summary>
+    {{tokens:motion}}
+  </details>
 </section>

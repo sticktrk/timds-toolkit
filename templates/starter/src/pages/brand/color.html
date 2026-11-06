@@ -6,9 +6,21 @@
 <section class="block" id="palette">
   <div class="block__head">
     <h2 class="h2">Palette</h2>
-    <p>The table is written from <code>tokens.json</code> at build time.</p>
+    <p>Seven colors: two inks for text, two grounds to set them on, a hairline, and an accent with the soft tint that marks the states around it.</p>
   </div>
-  {{tokens:color}}
+  <figure class="palette">
+    <div class="palette__swatch"><span class="palette__chip" style="background:var(--color-ink)"></span><b>Ink</b><small>Primary text</small></div>
+    <div class="palette__swatch"><span class="palette__chip" style="background:var(--color-muted)"></span><b>Muted</b><small>Secondary text</small></div>
+    <div class="palette__swatch"><span class="palette__chip" style="background:var(--color-canvas)"></span><b>Canvas</b><small>Page background</small></div>
+    <div class="palette__swatch"><span class="palette__chip" style="background:var(--color-surface)"></span><b>Surface</b><small>Panels and inputs</small></div>
+    <div class="palette__swatch"><span class="palette__chip" style="background:var(--color-line)"></span><b>Line</b><small>Rules and borders</small></div>
+    <div class="palette__swatch"><span class="palette__chip" style="background:var(--color-accent)"></span><b>Accent</b><small>Actions and links</small></div>
+    <div class="palette__swatch"><span class="palette__chip" style="background:var(--color-accent-soft)"></span><b>Accent soft</b><small>Hover and selection</small></div>
+  </figure>
+  <details class="spec-drawer">
+    <summary>Spec</summary>
+    {{tokens:color}}
+  </details>
 </section>
 
 <section class="block" id="grounds">
@@ -22,13 +34,16 @@
     <div class="ground" style="background:var(--color-accent-soft)"><b>Accent soft</b><span style="color:var(--color-muted)">Secondary text</span></div>
     <div class="ground" style="background:var(--color-accent);color:var(--color-surface)"><b>Accent</b><span>No secondary text</span></div>
   </figure>
-  <table class="spec">
-    <thead><tr><th>Ground</th><th>Text</th><th>Secondary text</th><th>Use</th></tr></thead>
-    <tbody>
-      <tr><td>Canvas</td><td><code>--color-ink</code></td><td><code>--color-muted</code></td><td>Page background</td></tr>
-      <tr><td>Surface</td><td><code>--color-ink</code></td><td><code>--color-muted</code></td><td>Panels, cards, and inputs</td></tr>
-      <tr><td>Accent soft</td><td><code>--color-ink</code></td><td><code>--color-muted</code></td><td>Hover and selected states</td></tr>
-      <tr><td>Accent</td><td><code>--color-surface</code></td><td>None</td><td>The primary action</td></tr>
-    </tbody>
-  </table>
+  <details class="spec-drawer">
+    <summary>Spec</summary>
+    <table class="spec">
+      <thead><tr><th>Ground</th><th>Text</th><th>Secondary text</th><th>Use</th></tr></thead>
+      <tbody>
+        <tr><td>Canvas</td><td><code>--color-ink</code></td><td><code>--color-muted</code></td><td>Page background</td></tr>
+        <tr><td>Surface</td><td><code>--color-ink</code></td><td><code>--color-muted</code></td><td>Panels, cards, and inputs</td></tr>
+        <tr><td>Accent soft</td><td><code>--color-ink</code></td><td><code>--color-muted</code></td><td>Hover and selected states</td></tr>
+        <tr><td>Accent</td><td><code>--color-surface</code></td><td>None</td><td>The primary action</td></tr>
+      </tbody>
+    </table>
+  </details>
 </section>

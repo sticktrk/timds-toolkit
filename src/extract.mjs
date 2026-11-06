@@ -265,6 +265,9 @@ function extractBlock(section, pageId, config, joinMedia, index, seenBlockIds, s
     }
     if (claimedSubtrees.has(node) || matchesAny(node, config.ignore)) return;
     if (node === heading) return;
+    // A disclosure label ("Spec", "Markup") is viewer chrome: the table or code
+    // it opens is the content, and that is harvested on its own above.
+    if (node.tag === "summary") return;
     const ownText = (node.children ?? []).some((child) => child.type === "text" && child.value.trim());
     if (ownText) {
       const value = textOf(node, { markdown: true });

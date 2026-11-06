@@ -41,7 +41,7 @@
 <section class="block" id="canvases">
   <div class="block__head">
     <h2 class="h2">Canvases</h2>
-    <p>Every event image, post, and ad is sized from the <code>social</code> group in <code>src/formats.json</code>, and a template is built from the same pieces as Digital DS (<code>src/styles/canvas.css</code>). A story keeps its message out of the bands the platform covers with its own interface; turn on the guides to see them.</p>
+    <p>Every event image, post, and ad is sized from the same catalog as Digital DS, and a template is built from the same canvas pieces. A story keeps its message out of the bands the platform covers with its own interface; turn on the guides to see them.</p>
   </div>
   {{formats:social}}
   <figure class="demo">
@@ -67,4 +67,8 @@
       </div>
     </div>
   </figure>
+  <details class="spec-drawer">
+    <summary>Spec</summary>
+    <div class="note"><b>Catalog and pieces.</b> The sizes are the <code>social</code> group in <code>src/formats.json</code>; the canvas pieces are styled in <code>src/styles/canvas.css</code>, shared with Digital DS.</div>
+  </details>
 </section>
