@@ -1,3 +1,18 @@
+// `timds defaults`: shared video publishing defaults with sticky overrides.
+//
+// The toolkit ships publishing targets and target defaults in
+// templates/video/publishing-defaults.json. A client contract adopts them
+// explicitly with `--apply`, which updates only `publishing.targets` and
+// `publishing.targetDefaults` and records the supplied values and the
+// persistent override paths in .timds/defaults.json. Later runs compare
+// against that baseline: a field still equal to the previous default
+// advances, a client override stays even when a later default matches it,
+// and an ordinary `upgrade` only reports what is pending. New video scaffolds
+// take the same source and baseline.
+//
+// Boundary: only the publishing defaults participate; brand, productions and
+// components never do (AGENTS.md names the test matrix this must keep).
+
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";

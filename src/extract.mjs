@@ -10,6 +10,9 @@
 //   <entry-dir>/brand.json     the brand kit: role colors and fonts (with the
 //                              files or font service that serve them), logos, imagery
 //   <entry-dir>/formats.json   the asset format catalog, when the system keeps one
+//   <entry-dir>/designs.json   the website designs, their pages and journeys
+//                              (designs.mjs serializes it; removed when none)
+//   <entry-dir>/changelog.json the release history (changelog.mjs renders it)
 //   <entry-dir>/bundle.json    the consumer bundle's manifest (bundle.mjs writes
 //                              it and the files; the index and llms.txt point at it)
 //   <entry-dir>/llms.txt       the brand essentials and the page index, in the
