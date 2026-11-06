@@ -45,6 +45,7 @@ import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 
+import { agentPointerHead, agentPointerNote } from "./agent-pointers.mjs";
 import { attr, classList, escapeHtml, findAll, findOne, parseHtml, textOf, walk } from "./html.mjs";
 import { importReferences, stylesheetReferences } from "./tokens.mjs";
 
@@ -341,9 +342,11 @@ function toolkitPage({ title, basePrefix, stylesheets, bodyClass, body }) {
     `    <title>${title}</title>`,
     ...stylesheets.map((href) => `    <link rel="stylesheet" href="${escapeHtml(href)}">`),
     `    <link rel="stylesheet" href="${basePrefix}/${DESIGNS_OUTPUT_DIRECTORY}/_directory.css">`,
+    ...agentPointerHead(basePrefix),
     "  </head>",
     `  <body class="${bodyClass}">`,
     ...body,
+    `    ${agentPointerNote(basePrefix, "td-directory-agents")}`,
     "  </body>",
     "</html>",
     "",

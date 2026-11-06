@@ -26,6 +26,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
+import { agentPointerHead, agentPointerNote } from "./agent-pointers.mjs";
 import { readManifestLike } from "./designs.mjs";
 import { escapeHtml } from "./html.mjs";
 
@@ -322,6 +323,7 @@ function renderPage({ manifest, parsed, basePrefix, stylesheets }) {
     `    <title>Changelog · ${escapeHtml(name)}</title>`,
     ...stylesheets.map((href) => `    <link rel="stylesheet" href="${escapeHtml(href)}">`),
     `    <link rel="stylesheet" href="${basePrefix}/${CHANGELOG_OUTPUT_DIRECTORY}/_changelog.css">`,
+    ...agentPointerHead(basePrefix),
     "  </head>",
     '  <body class="timds-changelog">',
     '    <header class="td-changelog-bar">',
@@ -336,6 +338,7 @@ function renderPage({ manifest, parsed, basePrefix, stylesheets }) {
     "      </div>",
     ...(releases.length ? releases.map((release) => renderRelease(release, manifest)) : ['      <p class="td-changelog-empty">No releases yet. Notes under Unreleased in CHANGELOG.md appear here once they ship.</p>']),
     "    </main>",
+    `    ${agentPointerNote(basePrefix, "td-changelog-agents")}`,
     "  </body>",
     "</html>",
     "",

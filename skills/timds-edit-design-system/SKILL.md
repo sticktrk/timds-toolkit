@@ -96,7 +96,8 @@ the released reference for the developer's port into the product.
 
 `check` reads the built HTML and CSS, never authored source, and derives
 `index.json`, `tokens.json`, `brand.json`, `formats.json`, `llms.txt`,
-`llms-full.txt`, and a Markdown mirror of every page. Video, product
+`llms-full.txt`, a Markdown mirror of every page, and a `robots.txt` at the
+site root that names `llms.txt`. Video, product
 repositories, consumer agents, and anyone given the system's public link read
 only that layer, so structure the pages for it whatever the framework:
 
