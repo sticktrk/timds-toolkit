@@ -192,8 +192,8 @@ not merge or publish without separate authorization.
 
 ## Remote editing through MCP
 
-`npm run timds -- mcp` serves the Design System editing tools over stdio to any
-MCP-capable agent, bound to the current checkout. The server is named
+`npm run timds -- mcp` (also `timds mcp edit`) serves the Design System editing
+tools over stdio to any MCP-capable agent, bound to the current checkout. The server is named
 `timds-design-system` and provides:
 
 - `get_editing_guide` (also resource `timds://guide`): the editing rules for an
@@ -1082,7 +1082,8 @@ if the catalog has changed since staging. Older staging entries without a
 baseline may still publish new keys or match unchanged records, but cannot
 replace existing records until deliberately restaged. To keep the published
 asset, remove its stale entry from `.timds/local-media.json` or restore it with
-`assets pull KEY --force`. Run `assets add FILE --key KEY` again only after
+`assets pull KEY --force`; `timds assets list` prints the catalog with each
+key's staging state. Run `assets add FILE --key KEY` again only after
 reviewing the intended replacement; do not restage an original over an
 optimized derivative just to clear a conflict. Successful publication advances
 the local baseline, so reverting `media.json` does not replay the old upload.
@@ -1893,7 +1894,8 @@ file, keyed by host origin. OAuth refresh tokens rotate when saved access tokens
 near expiry. Concurrent CLI and MCP processes serialize refresh, login and logout
 with a credentials-file lock, reload after locking, and atomically replace the
 file. A crashed owner's lock expires; waiting for a live owner is bounded.
-No token, code verifier or refresh token is printed. `auth logout`
+No token, code verifier or refresh token is printed. `timds auth status` reports
+the host and principal the saved credential signs in as; `timds auth logout`
 removes the local credential; it does not revoke the host-side authorization.
 `--token` and `TIMDS_ACCESS_TOKEN` retain the existing explicit-token paths.
 Hosted commands reload the credential before each request. After an HTTP 401,

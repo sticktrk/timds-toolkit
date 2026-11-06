@@ -18,6 +18,21 @@ Keep package releases cohesive. A version must carry compatible CLI behavior,
 templates, workflows, and skill instructions together. Update or add tests
 whenever managed-file behavior changes.
 
+The instructions this package ships (the skills, the scaffolded AGENTS,
+CLAUDE and README files, the EmDash site docs, the README, and these notes)
+are part of the release, and they drift unless each change carries them. Two
+checks hold the line, and both are binding: `src/prose-contract.test.mjs`
+fails `npm test` when prose names a command, flag, placeholder, MCP tool,
+skill or file the source does not have, when a usage text disagrees with
+`--help`, or when a command no instruction teaches; and
+`scripts/check-prose-impact.mjs` fails a pull request that changes a module
+without changing any instruction surface that describes it, unless a commit
+in the pull request carries a `Prose-impact:` trailer saying why none is
+needed. The module-to-surface map and the reviewed allowances live in
+`src/prose-contract.mjs`; `docs/prose-contract.md` is the procedure,
+including the periodic agent audit that catches what the checks cannot (a
+paragraph that describes an old behaviour with the right command names).
+
 Npm client repositories select the bounded `0.1.x` package line, commit the exact
 resolved lockfile, and execute `npm run timds --`. Binary clients instead select
 an exact executable release in schema 2 `.timds/installation.json` with

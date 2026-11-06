@@ -15,6 +15,8 @@ npm run typecheck             # tsc --noEmit (tsconfig only includes video/remot
 npm run pack:check            # npm pack --dry-run; verifies the `files` allowlist in package.json
 node --test src/core.test.mjs # one test file
 node --test --test-name-pattern="upgrade" src/core.test.mjs   # one test by name
+node --test src/prose-contract.test.mjs                        # prose (skills, scaffolded docs, README) against the source
+node scripts/check-prose-impact.mjs --base origin/master       # which instruction surfaces a change must carry
 tsx --test video/remotion.test.tsx                            # the React component test
 node bin/timds.mjs <command> --root /path/to/client-design-system   # run the CLI from source
 node bin/timds.mjs starter sync --root /path/to/client-design-system  # adopt or re-sync a starter-based system (then every upgrade does it)
@@ -271,6 +273,13 @@ behavior.
 
 - Module-top comments in `src/*.mjs` explain each module's purpose and
   boundary; read them before editing and keep them accurate.
+- The prose the package ships is under contract with the source:
+  `src/prose-contract.test.mjs` reads every usage text, placeholder list,
+  tool registration and skill name list and fails on a claim the source does
+  not back, and CI's `check-prose-impact` names the surfaces a changed module
+  is described in. A new command, flag, placeholder, skill, `.timds/` file
+  or MCP tool is not done until the surfaces in `proseOwnership` say so;
+  see `docs/prose-contract.md`.
 - Client-facing errors are thrown as plain `Error`s with actionable messages;
   `bin/timds.mjs` prints them as `TimDS: <message>` and exits 1.
 - Zod is imported as `zod/v4`.

@@ -70,6 +70,8 @@ jobs:
       - run: npm test
       - run: npm run pack:check
       - run: node scripts/check-starter-history.mjs
+      - if: github.event_name == 'pull_request'
+        run: node scripts/check-prose-impact.mjs --base "origin/${{ github.event.pull_request.base.ref }}"
 
   native-binaries:
     needs: changes

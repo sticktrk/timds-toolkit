@@ -390,7 +390,7 @@ test("the consumer CLI routes sync and update, and refuses unknown options", asy
   await assert.rejects(runConsumerCli(["update", "1.0.0", "2.0.0"]), /Unexpected argument 2\.0\.0/);
   const lines = [];
   await runConsumerCli(["sync", "--help"], { output: (line) => lines.push(line) });
-  assert.match(lines.join("\n"), /timds consumer update \[VERSION\]/);
+  assert.match(lines.join("\n"), /timds consumer update \[VERSION \| --draft NAME\]/);
 });
 
 test("check diagnoses a lock that predates published pins without rejecting the manifest", async (t) => {

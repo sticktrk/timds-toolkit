@@ -73,13 +73,13 @@ const CONSUMER_HELP = `Usage:
   timds consumer register [--portal-url URL] [--repository OWNER/REPO] [--base-branch REF] [--delivery auto|approve] [--notify] [--surface PATH]... [--root PATH] [--json]
   timds consumer updates [LABEL] [--portal-url URL] [--consumer-id UUID] [--root PATH] [--json]
   timds consumer sync [--root PATH]
-  timds consumer update [VERSION] [--root PATH]
+  timds consumer update [VERSION | --draft NAME] [--portal-url URL] [--root PATH]
   timds consumer migrate [--version VERSION] [--url URL] [--root PATH] [--force] [--skip-sync]
-  timds consumer preview --app NAME [--root PATH] [--output DIR] [--base REF] [--publish] [--pull-request N]
-  timds consumer init [--root PATH] [--system ID] [--version VERSION] [--url URL] [--force] [--skip-install] [--portal-url URL]
-  timds consumer scaffold emdash --root PATH --design-system GIT_URL [--stylesheet PATH]... [--site-url URL] [--portal-url URL] [--skip-install]
+  timds consumer preview --app NAME [--root PATH] [--base REF] [--output DIR] [--no-install] [--ready-timeout SECONDS] [--publish] [--pull-request N] [--portal-url URL]
+  timds consumer init [--root PATH] [--system ID] [--version VERSION] [--url URL] [--force] [--skip-install] [--portal-url URL] [--draft-preview]
+  timds consumer scaffold emdash --root PATH --design-system GIT_URL [--platform cloudflare|node] [--stylesheet PATH]... [--site-url URL] [--portal-url URL] [--skip-install]
   timds consumer notes [--root PATH] [--app NAME] [--pull-request N] [--all] [--json] [--portal-url URL]
-  timds consumer notes resolve ID [ID...] [--commit SHA] [--dismiss]`;
+  timds consumer notes resolve ID [ID...] [--commit SHA] [--dismiss] [--root PATH] [--portal-url URL]`;
 
 // ---------------------------------------------------------------------------
 // Manifest validation

@@ -36,8 +36,7 @@ export const BUNDLE_RECORD_SCHEMA_VERSION = 1;
 
 const SYNC_HELP = `Usage:
   timds consumer sync [--root PATH]
-  timds consumer update [VERSION] [--root PATH]
-  timds consumer update --draft NAME [--portal-url URL] [--root PATH]
+  timds consumer update [VERSION | --draft NAME] [--portal-url URL] [--root PATH]
 
 sync fetches the Design System bundle the product pins (designSystem.version in
 ${CONSUMER_MANIFEST_FILE}) into designSystem.path, verifying every file's digest;
