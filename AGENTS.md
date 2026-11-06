@@ -228,13 +228,16 @@ When adding a view, a page, or a catalog:
 2. Keep the scaffolded `templates/design-system-AGENTS.md`,
    `design-system-README.md`, the edit skill, and this repository's
    `CLAUDE.md` describing the new structure.
-3. A changed plumbing file or managed fragment needs no hash bookkeeping:
-   an adopted system's `.timds/starter.json` records what the toolkit last
-   wrote, and `starter sync` advances it. `legacyStarterFileHashes` in
-   `src/starter.mjs` only recognizes systems scaffolded before the record
-   existed and stays as it is. A new authored page under a starter view goes
-   in `starterManagedFragments`; a new stylesheet the layout must link goes
-   in the plumbing table and the layout link list.
+3. A changed plumbing file or managed fragment needs its hash bookkeeping:
+   starter sync refreshes a file only while its bytes match a stock version
+   the toolkit shipped, and an adopted system's `.timds/starter.json` can
+   sit behind its files, so `legacyStarterFileHashes` in `src/starter.mjs`
+   must list every version a release shipped. After changing a template
+   that a release already shipped, run
+   `node scripts/check-starter-history.mjs --print` and add the entries it
+   lists; CI runs the check and fails on a gap. A new authored page under a
+   starter view goes in `starterManagedFragments`; a new stylesheet the
+   layout must link goes in the plumbing table and the layout link list.
 4. Update the starter assertions in `src/core.test.mjs` (page ids, page
    counts, rendered tables) and `src/mcp.test.mjs` (the stylesheet list),
    then run `npm test` and `npm run pack:check`.
