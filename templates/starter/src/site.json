@@ -88,10 +88,11 @@
     {
       "id": "use",
       "label": "Use",
-      "blurb": "People, products, agents",
+      "blurb": "Make an asset",
       "pages": [
-        { "slug": "", "title": "Compose", "summary": "Make a post, an ad, or an email on brand in a chat, then every way in: the pages, one URL for any AI tool, the machine-readable layer, MCP, a pinned bundle, and the website designs." },
-        { "slug": "install", "title": "Install", "promote": "Use this system", "summary": "Put the system in front of your tools: paste one address for a one-off, connect an agent over MCP, pin a release in a product, or give an agent the designer skills." }
+        { "slug": "", "title": "Start", "layout": "landing", "summary": "The front page: what the system makes, the formats by type, the kit behind them, how a piece is made, and every other way in." },
+        { "slug": "compose", "title": "Compose", "promote": "Start making", "summary": "Make a post, an ad, a header, or a print piece on brand in a chat, then every way in: the pages, one URL for any AI tool, the machine-readable layer, MCP, a pinned bundle, and the website designs." },
+        { "slug": "install", "title": "Install", "summary": "Put the system in front of your tools: paste one address for a one-off, connect an agent over MCP, pin a release in a product, or give an agent the designer skills." }
       ]
     }
   ]

@@ -11,9 +11,18 @@
 //
 // src/formats.json is the catalog of every asset format the system produces
 // (print sheets in inches, screen canvases in pixels), each tied to the page
-// that shows it. {{formats:GROUP}} renders a group's table and {{canvas:ID}}
-// fills a preview's style attribute (src/styles/canvas.css), so a size lives
-// in exactly one place.
+// that shows it. {{formats:GROUP}} renders a group's table, {{canvas:ID}}
+// fills a preview's style attribute (src/styles/canvas.css), and
+// {{presets:GROUP}} renders the composer's preset cards, so a size lives in
+// exactly one place. {{count:formats|views|pages|designs}} states a count.
+//
+// A page declared with "layout": "landing" in src/site.json is rendered
+// without the side navigation and the previous/next links: the starter's
+// front page (the Use view's own page) is one, a portal with a hero, rails of
+// the formats the system makes, and the way to the composer. {{page:ID}} is a
+// page's address and refuses a planned page; {{nearest:ID}} falls back to the
+// nearest authored page, for a toolkit-written fragment that links the
+// client's own pages.
 //
 // Website designs under src/designs/ are whole pages on the system's own
 // stylesheets, rendered by TimDS (see build.mjs). The viewer only lists them:
@@ -198,6 +207,11 @@ function readSiteModel(site) {
       if (slug.split("/").includes("index")) throw new Error(`src/site.json page slug ${slug} in view ${view.id} may not use the segment "index"; use an empty slug for the view's own page`);
       if (!page.title) throw new Error(`src/site.json page ${view.id}/${slug} needs a title`);
       const id = slug ? `${view.id}/${slug}` : view.id;
+      // A landing page fills the shell's content area on its own: no side
+      // navigation and no previous/next links, so a front page can lead with
+      // a hero and rails the way a product's home does.
+      const layout = page.layout ?? "page";
+      if (!["page", "landing"].includes(layout)) throw new Error(`src/site.json page ${id} layout must be "page" or "landing", not ${JSON.stringify(page.layout)}`);
       if (pages.some((existing) => existing.id === id)) throw new Error(`src/site.json declares the page ${id} twice`);
       const entry = {
         id,
@@ -206,6 +220,7 @@ function readSiteModel(site) {
         group: page.group || "",
         summary: page.summary || "",
         planned: page.planned === true,
+        layout,
         // A promoted page is linked as a call to action in the app bar of every page.
         promote: typeof page.promote === "string" ? page.promote : page.promote === true ? page.title : "",
         file: slug ? `${id}.html` : `${view.id}/index.html`,
@@ -381,11 +396,57 @@ function canvasVars(formats, id, file) {
   ].join(";");
 }
 
+/**
+ * The composer's preset cards for one format group: every format the catalog
+ * declares, each a radio with its name and size and a thumbnail drawn at the
+ * format's proportion from the same custom properties a preview reads. The
+ * first preset a page renders is checked, so the composer opens on it.
+ */
+function renderPresets(formats, group, file, state) {
+  const entry = formats.groups.get(group);
+  if (!entry) throw new Error(`src/pages/${file} uses {{presets:${group}}}, but src/formats.json has no ${group} group`);
+  const print = entry.unit === "in";
+  const prompt = print ? "What is it for, and who will hold it?" : "What is it about?";
+  return entry.formats.map((format) => {
+    const checked = state.checked ? "" : " checked";
+    state.checked = true;
+    const size = print ? `${format.width} × ${format.height} in` : `${format.width} × ${format.height}`;
+    return [
+      '        <label class="preset">',
+      `          <input type="radio" name="preset" value="${escapeHtml(format.id)}" data-name="${escapeHtml(format.name)}" data-unit="${entry.unit}" data-prompt="${prompt}"${checked}>`,
+      `          <span class="preset__thumb" style="${canvasVars(formats, format.id, file)}"><span class="preset__shape${print ? " preset__shape--paper" : ""}"></span></span>`,
+      `          <b>${escapeHtml(format.name)}</b><small>${size}</small>`,
+      "        </label>",
+    ].join("\n");
+  }).join("\n");
+}
+
+/** A count a page states in prose, so a number never goes stale: the formats, views, pages, or designs the system declares. */
+function countOf(what, { formats, model, authored, designs }, file) {
+  const counts = { formats: formats.byId.size, views: model.views.length, pages: authored.length, designs: designs.length };
+  if (!(what in counts)) throw new Error(`src/pages/${file} uses {{count:${what}}}; count one of ${Object.keys(counts).join(", ")}`);
+  return String(counts[what]);
+}
+
 function pageHref(model, id, file) {
   const page = model.pages.find((candidate) => candidate.id === id);
   if (!page) throw new Error(`src/pages/${file} uses {{page:${id}}}, but src/site.json declares no page ${id}`);
   if (page.planned) throw new Error(`src/pages/${file} uses {{page:${id}}}, but that page is planned; author it or link another page`);
   return page.href;
+}
+
+/**
+ * The page's address, or the nearest authored one when it is planned: the
+ * first authored page of its view, else the overview. A front page the toolkit
+ * writes links the client's pages this way, so it builds on a system that has
+ * not authored them yet and the link improves as the system fills in.
+ */
+function nearestHref(model, id, file) {
+  const page = model.pages.find((candidate) => candidate.id === id);
+  if (!page) throw new Error(`src/pages/${file} uses {{nearest:${id}}}, but src/site.json declares no page ${id}`);
+  if (!page.planned) return page.href;
+  const view = model.views.find((candidate) => candidate.id === page.view);
+  return (view && firstAuthored(view))?.href || model.home.href;
 }
 
 function renderSitemap(model, designs) {
@@ -532,6 +593,19 @@ const enhancements = `<script>
     tabs.classList.add("is-enhanced");
     select(0);
   }
+  for (const landing of document.querySelectorAll(".landing")) {
+    const items = [...landing.querySelectorAll("[data-reveal]")];
+    if (!items.length || !("IntersectionObserver" in window) || matchMedia("(prefers-reduced-motion: reduce)").matches) continue;
+    landing.classList.add("is-enhanced");
+    const observer = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        entry.target.classList.add("is-in");
+        observer.unobserve(entry.target);
+      }
+    }, { rootMargin: "0px 0px -8% 0px", threshold: 0.1 });
+    for (const item of items) observer.observe(item);
+  }
   for (const pre of document.querySelectorAll("pre[data-copy]")) {
     const snippet = document.createElement("div");
     snippet.className = "snippet";
@@ -643,25 +717,33 @@ export async function renderSite() {
     const file = `src/pages/${page.file}`;
     const fragment = await readFile(path.join(source, "pages", page.file), "utf8");
     if ((fragment.match(/<h1[\s>]/gi) || []).length !== 1) throw new Error(`${file} must contain exactly one <h1>`);
+    const presetState = { checked: false };
     const content = mergeSlotTables(fill(fragment, file, {
       ...shared,
       ...slotValues,
       canvas: (id) => canvasVars(formats, id, page.file),
+      count: (what) => countOf(what, { formats, model, authored, designs }, page.file),
       formats: (group) => renderFormatTable(formats, group, page.file),
+      presets: (group) => renderPresets(formats, group, page.file, presetState),
       // {{page:ID}} is a page's address (overview, use, use/install, ...), so a
       // fragment the toolkit refreshes links the same page whether or not the
       // system moved it to the front.
       page: (id) => pageHref(model, id, page.file),
+      nearest: (id) => nearestHref(model, id, page.file),
       sitemap: () => renderSitemap(model, designs),
       tokens: (group) => renderTokenTable(tokens, group, page.file),
     }));
+    // A landing page stands alone in the shell: the side navigation and the
+    // previous/next links are left out, and the content is wrapped so the
+    // chrome's stylesheet can widen the content column for it.
+    const landing = page.layout === "landing";
     rendered.set(page.output, fill(layout, "src/layout.html", {
       ...shared,
       title: escapeHtml(page.title),
       views: renderViews(model, page, designs, hasDesigns),
-      sidenav: renderSidenav(model, page),
-      pagenav: `${renderPagenav(authored, page)}\n        ${enhancements}`,
-      content: content.trim(),
+      sidenav: landing ? "" : renderSidenav(model, page),
+      pagenav: `${landing ? "" : renderPagenav(authored, page)}\n        ${enhancements}`,
+      content: landing ? `<div class="landing">\n${content.trim()}\n</div>` : content.trim(),
     }));
   }
 

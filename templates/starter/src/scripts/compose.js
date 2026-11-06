@@ -29,6 +29,14 @@
   const name = app.dataset.name || "Brand";
   const $ = (selector) => app.querySelector(selector);
   const presets = [...app.querySelectorAll("input[name=preset]")];
+  // ?format=ID, as the front page's cards link here, opens the composer on
+  // that preset and brings its tab forward; an id the catalog lacks is ignored.
+  const wanted = presets.find((preset) => preset.value === new URLSearchParams(location.search).get("format"));
+  if (wanted) {
+    wanted.checked = true;
+    const panel = wanted.closest(".tabs__panel");
+    if (panel?.id) document.querySelector(`.tabs__tab[aria-controls="${panel.id}"]`)?.click();
+  }
   const transcript = $(".compose__transcript");
   const empty = $(".compose__empty");
   const notice = $(".compose__notice");
@@ -64,6 +72,7 @@
       id: checked.value,
       name: checked.dataset.name,
       prompt: checked.dataset.prompt,
+      unit: checked.dataset.unit === "in" ? " in" : "",
       width: Number(vars["--cw"]) || null,
       height: Number(vars["--ch"]) || null,
       style: thumb.getAttribute("style") || "",
@@ -75,7 +84,7 @@
     const preset = selected();
     input.placeholder = preset.prompt || "What is it about?";
     stage.setAttribute("style", preset.style);
-    size.textContent = `${preset.width} × ${preset.height} · PNG`;
+    size.textContent = `${preset.width} × ${preset.height}${preset.unit} · PNG`;
     hint.textContent = `Your ${preset.name} appears here.`;
   };
   const clearPreview = () => {

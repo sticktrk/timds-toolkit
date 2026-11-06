@@ -277,8 +277,10 @@ replaced on the next upgrade and reported, never kept; a system adopted
 later keeps a changed file as customized (`"recorded"`). It appends views, planned pages, and asset formats a newer scaffold
 declares to `src/site.json` and `src/formats.json` without removing,
 reordering, or retitling anything declared here; writes the Digital, Social,
-and Print overview fragments and the Use page (`use`, every way the system is
-consumed) when it adds or authors their page; and adds a
+and Print overview fragments and the Use pages (`use`, the front page, a
+portal onto the system; `use/compose`, the composer, then every way the
+system is consumed; and `use/install`) when it adds or authors their page;
+and adds a
 missing stock stylesheet link to `src/layout.html`. The existing `src/site.json`
 `home` choice, including leaving it unset, is preserved so authored links and
 guidance routes stay stable. Fresh ordinary scaffolds start with Use at `/`;
