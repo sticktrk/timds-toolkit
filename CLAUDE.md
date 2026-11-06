@@ -18,7 +18,6 @@ node --test --test-name-pattern="upgrade" src/core.test.mjs   # one test by name
 tsx --test video/remotion.test.tsx                            # the React component test
 node bin/timds.mjs <command> --root /path/to/client-design-system   # run the CLI from source
 node bin/timds.mjs starter sync --root /path/to/client-design-system  # adopt or re-sync a starter-based system (then every upgrade does it)
-npm run golden-drift -- --golden /path/to/golden-checkout            # where templates/starter has drifted from the golden system (exit 1 on drift)
 ```
 
 CI (`.github/workflows/ci.yml`) runs `npm ci && npm test && npm run pack:check`
@@ -237,8 +236,8 @@ host's relative compose route. `{{count:formats|views|pages|designs}}` states
 a count, and `{{nearest:ID}}` is a page's address with a fallback to its
 view's first authored page (then the overview) while it is planned, so a
 managed fragment can link client pages before they exist. The kit opens on its
-overview. The starter's views mirror the golden client system
-(Brand, Web DS, Digital DS, Social DS, Print DS); keep them in step with it. Planned pages are never built, so a fresh scaffold
+overview. The starter's views (Brand, Web DS, Digital DS, Social DS, Print DS) are
+the canonical structure; client systems are a source of ideas, not a mirror. Planned pages are never built, so a fresh scaffold
 keeps its two expected brand warnings. The kit instead authors its Voice page,
 reports the assumed sample voice, and reports no logo until its media is filled.
 Its template formats render in Minimal, Accent, Bold and Photo treatments.
