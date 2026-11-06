@@ -177,6 +177,7 @@ export const legacyStarterFileHashes = new Map([
     "b5417f9082603d6ff8c0a7aa1a40dbc2e8fd4d4590cae8a244d7208582494f2b", // v0.1.481
     "1c21909153c4aa85dddf8bec19f06ea162bab637d1975ee007cbd70ec48b5299", // v0.1.485
     "3f04b52e5efac581dc69c05298d4626a370f617db46fa4512e8bb7c90b1150b0", // v0.1.487
+    "abb08b8533800379e2d0805d5067e0babb174a7eef329f387b387d3b30d46afc", // v0.1.490
   ]],
   ["src/styles/canvas.css", [
     "dd0413554f9308cf3b1c6daedfb51ebb18c464672766b815eebbe77f0c3c6d98",
