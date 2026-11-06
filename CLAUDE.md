@@ -227,7 +227,7 @@ a count, and `{{nearest:ID}}` is a page's address with a fallback to its
 view's first authored page (then the overview) while it is planned, so a
 managed fragment can link client pages before they exist. The kit opens on its
 overview. The starter's views mirror the golden client system
-(Brand, Web DS, Digital DS, Social DS, Print DS); keep them in step with it. Planned pages are never built, so a fresh scaffold
+(Brand, Web, Digital, Social, Print; the labels drop the golden system's "DS" suffix); keep them in step with it. Planned pages are never built, so a fresh scaffold
 keeps its two expected brand warnings. The kit instead authors its Voice page,
 reports the assumed sample voice, and reports no logo until its media is filled.
 Its template formats render in Minimal, Accent, Bold and Photo treatments.

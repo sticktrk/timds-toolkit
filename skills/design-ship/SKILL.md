@@ -58,7 +58,7 @@ additions can merge. Write in the designer's
 language: what changed and where, as someone reading the release notes would
 want it. One or two sentences; no file paths unless a reader needs them.
 Lead with the area the change touches, so the note reads `Brand · Color:
-...`, `Print DS: ...`, or `Web DS · Components: ...`; the published system
+...`, `Print: ...`, or `Web · Components: ...`; the published system
 shows every release at `/changelog/` with that area as its label. `submit`
 refuses a change without a note, because merging rolls the notes into the
 release and an empty one would publish a release that says nothing.

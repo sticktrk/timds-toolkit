@@ -191,8 +191,9 @@ is organized the way a fleshed-out system ends up.
 Mirror structure, never content:
 
 - Views, in `src/site.json`: ids, labels, blurbs, order, sidebar groups, and
-  page lists. Keep the golden view labels (`Web DS`, `Digital DS`); the golden
-  `marketing` view is the starter's `web` view. Keep a page title unless it
+  page lists. The starter's labels are the golden ones without the "DS"
+  suffix (`Web`, `Digital`, `Social`, `Print`); the golden `marketing` view
+  is the starter's `web` view. Keep a page title unless it
   is ambiguous outside its sidebar group (`LinkedIn specs`, not `Specs`).
   A page that needs the client's mark, photos, or copy stays `planned`.
   Author a view's overview when it carries what every system needs:

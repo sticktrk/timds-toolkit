@@ -96,8 +96,8 @@ immediately. Its colors, fonts, and copy are neutral placeholders, not brand
 guidance. Its structure is the part to keep: views, a shared shell, and pages
 built from the same few blocks.
 
-- `src/site.json` lists the views (Brand, Web DS, Digital DS, Social DS,
-  Print DS, Use) and the pages in each, in
+- `src/site.json` lists the views (Brand, Web, Digital, Social,
+  Print, Use) and the pages in each, in
   navigation order. A page is `{ "slug", "title", "summary" }` plus an
   optional `group` heading for the sidebar. The page `<view>/<slug>` is
   authored in `src/pages/<view>/<slug>.html` and built to
@@ -450,7 +450,7 @@ them, logos, asset formats), so what reaches the kit reaches every tool.
 9. Append the change after the existing notes under `## Unreleased` in
    `CHANGELOG.md`, preserving existing notes and their order: one or two
    sentences for the people who use the system, led by the area it touches
-   (`Brand · Color: ...`, `Print DS: ...`). `submit` refuses a change
+   (`Brand · Color: ...`, `Print: ...`). `submit` refuses a change
    without one.
 
 ## Source and artifact boundary

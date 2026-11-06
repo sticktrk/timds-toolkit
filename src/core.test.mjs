@@ -1342,7 +1342,7 @@ test("starter sync adopts a scaffold from before the asset views, and upgrade ke
     ["src/pages/use/install.html", "created"],
     ["src/layout.html", "updated"],
   ]);
-  assert.deepEqual(result.site, { addedPages: ["web/email", "web/email-templates"], addedViews: ["digital", "social", "print", "use"], advanced: ["web.label", "web.blurb"], kept: [] });
+  assert.deepEqual(result.site, { addedPages: ["web/email", "web/email-templates"], addedViews: ["digital", "social", "print", "use"], advanced: ["web.blurb"], kept: [] });
   assert.deepEqual([result.formats.addedGroups, result.formats.addedFormats.length, result.formats.kept, result.formats.skipped], [["print", "digital", "social"], 48, [], []]);
   // Structure and plumbing advance to stock while the original front page stays.
   const stockSite = JSON.parse(await fs.readFile(path.join(templatesRoot, "starter/src/site.json"), "utf8"));
@@ -1351,7 +1351,7 @@ test("starter sync adopts a scaffold from before the asset views, and upgrade ke
   for (const relative of ["src/formats.json", "src/layout.html", "scripts/viewer.mjs", "scripts/check.mjs", "src/styles/canvas.css", "src/pages/print/index.html", "src/pages/use/index.html"]) {
     assert.equal(await read(relative), await fs.readFile(path.join(templatesRoot, "starter", relative), "utf8"), relative);
   }
-  assert.doesNotMatch(await read("src/pages/index.html"), /Digital DS/, "the client's own overview fragment is never rewritten");
+  assert.doesNotMatch(await read("src/pages/index.html"), /Digital to ads and campaign assets/, "the client's own overview fragment is never rewritten");
   assert.deepEqual(result.check.machine.warnings.map((warning) => warning.split(":")[0]), ["guidance group voice is empty", 'no asset is annotated data-timds-role="logo"; the brand kit has no logo']);
   const record = JSON.parse(await read(".timds/starter.json"));
   assert.equal(record.version, toolkitVersion);
@@ -1631,7 +1631,7 @@ test("starter sync merges around a view the client already declared", async (t) 
   const social = JSON.parse(await read("src/site.json")).views.find((view) => view.id === "social");
   assert.deepEqual([social.label, social.pages[0]], ["Social", { slug: "", title: "Social" }]);
   assert.ok(plannedOverview.site.advanced.includes("social.planned"));
-  assert.deepEqual(plannedOverview.site.kept.map((kept) => kept.path), ["social.label", "social.blurb", "social.title", "social.group", "social.summary"]);
+  assert.deepEqual(plannedOverview.site.kept.map((kept) => kept.path), ["social.blurb", "social.title", "social.group", "social.summary"]);
   assert.match(await read("dist/social/index.html"), /<h1 class="page-title">/);
   assert.equal(plannedOverview.check.machine.warnings.length, 2);
 });
@@ -1663,12 +1663,12 @@ test("a later scaffold advances starter fields the client never changed and keep
   await writeJson(path.join(repoRoot, "src/formats.json"), formats);
 
   const result = await syncStarterWorkspace(repoRoot);
-  assert.deepEqual(result.site, { addedPages: ["web/email-templates"], addedViews: [], advanced: ["web.label"], kept: [{ current: "Our interfaces", path: "web.blurb", stock: "Web & email system" }] });
+  assert.deepEqual(result.site, { addedPages: ["web/email-templates"], addedViews: [], advanced: [], kept: [{ current: "Our interfaces", path: "web.blurb", stock: "Web & email system" }] });
   assert.deepEqual([result.formats.advanced, result.formats.kept], [["print.letterhead.stock"], [{ current: 1, path: "print.letterhead.safe", stock: 0.5 }]]);
   assert.equal(result.files.find((file) => file.path === "scripts/check.mjs").status, "updated", "a file at the hash the toolkit last wrote is stock, whatever release wrote it");
   assert.equal(await read("scripts/check.mjs"), await fs.readFile(path.join(templatesRoot, "starter/scripts/check.mjs"), "utf8"));
   const synced = JSON.parse(await read("src/site.json"));
-  assert.deepEqual([web(synced).label, web(synced).blurb, web(synced).pages.map((page) => page.slug)], ["Web DS", "Our interfaces", ["spacing", "photography", "components", "layout", "email", "email-templates"]]);
+  assert.deepEqual([web(synced).label, web(synced).blurb, web(synced).pages.map((page) => page.slug)], ["Web", "Our interfaces", ["spacing", "photography", "components", "layout", "email", "email-templates"]]);
   assert.equal(result.check.machine.warnings.length, 2);
 
   // In the recorded mode a customized file keeps the hash the toolkit last wrote for it, so reverting to that version is recognized as stock again instead of needing --force.

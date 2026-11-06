@@ -16,7 +16,7 @@
     },
     {
       "id": "web",
-      "label": "Web DS",
+      "label": "Web",
       "blurb": "Web & email system",
       "pages": [
         { "slug": "spacing", "title": "Spacing & shape", "group": "Tokens", "summary": "The spacing scale, radii, layout constants, and motion durations." },
@@ -29,7 +29,7 @@
     },
     {
       "id": "digital",
-      "label": "Digital DS",
+      "label": "Digital",
       "blurb": "Ads & campaign assets",
       "pages": [
         { "slug": "", "title": "Overview", "group": "Foundations", "summary": "Paid ads, event banners, and promotional graphics for screens: the format catalog, delivery rules, and how a preview is built." },
@@ -44,7 +44,7 @@
     },
     {
       "id": "social",
-      "label": "Social DS",
+      "label": "Social",
       "blurb": "Social system",
       "pages": [
         { "slug": "", "title": "Overview", "group": "Foundations", "summary": "How the brand behaves on fixed-canvas, mobile-first channels: principles, the canvas catalog, and how the view is organized." },
@@ -70,7 +70,7 @@
     },
     {
       "id": "print",
-      "label": "Print DS",
+      "label": "Print",
       "blurb": "Print system",
       "pages": [
         { "slug": "", "title": "Overview", "group": "Foundations", "summary": "How the brand meets paper, vinyl, and board: the template scale, principles, the format catalog, and the printer handoff." },
