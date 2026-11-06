@@ -3,7 +3,8 @@
         run: |
           set -euo pipefail
           version="$(jq -er 'select(.schemaVersion == 2 and .mode == "binary" and .executable == "timds-cli") | .version' .timds/installation.json)"
-          [[ "$version" =~ ^0\.1\.[0-9]+$ ]] || { echo "Invalid binary toolkit release pin" >&2; exit 1; }
+          # An exact release, as the installation record selects it (MAJOR.MINOR.PATCH); the line is not bounded here.
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Invalid binary toolkit release pin" >&2; exit 1; }
           asset="timds-cli-v${version}-linux-x64"
           release="https://github.com/sticktrk/timds-toolkit/releases/download/v${version}"
           directory="$(mktemp -d "$RUNNER_TEMP/timds-binary.XXXXXX")"

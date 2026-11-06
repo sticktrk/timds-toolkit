@@ -315,3 +315,18 @@ test("the draft schema drops numeric minimums and caps item minimums at one, kee
   const schema = { type: "object", properties: { minimum: { type: "integer", minimum: 1 }, items: { type: "array", minItems: 3, items: { type: "string" } }, one: { type: "array", minItems: 1, items: { type: "string" } } } };
   assert.deepEqual(stripSchemaExtensions(schema), { type: "object", properties: { minimum: { type: "integer" }, items: { type: "array", minItems: 1, items: { type: "string" } }, one: { type: "array", minItems: 1, items: { type: "string" } } } });
 });
+
+test("web render jobs narrate with the lab's --python and --voice when the server was started with them", async (t) => {
+  const workspace = await labFixture(t);
+  const calls = [];
+  const runLab = async (_workspace, name, options) => { calls.push({ name, options }); return { outputRoot: path.join(workspace.designSystemRoot, "video-local/lab/records/out") }; };
+  const { call } = await serve(t, workspace, { jobs: createRenderJobs(workspace, { runLab, python: "/opt/tts/bin/python", voice: "en-GB-SoniaNeural" }) });
+  assert.equal((await call("POST", "/api/render", { name: "records" })).status, 202);
+  assert.equal(calls[0].options.python, "/opt/tts/bin/python");
+  assert.equal(calls[0].options.voice, "en-GB-SoniaNeural");
+  assert.equal(calls[0].options.render, true);
+  // Without the flags the lab's own defaults apply (TIMDS_PYTHON, then the contract's voice).
+  await createRenderJobs(workspace, { runLab }).start("records");
+  assert.equal(calls[1].options.python, undefined);
+  assert.equal(calls[1].options.voice, undefined);
+});

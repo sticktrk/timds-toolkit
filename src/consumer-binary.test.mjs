@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -169,4 +169,14 @@ test('standalone runtime selects binary init by default and rejects mismatched c
       else process.env[key] = value;
     }
   }
+});
+
+test('the binary consumer install accepts every exact release an installation record may select', async () => {
+  const install = await fs.readFile(new URL('../templates/consumer-binary-install.yml', import.meta.url), 'utf8');
+  const guard = install.split('\n').map(line => line.trim()).find(line => line.startsWith('[[ "$version" =~ '));
+  assert.ok(guard, 'the install step guards the release pin');
+  const accepts = version => spawnSync('bash', ['-c', `version=${JSON.stringify(version)}; ${guard}`], { encoding: 'utf8' }).status === 0;
+  const { version } = JSON.parse(await fs.readFile(new URL('../package.json', import.meta.url), 'utf8'));
+  for (const accepted of [version, '0.1.5', '0.2.0', '1.0.0', '12.34.56']) assert.ok(accepts(accepted), accepted);
+  for (const refused of ['0.1.x', 'v0.1.5', '0.1.5-rc.1', '0.1', '', 'latest']) assert.ok(!accepts(refused), refused);
 });
