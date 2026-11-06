@@ -57,15 +57,19 @@ zone. Keep the master's horizontal `text` placement in `video/assets.json`.
    target dimensions, crop, or components. For linked derivatives, inspect the
    derivative as well; its existing framing takes precedence over a live crop.
 5. Register and publish media through TimDS under the user's media-authoring
-   authorization. Commit the stable `media.json`, video asset map, and crop
-   registry together, preserving the repository's normal submission rules.
+   authorization (`assets add FILE --key KEY`, then `assets publish`; see the
+   edit skill's media section). Commit the stable catalog record
+   (`media/<group>.json` and the regenerated `media.json`, or `media.json`
+   alone without a contract layout), video asset map, and crop registry
+   together, preserving the repository's normal submission rules.
    Never commit source videos or ignored caches.
 6. Run `npm run timds -- video check` (also included in `timds check` and
    submission validation). A configured registry is checked for
    **all** producer footage masters even if no saved input uses them. Missing
    records, invalid positions/zones, incomplete review markers, mismatched
-   source hashes, and missing linked derivatives fail the check and workspace
-   loading before rendering. This verifies the record, not the visual review.
+   source hashes, missing linked derivatives, and a record for any key that is
+   not a current footage master (a `-vertical` derivative, say) fail the check
+   and workspace loading before rendering. This verifies the record, not the visual review.
 
 `producer.footage.allowShortCrop` defaults to false. Enabling it allows a
 published master with a validated record to fill a missing vertical link.
