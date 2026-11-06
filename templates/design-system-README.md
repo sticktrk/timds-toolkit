@@ -81,8 +81,8 @@ New contracts include a dependency-free starter viewer under `src/` and
 deterministic Node.js commands under `scripts/`. The starter exists so the
 contract builds and validates immediately; replace its neutral tokens and
 examples with approved client foundations rather than treating them as brand
-guidance. It is organized as views (Brand, Web DS, Digital DS, Social DS,
-Print DS, Use), each a list of pages, all rendered into one shared shell. Some pages are authored from the starter
+guidance. It is organized as views (Brand, Web, Digital, Social,
+Print, Use), each a list of pages, all rendered into one shared shell. Some pages are authored from the starter
 tokens; the rest are declared as planned and built once someone writes them.
 
 | Path | Purpose |
@@ -348,7 +348,7 @@ same-host relative URL such as `../client-design-system.git`, so authenticated
 HTTPS and SSH clones both resolve within the organization.
 
 Day-to-day changes go under `## Unreleased` in `CHANGELOG.md`, each note
-led by the area it touches (`Brand · Color: ...`, `Print DS: ...`). Merging
+led by the area it touches (`Brand · Color: ...`, `Print: ...`). Merging
 an accepted change rolls those notes into the next version automatically:
 the UTC day of the release and its number that day (`2026.10.12-1`, then
 `2026.10.12-2`). The built system shows the history at `/changelog/`,
