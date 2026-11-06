@@ -55,7 +55,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-import { CONSUMER_INSTALLATION_PATH, CONSUMER_MANIFEST_FILE, consumerPinMode, gitIgnoredPaths, publishedBaseUrl, validateConsumerManifest } from "./consumer.mjs";
+import { CONSUMER_INSTALLATION_PATH, CONSUMER_MANIFEST_FILE, CONSUMER_SKILL_NAME, CONSUMER_SKILL_NAMES, CONSUMER_UPDATE_SKILL_NAME, consumerPinMode, gitIgnoredPaths, publishedBaseUrl, validateConsumerManifest } from "./consumer.mjs";
 import { resolvePublishedBundle, syncConsumerBundle } from "./consumer-sync.mjs";
 import { planConsumerToolkitLock, resolveConsumerToolkitLock, runConsumerNpm } from "./consumer-install.mjs";
 import { acceptsToolkitReleaseRange, runtimeIdentity, toolkitReleaseRange } from "./runtime.mjs";
@@ -65,11 +65,10 @@ import { assertBinaryInstallation, binaryInstallationRecord, readBinaryInstallat
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-export const CONSUMER_SKILL_NAME = "timds-consume-design-system";
+// The skill names are declared in consumer.mjs, next to the always-allowed
+// paths derived from them, and re-exported here for the callers that render them.
+export { CONSUMER_SKILL_NAME, CONSUMER_SKILL_NAMES, CONSUMER_UPDATE_SKILL_NAME };
 export const CONSUMER_SKILL_PATH = `.agents/skills/${CONSUMER_SKILL_NAME}`;
-// The developer's counterpart: move the pin to a new release and port the designs that changed.
-export const CONSUMER_UPDATE_SKILL_NAME = "timds-update-design-system";
-export const CONSUMER_SKILL_NAMES = [CONSUMER_SKILL_NAME, CONSUMER_UPDATE_SKILL_NAME];
 export const CONSUMER_WORKFLOW_PATH = ".github/workflows/timds-consumer-preview.yml";
 export const CONSUMER_DESIGNER_WORKFLOW_PATH = ".github/workflows/timds-designer-change.yml";
 export const CONSUMER_LAUNCH_PATH = ".claude/launch.json";
@@ -352,7 +351,12 @@ function list(values) {
   return values.map(code).join(", ");
 }
 
-function appSection(name, app, invocation = "npm run timds --") {
+/** Where an app's folder finds the built designs: the manifest's Design System path, relative to that folder. */
+function designsPathFrom(app, designSystemPath) {
+  return `${path.posix.join(path.posix.relative(app.cwd, "."), designSystemPath, "dist", "designs")}/`;
+}
+
+function appSection(name, app, invocation = "npm run timds --", designSystemPath = "design-system") {
   const cwd = app.cwd === "." ? "repository root" : `${code(`${app.cwd}/`)}`;
   const preview = app.preview;
   const lines = [`### ${code(name)}`, ""];
@@ -365,7 +369,7 @@ function appSection(name, app, invocation = "npm run timds --") {
   }
   if (preview.routes?.length) lines.push(`- Review routes: ${list(preview.routes)}.`);
   const designs = Object.entries(preview.designs || {});
-  if (designs.length) lines.push(`- Designs to match: ${designs.map(([route, reference]) => `${code(route)} matches ${code(reference)}`).join(", ")}. The preview shows each design beside its route; read it with ${code("read_design")} or under ${code(`${app.cwd === "." ? "" : "../"}design-system/dist/designs/`)} after the pin is built.`);
+  if (designs.length) lines.push(`- Designs to match: ${designs.map(([route, reference]) => `${code(route)} matches ${code(reference)}`).join(", ")}. The preview shows each design beside its route; read it with ${code("read_design")} or under ${code(designsPathFrom(app, designSystemPath))} after the pin is built.`);
   lines.push(`- Review at: ${list(preview.viewports)} widths; ${list(preview.schemes)} schemes.`);
   lines.push(`- Design surface (may change): ${list(app.designSurface)}.`);
   lines.push(app.protected.length
@@ -398,9 +402,10 @@ function pinSections(designSystem, binary = false, { targetLabel, delivery } = {
   };
 }
 
-/** The host receives a checked working tree; a local developer owns Git delivery. */
-function updateSections({ targetLabel, delivery } = {}) {
+/** The host receives a checked working tree; a local developer owns Git delivery. The verify step follows the pin mode. */
+function updateSections(designSystem, { targetLabel, delivery } = {}) {
   const hosted = delivery === "hosted";
+  const published = consumerPinMode(designSystem) === "published";
   return {
     __UPDATE_WORKSPACE__: hosted
       ? "Use only the prepared consumer checkout and the exact supplied release. The host owns branches, commits and pull requests; keep your changes in the working tree."
@@ -411,10 +416,9 @@ function updateSections({ targetLabel, delivery } = {}) {
     __UPDATE_RESULT__: hosted
       ? "Report the exact supplied version, the routes ported or left with their reasons, the checks completed, and gaps in the system. Return the structured report at the path the host supplied; the host adds the pull-request link after delivery."
       : "Lead with the version moved to and the routes ported, journey by journey where the routes belong to one. Include the pull-request link, the routes and widths you checked, any design state not yet expressed, and every gap reported to the Design System.",
-    __PIN_CHECK_TARGET__: targetLabel || "<target-label>",
-    __PIN_CHECK_EXPLANATION__: targetLabel
-      ? `Use only the supplied immutable release \`${targetLabel}\`.`
-      : "Replace `<target-label>` with the exact immutable release selected above.",
+    __PIN_VERIFY__: published
+      ? `3. Run from repository root:\n\n\`\`\`bash\nnpm run timds -- consumer check --base origin/__DEFAULT_BRANCH__ --allow-pin-update ${targetLabel || "<target-label>"}\n\`\`\`\n\n   ${targetLabel ? `Use only the supplied immutable release \`${targetLabel}\`.` : "Replace `<target-label>` with the exact published version the pin moved to."}\n   The opt-in permits only that published version change (never \`current\`\n   or \`latest\`). All other manifest metadata, including the system\n   identity, paths, app commands and scope, must remain unchanged. The base\n   manifest still controls the design surface and protected paths. If the\n   pinned CLI does not recognize the flag, upgrade it through the product's\n   normal reviewed dependency path before using hosted updates. Never weaken\n   or bypass this check.`
+      : `3. Keep the submodule's explicit gitlink review and run from repository root:\n\n\`\`\`bash\nnpm run timds -- consumer check --base origin/__DEFAULT_BRANCH__\n\`\`\`\n\n   That check still reports the deliberate gitlink pin move; inspect the\n   exact commit selected and report that diagnostic in the pull request.\n   Resolve every other check failure, including protected paths and\n   design-surface violations. Do not describe that run as green. The\n   published-pin opt-in (\`--allow-pin-update\`) does not apply to submodules,\n   and hosted followers require a published pin: \`npm run timds -- consumer\n   migrate\` replaces the submodule with one at the version the checkout\n   declared, in one reviewable change.`,
   };
 }
 
@@ -439,9 +443,9 @@ export async function renderConsumerSkillFile(skillName, manifest, options = {})
   const source = await fs.readFile(path.join(packageRoot, "skills", skillName, "SKILL.md"), "utf8");
   const binary = options.mode === "binary";
   const invocation = binary ? "timds-cli" : "npm run timds --";
-  const apps = Object.entries(validated.apps).map(([name, app]) => appSection(name, app, invocation)).join("\n\n");
+  const apps = Object.entries(validated.apps).map(([name, app]) => appSection(name, app, invocation, validated.designSystem.path)).join("\n\n");
   let text = source;
-  for (const [placeholder, replacement] of Object.entries({ ...pinSections(validated.designSystem, binary, options), ...updateSections(options) })) text = text.replace(placeholder, () => replacement);
+  for (const [placeholder, replacement] of Object.entries({ ...pinSections(validated.designSystem, binary, options), ...updateSections(validated.designSystem, options) })) text = text.replace(placeholder, () => replacement);
   if (binary) {
     text = text.replaceAll("npm run timds --", "timds-cli")
       .replaceAll("fetched by npm install", "fetched by timds-cli consumer sync")

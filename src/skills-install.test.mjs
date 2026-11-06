@@ -39,10 +39,20 @@ test("the hosted skill template is a CLI workflow with only the placeholders the
   assert.match(skill, /npx --yes @dtconcepts\/timds@latest/);
   assert.doesNotMatch(skill, /@dtconcepts\/timds@\d/, "never a pinned version");
   for (const command of [
-    "timds auth login --portal-url __HOST_ORIGIN__ --oauth",
+    "timds auth login --portal-url __HOST_ORIGIN__",
+    "timds auth status",
+    "timds principals --system-id __SYSTEM_ID__ --portal-url __HOST_ORIGIN__",
+    "timds active-work --system-id __SYSTEM_ID__ --portal-url __HOST_ORIGIN__",
+    "timds draft create <name> --system-id __SYSTEM_ID__ --portal-url __HOST_ORIGIN__",
+    "timds draft list --system-id __SYSTEM_ID__ --portal-url __HOST_ORIGIN__",
+    "timds draft close <name> --system-id __SYSTEM_ID__ --portal-url __HOST_ORIGIN__",
+    "timds sessions close",
+    "timds join <session id> --principal-id <id>",
+    "timds assets add <file> --key <key>",
+    "## Unreleased",
     "timds whoami",
     "timds systems",
-    "timds skills install --portal-url __HOST_ORIGIN__ --system-id __SYSTEM_ID__",
+    "timds skills install --portal-url __HOST_ORIGIN__ --system-id __SYSTEM_ID__ --system-name \"__SYSTEM_NAME__\" --studio-url __STUDIO_URL__",
     "timds skills install --portal-url __HOST_ORIGIN__ --system-id <id>",
     "timds start __SYSTEM_ID__ --root ./<folder> --portal-url __HOST_ORIGIN__",
     'timds join "<invite link>"',
@@ -77,7 +87,9 @@ test("skills install writes the filled designer skills into every agent folder a
   const skill = await fs.readFile(path.join(root, ".claude", "skills", hosted, "SKILL.md"), "utf8");
   assert.doesNotMatch(skill, /__[A-Z_]+__/);
   assert.match(skill, /^name: timds-core$/m);
-  assert.match(skill, /timds auth login --portal-url https:\/\/host\.example\.com --oauth/);
+  assert.match(skill, /timds auth login --portal-url https:\/\/host\.example\.com`/);
+  assert.match(skill, /timds skills install --portal-url https:\/\/host\.example\.com --system-id timds-example\/core --system-name "timds-example\/core" --studio-url https:\/\/host\.example\.com\/studio\//);
+  assert.doesNotMatch(skill, /--oauth/, "the sign-in flow is chosen by the host; --oauth fails where none is advertised");
   assert.match(skill, /timds start timds-example\/core --root/);
   assert.match(skill, /Studio, where the designer reviews: https:\/\/host\.example\.com\/studio\//);
   assert.match(await fs.readFile(path.join(root, ".cursor", "skills", hosted, "agents", "openai.yaml"), "utf8"), /\$timds-core/);
@@ -201,4 +213,11 @@ test("skills install refuses folders whose skills another TimDS record owns", as
     await assert.rejects(fs.access(path.join(root, ".agents")));
   }
   await assert.rejects(runCli(["skills", "list"]), /Usage: timds skills install/);
+});
+
+test("the installable skill names are the Design System's designer skills, from one source", async () => {
+  const { designSystemSkillNames, designerSkillNames } = await import("./core.mjs");
+  assert.deepEqual([...INSTALLABLE_SKILL_NAMES], designSystemSkillNames.filter((name) => name !== "timds-create-video"));
+  assert.deepEqual([...INSTALLABLE_SKILL_NAMES], ["timds-edit-design-system", ...designerSkillNames]);
+  for (const name of INSTALLABLE_SKILL_NAMES) await fs.access(new URL(`../skills/${name}/SKILL.md`, import.meta.url));
 });

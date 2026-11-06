@@ -14,6 +14,8 @@ import {
   runConsumerCli,
   validateConsumerManifest,
   parseDesignReference,
+  CONSUMER_ALWAYS_ALLOWED,
+  CONSUMER_SKILL_NAMES,
 } from "./consumer.mjs";
 import { runCli } from "./core.mjs";
 
@@ -351,6 +353,8 @@ test("checkConsumer allows an adoption-shaped diff at the root but not nested pa
   await write(product, ".gitignore", ".timds/preview/\n");
   await write(product, ".timds/installation.json", { version: 1 });
   await write(product, ".agents/skills/timds-consume-design-system/SKILL.md", "# Skill\n");
+  // An upgrade refreshes the developer's update skill too; it is managed, not product source.
+  await write(product, ".agents/skills/timds-update-design-system/SKILL.md", "# Update skill\n");
   await write(product, ".github/workflows/timds-consumer-preview.yml", "name: preview\n");
   await write(product, ".github/workflows/timds-designer-change.yml", "name: designer change\n");
   await write(product, ".mcp.json", { mcpServers: {} });
@@ -530,4 +534,9 @@ test("checkConsumer fails on a root file git ignores and warns on installed file
   const tracked = await checkConsumer(product);
   assert.equal(tracked.status, "passed", tracked.errors.join("\n"));
   assert.doesNotMatch(tracked.warnings.join("\n"), /Not tracked/);
+});
+
+test("every consumer skill consumer init renders is always allowed in a consumer check", () => {
+  for (const name of CONSUMER_SKILL_NAMES) assert.ok(CONSUMER_ALWAYS_ALLOWED.includes(`.agents/skills/${name}/**`), name);
+  assert.deepEqual(CONSUMER_SKILL_NAMES, ["timds-consume-design-system", "timds-update-design-system"]);
 });
