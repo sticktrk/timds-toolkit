@@ -260,6 +260,29 @@ test("syncStarter holds the stock pages back while the renderer is this system's
   assert.ok(await fs.readFile(usePage, "utf8"), "the Use page is written once the stock viewer renders it");
 });
 
+test("syncStarter refreshes a Use page still at an earlier release's stock bytes even when the record names a newer hash", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "timds-starter-"));
+  t.after(() => fs.rm(root, { force: true, recursive: true }));
+  await fs.cp(fixtureRoot, root, { recursive: true });
+  await syncStarter({ designSystemRoot: root, version: "0.0.0" });
+  // A hosted repair reverted the page writes and kept the record: the files are
+  // 0.1.481's stock pages while the record names the current stock hashes.
+  const released = fileURLToPath(new URL("./fixtures/starter-use-0.1.481/", import.meta.url));
+  const pages = [["src/pages/use/index.html", "index.html"], ["src/pages/use/install.html", "install.html"]];
+  for (const [relative, name] of pages) await fs.copyFile(path.join(released, name), path.join(root, ...relative.split("/")));
+  const report = await syncStarter({ designSystemRoot: root, version: "0.0.0" });
+  for (const [relative] of pages) {
+    assert.equal(report.files.find((file) => file.path === relative).status, "updated", relative);
+    assert.equal(await fs.readFile(path.join(root, ...relative.split("/")), "utf8"), await template(`starter/${relative}`), relative);
+  }
+  assert.match(await fs.readFile(path.join(root, "src", "pages", "use", "index.html"), "utf8"), /data-compose/, "the refreshed Use page carries the composer");
+  // One changed byte makes it this system's own page again.
+  const usePage = path.join(root, "src", "pages", "use", "index.html");
+  await fs.writeFile(usePage, `${await fs.readFile(path.join(released, "index.html"), "utf8")}\n`, "utf8");
+  const kept = await syncStarter({ designSystemRoot: root, version: "0.0.0" });
+  assert.equal(kept.files.find((file) => file.path === "src/pages/use/index.html").status, "customized");
+});
+
 test("syncStarter restores every file and the record when the check fails afterwards", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "timds-starter-"));
   t.after(() => fs.rm(root, { force: true, recursive: true }));
