@@ -25,18 +25,31 @@ retain their declared prerequisites. The agent runs these steps for the designer
 
 ## Find the two ends
 
+Paths below are relative to the Design System root: the repository in a
+standalone system, `design-system/` in an embedded one.
+
 1. The product. `AGENTS.md` or `README.md` names it (the repository, and
    usually a sibling checkout such as `../<product>`). If neither does, ask
    once and record the answer in `AGENTS.md` under the production section so
    the next handoff does not ask again.
 2. What the product pins. In a sibling checkout read
    `designSystem.version` in `timds.consumer.json` (a published pin) or the
-   commit the `design-system` submodule points at. Otherwise ask.
+   commit the `design-system` submodule points at. Otherwise ask. A pin of
+   `current` follows every release on its own: the product already moves,
+   so take the version its synced `design-system/.timds-bundle.json`
+   records (or the last version the developer says they verified against)
+   as "pinned now", and write the brief as the porting guide it still needs.
+   In an embedded system the product is this repository and there is no
+   pin: the two ends are the last handoff (a tag, a commit, or the issue the
+   last brief was filed in) and the current tree.
 3. What this repository is at. `version` in `timds.json` is the latest
    release when the checkout is on the default branch with no unreleased
    notes; the top of `CHANGELOG.md` shows anything newer still unreleased.
-   Releases are commits titled `Release <version>` on the default branch;
-   find the pinned one with `git log --grep "^Release <version>$"`.
+   Where the managed standalone release workflow or `scripts/release.mjs`
+   runs, releases are commits titled `Release <version>` on the default
+   branch; find the pinned one with `git log --grep "^Release <version>$"`.
+   A hosted system has no Git history in the session: `timds history` and
+   the published `changelog.json` are its record.
 
 If the product already pins the current release and nothing is unreleased,
 say so and stop.
@@ -57,18 +70,22 @@ tree, when the designer wants a preview of unreleased work), gather:
   renamed titles and the journeys that changed or were added (a journey is
   the pages a visitor moves through in order, with its steps, screens, and
   branches; its storyboard is `/designs/<design>/journeys/<id>/`). A route
-  is the file's path; a state is the `.state.html` file beside it. Open
+  is the file's path; a state is authored as `<route>.<state>.html` beside
+  it and built as `<state>.html` beside the route's `index.html`. Open
   each in the built artifact (`npm run timds -- check`, then
   `dist/designs/<design>/<route>/`) when the diff alone does not say what a
   developer must match. A changed funnel whose `design.json` declares no
   journey is a gap in the system to fix before the brief, not a brief to
   write around.
-- Tokens: changed or added names in `tokens.json`, by name only; the
-  developer takes values from the pin, never from the brief.
+- Tokens: changed or added tokens, named by the CSS custom property the
+  developer uses (`--color-accent`) as the derived `dist/tokens.json` lists
+  them, by name only; the developer takes values from the pin, never from
+  the brief.
 - Styles and components: changed files under `src/styles/` and the
   `web/components` page, and any new file that `timds.json`
   `bundle.include` now carries that the product must load.
-- Media: new or replaced keys in `media.json`, with their public URLs.
+- Media: new or replaced keys in the media catalog (`media/*.json`, or
+  `media.json` in the older layout), with their public URLs.
 - Guidance: changed pages under `src/pages/` that affect copy, voice, or
   compliance.
 
@@ -101,6 +118,9 @@ Pinned now: <pinned version>. Pin: <current version>.
 
 ## Review
 - Routes, widths, and schemes to check after the port.
+- New routes to pair with their design in `timds.consumer.json`
+  `preview.designs` (`"/contact": "website:/contact"`), so the product's
+  review shows the design beside the route at desktop, tablet and phone.
 ```
 
 Leave out sections with nothing in them. Link designs by their published
