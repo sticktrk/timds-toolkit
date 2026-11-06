@@ -18,6 +18,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v6
         with:
           node-version: 24
@@ -25,6 +27,7 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run pack:check
+      - run: node scripts/check-starter-history.mjs
 
   shared-upgrades:
     runs-on: ubuntu-latest

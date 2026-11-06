@@ -48,8 +48,9 @@
 // run it over uncommitted changes to the files it writes (`starterSyncPaths`)
 // and the sync's own diff stays reviewable on its own.
 //
-// A system scaffolded before the record existed is bootstrapped from the stock
-// versions earlier releases shipped: `legacyStarterFileHashes` below and the
+// A system scaffolded before the record existed, or whose files lag its record,
+// is recognized from the stock versions earlier releases shipped:
+// `legacyStarterFileHashes` below and the
 // catalog snapshots under templates/starter-history/. `init` writes the
 // record for a fresh scaffold, `timds starter sync` adopts an existing system,
 // and `upgrade` runs the sync on every adopted system from then on. The sync
@@ -138,10 +139,15 @@ export const starterSyncPaths = Object.freeze(starterPaths());
 const starterLayoutStylesheets = Object.freeze(["/styles/canvas.css", "/styles/viewer.css"]);
 
 /**
- * sha256 of every stock version a managed file shipped with before the record
- * existed. Once a system has a record, the hash the toolkit last wrote is
- * known from it; this table only recognizes systems scaffolded earlier, so it
- * never needs to grow for a change made after the record was introduced.
+ * sha256 of every earlier stock version a release shipped for a managed file,
+ * plumbing and fragments alike. The record's hash covers a system whose files
+ * are what the toolkit last wrote, but a record can move past its files: a
+ * hosted repair that reverted a page write kept the newer hash, and a file
+ * still at an older release's bytes then read as customized for good, so a
+ * stock Use page never gained the composer. Any byte-identical release version
+ * is the toolkit's and is refreshed. When a template changes, its previous
+ * released version belongs here: `node scripts/check-starter-history.mjs`
+ * walks the release tags, fails on a gap, and `--print` lists the entries.
  */
 export const legacyStarterFileHashes = new Map([
   ["scripts/build.mjs", [
@@ -163,9 +169,35 @@ export const legacyStarterFileHashes = new Map([
     "7c534a20e242f2ba51f86907233684ae3b61161d8ba1dbcc92665d379968b721",
     "673344052d11194f219bc32ba724ad4c5cd954b19ba95be684b7001774074bc9",
     "e8d44a94a49d01abbd379d98ddc224f4cba0fc3445782523550263f562e605f7",
+    "bdf9cf64d28cc26980f2d9678b59336eca6e9fef8a842fb8a686b51cdd370514", // v0.1.461
+    "61e1c5f962426ace33f14ea6501defc35bc012af16be70fb183f0e856def4b6b", // v0.1.462
+    "55ccb241300fcadb0a3bf0e980ef2a13b2bb4a3dd455df441d0bf7633ae2cb26", // v0.1.464
+    "b5417f9082603d6ff8c0a7aa1a40dbc2e8fd4d4590cae8a244d7208582494f2b", // v0.1.481
+    "1c21909153c4aa85dddf8bec19f06ea162bab637d1975ee007cbd70ec48b5299", // v0.1.485
   ]],
-  ["src/styles/canvas.css", ["dd0413554f9308cf3b1c6daedfb51ebb18c464672766b815eebbe77f0c3c6d98"]],
-  ["src/styles/viewer.css", ["bb9a4ff63a56bcdea1a91b7322e4b7a480c57af6597a332a774cdbe8c9d98c63"]],
+  ["src/styles/canvas.css", [
+    "dd0413554f9308cf3b1c6daedfb51ebb18c464672766b815eebbe77f0c3c6d98",
+    "c01549fcb01e1f1c44493d4c4a60864beaf3919cc2c570e5ea2d3aaed16e3d38", // v0.1.485
+  ]],
+  ["src/styles/viewer.css", [
+    "bb9a4ff63a56bcdea1a91b7322e4b7a480c57af6597a332a774cdbe8c9d98c63",
+    "89c7ba85c684a91a0cbf8b7269529da767d25a9c8f4b069c531f36443af74574", // v0.1.461
+    "afc438a5474fdb6e63f70ffd9330fde1e636b18ba714b61bda32bf9ef00b2fdd", // v0.1.464
+    "b9d437b8d8df332d765ed65a1cd7f35e25f011efa94c3090aade69917e5b9940", // v0.1.481
+    "8f95580c4578921acbcb6f312cf037e59a5758de494faa4d0e37776a8b2c590f", // v0.1.485
+  ]],
+  ["scripts/brand-kit.mjs", [
+    "644ade30ac144dc71cb43a127fc456ece032be105ce325d1e9498fa54942d07b", // v0.1.485
+  ]],
+  ["src/pages/use/index.html", [
+    "573b6e515900155d96b066900304d8a41b6c1fb26f181e5a51fc457c7264e863", // v0.1.461
+    "393e955a544050532430b750481101d32d06e6c06beaef55007227b8f1c36ca2", // v0.1.481
+    "49651882b5243054760986a11a892ca3a186b5037510ef3f2732775c863525f6", // v0.1.484
+  ]],
+  ["src/pages/use/install.html", [
+    "2f592695615a656474cf8034b3d757662fb3468ae5c674f0825b13982a378371", // v0.1.481
+    "b03eb3fad31a447052de5a8e6a4f0fd75e919d5de126cee9762eaf9471cab6ae", // v0.1.484
+  ]],
 ]);
 
 /** Stock catalogs earlier releases scaffolded, for a system without a record. */
