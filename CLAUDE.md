@@ -22,7 +22,13 @@ npm run golden-drift -- --golden /path/to/golden-checkout            # where tem
 ```
 
 CI (`.github/workflows/ci.yml`) runs `npm ci && npm test && npm run pack:check`
-on Node 24. Run both before committing.
+and the starter-history check on Node 24 for every pull request and master
+push. The native executables (`binary.yml`, a macOS runner) and the shared
+upgrade proof (Remotion plus a browser) run only when the change touches what
+they prove (binary scripts and modules, the lockfile; video, templates, skills,
+starter and brand-kit modules), on a manual run, and always for a release.
+A newer push to a pull request cancels its running checks. Run tests and the
+pack check before committing.
 
 Releases: `npm run release` (or `-- 0.2.0`, `-- --dry-run`) bumps, tags
 `v<version>`, pushes, and creates a GitHub Release. npm publish happens only in
