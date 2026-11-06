@@ -1,3 +1,25 @@
+// The media catalog: large public media staged locally, published to TimDS
+// object storage, and recorded by stable public URL.
+//
+// A Design System keeps full-resolution originals out of Git. `assets add`
+// (`stageMediaFile`) copies a file, named from the repository root, into the
+// ignored media-local/ workspace under a logical key, measures timed media
+// with ffprobe, and records it with the catalog checksum in
+// .timds/local-media.json; `assets publish` (`publishStagedMedia`, which
+// `submit` also runs) uploads the staged files through the portal to public
+// storage and writes only the stable public record into the catalog,
+// refusing stale replacements and asset-ID reuse across keys; `assets pull`
+// restores an original from its public URL and `assets backfill-metadata`
+// repairs older records without re-uploading. `readMediaCatalog` reads the
+// authored media/<group>.json maps when the contract groups exist (and the
+// writes regenerate the media.json view through contract-groups.mjs), else
+// media.json itself.
+//
+// `resolveMediaSource` and `localMediaResponse` serve staged files to a
+// framework viewer during authoring; the starter viewer only uses a catalog
+// entry's optional src/assets/ copy. Credentials come from auth.mjs, and
+// nothing here is design-system specific.
+
 import { hasContractGroups, readContractGroups, writeGroupedMedia } from "./contract-groups.mjs";
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";

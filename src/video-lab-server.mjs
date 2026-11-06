@@ -1,7 +1,7 @@
 /**
  * TimDS Video Lab — the local web UI behind `timds video lab --serve`.
  *
- * A standardized copy of the LawBoost Video Lab flow that ships with the toolkit
+ * A standardized copy of an automated Video Lab flow that ships with the toolkit
  * and runs against the client's own Design System workspace: describe a source,
  * draft the compile request with Claude against the client's authoring contract
  * (or paste one), edit the answer beats, check the compiled plan, render, and

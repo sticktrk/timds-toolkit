@@ -1,3 +1,26 @@
+// The TimDS CLI and the workspace model every command shares.
+//
+// `runCli` is the flat dispatcher bin/timds.mjs calls, and `helpText()` is
+// its public inventory: every usage line there has a branch below. The
+// workspace commands (doctor, brand, dev, check, extract, publish, preview,
+// diff, assets, submit, video, mcp, upgrade, defaults, designs init, starter
+// sync, feed, sever) go through `loadWorkspace`, which finds the repository
+// root (a hosted session root, else the git toplevel, else the nearest
+// timds.json or design-system/timds.json), picks the standalone or embedded
+// layout, validates the manifest and reads the catalogs; `checkWorkspace`
+// is the pipeline `check` runs (workspace build, designs, changelog,
+// workspace check, bundle, extraction, artifact validation, video). This
+// module also owns `init` and the templates it renders, the managed-file
+// boundary `upgrade` keeps (`designSystemSkillNames`, the installation
+// record, the stock release automation and its recorded hashes), `submit`,
+// and the `output()` sink the MCP servers redirect so stdout stays a
+// protocol stream.
+//
+// Boundary: a command's client-facing behaviour lives here or in a module
+// this one delegates to (consumer.mjs, hosted.mjs, video.mjs, starter.mjs,
+// media.mjs, ...). Nothing here builds authored source, which the manifest's
+// workspace commands do, and nothing client-specific enters it.
+
 import { isBinaryRuntime, javascriptCommand, packageIdentity, runtimeEnvironment } from "./executable.mjs";
 import { assertBinaryInstallation, binaryInstallationRecord, binaryWorkspaceCommand, isStockWorkspace, readBinaryInstallation, readInstallation, renderBinaryInstructions, requireBinaryRelease, stockWorkspaceCommands, withBinarySelection, withFileRollback } from "./binary-installation.mjs";
 import { hasContractGroups, migrateContractGroups, syncContractViews } from "./contract-groups.mjs";

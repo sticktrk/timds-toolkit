@@ -6,6 +6,10 @@
 // each call's `draftId` to a workspace. The toolkit owns the tool definitions,
 // the authored-surface guard, and the check; the host owns transport,
 // identity, draft lifecycle, and what happens after a write.
+// `registerHostedSessionTools` is the second surface: the `timds_*` session
+// tools (start, join, pull, update, submit, claim, active-work, drafts,
+// status, history, publish) over the hosted CLI in hosted.mjs, for an agent
+// that works through MCP rather than a shell.
 
 import { randomBytes, createHash } from "node:crypto";
 import { lstatSync, promises as fs } from "node:fs";
