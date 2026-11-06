@@ -363,9 +363,13 @@ update its catalog lineage; local sever does not perform that operation.
 
 `check` reads the built HTML and CSS, never authored source, and writes
 `index.json`, `tokens.json`, `brand.json`, `formats.json`, `llms.txt`,
-`llms-full.txt`, and a Markdown mirror of every page beside them. Video,
-product repositories, other agents, and anyone given the system's public link
-consume only that layer, so page structure decides what they receive.
+`llms-full.txt`, a Markdown mirror of every page beside them, and a
+`robots.txt` naming `llms.txt` at the site root. Video, product repositories,
+other agents, and anyone given the system's public link consume only that
+layer, so page structure decides what they receive. The viewer points every
+rendered page at `llms.txt` and its own mirror (head links and one visible
+line at the end of the body), so an agent sent to the site finds the layer
+without a hint; nothing in `src/layout.html` needs to carry that.
 `llms.txt` opens with the brand essentials (colors, fonts and where to get
 them, logos, asset formats), so what reaches the kit reaches every tool.
 

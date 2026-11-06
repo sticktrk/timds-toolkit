@@ -35,6 +35,8 @@ body.timds-design-directory {
 .timds-design-directory .td-directory-eyebrow { margin-bottom: .75rem; color: var(--directory-muted); font-size: .75rem; font-weight: 650; letter-spacing: .1em; text-transform: uppercase; }
 .timds-design-directory h1 { font-family: inherit; font-size: clamp(2rem, 5vw, 3rem); font-weight: 600; line-height: 1.15; letter-spacing: -.035em; }
 .timds-design-directory .td-directory-lede { margin-top: 1rem; color: var(--directory-muted); }
+.td-directory-agents { margin: 0; padding: 1rem 1.5rem 2rem; color: var(--directory-muted); font-size: .8125rem; text-align: center; }
+.td-directory-agents a { color: inherit; }
 .timds-design-directory .td-directory-section { margin-top: 1.5rem; padding: 0; border: 1px solid var(--directory-line); border-radius: .75rem; background: var(--directory-surface); overflow: hidden; }
 .timds-design-directory .td-directory-section-head { display: flex; align-items: start; justify-content: space-between; gap: 1.5rem; padding: 1.5rem; border-bottom: 1px solid var(--directory-line); }
 .timds-design-directory h2 { font-family: inherit; font-size: 1.25rem; font-weight: 600; line-height: 1.4; letter-spacing: -.015em; overflow-wrap: anywhere; }

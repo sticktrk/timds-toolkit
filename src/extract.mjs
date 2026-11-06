@@ -17,12 +17,16 @@
 //                              any AI tool to produce something on-brand
 //   <entry-dir>/llms-full.txt  every page's Markdown in one file
 //   <page>/index.md            a Markdown mirror of every page
+//   robots.txt                 at the site root (entry at the artifact root),
+//                              naming llms.txt for a crawler; kept when the
+//                              build wrote its own
 //
 // Extraction keys on HTML semantics (main, section, h1/h2, table, figure, pre)
 // so it works with no configuration. A design system whose markup needs a hint
 // declares one in timds.json `machine`; nothing here is design-system specific.
 
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 
@@ -40,6 +44,7 @@ import {
   textOf,
   walk,
 } from "./html.mjs";
+import { robotsText } from "./agent-pointers.mjs";
 import { annotationFor, buildBrandKit } from "./brand.mjs";
 import { bundleOutputDirectory } from "./bundle.mjs";
 import { designsDocument } from "./designs.mjs";
@@ -739,6 +744,16 @@ export async function extractArtifact({ artifactRoot, manifest, mediaCatalog = {
     await fs.writeFile(llmsPath, buildLlmsText(manifest, pages, { indexUrl: `${basePrefix}/index.json`, tokensUrl, brandUrl, designsUrl, formatsUrl, fullUrl, bundleUrl, changelogUrl, kit: brand, formats: formatsDoc }));
     await fs.writeFile(llmsFullPath, buildLlmsFullText(manifest, pages));
     written.push(indexPath, tokensPath, brandPath, llmsPath, llmsFullPath);
+    // A crawler reads robots.txt before anything else, so at the site root it
+    // names the entry point too. A robots.txt the build put there is the
+    // system's own and is kept.
+    if (entryDirectory === ".") {
+      const robotsPath = path.join(artifactRoot, "robots.txt");
+      if (!existsSync(robotsPath)) {
+        await fs.writeFile(robotsPath, robotsText());
+        written.push(robotsPath);
+      }
+    }
     if (formatsDoc) {
       const formatsPath = path.join(baseDirectory, "formats.json");
       await fs.writeFile(formatsPath, `${JSON.stringify(formatsDoc, null, 2)}\n`);

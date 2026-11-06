@@ -104,8 +104,13 @@ stylesheets pages link), `brand.json` (`brand.mjs`, from `data-timds-role`
 annotations, each font role with the files or font service that provide its
 family), `formats.json` (`formats.mjs`, from the optional `src/formats.json`
 catalog), `llms.txt` (opens with the brand essentials: colors, fonts, logos,
-formats), `llms-full.txt`, per-page `index.md`, and `designs.json` (the
-designs output directory is skipped by the page walk). `bundle.mjs` builds
+formats), `llms-full.txt`, per-page `index.md`, `designs.json` (the
+designs output directory is skipped by the page walk), and `robots.txt` at
+the site root naming `llms.txt` (kept when the build wrote its own).
+`agent-pointers.mjs` holds that robots text and the head/body pointers to
+`llms.txt` the changelog page and designs directory carry; the starter viewer
+writes its own copy on every page it renders, with the page's Markdown
+mirror. `bundle.mjs` builds
 the consumer bundle: the files `timds.json` `bundle.include` globs name,
 copied into `<entry>/bundle/` under their source paths with a `bundle.json`
 of digests, published under the current prefix and an immutable
