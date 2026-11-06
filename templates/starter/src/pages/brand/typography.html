@@ -8,7 +8,6 @@
     <h2 class="h2">Families</h2>
     <p>System fonts keep the starter fast, portable, and free of licensing assumptions.</p>
   </div>
-  {{tokens:font}}
   <figure class="specimen">
     <figcaption>Display / font.serif</figcaption>
     <p style="font-family:var(--font-serif);font-size:var(--type-display);letter-spacing:-0.04em;line-height:1">Clear thinking, clearly expressed.</p>
@@ -21,6 +20,10 @@
     <figcaption>Code / font.mono</figcaption>
     <p style="font-family:var(--font-mono);font-size:var(--type-small)">color: var(--color-ink);</p>
   </figure>
+  <details class="spec-drawer">
+    <summary>Spec</summary>
+    {{tokens:font}}
+  </details>
 </section>
 
 <section class="block" id="scale">
@@ -28,5 +31,16 @@
     <h2 class="h2">Scale</h2>
     <p>Six sizes, each with one job. Pick the role; never resize a role to make copy fit.</p>
   </div>
-  {{tokens:type}}
+  <figure class="type-scale">
+    <div class="type-scale__row"><small>display</small><p style="font-family:var(--font-serif);font-size:var(--type-display);letter-spacing:-0.04em">The page's one headline</p></div>
+    <div class="type-scale__row"><small>title</small><p style="font-family:var(--font-serif);font-size:var(--type-title);letter-spacing:-0.03em">A section's heading</p></div>
+    <div class="type-scale__row"><small>lead</small><p style="font-size:var(--type-lead)">The sentence that opens a page or a section.</p></div>
+    <div class="type-scale__row"><small>body</small><p style="font-size:var(--type-body)">Everything read at length: rules, notes, and the copy of a design.</p></div>
+    <div class="type-scale__row"><small>small</small><p style="font-size:var(--type-small)">Help text, table rows, and the supporting line under a control.</p></div>
+    <div class="type-scale__row"><small>label</small><p style="font-size:var(--type-label);letter-spacing:0.1em;text-transform:uppercase">Eyebrows and column heads</p></div>
+  </figure>
+  <details class="spec-drawer">
+    <summary>Spec</summary>
+    {{tokens:type}}
+  </details>
 </section>
