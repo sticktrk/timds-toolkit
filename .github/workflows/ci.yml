@@ -5,13 +5,55 @@ on:
   push:
     branches:
       - master
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+# A newer push to a pull request supersedes its running checks. Pushes to
+# master and manual runs each keep their own run.
+concurrency:
+  group: validate-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
-  native-binaries:
-    uses: ./.github/workflows/binary.yml
+  # The validate job always runs. The native executables and the shared
+  # upgrade proof are the expensive jobs (a macOS runner, Remotion, a browser),
+  # so a pull request or a push runs them only when it touches what they
+  # prove; a manual run does everything. Releases build and verify the
+  # executables again in release.yml, so a skipped build here never reaches
+  # a published release.
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      binaries: ${{ steps.filter.outputs.binaries }}
+      upgrades: ${{ steps.filter.outputs.upgrades }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - id: filter
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = pull_request ]; then
+            git fetch --quiet origin "$BASE_REF"
+            changed=$(git diff --name-only "origin/$BASE_REF...HEAD")
+          elif [ "$EVENT" = push ] && [ -n "$BEFORE" ] && [ "$BEFORE" != 0000000000000000000000000000000000000000 ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            changed=$(git diff --name-only "$BEFORE" HEAD)
+          else
+            changed=$(git ls-files)
+          fi
+          printf 'Changed files:\n%s\n' "$changed"
+          matches() { if printf '%s\n' "$changed" | grep -Eq "$1"; then echo true; else echo false; fi; }
+          echo "binaries=$(matches '^(scripts/binary-|src/(binary-|executable|runtime)|package\.json$|package-lock\.json$|\.github/workflows/(ci|binary)\.yml$)')" >> "$GITHUB_OUTPUT"
+          echo "upgrades=$(matches '^(video/|templates/|skills/|src/(video|starter|brand-kit|core\.mjs$)|scripts/check-(shared-upgrades|brand-kit-rendering)\.mjs$|\.github/workflows/ci\.yml$)')" >> "$GITHUB_OUTPUT"
+          cat "$GITHUB_OUTPUT"
 
   validate:
     runs-on: ubuntu-latest
@@ -29,7 +71,14 @@ jobs:
       - run: npm run pack:check
       - run: node scripts/check-starter-history.mjs
 
+  native-binaries:
+    needs: changes
+    if: needs.changes.outputs.binaries == 'true'
+    uses: ./.github/workflows/binary.yml
+
   shared-upgrades:
+    needs: changes
+    if: needs.changes.outputs.upgrades == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
