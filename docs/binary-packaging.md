@@ -132,8 +132,9 @@ real rendering, client TSX overrides and the two-brand visual comparisons.
 The ordinary suite also exercises extraction concurrency, dead initializer
 recovery, traversal rejection, migration, pins, and sanitized environments.
 
-PR CI and release CI delete the build's source `node_modules` after packaging,
-then run both builtins-only smoke drivers from the runner's temporary directory.
+PR CI (when the change touches the binary inputs `ci.yml` filters on) and
+release CI delete the build's source `node_modules` after packaging, then run
+both builtins-only smoke drivers from the runner's temporary directory.
 The driver uses Node to orchestrate assertions; all tested TimDS commands and
 their children use the moved executable with no JavaScript toolchain on PATH.
 Both native targets run through these checks. A successful

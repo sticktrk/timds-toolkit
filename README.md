@@ -8,8 +8,9 @@ runtime package for clients to install or copy.
 Client repositories select the bounded `0.1.x` package line in
 `devDependencies`. The lockfile records the exact resolved release. The CLI runs
 from `node_modules`; client Git repositories do not carry a copied `.timds/cli`
-tree. TimDS also installs a small repository-local skill for AI-agent discovery
-and `.timds/installation.json` for fleet/version inspection.
+tree. TimDS also installs the managed skills under `.agents/skills/` (the
+editing and video procedures and the four designer skills) and
+`.timds/installation.json` for fleet/version inspection.
 
 ## Standalone executable
 
@@ -109,8 +110,8 @@ git add --all
 git commit -m "Initialize TimDS design system"
 ```
 
-To link a standalone Design System to a repository that consumes it as a
-submodule, declare the consumer during initialization:
+To link a standalone Design System to a product repository that consumes it,
+declare the consumer during initialization:
 
 ```bash
 npx --yes @dtconcepts/timds@0.1.x init --standalone \
@@ -126,8 +127,12 @@ repository secret `TIMDS_CONSUMER_TOKEN` with contents and pull-request access
 to the consumer. Every accepted change on `main` becomes a dated release
 (`YYYY.MM.DD-N`, the UTC day and the release number that day): TimDS
 synchronizes the version, publishes that exact commit, then opens or refreshes
-a gitlink-update pull request in the consumer. This flow pins the commit SHA and
-does not depend on a release tag.
+a pull request in the consumer that moves its pin to the release. A consumer
+with a published pin (`designSystem.version` in `timds.consumer.json`, the
+form `consumer init` writes) is moved through its own toolkit, which fetches
+and verifies the published bundle; a consumer that still carries the system
+as a git submodule has its gitlink advanced to the exact commit. Neither
+depends on a release tag.
 
 Create an embedded root `design-system/` contract in an existing client app:
 
@@ -154,6 +159,29 @@ adds the appropriate dependency and artifact ignore rules, so after
 `npm install` creates the exact lockfile, `git add --all` is safe. Commit
 `package.json`, the lockfile, `.agents/skills/`, the Design System contract,
 and the TimDS workflow. Do not commit `node_modules`.
+
+The ordinary starter is organized as views (Brand, Web DS, Digital DS, Social
+DS, Print DS, Use) declared in `src/site.json`, each a list of authored or
+`planned` pages rendered into one shared shell. It opens on the Use view's
+own page, a portal landing (`"layout": "landing"`, rendered without the side
+navigation): a hero, rails of asset cards from the format catalog that open
+the composer on that format, the kit, three steps, and every other way in.
+`use/compose` is the composer, promoted as "Start making" in the app bar of
+every page, with every entry of `src/formats.json` as a preset; `use/install`
+explains each way to consume the published system. The scaffold also carries
+a `CHANGELOG.md`: notes go under `## Unreleased`, a release rolls them under
+its dated version, the built system renders the history at `/changelog/`
+(linked from the version chip in the app bar) and publishes it as
+`changelog.json`, and `submit` refuses a change without an Unreleased note.
+
+`init --starter brand-kit` scaffolds the second starter instead: a
+slot-driven brand kit for a website-to-kit parent, with nine channel views
+(Brand, Web, Social, Ads, Email, Print, Events, Decks, Use), an authored
+Voice page, copy slots in `src/copy.json`, media slots, template formats
+rendered in Minimal, Accent, Bold and Photo treatments, and an empty Designs
+directory. Its slot contract is exported as `@dtconcepts/timds/brand-kit`;
+`.timds/starter.json` records the kind, and starter sync keeps each kind's
+catalogs and managed fragments. See [the brand kit](docs/brand-kit.md).
 
 ## Designer workflow
 
@@ -188,7 +216,8 @@ npm run timds -- submit --message "Describe the design-system change"
 
 This validates the artifact, creates or uses a `design-system/<change>` branch,
 pushes it, and opens a draft pull request against the default branch. It does
-not merge or publish without separate authorization.
+not merge or publish without separate authorization, and it refuses a change
+whose `CHANGELOG.md` has no note under `## Unreleased`.
 
 ## Remote editing through MCP
 
@@ -656,10 +685,14 @@ npm run timds -- extract
 Beside the published pages this writes `index.json` (the structured tree, with
 assets joined to their media records), `tokens.json` (the design tokens),
 `brand.json` (the brand kit), `formats.json` (the asset format catalog, when
-the system keeps one), `llms.txt` (the brand essentials and the page index),
-`llms-full.txt` (every page in one file), an `index.md` Markdown mirror
-of every page, and, when the entry page is at the artifact root, a
-`robots.txt` that names `llms.txt` (a `robots.txt` the build wrote is kept).
+the system keeps one), `designs.json` (the website designs, their pages and
+journeys), `changelog.json` (the release history, beside the rendered
+`/changelog/` page), `bundle.json` (the consumer bundle's digests, when the
+manifest declares `bundle.include`), `llms.txt` (the brand essentials and
+the page index), `llms-full.txt` (every page in one file), an `index.md`
+Markdown mirror of every page, and, when the entry page is at the artifact
+root, a `robots.txt` that names `llms.txt` (a `robots.txt` the build wrote
+is kept).
 Every record carries a stable id such as `social/shorts#safe-zones/bottom-band`,
 so an agent can cite a rule and a reviewer can resolve the citation.
 
@@ -897,11 +930,12 @@ npm run timds -- starter sync --force scripts/viewer.mjs   # non-interactive: re
 ```
 
 Inside the boundary the sync touches three kinds of things. The stock
-`scripts/build.mjs`, `check.mjs`, `dev.mjs`, `viewer.mjs`,
-`src/styles/canvas.css`, and `src/styles/viewer.css` are plumbing, and the
-record's `plumbing` mode says who a local change to them belongs to. A
-system scaffolded by `init` is `"toolkit"`: every upgrade brings the six
-files to stock, replacing a local change and saying so, without halting and
+`scripts/build.mjs`, `check.mjs`, `dev.mjs`, `viewer.mjs`, `brand-kit.mjs`,
+`src/scripts/compose.js`, `src/styles/canvas.css`, and
+`src/styles/viewer.css` are plumbing (`starterPlumbingFiles` in
+`src/starter.mjs`), and the record's `plumbing` mode says who a local change
+to them belongs to. A system scaffolded by `init` is `"toolkit"`: every
+upgrade brings those files to stock, replacing a local change and saying so, without halting and
 without naming files. A system adopted later with `starter sync` is
 `"recorded"`: a file is replaced while it still matches a hash the toolkit
 wrote, and a customized one is kept unless the person running the sync in a
@@ -914,10 +948,11 @@ scaffold, and anything the client changed is kept, and reported when the
 scaffold's own value moved rather than on every sync; nothing is removed,
 reordered, or retitled, and a format whose page the system does not declare
 is skipped. The Digital, Social, and Print overview fragments and the Use
-pages (Install, and every way to consume a system) are written
+pages (the landing, the composer, and Install) are written
 when the sync adds or authors their page and refreshed while unmodified; one
 that differs is the system's own page and is never replaced. `src/layout.html`
-only gains a missing stock stylesheet link. Everything else, other fragments,
+only gains a missing stock stylesheet link and the changelog link on its
+version chip. Everything else, other fragments,
 `tokens.json`, `system.css`, `timds.json`, stays the client's. In the
 recorded mode, customized scripts and stylesheets are asked about in a
 terminal and otherwise reported and replaced only by `starter sync --force`
@@ -1514,7 +1549,7 @@ npm run timds -- video lab --list          # lab inputs and ready productions
 ```
 
 The lab also ships as a small local web app, the toolkit's standardized copy of
-the LawBoost Video Lab flow, so a Design System editor can test-generate a
+an automated Video Lab flow, so a Design System editor can test-generate a
 video without touching Remotion:
 
 ```bash
@@ -1611,7 +1646,8 @@ npm run timds -- check
 ```
 
 `upgrade` removes the legacy `.timds/cli` tree when present, synchronizes
-both managed skills, and re-syncs the starter of an adopted system (see "The
+the managed skills (the editing and video procedures and the four designer
+skills), and re-syncs the starter of an adopted system (see "The
 starter stays current through upgrade"); a system that has not adopted it is
 told to run `timds starter sync`. It refuses locally modified managed files
 unless `--force` is explicitly supplied (that flag never extends to starter
@@ -1808,20 +1844,27 @@ npm run pack:check
 ```
 
 To release the latest `master` from GitHub, open
-[Actions → Publish npm package](https://github.com/sticktrk/timds-toolkit/actions/workflows/release.yml),
+[Actions → Publish TimDS package and executables](https://github.com/sticktrk/timds-toolkit/actions/workflows/release.yml),
 click **Run workflow**, leave the branch set to **master**, and click **Run workflow**
 again. No version input is needed: the workflow checks out the latest `master`,
 runs the checks above, bumps the patch version in `package.json` and the lockfile,
 pushes the release commit and matching tag, creates a GitHub Release with generated
-notes, and publishes to npm. Release runs are serialized. If `master` changes
-during validation, the push fails without publishing a stale release; start a new
-run against the updated branch.
+notes, builds, signs, notarizes and verifies the native macOS arm64 and Linux
+x64 executables (`binary.yml`), publishes to npm only when both built, and
+attaches the executables with their `SHA256SUMS` to the release. The `dry_run`
+input only exchanges the workflow's OIDC token with npm and prints the
+answer, with no release and no publish. Release runs are serialized. If
+`master` changes during validation, the push fails without publishing a stale
+release; start a new run against the updated branch.
 
 The workflow uses the built-in GitHub token to create the release and the existing
-npm trusted publisher for `release.yml` to publish. No additional secret is needed.
-If npm publishing fails after the release was created, use **Re-run failed jobs**
-to retry publishing the same version. **Run workflow** or **Re-run all jobs** creates
-another patch release.
+npm trusted publisher for `release.yml` to publish. It refuses to start
+without the six Apple signing secrets (`TIMDS_MACOS_CERTIFICATE_BASE64`,
+`TIMDS_MACOS_CERTIFICATE_PASSWORD`, `TIMDS_CODESIGN_IDENTITY`,
+`TIMDS_NOTARY_APPLE_ID`, `TIMDS_NOTARY_TEAM_ID`, `TIMDS_NOTARY_PASSWORD`; see
+[signing](docs/binary-packaging.md)). If npm publishing fails after the
+release was created, use **Re-run failed jobs** to retry publishing the same
+version. **Run workflow** or **Re-run all jobs** creates another patch release.
 
 You can also cut a release locally from a clean, synced `master`:
 
@@ -1867,7 +1910,8 @@ skill (`timds skills install`) teaches them. The MCP tools `timds_start`,
 `timds_pull`, `timds_submit`, `timds_update`, `timds_sessions_close`,
 `timds_claim`, `timds_active_work`, `timds_join`, `timds_whoami`,
 `timds_systems`, `timds_principals`, and `timds_draft_create|list|close` expose the same
-operations for hosts and MCP clients.
+operations for hosts and MCP clients, beside `timds_status`,
+`timds_history`, and `timds_publish` for the human verbs.
 
 `timds auth login` (also `timds login`) selects `--portal-url` first, then the
 nearest workspace's hosted `provider.url`, then `TIMDS_PORTAL_URL` or
@@ -1916,8 +1960,10 @@ timds draft create spring-refresh --from main --system-id example/core
 timds start example/core --draft spring-refresh --on 'tokens/color*' --root ./session
 timds active-work
 timds claim --on 'tokens/color*' --note 'Warm the brand palette'
+timds pull
 timds submit --note 'Warm the brand palette'
 timds update --resolve 'tokens/color.json#brand.value=theirs' --note 'Keep the director’s color'
+timds sessions close
 timds whoami
 timds systems
 timds principals

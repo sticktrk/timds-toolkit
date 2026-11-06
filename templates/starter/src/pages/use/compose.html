@@ -199,7 +199,7 @@
   <table class="spec">
     <thead><tr><th>Step</th><th>Command</th><th>What it does</th></tr></thead>
     <tbody>
-      <tr><td><strong>Adopt</strong></td><td><code>npm run timds -- consumer init --system ID</code></td><td>Writes the manifest with a published pin, wires the sync into <code>postinstall</code>, and installs the consumer skill, the preview workflows, and the hosted MCP entry.</td></tr>
+      <tr><td><strong>Adopt</strong></td><td><code>npx --yes @dtconcepts/timds@latest consumer init --system ID</code></td><td>Installs the toolkit in the product and writes the manifest with a published pin, wires the sync into <code>postinstall</code>, and installs the consumer skill, the preview workflows, and the hosted MCP entry.</td></tr>
       <tr><td><strong>Install</strong></td><td><code>npm ci</code></td><td>Fetches the pinned bundle and verifies it.</td></tr>
       <tr><td><strong>Move the pin</strong></td><td><code>npm run timds -- consumer update VERSION</code></td><td>Moves to a version, or without one to the current release. A pin of <code>current</code> follows every release at the next install.</td></tr>
       <tr><td><strong>Check</strong></td><td><code>npm run timds -- consumer check</code></td><td>Validates the manifest and the pin, and that a branch stays inside the product's declared design surface.</td></tr>
