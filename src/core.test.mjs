@@ -21,7 +21,10 @@ import {
   upgradeRepository,
   validateArtifact,
   validateManifest,
+  isUpgradeWritePath,
+  upgradeWriteBoundary,
 } from "./core.mjs";
+import { VIDEO_HELP } from "./video.mjs";
 import { describeStarterSync, forceReplaceable, starterManagedFragments, starterPlumbingFiles } from "./starter.mjs";
 import { prepareMergeRelease } from "../templates/starter/scripts/prepare-merge-release.mjs";
 import {
@@ -1817,4 +1820,73 @@ test("joining from a Studio link attaches in a new session folder without anothe
   assert.equal(lines[0], "TimDS join: fetching workspace from https://host.example...");
   assert.ok(lines.includes(`Workspace: ${workspace}`));
   assert.doesNotMatch(lines.join("\n"), /authoriz|Already signed in/i);
+});
+
+test("video --help prints the video help, not the main help", async () => {
+  const video = [];
+  await runWithOutputSink((line) => video.push(line), () => runCli(["video", "--help"]));
+  assert.equal(video.join("\n"), VIDEO_HELP);
+  const main = [];
+  await runWithOutputSink((line) => main.push(line), () => runCli(["--help"]));
+  assert.match(main.join("\n"), /timds video --help/u);
+  assert.notEqual(main.join("\n"), VIDEO_HELP);
+  const alias = [];
+  await runWithOutputSink((line) => alias.push(line), () => runCli(["video", "help"]));
+  assert.equal(alias.join("\n"), VIDEO_HELP);
+});
+
+test("init under the binary runtime renders the scaffolded docs and the media README for the executable", async (t) => {
+  const repoRoot = await temporaryDirectory(t);
+  gitInit(repoRoot);
+  const packageRoot = fileURLToPath(new URL("../", import.meta.url)).replace(/\/$/u, "");
+  const binaryEnvironment = { TIMDS_BINARY_EXECUTABLE: path.join(packageRoot, "bin", "timds.mjs"), TIMDS_RUNTIME_ROOT: packageRoot, TIMDS_RUNTIME_PACKAGE: packageRoot };
+  const previous = Object.fromEntries(Object.keys(binaryEnvironment).map((key) => [key, process.env[key]]));
+  Object.assign(process.env, binaryEnvironment);
+  t.after(() => { for (const [key, value] of Object.entries(previous)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } });
+  await initializeRepository(repoRoot, { standalone: true, name: "Binary Scaffold" });
+  const read = (relative) => fs.readFile(path.join(repoRoot, relative), "utf8");
+  const agents = await read("AGENTS.md");
+  // The upgrade command the executable accepts is an exact release, not the npm line.
+  assert.match(agents, /timds-cli upgrade --version EXACT_VERSION/u);
+  assert.doesNotMatch(agents, /upgrade --version 0\.1\.x/u);
+  assert.doesNotMatch(agents, /npm run timds --|__TIMDS_CLI__/u);
+  for (const file of ["CLAUDE.md", "README.md"]) {
+    const text = await read(file);
+    assert.doesNotMatch(text, /npm run timds --|__TIMDS_CLI__|upgrade --version 0\.1\.x/u, file);
+  }
+  const media = await read("media-local/README.md");
+  assert.match(media, /timds-cli assets add media-local\/example\.mp4 --key example-video/u);
+  assert.match(media, /timds-cli assets pull KEY --force/u);
+  assert.doesNotMatch(media, /npm run timds/u);
+  assert.equal(JSON.parse(await read(".timds/installation.json")).mode, "binary");
+});
+
+test("init under npm keeps the bounded upgrade line in the scaffolded docs and the media README", async (t) => {
+  const repoRoot = await temporaryDirectory(t);
+  gitInit(repoRoot);
+  await initializeRepository(repoRoot, { standalone: true });
+  const read = (relative) => fs.readFile(path.join(repoRoot, relative), "utf8");
+  assert.match(await read("AGENTS.md"), /npm run timds -- upgrade --version 0\.1\.x/u);
+  assert.match(await read("media-local/README.md"), /npm run timds -- assets add media-local\/example\.mp4/u);
+  assert.doesNotMatch(await read("media-local/README.md"), /timds-cli/u);
+});
+
+test("the upgrade write boundary covers the managed boundary, both starters' sync, the contract groups, and the artifact", async () => {
+  const { designSystemSkillNames } = await import("./core.mjs");
+  const { starterPaths } = await import("./starter.mjs");
+  for (const prefix of ["", "design-system/"]) {
+    const options = { designSystemPrefix: prefix };
+    for (const kind of ["starter", "brand-kit"]) for (const relative of starterPaths(kind)) assert.ok(isUpgradeWritePath(`${prefix}${relative}`, options), `${prefix}${relative}`);
+    for (const name of designSystemSkillNames) assert.ok(isUpgradeWritePath(`.agents/skills/${name}/SKILL.md`, options), name);
+    for (const file of ["package.json", "package-lock.json", ".claude/skills", ".github/workflows/timds-upgrade.yml", ".github/workflows/update-consumer-submodule.yml", "scripts/release.sh", `${prefix}.timds/installation.json`, `${prefix}.timds/starter.json`, `${prefix}.timds/contract-layout.json`, `${prefix}tokens.json`, `${prefix}tokens/color.json`, `${prefix}media/logos.json`, `${prefix}dist/index.json`]) {
+      assert.ok(isUpgradeWritePath(file, options), file);
+    }
+    for (const file of [`${prefix}src/index.html`, `${prefix}src/styles/system.css`, `${prefix}src/pages/brand/index.html`, `${prefix}src/copy.json`, `${prefix}timds.json`, `${prefix}.timds/parent.json`, `${prefix}.timds/stock.json`, `${prefix}CHANGELOG.md`, `${prefix}.gitignore`, ".agents/skills/custom/SKILL.md", "web/package.json"]) {
+      assert.ok(!isUpgradeWritePath(file, options), file);
+    }
+  }
+  // An embedded layout keeps its repository-level files at the root.
+  const embedded = upgradeWriteBoundary({ designSystemPrefix: "design-system/" });
+  assert.ok(embedded.files.includes("package.json") && embedded.files.includes("design-system/.timds/installation.json"));
+  assert.ok(!embedded.files.includes(".timds/installation.json"));
 });

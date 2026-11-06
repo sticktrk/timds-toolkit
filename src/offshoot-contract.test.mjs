@@ -6,7 +6,7 @@ import test from 'node:test';
 import { initializeRepository, checkWorkspace } from './core.mjs';
 import { readDerivedLayer } from './derived.mjs';
 import { createPublicationStampFromFiles } from './publication-snapshot.mjs';
-import { isDesignerRecordPath, isLineagePath, isPlumbingPath, parentLineage, readParentRecord, readStockRecord, regularPath, unresolvedTokenWarnings, validateOffshootRecords, validateParentRecord, validateStockRecord } from './offshoot-contract.mjs';
+import { STOCK_RECORD_PATH_KINDS, isDesignerRecordPath, isLineagePath, isPlumbingPath, parentLineage, readParentRecord, readStockRecord, regularPath, unresolvedTokenWarnings, validateOffshootRecords, validateParentRecord, validateStockRecord } from './offshoot-contract.mjs';
 
 const parent = () => ({ schemaVersion: 1, systemId: 'example/core', sourceId: '00000000-0000-4000-8000-000000000001', version: '2026.10.29-1', commit: 'a'.repeat(40), mode: 'structure', baseline: { site: { views: [{ id: 'brand', label: 'Brand', pages: [{ slug: '', title: 'Overview', planned: true }] }] }, formats: null } });
 const json = value => `${JSON.stringify(value, null, 2)}\n`;
@@ -151,4 +151,9 @@ test('check accepts host structure records and reports placeholder tokens withou
   assert.equal(await fs.readFile(path.join(directory, '.timds/parent.json'), 'utf8'), json(customRecord));
   await write(directory, '.timds/stock.json', json({ schemaVersion: 1, paths: ['src/pages/*.html'] }));
   await assert.rejects(checkWorkspace(directory), /stock.json/);
+});
+
+test('the stock record path kinds are the paths the validator accepts, and the refusal names them', async () => {
+  assert.deepEqual([...STOCK_RECORD_PATH_KINDS], ['src/pages/**/*.html', 'src/styles/**/*.css', 'src/layout.html', 'src/copy.json']);
+  await assert.rejects(validateStockRecord({ schemaVersion: 1, paths: ['src/assets/image.png'] }, null), new RegExp(STOCK_RECORD_PATH_KINDS.map(kind => kind.replace(/[.*]/g, '\\$&')).join(', ')));
 });

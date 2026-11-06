@@ -30,7 +30,7 @@ import {
 import { readDerivedLayer, summarizeBrandKit } from "./derived.mjs";
 import { readMediaCatalog } from "./media.mjs";
 import { runHostedCommand, sessionIgnoredMatcher } from "./hosted.mjs";
-import { isDesignerRecordPath, isLineagePath } from "./offshoot-contract.mjs";
+import { STOCK_RECORD_PATH_KINDS, isDesignerRecordPath, isLineagePath } from "./offshoot-contract.mjs";
 
 export const DESIGN_SYSTEM_MCP_SERVER_NAME = "timds-design-system";
 export const EDITING_GUIDE_URI = "timds://guide";
@@ -119,7 +119,7 @@ change. Work only in the Design System the user gave you.
 - \`.timds/parent.json\` is protected ancestry. Declare reviewed reusable
   structure in \`.timds/stock.json\`, the only editable file under
   \`.timds/\`: schemaVersion 1 and a \`paths\` array naming exact existing
-  \`src/pages/**/*.html\`, \`src/styles/**/*.css\`, or \`src/layout.html\`
+  ${STOCK_RECORD_PATH_KINDS.map((kind) => `\`${kind}\``).join(", ")}
   files. Globs and symbolic links are refused by \`run_check\`.
 - Edit authored tokens, source, documentation, components, navigation, and
   lightweight assets. Preserve the framework and visual language unless the

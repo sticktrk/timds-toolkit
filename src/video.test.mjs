@@ -2149,3 +2149,46 @@ test("finalize derives YouTube chapters from chapter-title boards and the timed 
   const plain = producer.compileProduction(boardRequest([beat("a")]));
   assert.equal(producer.finalizeProduction({ schemaVersion: 1, compiled: plain, timings: plain.scenes.map((scene) => ({ id: scene.id, durationMs: 2500, words: [] })), audioSrc: null }).plan.chapters, undefined);
 });
+
+test("brand.logo and brand.fontFiles paths accept a published media key the way the audio bed does", async (t) => {
+  const workspace = await videoFixture(t);
+  const raw = JSON.parse(await fs.readFile(path.join(workspace.designSystemRoot, "video", "contract.json"), "utf8"));
+  raw.brand.logo = { mediaKey: "brand-logo" };
+  raw.brand.fontFiles[0].path = { mediaKey: "brand-serif" };
+  await fs.writeFile(path.join(workspace.designSystemRoot, "video", "contract.json"), JSON.stringify(raw));
+  // Validation keeps the record instead of turning it into the string "[object Object]".
+  const contract = validateVideoContract(raw);
+  assert.deepEqual(contract.brand.logo, { mediaKey: "brand-logo" });
+  assert.deepEqual(contract.brand.fontFiles[0].path, { mediaKey: "brand-serif" });
+  for (const bad of [{ mediaKey: "" }, { key: "brand-logo" }, 7]) {
+    await assert.rejects(async () => validateVideoContract({ ...raw, brand: { ...raw.brand, logo: bad } }), /video contract brand\.logo/u);
+  }
+  // An unpublished key is reported by its field, never as a missing file.
+  const problems = await checkVideoBrandSources({ designSystemRoot: workspace.designSystemRoot, contract, mediaCatalog: { assets: [] } });
+  assert.deepEqual(problems, [
+    "brand.logo: media key brand-logo is not registered in media.json; publish it with timds assets first",
+    "brand.fontFiles[0].path: media key brand-serif is not registered in media.json; publish it with timds assets first",
+  ]);
+  await assert.rejects(checkVideoWorkspace(workspace), (error) => {
+    assert.match(error.message, /brand\.logo: media key brand-logo/u);
+    assert.doesNotMatch(error.message, /object Object/u);
+    return true;
+  });
+  // Published keys stage from the local media copy under the published file's extension.
+  const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
+  const logoBytes = await fs.readFile(path.join(workspace.designSystemRoot, "public", "logo.svg"));
+  const fontBytes = await fs.readFile(path.join(workspace.designSystemRoot, "public", "example.woff2"));
+  const mediaCatalog = { assets: [
+    { key: "brand-logo", publicUrl: "https://cdn.example/logo.svg", filename: "logo.svg", bytes: logoBytes.length, sha256: sha(logoBytes) },
+    { key: "brand-serif", publicUrl: "https://cdn.example/serif.woff2", filename: "serif.woff2", bytes: fontBytes.length, sha256: sha(fontBytes) },
+  ] };
+  const localManifest = { assets: [{ key: "brand-logo", path: "public/logo.svg" }, { key: "brand-serif", path: "public/example.woff2" }] };
+  assert.deepEqual(await checkVideoBrandSources({ designSystemRoot: workspace.designSystemRoot, contract, mediaCatalog }), []);
+  const publicRoot = path.join(workspace.designSystemRoot, "staged-public");
+  const brand = await stageVideoBrand({ designSystemRoot: workspace.designSystemRoot, contract, publicRoot, mediaCatalog, localManifest });
+  assert.match(brand.logo, /^brand\/logo-0-brand-logo\.svg$/u);
+  assert.match(brand.fontFiles[0].path, /^brand\/font-0-brand-serif\.woff2$/u);
+  assert.equal(brand.fontFiles[0].format, "woff2");
+  assert.equal(await fs.readFile(path.join(publicRoot, brand.logo), "utf8"), logoBytes.toString("utf8"));
+  assert.equal((await fs.readFile(path.join(publicRoot, brand.fontFiles[0].path))).toString("base64"), brand.fontFiles[0].dataBase64);
+});

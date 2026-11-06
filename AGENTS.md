@@ -34,7 +34,7 @@ source. The always-managed repository-local boundary is
 `.timds/installation.json`, `.agents/skills/timds-edit-design-system/`,
 `.agents/skills/timds-create-video/`, the four designer skills
 (`.agents/skills/design-start/`, `design-media/`, `design-ship/`,
-`design-handoff/`, listed in `designSystemSkillNames` in `src/core.mjs`),
+`design-handoff/`, listed in `designSystemSkillNames` in `src/skill-names.mjs`),
 and the legacy `.timds/cli/` tree only
 while removing it during migration. `init` and `upgrade` also create the
 `.claude/skills -> ../.agents/skills` link (`src/agent-skills.mjs`) when

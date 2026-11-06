@@ -1,6 +1,6 @@
 ---
 name: timds-edit-design-system
-description: Edit repository-owned TimDS design systems in either a standalone design-system repository or an embedded root design-system/ directory. Use for getting a client design system running locally; turning a freshly scaffolded starter into the client's system; changing tokens, documentation, components, navigation, imagery, fonts, or viewer source; adding externally stored full-resolution media; previewing the generated artifact; or preparing a guarded pull request for designer approval.
+description: Edit repository-owned TimDS design systems in either a standalone design-system repository or an embedded root design-system/ directory. Use for getting a client design system running locally; turning a freshly scaffolded starter or brand kit into the client's system; changing tokens, documentation, components, navigation, imagery, fonts, or viewer source; designing whole website pages and journeys in the system; adding externally stored full-resolution media; previewing the generated artifact; creating or feeding an offshoot of a parent system; upgrading the toolkit; working in a hosted session; or preparing a guarded pull request for designer approval.
 ---
 
 # Edit a TimDS Design System
@@ -34,13 +34,37 @@ retain their declared prerequisites. The agent runs these steps for the designer
    brand-kit gap with its fix. Run `npm run timds -- dev` to open the
    repository-declared authoring server.
 7. Treat the approved `@dtconcepts/timds` release line and resolved lockfile,
-   `.timds/installation.json`, the managed skills under `.agents/skills/`,
-   the TimDS workflows under `.github/workflows/`, the release automation
-   scripts (`scripts/release.mjs`, `scripts/release.sh`,
+   `.timds/installation.json` and every other record under `.timds/` except
+   the designer's `.timds/stock.json`, the managed skills under
+   `.agents/skills/`, the TimDS workflows under `.github/workflows/`, the
+   release automation scripts (`scripts/release.mjs`, `scripts/release.sh`,
    `scripts/check-versions.mjs`, `scripts/prepare-merge-release.mjs` and its
-   test), and the `systemId`, `version`, `artifact`, `media`, `consumer`, and
-   `workspace` entries of `timds.json` as protected tooling. Change them only
-   when the user asks to update TimDS.
+   test), and the `systemId`, `version`, `artifact`, `media`, `consumer`,
+   `bundle`, and `workspace` entries of `timds.json` as protected tooling.
+   Change them only when the user asks to update TimDS. The `brand` and
+   `machine` entries of `timds.json` are design configuration an editing
+   agent may change.
+
+## Authored and generated contract files
+
+When `.timds/contract-layout.json` exists (every system scaffolded or
+upgraded by a current release), the authored token and media records are
+the key maps under `tokens/<group>.json` and `media/<group>.json`.
+`tokens.json` and `media.json` at the Design System root are generated
+compatibility views: `check`, `assets` commands and `upgrade` rewrite them
+from the groups, so never hand-edit them and never commit a change to them
+alone. Without that record, `tokens.json` and `media.json` are the authored
+files themselves. The viewer and the hosted session transport follow the
+same rule, so an edit to a generated view is lost on the next build or is
+left out of the next update.
+
+## Related skills
+
+Four designer skills are installed beside this one and run the toolkit for
+the designer: `design-start` opens the workspace and reports its state,
+`design-media` stages, publishes and places imagery, `design-ship` finishes
+a change (it writes the changelog note and opens the draft pull request),
+and `design-handoff` writes the brief a developer ports a release from.
 
 ## Start from a fresh scaffold
 
@@ -53,21 +77,43 @@ system is ordinary design work:
    files, and voice guidance. Ask for what is missing rather than inventing it.
 2. Replace the values in `tokens/*.json`. The starter build emits each
    `group.name` token as the `--group-name` custom property in `tokens.css`;
-   add a token before using a new value in `src/styles/`.
+   add a token before using a new value in `src/styles/`. The starter
+   `check` fails on any color literal in `src/styles/*.css`, and warns when
+   the accent is nearly the text color or under 3:1 on the background, or
+   when the type scale is out of order; resolve those warnings rather than
+   reporting them as the system's choices.
 3. Read `src/site.json`. It declares every view and page; a page marked
    `"planned": true` has no source yet and is not built. Rewrite the authored
    fragments under `src/pages/` for the client, then author the planned ones:
-   create `src/pages/<view>/<slug>.html` and remove the flag. Remove planned
-   pages the system will not have and add the pages and views it needs.
-   Every print sheet and screen canvas is sized from `src/formats.json`;
-   add a format there, naming its page, before a template page previews it
-   with `{{canvas:ID}}`.
+   create `src/pages/<view>/<slug>.html` and remove the flag in the same
+   change, because a file and a `planned` flag for the same page fail the
+   build. A view's own page (an empty `slug`) is `src/pages/<view>/index.html`,
+   and `src/pages/index.html` is the overview, which moves to `/overview/`
+   when `home` names the view whose own page is the front page (the
+   starter's is the Use view, rendered with `"layout": "landing"`, without
+   the side navigation). A page with `promote` is linked as the call to
+   action in every app bar, and `group` sorts pages inside a view. Remove
+   planned pages the system will not have and add the pages and views it
+   needs. Every print sheet and screen canvas is sized from
+   `src/formats.json`; add a format there, naming its page, before a
+   template page previews it with `{{canvas:ID}}`.
 4. Add the logo under `src/assets/` and write the `brand/logo`, `brand/voice`,
    and other guidance pages, shaped as described in the next section. A
    fragment holds only the content of `<main>`; `src/layout.html` supplies the
    shell and the navigation.
 5. The starter `dev` server builds once and does not watch files. Rerun
    `npm run timds -- check` after an edit, then reload.
+
+The starter viewer fills these placeholders in fragments and the layout, and
+fails the build on one it does not know: `{{tokens:GROUP}}` (a token group's
+table), `{{formats:GROUP}}` (a format group's table), `{{canvas:ID}}` (a
+format's preview variables), `{{presets:GROUP}}` (the composer's preset
+cards), `{{count:formats|views|pages|designs}}`, `{{page:ID}}` (a page's
+address; it refuses a planned page), `{{nearest:ID}}` (the same, falling
+back to the nearest authored page while the page is planned), `{{sitemap}}`,
+`{{name}}`, `{{description}}`, `{{version}}`, `{{copy:KEY}}` (a string from
+`src/copy.json`), `{{media:KEY}}` (a catalog asset's `src/assets/` path) and
+`{{slots:GROUP_OR_KEY}}` (brand-kit slot guidance).
 
 The scaffolded `AGENTS.md` carries the same starter map. Once the system moves
 to another framework, follow `timds.json` `workspace` and that framework's
@@ -81,11 +127,15 @@ values in `src/copy.json`, media records and approved assets, and record capture
 facts and owner decisions on `brand/evidence`; do not regenerate the stock
 pages. Preserve confirmed/observed/assumed/unresolved labels, and never label
 arbitrary supplied copy as observed. Copy banks use newlines; numeric
-placeholders such as `{{copy:headlines.0}}` select a line, while the bare key
-renders the whole escaped string. Media placeholders use a catalog asset's
-regular path under `src/assets/`, alongside its existing stable public URL;
-missing keys use the sample wordmark or the Bold treatment, while an invalid
-explicit path fails. Run check and review the reported fallback keys, assumed
+placeholders such as `{{copy:headlines.0}}` select a line of the `headlines`
+or `ctas` bank, while the bare key renders the whole escaped string. Media
+slots have fixed keys (`logo`, `logo-on-dark`, `mark`, `favicon`, `photo-1`
+to `photo-6`, `illustration`, `icon-family`); `{{media:KEY}}` renders the
+catalog record's regular path under `src/assets/`, alongside its existing
+stable public URL, so filling a slot is a catalog record with that key and a
+`path` under `src/assets/` while the stock page stays as it is. Missing keys
+use the sample wordmark or the Bold treatment, while an invalid explicit
+path fails. Run check and review the reported fallback keys, assumed
 voice diagnostic, missing-logo gap, and all four treatments on the actual
 palette. The Voice page already carries guidance; do not mark it planned to
 recreate the ordinary starter's warning. Designs begin empty; author whole
@@ -95,11 +145,13 @@ the released reference for the developer's port into the product.
 ## Shape pages for the derived layer
 
 `check` reads the built HTML and CSS, never authored source, and derives
-`index.json`, `tokens.json`, `brand.json`, `formats.json`, `llms.txt`,
-`llms-full.txt`, a Markdown mirror of every page, and a `robots.txt` at the
-site root that names `llms.txt`. Video, product
-repositories, consumer agents, and anyone given the system's public link read
-only that layer, so structure the pages for it whatever the framework:
+`index.json`, `tokens.json`, `brand.json`, `formats.json`, `designs.json`,
+`changelog.json` (with the `/changelog/` page, rendered from `CHANGELOG.md`),
+`bundle.json` with the `bundle/` copies, `llms.txt`, `llms-full.txt`, a
+Markdown mirror of every page, and a `robots.txt` at the site root that
+names `llms.txt`. Video, product repositories, consumer agents, and anyone
+given the system's public link read only that layer, so structure the pages
+for it whatever the framework:
 
 - Give every page one `<h1>`; a page without one is skipped. When the `<h1>`
   is a direct child of `<main>`, the element before it becomes the eyebrow and
@@ -112,6 +164,12 @@ only that layer, so structure the pages for it whatever the framework:
   `.note`, and code in a `<pre>`. Other text is untyped prose, which the
   `check` summary counts. `timds.json` `machine` can name different selectors
   when the markup cannot change.
+- In the starter, a block is a `.block__head` with its `<h2>` and intro, a
+  live `<figure class="demo">` preview, then the class names, token table
+  and markup in a closed `<details class="spec-drawer"><summary>Spec
+  </summary>…</details>`: the page shows the brand first, and extraction
+  reads the drawer's table and code like any other block while skipping
+  the summary. Shape new blocks the same way so they match the stock pages.
 - Put a name on every asset with a `<figcaption>` or `alt`, and reference
   artifact files by site-absolute path such as `/assets/logo.svg`.
   Publication rewrites those to stable public URLs in the index and brand
@@ -187,7 +245,8 @@ selects the stock catalogs, history and fragments; absent means `starter`.
 Brand-kit stock pages use the same unmodified-fragment boundary. Every `upgrade` re-syncs an adopted system: the plumbing is
 brought to stock, new views, planned pages, and formats are appended
 without removing, reordering, or retitling anything the system declares,
-and a missing stock stylesheet link is added to `src/layout.html`. In a
+and a missing stock stylesheet link and the changelog link on the version
+chip are added to `src/layout.html`. In a
 system scaffolded by `init` (`"plumbing": "toolkit"` in the record) a local
 change to a stock script or stylesheet is replaced on the next upgrade and
 reported, so never make one there. In an adopted system (`"recorded"`) a
@@ -269,8 +328,10 @@ before publishing severed source; the local command cannot perform that step.
 
 1. Use the bounded release line selected by the user or DT Concepts operator.
    For the current package use `0.1.x`; never select unbounded `latest`.
-2. Confirm `devDependencies["@dtconcepts/timds"]` remains `"0.1.x"`, then run
-   from repository root:
+2. Confirm `devDependencies["@dtconcepts/timds"]` remains `"0.1.x"` and
+   `scripts.timds` is `timds`, commit everything first (the upgrade refuses a
+   dirty working tree and needs a committed npm v2 or v3 lockfile that
+   matches that requirement), then run from repository root:
 
 ```bash
 npm run timds -- upgrade --version 0.1.x
@@ -289,11 +350,19 @@ npm run timds -- defaults
 3. Never use `--force` without explicit authorization to replace locally
    modified managed tooling.
 4. For an older standalone repository, use `--auto-release` only when the user
-   asks to migrate it to the managed merge-to-patch flow. TimDS preserves
-   customized release automation unless `--force` is also authorized.
-5. Confirm the upgrade changed only the package manifest and lockfile, local AI
-   skill, installation record, workflow when intentionally updated, and removal
-   of any legacy `.timds/cli` tree.
+   asks to migrate it to the managed merge-to-release flow (dated versions,
+   rolled from `## Unreleased` on merge). TimDS preserves customized release
+   automation unless `--force` is also authorized.
+5. Confirm the upgrade changed only what it owns: the package manifest and
+   lockfile, the six managed skills under `.agents/skills/` and the
+   `.claude/skills` link, `.timds/installation.json`, the TimDS workflows
+   when intentionally updated, removal of any legacy `.timds/cli` tree, the
+   starter sync's files in an adopted system (`.timds/starter.json`, stock
+   plumbing, `src/site.json`, `src/formats.json`, managed overview and Use
+   fragments, the layout links, as its report lists them), and the one-time
+   contract-group migration (`tokens/`, `media/`,
+   `.timds/contract-layout.json` and the regenerated views). `upgrade --json`
+   prints the exact list. Anything else in the diff is a problem to report.
 6. Run `npm run timds -- doctor` and `npm run timds -- check`. Submit the
    tooling update separately from ordinary design work.
 
@@ -395,17 +464,25 @@ npm run timds -- assets add media-local/file.mp4 \
   --tags b-roll,campaign
 ```
 
-Use that logical key in viewer source. The local authoring server resolves it
-from `.timds/local-media.json`; a production build resolves it from the stable
-public URL in `media.json`. Authenticate through the operator portal and upload:
+Reference the asset from pages by what resolves everywhere: the starter viewer
+resolves `{{media:KEY}}` to the catalog record's regular `src/assets/` path
+(small display files such as a logo), never to a remote URL, so a
+published-only asset is referenced by the stable `publicUrl` in its record.
+A framework viewer can resolve keys with `resolveMediaSource` and serve
+staged files with `localMediaResponse` from `@dtconcepts/timds/media`.
+Authenticate through the operator portal (`auth login --portal-url` with
+`timds.json` `media.portalUrl` when it is not the default host) and upload:
 
 ```bash
-npm run timds -- login
+npm run timds -- auth login
 npm run timds -- assets publish
 ```
 
-`submit` publishes changed staged files automatically before validation. Commit
-the resulting `media.json` record, never the raw file or local manifest.
+`submit` publishes changed staged files automatically before validation in a
+Git checkout; a hosted `submit` does not, so publish first there. Commit the
+resulting catalog record (`media/<group>.json` plus the regenerated
+`media.json`, or `media.json` alone without a contract layout), never the
+raw file or local manifest.
 `assets add` records the catalog checksum when staging. `assets publish` and
 `submit` stop before uploading if a staged replacement conflicts with the
 current catalog, including older staging entries without that baseline. Keep
@@ -449,11 +526,18 @@ contrast, overflow, focus states, and the requested change.
 ## Keep linked consumers release-pinned
 
 When a standalone `timds.json` declares a `consumer`, treat the Design System
-release as the source of the consumer's submodule update. Every accepted change
-on `main` becomes a patch release: CI synchronizes the version, publishes the
-exact commit, requests portal publication, and only then opens or refreshes a gitlink-only pull request in
-the consumer. Tags are not required. `scripts/release.sh` remains available for
-an intentional explicit version advance.
+release as the source of the consumer's pin update. Every accepted change on
+`main` becomes a dated release (`YYYY.MM.DD-N`: the UTC day and the release
+number that day; never edit `version` by hand): CI rolls the `## Unreleased`
+notes into that version, publishes the exact commit, requests portal
+publication, and only then opens or refreshes a pull request in the consumer
+that moves its pin. A consumer with a published pin (`designSystem.version`
+in `timds.consumer.json`) has that version moved, which fetches and verifies
+the bundle; a consumer that still carries the system as a git submodule has
+its gitlink advanced, the legacy case, which `timds consumer migrate` in the
+product repository replaces with a published pin when separately authorized.
+Tags are not required. `scripts/release.sh [YYYY.MM.DD-N]` remains available
+for an intentional explicit release.
 
 Portal promotion respects the system's Automatic updates setting. ON publishes
 and verifies the public root; OFF reports a candidate waiting for an operator.
@@ -465,24 +549,33 @@ stale or mismatched bytes fail. `extract --publish` only uploads CDN files. Do
 not enable Automatic updates or substitute client-bound/consumer credentials
 to get publication through.
 
-The consumer owns its `.gitmodules` record and reviewed gitlink. Prefer a
-same-host relative submodule URL, and never merge the consumer pull request or
-deploy the consumer without separate authorization. If
+The consumer owns its manifest pin (and, in the legacy case, its
+`.gitmodules` record and reviewed gitlink); never merge the consumer pull
+request or deploy the consumer without separate authorization. If
 `TIMDS_CONSUMER_TOKEN` is not configured with contents and pull-request access
 to the declared consumer repository, report that setup requirement rather than
 copying a workstation credential into GitHub Actions.
 
 ## Submit only when requested
 
-When asked to push or open a pull request, run:
+Every change carries its release note: `submit` refuses to run while
+`CHANGELOG.md` has nothing under `## Unreleased`, because the merge rolls
+those notes into the dated version and an empty one would publish a release
+that says nothing. Before submitting, append one or two sentences there in
+the designer's words, leading with the area (`Brand · Color: ...`,
+`Maintenance: ...`), as the `design-ship` skill describes; the published
+system shows them at `/changelog/` and in `changelog.json`. Then, when asked
+to push or open a pull request, run:
 
 ```bash
 npm run timds -- submit --message "Concise change summary"
 ```
 
-The command validates and rebuilds, checks the standalone or embedded scope,
-creates a review branch when needed, pushes it, and opens a draft pull request
-against the default branch. Do not merge, publish, deploy, upgrade tooling, or
+The command checks the standalone or embedded scope, publishes staged media,
+validates and rebuilds, creates a review branch when needed, pushes it, and
+opens a draft pull request against the default branch. `--dry-run` prints
+the exact commands first. A workspace whose provider is `local` does not
+submit. Do not merge, publish, deploy, upgrade tooling, or
 roll back without separate authorization.
 
 ## Report the result
@@ -504,6 +597,9 @@ are `timds start`, `join`, `pull`, `update`, `submit`, `claim`,
 `active-work`, `whoami`, `systems`, `principals`, `draft create|list|close`,
 and `sessions close`. When the human names a design system you have no id
 for, `timds systems` lists every system the signed-in person can see.
+Outside a session workspace, `active-work`, `principals` and `draft`
+commands need `--system-id ID` and `--portal-url URL`: only `start`, `join`,
+`whoami` and `systems` fall back to the saved login.
 
 Join before you start. When the human names an open session (a session id, a
 Studio link, or "the session I have open"), attach to it and send work with
@@ -539,9 +635,14 @@ loopback callback; portals keep device login. Let the human complete sign-in.
 the portal's `--device` flow. Credentials and refresh tokens stay outside the
 workspace; never copy them into a prompt, source file or session metadata.
 
-Author token key maps under `tokens/` and media key maps under `media/`.
-`tokens.json` and `media.json` are generated views after upgrade. Run check
-for reference integrity and build validation. When the session moved while
+Author token key maps under `tokens/` and media key maps under `media/`
+when `.timds/contract-layout.json` exists; an edit to the generated
+`tokens.json` or `media.json` is left out of every update and submit. A
+change set is limited to 10 MiB, so large media goes through `assets add`
+and the asset store, never into the session. Run check for reference
+integrity and build validation. Hosted `submit` refuses, like Git `submit`,
+while `CHANGELOG.md` has nothing under `## Unreleased`; write the note
+first. When the session moved while
 you worked, `timds pull` brings its current files into the workspace and
 keeps your edits. Key conflicts return exactly `path`, `key`, `base`, `mine`,
 `theirs`; resolve with

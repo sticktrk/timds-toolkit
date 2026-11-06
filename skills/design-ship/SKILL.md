@@ -23,11 +23,16 @@ retain their declared prerequisites. The agent runs these steps for the designer
 ## Validate
 
 1. Run `npm run timds -- check` until it passes. Fix the cause, never the
-   symptom: a color literal in a stylesheet becomes a token in `tokens.json`
-   first; a broken link gets the site-absolute artifact path; a class a
-   website design uses that no stylesheet declares is added to the system
-   stylesheet and documented on the components page. Warnings about a
-   missing voice page or logo are gaps to name in the report, not to paper
+   symptom: a color literal in a stylesheet becomes an authored token first
+   (`tokens/<group>.json`; `tokens.json` is generated from the groups when
+   `.timds/contract-layout.json` exists, and is the authored file only in the
+   older single-file layout); a broken link gets the site-absolute artifact
+   path; a class a website design uses that no stylesheet declares is added
+   to the system stylesheet and documented on the components page, in the
+   block's Spec drawer after its preview. Warnings about a missing voice
+   page or logo, an accent nearly the text color or under 3:1 on the
+   background, an out-of-order type scale, or a brand kit's assumed voice
+   and stock slot fallbacks are gaps to name in the report, not to paper
    over. A warning that a design's pages have no journey is fixed before
    shipping when the change added them: pages a visitor moves through in
    order (a funnel, a checkout, a form with its states) are declared as a
@@ -36,16 +41,20 @@ retain their declared prerequisites. The agent runs these steps for the designer
    storyboard at `/designs/<design>/journeys/<id>/` shows them in order.
 2. Run `npm run timds -- brand` and note any gap the change was meant to
    close that is still open.
-3. Run `npm run timds -- diff` to see exactly what will ship, and confirm it
-   is only this change. Unrelated files, protected tooling, `dist/`, media
-   originals, and credentials never go in.
+3. In a Git checkout, run `npm run timds -- diff` to see exactly what will
+   ship, and confirm it is only this change. Unrelated files, protected
+   tooling, `dist/`, media originals, and credentials never go in. In a
+   hosted workspace (`timds.json` has a hosted provider, or
+   `.timds/session.json` exists) there is no Git: `timds status` and the
+   session's claims say what is yours.
 
 ## Look at it
 
 Serve the exact artifact with `npm run timds -- preview` and open every
 changed page, every website design route and state the change touched, and
 the storyboard of every journey those pages belong to,
-at desktop and phone widths and in each color scheme the system offers.
+at desktop and phone widths (1440 and 390, the widths the product's review
+uses) and in each color scheme the system offers.
 Use the browser tools when they are available and fix what you see before
 continuing. When you cannot open a browser, say plainly in the report that
 the pages were built and validated but not viewed.
@@ -57,15 +66,19 @@ Append one entry after the existing notes under `## Unreleased` in
 additions can merge. Write in the designer's
 language: what changed and where, as someone reading the release notes would
 want it. One or two sentences; no file paths unless a reader needs them.
-Lead with the area the change touches, so the note reads `Brand · Color:
-...`, `Print DS: ...`, or `Web DS · Components: ...`; the published system
-shows every release at `/changelog/` with that area as its label. `submit`
-refuses a change without a note, because merging rolls the notes into the
-release and an empty one would publish a release that says nothing.
+Lead with the area the change touches: the view label from `src/site.json`,
+then the page, so the note reads `Brand · Color: ...`, `Print DS: ...`, or
+`Web DS · Components: ...` (a brand kit's labels are `Web`, `Print`, `Ads`
+and so on; toolkit work is `Maintenance: ...`); the published system shows
+every release at `/changelog/` with that area as its label. Write a note for
+every change even when others are already listed: `submit` refuses to run
+while `## Unreleased` is empty, because merging rolls the notes into the
+release and an empty one would publish a release that says nothing, and the
+gate checks only that the section is not empty.
 
 ## Submit
 
-Run, with a title the designer would recognize:
+In a Git checkout, run, with a title the designer would recognize:
 
 ```bash
 npm run timds -- submit --message "Describe the change"
@@ -73,20 +86,33 @@ npm run timds -- submit --message "Describe the change"
 
 It publishes staged media, validates, creates a `design-system/<change>`
 branch when the checkout is still on the default branch, commits, pushes,
-and opens a draft pull request. If it refuses, read the reason and fix it:
-changes outside the Design System scope come out of the branch; an
-unauthenticated media publish needs the designer's one-time
-`npm run timds -- auth login`.
+and opens a draft pull request; `--dry-run` prints the commands first. If it
+refuses, read the reason and fix it: changes outside the Design System scope
+come out of the branch; an unauthenticated media publish needs the
+designer's one-time `npm run timds -- auth login`. A workspace whose
+provider is `local` does not submit at all; say so.
+
+In a hosted workspace, publish any staged media first, then
+`timds submit --note "Describe the change"` (`--message` is accepted too).
+It freezes a submission with a preview for review in Studio; there is no
+branch and no pull request. Report the submission id and the Preview URL
+it prints.
 
 ## Report, and say what happens next
 
-Give the designer the pull-request link and a two-sentence summary of what
-is in it. Then explain the path to production once, in order:
+Give the designer the pull-request link (or the submission id and preview
+URL) and a two-sentence summary of what is in it. Then explain the path to
+production once, in order:
 
-1. An operator reviews and merges the pull request. Merging is the release
-   decision: every accepted change becomes a dated version (`2026.10.12-1`,
-   the day and the release number that day) and is published, with its notes
-   on the changelog page.
+1. An operator reviews and merges the pull request, or reviews the
+   submission in Studio. In a standalone system with managed releases,
+   merging is the release decision: every accepted change becomes a dated
+   version (`2026.10.12-1`, the day and the release number that day) with its
+   notes on the changelog page, and publication to the system's public root
+   follows its Automatic updates setting (on: published and verified; off:
+   an operator publishes the candidate). An embedded system's workflow only
+   validates; its release is whatever the product's own process does. A
+   hosted system is published from Studio by someone with the right to.
 2. The product site keeps using the version it pins until a developer moves
    that pin and ports what changed. The `design-handoff` skill writes the
    brief that developer needs; offer to run it once the release exists.

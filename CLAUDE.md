@@ -319,9 +319,11 @@ they are written once and then client-owned, so keep them accurate for a fresh
 scaffold. `skills/` holds the managed agent skills installed under
 `.agents/skills/`: for Design System repos the editing and video
 procedures plus the four designer skills (`design-start`, `design-media`,
-`design-ship`, `design-handoff`; names in `designSystemSkillNames` in
-`src/core.mjs`), and for consumer repos `timds-consume-design-system` and
-`timds-update-design-system` (names in `CONSUMER_SKILL_NAMES` in
+`design-ship`, `design-handoff`; names in `designSystemSkillNames`, declared in
+`src/skill-names.mjs` and re-exported from `src/core.mjs`), and for consumer
+repos `timds-consume-design-system` and `timds-update-design-system` (names
+in `CONSUMER_SKILL_NAMES`, declared in `src/consumer.mjs` beside the
+always-allowed paths derived from them and re-exported from
 `src/consumer-init.mjs`, rendered per manifest). `src/agent-skills.mjs`
 links `.claude/skills` to `.agents/skills` in both repository kinds.
 `src/skills-install.mjs` is `timds skills install`, for the folder a
