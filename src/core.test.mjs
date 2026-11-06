@@ -837,8 +837,10 @@ test("initializes the reusable standalone repository shape", async (t) => {
   const claudeEntry = await fs.readFile(path.join(repoRoot, "CLAUDE.md"), "utf8");
   assert.match(claudeEntry, /^@AGENTS\.md$/m);
   assert.match(claudeEntry, /`\.agents\/skills\/`/);
-  for (const document of [agentContract, claudeEntry, await fs.readFile(path.join(repoRoot, "README.md"), "utf8")]) {
-    assert.doesNotMatch(document, /__(?:TIMDS_CLI|CONTRACT_DESCRIPTION|DIST_PATH|SKILLS_PATH)__/);
+  const mediaReadme = await fs.readFile(path.join(repoRoot, "media-local", "README.md"), "utf8");
+  assert.match(mediaReadme, /npm run timds -- assets add media-local\/example\.mp4/);
+  for (const document of [agentContract, claudeEntry, await fs.readFile(path.join(repoRoot, "README.md"), "utf8"), mediaReadme]) {
+    assert.doesNotMatch(document, /__(?:TIMDS_CLI|CONTRACT_DESCRIPTION|DIST_PATH|MEDIA_LOCAL|SKILLS_PATH)__/);
   }
   const packageJson = JSON.parse(await fs.readFile(path.join(repoRoot, "package.json"), "utf8"));
   // A fresh system is the first release of the day it was scaffolded, in timds.json, package.json, and the changelog alike.

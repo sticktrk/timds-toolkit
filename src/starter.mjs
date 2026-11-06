@@ -218,6 +218,9 @@ export const legacyStarterFileHashes = new Map([
   ["src/pages/social/index.html", [
     "fa10c0442225ec7f67a3b88e2d8277793186e27036dbc257b39432b903e3fbe4", // v0.1.451
   ]],
+  ["src/pages/use/compose.html", [
+    "b13c74cb4e280e4726cbfa11abcfa42ac998034c6b52cb9d22f8d6e7abed2bdf", // v0.1.490, v0.1.491
+  ]],
 ]);
 
 /** Stock catalogs earlier releases scaffolded, for a system without a record. */
