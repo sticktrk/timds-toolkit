@@ -202,3 +202,10 @@ test("skills install refuses folders whose skills another TimDS record owns", as
   }
   await assert.rejects(runCli(["skills", "list"]), /Usage: timds skills install/);
 });
+
+test("the installable skill names are the Design System's designer skills, from one source", async () => {
+  const { designSystemSkillNames, designerSkillNames } = await import("./core.mjs");
+  assert.deepEqual([...INSTALLABLE_SKILL_NAMES], designSystemSkillNames.filter((name) => name !== "timds-create-video"));
+  assert.deepEqual([...INSTALLABLE_SKILL_NAMES], ["timds-edit-design-system", ...designerSkillNames]);
+  for (const name of INSTALLABLE_SKILL_NAMES) await fs.access(new URL(`../skills/${name}/SKILL.md`, import.meta.url));
+});

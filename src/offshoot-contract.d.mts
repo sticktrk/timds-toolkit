@@ -36,6 +36,8 @@ export type StockRecord = { schemaVersion: 1; paths: string[] };
 
 export const PARENT_RECORD_FILE: ".timds/parent.json";
 export const STOCK_RECORD_FILE: ".timds/stock.json";
+/** The exact source files `.timds/stock.json` may name, as path patterns. */
+export const STOCK_RECORD_PATH_KINDS: readonly string[];
 /** Portable case aliases classify the same repository record. */
 export function isLineagePath(value: unknown): boolean;
 export function isDesignerRecordPath(value: unknown): boolean;

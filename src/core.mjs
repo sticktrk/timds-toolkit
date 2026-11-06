@@ -1,14 +1,15 @@
 import { isBinaryRuntime, javascriptCommand, packageIdentity, runtimeEnvironment } from "./executable.mjs";
 import { assertBinaryInstallation, binaryInstallationRecord, binaryWorkspaceCommand, isStockWorkspace, readBinaryInstallation, readInstallation, renderBinaryInstructions, requireBinaryRelease, stockWorkspaceCommands, withBinarySelection, withFileRollback } from "./binary-installation.mjs";
-import { hasContractGroups, migrateContractGroups, syncContractViews } from "./contract-groups.mjs";
+import { CONTRACT_LAYOUT_FILE, hasContractGroups, migrateContractGroups, syncContractViews } from "./contract-groups.mjs";
 import { parentLineage, readParentRecord, validateOffshootRecords } from "./offshoot-contract.mjs";
 import { loadOffshootSource, severOffshoot, shootOffshoot } from "./offshoots.mjs";
 import { describeFeed, feedOffshoot } from "./feed.mjs";
 import { requireCleanPaths } from "./clean-tree.mjs";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { spawn } from "node:child_process";
-import { linkClaudeSkills } from "./agent-skills.mjs";
+import { CLAUDE_SKILLS_LINK, linkClaudeSkills } from "./agent-skills.mjs";
 import { SKILLS_HELP, installSkills, staleSkillsNotice } from "./skills-install.mjs";
+import { designerSkillNames, designSystemSkillNames } from "./skill-names.mjs";
 import { createHash } from "node:crypto";
 import { createReadStream, existsSync } from "node:fs";
 import { promises as fs } from "node:fs";
@@ -43,7 +44,7 @@ import { normalizeProvider, runHostedCommand, sessionReference, workspaceProvide
 import { buildBundle, describeBundle, normalizeBundleConfig } from "./bundle.mjs";
 import { DESIGNS_SOURCE_DIRECTORY, buildDesigns, checkDesigns, declaredClasses, readDesignCatalog, renderDesigns } from "./designs.mjs";
 import { CHANGELOG_FILE, CHANGELOG_OUTPUT_DIRECTORY, buildChangelog, readUnreleasedNotes, renderChangelog, versionDate } from "./changelog.mjs";
-import { STARTER_LAYOUT_FILE, STARTER_RECORD_FILE, describeStarterSync, forceReplaceable, isStarterSystem, knownStarterHashes, planStockFile, readStarterRecord, recordFreshStarter, recordStarterFiles, starterKind, starterPaths, starterPlumbingFiles, syncStarter } from "./starter.mjs";
+import { STARTER_KINDS, STARTER_LAYOUT_FILE, STARTER_RECORD_FILE, describeStarterSync, forceReplaceable, isStarterSystem, knownStarterHashes, planStockFile, readStarterRecord, recordFreshStarter, recordStarterFiles, starterKind, starterPaths, starterPlumbingFiles, syncStarter } from "./starter.mjs";
 import { extractArtifact, normalizeMachineConfig } from "./extract.mjs";
 import { readFormatCatalog } from "./formats.mjs";
 import { normalizeBrandGuidance } from "./brand.mjs";
@@ -970,8 +971,47 @@ async function toolkitPackageIdentity(root = packageRoot) {
 // editing and video procedures: each one takes a moment of the designer's
 // day (starting, adding media, shipping, handing off to developers) and
 // runs the tooling for it, so the designer never has to.
-export const designerSkillNames = ["design-start", "design-media", "design-ship", "design-handoff"];
-export const designSystemSkillNames = ["timds-edit-design-system", "timds-create-video", ...designerSkillNames];
+// The skill names live in skill-names.mjs so `skills install` shares them; they stay exported here for existing callers.
+export { designerSkillNames, designSystemSkillNames };
+/**
+ * Every path `upgrade` may write, relative to the repository root with POSIX
+ * separators: the dependency selection, the managed boundary (installation
+ * record, skills, the Claude skills link, release and dependency automation),
+ * the starter sync of either starter kind, the contract-group migration, and
+ * the artifact `check` rebuilds. `designSystemPrefix` is "" for a standalone
+ * system and "design-system/" for an embedded one. The dependency-upgrade
+ * workflow reads this from the selected release so an upgrade PR fails only
+ * on authored files, whatever that release's sync writes.
+ */
+export function upgradeWriteBoundary({ designSystemPrefix = "" } = {}) {
+  const inSystem = (relative) => `${designSystemPrefix}${relative}`;
+  const files = new Set([
+    "package.json",
+    "package-lock.json",
+    CLAUDE_SKILLS_LINK,
+    ...dependencyAutomationFiles.map(([relative]) => relative),
+    ...standaloneReleaseAutomationFiles.map(([relative]) => relative),
+    inSystem(".timds/installation.json"),
+    inSystem(CONTRACT_LAYOUT_FILE),
+    inSystem("tokens.json"),
+    inSystem("media.json"),
+    ...STARTER_KINDS.flatMap((kind) => starterPaths(kind)).map(inSystem),
+  ]);
+  const roots = [
+    ...designSystemSkillNames.map((name) => `.agents/skills/${name}/`),
+    inSystem("dist/"),
+    inSystem("tokens/"),
+    inSystem("media/"),
+  ];
+  return { files: [...files], roots };
+}
+
+/** Whether `file` (repository-relative, POSIX separators) is inside `upgradeWriteBoundary`. */
+export function isUpgradeWritePath(file, options = {}) {
+  const { files, roots } = upgradeWriteBoundary(options);
+  return files.includes(file) || roots.some((root) => file.startsWith(root));
+}
+
 function managedToolkitPaths(repoRoot, designSystemRoot) {
   return {
     installationPath: path.join(designSystemRoot, ".timds", "installation.json"),
@@ -1234,7 +1274,6 @@ export async function initializeRepository(repoRootInput, {
   await writeIfMissing(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, created);
   await writeIfMissing(path.join(designSystemRoot, "tokens.json"), await template(selectedStarter === "starter" ? "tokens.json" : `${selectedStarter}/tokens.json`), created);
   await writeIfMissing(path.join(designSystemRoot, "media.json"), await template("media.json"), created);
-  await writeIfMissing(path.join(designSystemRoot, "media-local", "README.md"), await template("media-local-README.md"), created);
   for (const line of (await template("design-system-gitignore")).split(/\r?\n/).map((entry) => entry.trim()).filter(Boolean)) {
     await ensureGitignoreLine(path.join(designSystemRoot, ".gitignore"), line, created);
   }
@@ -1244,11 +1283,18 @@ export async function initializeRepository(repoRootInput, {
   const contractDescription = standalone
     ? "This repository is the editable source and static publication contract for TimDS."
     : "This root `design-system/` directory is the editable source and static publication contract for TimDS.";
-  const renderTemplate = (content) => (isBinaryRuntime() ? renderBinaryInstructions(content) : content)
-    .replaceAll("__TIMDS_CLI__", cliCommand)
-    .replaceAll("__CONTRACT_DESCRIPTION__", contractDescription)
-    .replaceAll("__DIST_PATH__", standalone ? "dist/" : "design-system/dist/")
-    .replaceAll("__SKILLS_PATH__", standalone ? ".agents/skills/" : "../.agents/skills/");
+  // The placeholders are filled first: the binary rendering rewrites the
+  // filled npm commands (`timds-cli upgrade --version 0.1.x` becomes the exact
+  // selection the executable accepts), so it must see them.
+  const renderTemplate = (content) => {
+    const filled = content
+      .replaceAll("__TIMDS_CLI__", cliCommand)
+      .replaceAll("__CONTRACT_DESCRIPTION__", contractDescription)
+      .replaceAll("__DIST_PATH__", standalone ? "dist/" : "design-system/dist/")
+      .replaceAll("__SKILLS_PATH__", standalone ? ".agents/skills/" : "../.agents/skills/");
+    return isBinaryRuntime() ? renderBinaryInstructions(filled) : filled;
+  };
+  await writeIfMissing(path.join(designSystemRoot, "media-local", "README.md"), renderTemplate(await template("media-local-README.md")), created);
   await writeIfMissing(path.join(designSystemRoot, "AGENTS.md"), renderTemplate(await template("design-system-AGENTS.md")), created);
   // Claude Code reads CLAUDE.md, not AGENTS.md; the pointer imports the contract.
   await writeIfMissing(path.join(designSystemRoot, "CLAUDE.md"), renderTemplate(await template("design-system-CLAUDE.md")), created);
@@ -1947,7 +1993,8 @@ export async function runCli(argv) {
     return runConsumerCli(rest, { output });
   }
   const { options, positional } = parseArguments(rest);
-  if (options.help || ["help", "--help", "-h"].includes(command)) {
+  // `video --help` belongs to the video command, which prints its own help.
+  if ((options.help && command !== "video") || ["help", "--help", "-h"].includes(command)) {
     output(helpText());
     return;
   }
@@ -2085,7 +2132,7 @@ export async function runCli(argv) {
     if (videoCommand === "lab") {
       if (options.serve) {
         const { serveVideoLab } = await import("./video-lab-server.mjs");
-        return serveVideoLab(workspace, { port: options.port || undefined, log: output });
+        return serveVideoLab(workspace, { port: options.port || undefined, python: options.python, voice: options.voice, log: output });
       }
       return runVideoLab(workspace, videoArgument || undefined, { list: Boolean(options.list), plan: Boolean(options.plan), prepare: Boolean(options.prepare), render: Boolean(options.render), silent: Boolean(options.silent), voice: options.voice, python: options.python, log: output });
     }
