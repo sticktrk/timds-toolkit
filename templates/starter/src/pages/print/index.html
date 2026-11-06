@@ -38,15 +38,19 @@
 <section class="block" id="formats">
   <div class="block__head">
     <h2 class="h2">Formats</h2>
-    <p>Every template page sizes its previews from the <code>print</code> group in <code>src/formats.json</code>. Bleed extends past the trim line; live type and the mark stay inside the safe area.</p>
+    <p>Every template page sizes its previews from one catalog. Bleed extends past the trim line; live type and the mark stay inside the safe area.</p>
   </div>
   {{formats:print}}
+  <details class="spec-drawer">
+    <summary>Spec</summary>
+    <div class="note"><b>Catalog.</b> This list is the <code>print</code> group in <code>src/formats.json</code>, in inches; every preview on this view reads it.</div>
+  </details>
 </section>
 
 <section class="block" id="previews">
   <div class="block__head">
     <h2 class="h2">Previews</h2>
-    <p>A sheet is a print canvas (<code>canvas--print</code>) sized from the catalog, so one preview unit is one inch and type is set in points. It is composed from the same pieces as a screen canvas, in <code>src/styles/canvas.css</code>. Turn on the guides to see the safe area.</p>
+    <p>A sheet is a print canvas sized from the catalog, so one preview unit is one inch and type is set in points. It is composed from the same pieces as a screen canvas. Turn on the guides to see the safe area.</p>
   </div>
   <figure class="demo">
     <label class="canvas-guides"><input type="checkbox"> Show guides</label>
@@ -69,6 +73,10 @@
       </div>
     </div>
   </figure>
+  <details class="spec-drawer">
+    <summary>Spec</summary>
+    <div class="note"><b>Pieces.</b> A print sheet is a <code>.canvas.canvas--print</code>, styled with the screen canvas pieces in <code>src/styles/canvas.css</code>.</div>
+  </details>
 </section>
 
 <section class="block" id="handoff">

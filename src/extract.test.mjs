@@ -98,6 +98,31 @@ test("joins figure assets to media records and keeps caption lines", () => {
   assert.deepEqual(asset.lines, ["Push-in from behind", "Loss and contemplation. Strong hook shot."]);
 });
 
+test("a spec drawer's summary is chrome: its table and code are harvested, the label is not prose", () => {
+  const html = `<!doctype html><html><body><main class="content">
+    <h1 class="page-title">Components</h1>
+    <section class="block" id="buttons">
+      <h2 class="h2">Buttons</h2>
+      <p>A button starts an action.</p>
+      <figure class="demo"><button type="button">Go</button></figure>
+      <details class="spec-drawer">
+        <summary>Spec</summary>
+        <table class="spec"><thead><tr><th>Variant</th><th>Class</th></tr></thead><tbody><tr><td>Primary</td><td><code>.button</code></td></tr></tbody></table>
+        <pre>&lt;button class="button"&gt;Go&lt;/button&gt;</pre>
+        <div class="note">Styled in <code>/styles/system.css</code>.</div>
+      </details>
+    </section>
+  </main></body></html>`;
+  const page = extractPage(html, { pageId: "web/components", url: "/web/components" });
+  const [block] = page.blocks;
+  assert.equal(block.intro, "A button starts an action.");
+  assert.deepEqual(block.specs[0].rows.map((row) => row.fields.Class), [".button"]);
+  assert.equal(block.code[0].text, '<button class="button">Go</button>');
+  assert.deepEqual(block.notes.map((entry) => entry.text), ["Styled in `/styles/system.css`."]);
+  assert.equal(block.prose, undefined);
+  assert.ok(!blockToMarkdown(block).includes("Spec"));
+});
+
 test("captures unrecognized content as untyped prose instead of dropping it", () => {
   const block = page.blocks.find((entry) => entry.id.endsWith("#clips"));
   assert.deepEqual(block.prose.map((entry) => entry.text), ["An untyped page family"]);

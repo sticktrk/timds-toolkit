@@ -21,15 +21,19 @@
 <section class="block" id="formats">
   <div class="block__head">
     <h2 class="h2">Every format</h2>
-    <p>The catalog is the <code>digital</code> group in <code>src/formats.json</code>. Previews, spec tables, and this list all read it, so a size changes in one place. Sizes and limits are the platforms' own; confirm them against current specifications before a campaign ships.</p>
+    <p>Previews, spec tables, and this list all read one catalog, so a size changes in one place. Sizes and limits are the platforms' own; confirm them against current specifications before a campaign ships.</p>
   </div>
   {{formats:digital}}
+  <details class="spec-drawer">
+    <summary>Spec</summary>
+    <div class="note"><b>Catalog.</b> This list is the <code>digital</code> group in <code>src/formats.json</code>; every preview and spec table on this view reads it.</div>
+  </details>
 </section>
 
 <section class="block" id="previews">
   <div class="block__head">
     <h2 class="h2">Previews</h2>
-    <p>A template is a canvas sized from the catalog and composed from the pieces in <code>src/styles/canvas.css</code>: a safe-area box, an eyebrow, a display line, a button, and a foot. Everything inside is written in design pixels, so the same markup is a leaderboard or a billboard. Turn on the guides to see the safe area and any band the platform covers with its own interface.</p>
+    <p>A template is a canvas sized from the catalog and composed from a few pieces: a safe-area box, an eyebrow, a display line, a button, and a foot. Everything inside is written in design pixels, so the same template is a leaderboard or a billboard. Turn on the guides to see the safe area and any band the platform covers with its own interface.</p>
   </div>
   <figure class="demo">
     <label class="canvas-guides"><input type="checkbox"> Show guides</label>
@@ -55,7 +59,9 @@
       </div>
     </div>
   </figure>
-  <pre>&lt;div class="canvas-frame" style="&#123;&#123;canvas:gdn-300x250&#125;&#125;"&gt;
+  <details class="spec-drawer">
+    <summary>Spec</summary>
+    <pre>&lt;div class="canvas-frame" style="&#123;&#123;canvas:gdn-300x250&#125;&#125;"&gt;
   &lt;div class="canvas"&gt;
     &lt;div class="canvas-ui"&gt;&lt;/div&gt;
     &lt;div class="canvas-safe"&gt;
@@ -65,6 +71,8 @@
     &lt;/div&gt;
   &lt;/div&gt;
 &lt;/div&gt;</pre>
+    <div class="note"><b>Pieces.</b> The canvas pieces are styled in <code>src/styles/canvas.css</code>; the <code>canvas</code> placeholder fills a frame's size from the catalog.</div>
+  </details>
 </section>
 
 <section class="block" id="delivery">
