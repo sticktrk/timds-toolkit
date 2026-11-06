@@ -1234,21 +1234,25 @@ export async function initializeRepository(repoRootInput, {
   await writeIfMissing(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, created);
   await writeIfMissing(path.join(designSystemRoot, "tokens.json"), await template(selectedStarter === "starter" ? "tokens.json" : `${selectedStarter}/tokens.json`), created);
   await writeIfMissing(path.join(designSystemRoot, "media.json"), await template("media.json"), created);
-  await writeIfMissing(path.join(designSystemRoot, "media-local", "README.md"), await template("media-local-README.md"), created);
+  const cliCommand = isBinaryRuntime() ? "timds-cli" : "npm run timds --";
+  const contractDescription = standalone
+    ? "This repository is the editable source and static publication contract for TimDS."
+    : "This root `design-system/` directory is the editable source and static publication contract for TimDS.";
+  // The scaffolded docs name the CLI, the layout's paths, and the installation
+  // mode; `__MEDIA_LOCAL__` is the staging folder from the repository root,
+  // where `assets add` resolves its FILE argument.
+  const renderTemplate = (content) => (isBinaryRuntime() ? renderBinaryInstructions(content) : content)
+    .replaceAll("__TIMDS_CLI__", cliCommand)
+    .replaceAll("__CONTRACT_DESCRIPTION__", contractDescription)
+    .replaceAll("__DIST_PATH__", standalone ? "dist/" : "design-system/dist/")
+    .replaceAll("__MEDIA_LOCAL__", standalone ? "media-local/" : "design-system/media-local/")
+    .replaceAll("__SKILLS_PATH__", standalone ? ".agents/skills/" : "../.agents/skills/");
+  await writeIfMissing(path.join(designSystemRoot, "media-local", "README.md"), renderTemplate(await template("media-local-README.md")), created);
   for (const line of (await template("design-system-gitignore")).split(/\r?\n/).map((entry) => entry.trim()).filter(Boolean)) {
     await ensureGitignoreLine(path.join(designSystemRoot, ".gitignore"), line, created);
   }
   await ensureGitignoreLine(path.join(repoRoot, ".gitignore"), "node_modules/", created);
   if (standalone) await ensureGitignoreLine(path.join(designSystemRoot, ".gitignore"), "dist/", created);
-  const cliCommand = isBinaryRuntime() ? "timds-cli" : "npm run timds --";
-  const contractDescription = standalone
-    ? "This repository is the editable source and static publication contract for TimDS."
-    : "This root `design-system/` directory is the editable source and static publication contract for TimDS.";
-  const renderTemplate = (content) => (isBinaryRuntime() ? renderBinaryInstructions(content) : content)
-    .replaceAll("__TIMDS_CLI__", cliCommand)
-    .replaceAll("__CONTRACT_DESCRIPTION__", contractDescription)
-    .replaceAll("__DIST_PATH__", standalone ? "dist/" : "design-system/dist/")
-    .replaceAll("__SKILLS_PATH__", standalone ? ".agents/skills/" : "../.agents/skills/");
   await writeIfMissing(path.join(designSystemRoot, "AGENTS.md"), renderTemplate(await template("design-system-AGENTS.md")), created);
   // Claude Code reads CLAUDE.md, not AGENTS.md; the pointer imports the contract.
   await writeIfMissing(path.join(designSystemRoot, "CLAUDE.md"), renderTemplate(await template("design-system-CLAUDE.md")), created);

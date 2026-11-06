@@ -32,8 +32,11 @@ toolkit: the skills under `.agents/skills/` (and, for Claude Code, the
 | "It's done" | `design-ship` | Validated, reviewed at both widths, changelog note written, draft pull request open |
 | "Give it to the developers" | `design-handoff` | A brief naming the version to pin and the designs to port |
 
-Merging a pull request releases a dated version (`2026.10.12-1`: the day
-and the release number that day). The production product
+In a standalone repository, merging a pull request releases a dated version
+(`2026.10.12-1`: the day and the release number that day) and publishes it.
+An embedded system (`design-system/` inside a product repository) has no
+release automation: its CI only validates, and the merge lands the rebuilt
+`design-system/dist/` in the product itself. The production product
 pins a release and a developer carries it across there, with its own
 `timds-update-design-system` skill. `AGENTS.md` names the product under
 "Handing a release to production".
@@ -56,7 +59,11 @@ a brand kit has an authored Voice page and reports its assumed sample voice. `de
 repository-declared authoring server. `preview` serves the exact generated
 static artifact that TimDS will publish.
 
-## Release publication
+## Release publication (standalone repositories)
+
+Publication needs the `artifact.publishRef` a standalone `timds.json`
+declares; an embedded manifest has none, so `publish` refuses there and the
+product consumes the committed `design-system/dist/` directly.
 
 After committing and pushing source changes, an authorized operator runs
 `__TIMDS_CLI__ publish` to build, push the declared artifact ref and request portal
@@ -87,17 +94,17 @@ tokens; the rest are declared as planned and built once someone writes them.
 
 | Path | Purpose |
 | --- | --- |
-| `tokens/*.json` | Authored tokens; the build emits each as a `--group-name` CSS custom property in `tokens.css` |
+| `tokens/<group>.json`, `media/<group>.json` | Authored token and media key maps; the build emits each token as a `--group-name` CSS custom property in `tokens.css`. `tokens.json` and `media.json` are generated views of the groups, never edited |
 | `src/site.json` | The views and their pages, authored or planned; drives the navigation and the overview |
 | `src/formats.json` | Every print sheet and screen canvas the system produces, each tied to its page; `{{formats:GROUP}}` tables and `{{canvas:ID}}` previews read it |
 | `src/pages/` | One content fragment per authored page, such as `src/pages/brand/color.html` |
 | `src/designs/` | Website designs: whole pages in HTML with JavaScript on the system's stylesheets, one directory per design, built to `/designs/` |
 | `src/layout.html` | The shell every page shares |
-| `src/styles/system.css`, `src/styles/canvas.css`, `src/styles/viewer.css` | The system's own styles, the format previews, and the documentation chrome |
+| `src/styles/system.css` | The system's own styles, the base styles and components a product adopts |
 | `src/assets/` | Small optimized assets such as logos, copied into the artifact |
-| `scripts/build.mjs`, `dev.mjs`, `check.mjs`, `viewer.mjs`, `brand-kit.mjs`, `src/scripts/compose.js` | Shared build, renderer, slot data and composer plumbing managed by starter sync |
+| `scripts/build.mjs`, `dev.mjs`, `check.mjs`, `viewer.mjs`, `brand-kit.mjs`, `src/scripts/compose.js`, `src/styles/canvas.css`, `src/styles/viewer.css` | Shared build, renderer, slot data and composer plumbing, the format preview engine, and the documentation chrome, all managed by starter sync and replaced on upgrade |
 | `CHANGELOG.md` | Release notes, rendered at `/changelog/`; add to `## Unreleased`, leading with the area the change touches |
-| `media.json`, `media-local/` | Published media catalog and ignored originals |
+| `media-local/` | Ignored full-resolution originals, staged by `assets add` |
 
 The starter `dev` server builds once and serves on `http://127.0.0.1:4321`. It
 does not watch files, so rerun `__TIMDS_CLI__ check` after an edit and reload.
@@ -214,7 +221,7 @@ Declare framework-specific local commands as argument arrays in `timds.json`:
 }
 ```
 
-The commands execute only on a designer workstation or in isolated CI. TimDS never executes repository code during sync.
+The commands execute only on a designer workstation or in isolated CI (`check`, `upgrade` and `starter sync` run them there).
 
 The design system should use the client repository's existing framework. For example, an Astro client site can declare commands that target the site package from this directory:
 
@@ -233,17 +240,20 @@ TimDS consumes only the resulting `__DIST_PATH__`; Astro or another framework re
 ## Full-resolution public media and B-roll
 
 Do not add large originals to Git or `dist/`. Put them under the ignored
-`media-local/` workspace and give each one a stable logical key:
+`media-local/` workspace and give each one a stable logical key (the file
+path is read from the repository root):
 
 ```bash
-__TIMDS_CLI__ assets add media-local/interview.mp4 \
+__TIMDS_CLI__ assets add __MEDIA_LOCAL__interview.mp4 \
   --key founder-interview \
   --title "Founder interview" \
   --tags interview,b-roll
 ```
 
-The authoring viewer reads the ignored local file. Authenticate once and upload
-the staged file to public TimDS object storage:
+The starter viewer does not read the ignored original: `{{media:KEY}}`
+resolves to a small optimized copy under `src/assets/`, and only a framework
+viewer that serves staged files with `localMediaResponse` shows it locally.
+Authenticate once and upload the staged file to public TimDS object storage:
 
 ```bash
 __TIMDS_CLI__ login
@@ -251,7 +261,8 @@ __TIMDS_CLI__ assets publish
 ```
 
 `submit` performs the publish step automatically before building and preparing
-the pull request. Git receives only the stable public record in `media.json`.
+the pull request. Git receives only the stable public record in the media
+catalog (`media/<group>.json`, with `media.json` regenerated from it).
 Staging remembers the catalog checksum. Publication refuses stale replacements,
 including older staging entries without a baseline, and never removes another
 logical key when storage reuses its asset ID. To keep the published asset,
@@ -335,17 +346,26 @@ Submission creates a draft pull request. In a standalone repository, an
 operator's merge accepts the change for automatic publication; rollback
 remains a separate operator decision.
 
-## Linked consumer repository
+## Linked consumer repository (standalone repositories)
 
-When `timds.json` declares a `consumer`, every accepted change on `main`
-becomes a release. CI synchronizes the version, publishes that exact
-commit, then opens or refreshes a pull request that advances the consumer's
-pinned `design-system` gitlink. Configure a `TIMDS_CONSUMER_TOKEN` repository
-secret with contents and pull-request access to that consumer repository.
+In a standalone repository every accepted change on `main` becomes a
+release: CI synchronizes the version and publishes that exact commit. When
+`timds.json` also declares a `consumer`, the same run then opens or
+refreshes a pull request in that product that moves its pin to the release.
+Configure a `TIMDS_CONSUMER_TOKEN` repository secret with contents and
+pull-request access to that consumer repository.
 
-The consumer owns only its `.gitmodules` record and reviewed gitlink. Prefer a
-same-host relative URL such as `../client-design-system.git`, so authenticated
-HTTPS and SSH clones both resolve within the organization.
+The pin takes one of two forms. A product with a **published pin**
+(`designSystem.version` in its `timds.consumer.json`) is moved to the
+release through its own toolkit, which fetches and verifies the published
+bundle into its gitignored `design-system/` directory; no Design System
+bytes enter the product's repository. A product that still carries this
+system as a **git submodule** gets its `design-system` gitlink advanced to
+the exact commit; it owns only its `.gitmodules` record and the reviewed
+gitlink, and a same-host relative URL such as `../client-design-system.git`
+lets authenticated HTTPS and SSH clones both resolve within the
+organization. `timds consumer migrate` in the product moves it from the
+submodule to a published pin.
 
 Day-to-day changes go under `## Unreleased` in `CHANGELOG.md`, each note
 led by the area it touches (`Brand · Color: ...`, `Print DS: ...`). Merging
@@ -396,16 +416,23 @@ Run defaults application on a feature branch. It migrates shared publishing
 wording and budgets, retaining inherited client policy and recording supplied
 values and persistent override paths in `.timds/defaults.json`. Commit that
 baseline with the contract so updates advance unchanged defaults and keep client
-choices, even when a later default matches them. Review the diff and run `timds check`.
+choices, even when a later default matches them. Review the diff and run `__TIMDS_CLI__ check`.
 
 An older standalone repository adopts the managed automatic release flow with
 `npm run timds -- upgrade --root . --auto-release`. The command refuses
 customized release files unless replacement is explicitly forced.
 
 The CLI runs from `node_modules`; do not commit that directory or a copied
-`.timds/cli` tree. The upgrade does not rewrite this Design System's manifest,
-tokens, media catalog, authored source, framework configuration, documentation,
-or generated artifact. Review and commit the tooling diff separately.
+`.timds/cli` tree. Besides the package pin, the managed skills and the
+installation record, an upgrade writes only what the starter sync above
+owns: the stock scripts and viewer stylesheets, entries appended to
+`src/site.json` and `src/formats.json`, the managed overview and Use
+fragments while they are unmodified, a missing stylesheet or changelog link
+in `src/layout.html`, the `.timds/starter.json` record, and the generated
+`tokens.json` and `media.json` views when it migrates the aggregates into
+groups. It never rewrites `timds.json`, the authored token and media groups,
+other pages, `system.css`, framework configuration, this documentation, or
+the generated artifact. Review and commit the tooling diff separately.
 
 
 ## Multiplayer source contract
