@@ -1003,8 +1003,9 @@ test("the starter viewer resolves Use links with and without a home view and rej
   delete site.home;
   await writeJson(sitePath, site);
   build();
-  assert.match(await fs.readFile(path.join(repoRoot, "dist/use/index.html"), "utf8"), /<a href="\/">the overview<\/a>/);
-  assert.match(await fs.readFile(path.join(repoRoot, "dist/use/install/index.html"), "utf8"), /<a href="\/use\/#mcp">Using the system<\/a>/);
+  assert.match(await fs.readFile(path.join(repoRoot, "dist/use/compose/index.html"), "utf8"), /<a href="\/">the overview<\/a>/);
+  assert.match(await fs.readFile(path.join(repoRoot, "dist/use/index.html"), "utf8"), /<a class="pill" href="\/use\/compose\/">Start making<\/a>/, "the landing links the composer wherever the Use view is served");
+  assert.match(await fs.readFile(path.join(repoRoot, "dist/use/install/index.html"), "utf8"), /<a href="\/use\/compose\/#mcp">Compose<\/a>/);
   await assert.rejects(fs.access(path.join(repoRoot, "dist/overview/index.html")), { code: "ENOENT" });
   for (const home of ["missing", "brand", "use/install"]) {
     site.home = home;
@@ -1034,14 +1035,30 @@ test("the starter viewer renders its site model, and its build guards pages, pla
     if (page.planned) await assert.rejects(fs.access(built), page.id);
     else assert.match(await fs.readFile(built, "utf8"), /<main id="content"/, page.id);
   }
+  // The front page is the portal: a landing page without the side navigation, whose cards open the composer on their format.
   const front = await read("dist/index.html");
-  assert.match(front, /<h1 class="page-title">Make something with Client &amp; Co<\/h1>/);
-  assert.match(front, /<script src="\/scripts\/compose\.js" defer><\/script>/, "the composer script is loaded from the copied scripts directory");
-  await fs.access(path.join(repoRoot, "dist/scripts/compose.js"));
+  assert.match(front, /<main id="content" class="content">\s*<div class="landing">/, "a landing page is wrapped so the chrome widens its column");
+  assert.match(front, /<nav class="sidenav" aria-label="Pages">\s*<\/nav>/, "a landing page has no side navigation");
+  assert.doesNotMatch(front, /class="pagenav"/, "a landing page has no previous/next links");
+  assert.match(front, /<h1 class="portal-hero__title lines"><span class="line"><span>Every asset,<\/span><\/span> <span class="line"><span>already <em>on brand\.<\/em><\/span><\/span><\/h1>/);
+  assert.match(front, /<div class="stat"><b>48<\/b><span>ready-sized formats<\/span><\/div>\s*<div class="stat"><b>6<\/b><span>views, one brand<\/span><\/div>/, "{{count:formats}} and {{count:views}} come from the catalogs");
+  assert.match(front, /<a class="asset-card" href="\/use\/compose\/\?format=business-card" data-reveal><span class="asset-card__thumb" style="--cw:3\.5;--ch:2;--safe:0\.125;/, "a rail card opens the composer on its format and draws its proportion from the catalog");
   assert.match(front, /<a class="appbar__view" href="\/" aria-current="true"><b>Use<\/b>/, "the Use view's app bar link is the front page");
-  assert.match(front, /style="--cw:1080;--ch:1350;--safe:64;/, "preset cards draw their format from the catalog");
-  assert.match(await read("dist/use/install/index.html"), /<a href="\/#mcp">Using the system<\/a>/, "{{page:use}} resolves to wherever the page is served");
+  assert.match(front, /<a class="appbar__cta" href="\/use\/compose\/">Start making<\/a>/, "the promoted page is the composer");
+  assert.match(front, /<a class="pill" href="\/use\/compose\/">Start making<\/a>\s*<a class="pill pill--glass" href="\/brand\/typography\/">Explore the brand<\/a>/, "{{nearest:brand/foundation}} falls back to the view's first authored page while foundation is planned");
   await assert.rejects(fs.access(path.join(repoRoot, "dist/use/index.html")));
+  // The composer offers every format in the catalog, one tab per group, and deep-links from the front page.
+  const compose = await read("dist/use/compose/index.html");
+  assert.match(compose, /<h1 class="page-title">Make something with Client &amp; Co<\/h1>/);
+  assert.match(compose, /<script src="\/scripts\/compose\.js" defer><\/script>/, "the composer script is loaded from the copied scripts directory");
+  await fs.access(path.join(repoRoot, "dist/scripts/compose.js"));
+  assert.match(await read("dist/scripts/compose.js"), /new URLSearchParams\(location\.search\)\.get\("format"\)/);
+  assert.equal((compose.match(/<label class="preset">/g) || []).length, 48, "every catalog format is a preset");
+  assert.equal((compose.match(/<input type="radio" name="preset" [^>]* checked>/g) || []).length, 1, "the first preset is checked");
+  assert.match(compose, /<div class="tabs__panel" data-tab="Print">\s*<label class="preset">\s*<input type="radio" name="preset" value="letterhead" data-name="Letterhead · US Letter" data-unit="in" data-prompt="What is it for, and who will hold it\?">\s*<span class="preset__thumb" style="--cw:8\.5;--ch:11;--safe:0\.5;[^"]*"><span class="preset__shape preset__shape--paper"><\/span><\/span>\s*<b>Letterhead · US Letter<\/b><small>8\.5 × 11 in<\/small>/, "a print preset is drawn as paper in inches");
+  assert.match(compose, /style="--cw:1080;--ch:1350;--safe:64;/, "preset cards draw their format from the catalog");
+  assert.match(compose, /<nav class="sidenav" aria-label="Pages">\s*<a href="\/">Start<\/a>\s*<a href="\/use\/compose\/" aria-current="page">Compose<\/a>\s*<a href="\/use\/install\/">Install<\/a>/, "the Use view lists the front page first");
+  assert.match(await read("dist/use/install/index.html"), /<a href="\/use\/compose\/#mcp">Compose<\/a>/, "{{page:use/compose}} resolves to wherever the page is served");
   const overview = await read("dist/overview/index.html");
   assert.match(overview, /<h1 class="page-title">Client &amp; Co<\/h1>/);
   // The version chip opens the changelog TimDS renders outside the views; the starter build writes it so dev shows it.
@@ -1073,7 +1090,7 @@ test("the starter viewer renders its site model, and its build guards pages, pla
 
   // The derived layer carries only authored guidance, so the brand kit still reports what the client has not supplied.
   const { designs, machine } = await checkWorkspace(repoRoot);
-  assert.deepEqual(machine.pages.map((page) => page.id), ["brand/color", "brand/typography", "digital", "index", "overview", "print", "social", "use/install", "web/components", "web/spacing"], "design and changelog pages are not guidance; the Use page is the index and the overview sits beside it");
+  assert.deepEqual(machine.pages.map((page) => page.id), ["brand/color", "brand/typography", "digital", "index", "overview", "print", "social", "use/compose", "use/install", "web/components", "web/spacing"], "design and changelog pages are not guidance; the front page is the index and the overview sits beside it");
   assert.deepEqual(machine.index.changelog, { url: "/changelog.json", page: "/changelog/", releases: 1, latest: machine.index.system.version });
   assert.equal(JSON.parse(await read("dist/changelog.json")).releases[0].entries[0].area, "Maintenance");
   assert.equal(machine.counts.untyped, 0);
@@ -1116,7 +1133,7 @@ test("the starter viewer renders its site model, and its build guards pages, pla
   const voice = site.views[0].pages.find((page) => page.slug === "voice");
   delete voice.planned;
   await writeJson(path.join(repoRoot, "src/site.json"), site);
-  assert.match(run("build"), /11 pages/);
+  assert.match(run("build"), /12 pages/);
   assert.match(await read("dist/brand/voice/index.html"), /Lead with the answer/);
   await fs.rm(path.join(repoRoot, "src/pages/brand/voice.html"));
   fails("build", /src\/pages\/brand\/voice\.html is missing/);
@@ -1255,7 +1272,7 @@ test("upgrade preserves pre-home routes and customized Install links", async (t)
   site.views.find(view => view.id === "use").pages.find(page => page.slug === "").title = "Using the system";
   record.baseline.site = structuredClone(site);
   record.version = "0.1.484";
-  const oldInstall = (await read("src/pages/use/install.html")).replaceAll("{{page:use}}", "/use/");
+  const oldInstall = (await read("src/pages/use/install.html")).replaceAll("{{page:use/compose}}", "/use/");
   for (const anchor of ["mcp", "products", "change"]) assert.ok(oldInstall.includes(`/use/#${anchor}`));
   record.files["src/pages/use/install.html"] = createHash("sha256").update(oldInstall).digest("hex");
   const authoredInstall = `${oldInstall}\n<!-- This client's installation guidance. -->\n`;
@@ -1274,7 +1291,7 @@ test("upgrade preserves pre-home routes and customized Install links", async (t)
   assert.equal(await read("src/pages/use/install.html"), authoredInstall);
   assert.equal(await read("src/pages/index.html"), authoredOverview);
   assert.deepEqual(upgraded.starter.check.machine.pages.map(page => page.id), before.machine.pages.map(page => page.id), "guidance routes remain stable without duplicate aliases");
-  assert.match(await read("dist/use/install/index.html"), /href="\/use\/#mcp"/);
+  assert.match(await read("dist/use/install/index.html"), /href="\/use\/#mcp"/, "the customized Install page keeps its own links");
   await fs.access(path.join(repoRoot, "dist/use/index.html"));
   await assert.rejects(fs.access(path.join(repoRoot, "dist/overview/index.html")), { code: "ENOENT" });
 
@@ -1318,6 +1335,7 @@ test("starter sync adopts a scaffold from before the asset views, and upgrade ke
     ["src/pages/print/index.html", "created"],
     ["src/pages/social/index.html", "created"],
     ["src/pages/use/index.html", "created"],
+    ["src/pages/use/compose.html", "created"],
     ["src/pages/use/install.html", "created"],
     ["src/layout.html", "updated"],
   ]);
@@ -1414,8 +1432,9 @@ test("starter sync adds a view a newer scaffold declares to a system adopted und
     return { ...rest, views: site.views.filter((view) => view.id !== "use") };
   };
   const record = JSON.parse(await read(".timds/starter.json"));
-  assert.ok(record.files["src/pages/use/index.html"] && record.files["src/pages/use/install.html"], "a fresh scaffold records the Use fragments");
+  assert.ok(record.files["src/pages/use/index.html"] && record.files["src/pages/use/compose.html"] && record.files["src/pages/use/install.html"], "a fresh scaffold records the Use fragments");
   delete record.files["src/pages/use/index.html"];
+  delete record.files["src/pages/use/compose.html"];
   delete record.files["src/pages/use/install.html"];
   record.baseline.site = dropUse(record.baseline.site);
   record.version = "0.1.0";
@@ -1430,9 +1449,10 @@ test("starter sync adds a view a newer scaffold declares to a system adopted und
   assert.deepEqual(result.files.filter((file) => file.status !== "current").map((file) => [file.path, file.status]), [
     ["src/site.json", "updated"],
     ["src/pages/use/index.html", "created"],
+    ["src/pages/use/compose.html", "created"],
     ["src/pages/use/install.html", "created"],
   ]);
-  for (const relative of ["src/pages/use/index.html", "src/pages/use/install.html"]) {
+  for (const relative of ["src/pages/use/index.html", "src/pages/use/compose.html", "src/pages/use/install.html"]) {
     assert.equal(await read(relative), await fs.readFile(path.join(templatesRoot, "starter", relative), "utf8"), `${relative} is written byte for byte`);
   }
   const stockSite = JSON.parse(await fs.readFile(path.join(templatesRoot, "starter/src/site.json"), "utf8"));
