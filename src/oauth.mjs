@@ -1,3 +1,19 @@
+// OAuth for TimDS hosts: discovery, the PKCE authorization-code flow on a
+// loopback callback, and refresh.
+//
+// `discoverOAuthServer` reads a host's /.well-known/oauth-authorization-server
+// metadata and requires authorization code with PKCE S256. `authorizeOAuth`
+// runs that flow: it registers a public native client when the host offers
+// dynamic registration (otherwise the caller supplies --client-id), listens
+// on a temporary 127.0.0.1 callback, hands the verification URL to the
+// caller (which prints it, and opens the browser unless told not to), and
+// exchanges the code. `refreshOAuth` exchanges a refresh token. Scopes
+// default to timds:read, timds:write and offline_access for the host's
+// /api/timds resource.
+//
+// Boundary: this module speaks HTTP to the host and nothing else; where the
+// credential is stored and when it is refreshed is auth.mjs's.
+
 import { spawn } from "node:child_process";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import http from "node:http";

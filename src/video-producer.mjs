@@ -1,3 +1,25 @@
+// The programmatic producer: a model-authored compile request becomes a
+// production the Remotion components can render.
+//
+// `createVideoAuthoringContract()` builds the prompt, brief and JSON Schema a
+// Video Lab (the local web lab or an automated one) hands the model, from
+// the client contract's `producer` block, its board catalog, the footage
+// catalog and the derived brand. `createVideoProducer()` returns
+// `compileProduction`, which validates a request against that contract
+// (beat roles, copy limits, board kinds and cues, footage picks) and
+// compiles the scenes, boards and chapters, and `finalizeProduction`, which
+// settles the production once narration timings, footage and the cover are
+// known. The compiler rejects over-limit copy rather than truncating. The
+// compile request and compiled production stay at schema 1 (additive fields
+// only); the authoring contract is schema 2, since it gained the board
+// catalog.
+//
+// Boundary: the producer knows only the executable schema and the shared
+// rules in video/footage.mjs and video/boards.mjs; client role labels, CTA
+// copy and asset vocabulary come from the contract and never live here. A
+// client's components import it (`resolveBoardKind`), so it is bundled for
+// the browser: keep it free of Node-only imports.
+
 import { assertVideoContractRuntime, runtimeIdentity } from "./runtime.mjs";
 import { VideoAuthoringContractSchema, VideoCompiledProductionSchema } from "./video-transport.mjs";
 import { footageFamily, matchesFootagePrefix, verticalTextZone } from "../video/footage.mjs";

@@ -1,3 +1,20 @@
+// Credentials for TimDS hosts: the external store and the sign-in flows.
+//
+// Access tokens live in one JSON file outside every repository
+// (`credentialsPath`: $XDG_CONFIG_HOME or ~/.config, then timds/credentials.json),
+// keyed by host origin, with the last selected host remembered so `start` and
+// the hosted commands need no repeated --portal-url. `resolveAccessToken` is
+// the one read path: an explicit token, then TIMDS_ACCESS_TOKEN, then the
+// saved credential, refreshing an OAuth credential under the file lock when
+// it is near expiry or was just rejected (the lock covers every host record
+// because they share one file, and its mtime heartbeat recovers a crashed
+// owner). `loginWithHost` signs in through the host's advertised OAuth server
+// (oauth.mjs) and falls back to the portal device flow (`loginWithDevice`).
+//
+// Boundary: this module never touches a repository or a manifest; the
+// portal-URL cleaning and saved-host selection it exports are how core and
+// the consumer commands pick a host. Tests use their own credentials file.
+
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";

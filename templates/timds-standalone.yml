@@ -1,7 +1,8 @@
 name: TimDS design system
 
 # Pull requests validate. Every accepted update to main becomes a release:
-# prepare-release advances the patch exactly once unless the pull request
+# prepare-release takes the next dated version (YYYY.MM.DD-N: the UTC day and the
+# release number that day) exactly once unless the pull request
 # explicitly advanced the version. Publish ships that exact commit and respects
 # automatic updates; the final reusable job advances the linked consumer pin.
 # Portal publication needs an unbound operator TIMDS_ACCESS_TOKEN secret; a

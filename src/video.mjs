@@ -1,3 +1,24 @@
+// The video orchestrator behind `timds video`.
+//
+// A Design System that enables video (`video init`) owns its contract, asset
+// map, board catalog and the five JSON records of each production. This
+// module reads and validates them (`validateVideoContract`,
+// `loadVideoWorkspace`, `checkVideoWorkspace`), resolves brand colors and
+// fonts from the derived layer, stages brand files and published media into
+// the public roots a render host serves, prepares a production, runs the
+// voiceover script, Remotion Studio and the headless render, exports the
+// publishing data, writes the one-time component snapshot (`components
+// init`), and runs `video lab` (a compile request through the producer, the
+// way an automated lab ships it). `VIDEO_HELP` is the `timds video --help`
+// inventory. video-producer.mjs compiles, video-runtime.mjs and
+// video-component-loader.mjs load a client's components, video-migration.mjs
+// consolidates snapshots, and video-lab-server.mjs is the web lab.
+//
+// Boundary: the engine here knows only the executable schema and the shared
+// rules under video/; client brand, copy, source authorization, compliance,
+// asset selection, production records and output policy stay in the client's
+// Design System (AGENTS.md).
+
 import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, promises as fs } from "node:fs";
