@@ -278,7 +278,7 @@ test("renders the skill from the manifest and records managed-file hashes", asyn
   assert.match(skill, /### `docs`[\s\S]*build with `npm run build` \(output in `dist\/`\)[\s\S]*consumer preview --app docs/);
   assert.match(skill, /Protected: nothing beyond/);
   assert.match(skill, /TIMDS_PREVIEWS_ENABLED=true[\s\S]*TIMDS_ACCESS_TOKEN/);
-  assert.match(skill, /provide the local review URL and screenshots; do not wait for/);
+  assert.match(skill, /provide the local review URL and\s+screenshots; do not wait for/);
   assert.match(skill, /state that\nvisual checks were not performed/);
   assert.equal(skill, await renderConsumerSkill(result.manifest, { defaultBranch: "main" }));
   await fs.access(path.join(product, ".agents", "skills", "timds-consume-design-system", "agents", "openai.yaml"));
