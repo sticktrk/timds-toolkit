@@ -44,6 +44,13 @@ export const DEFAULT_PUBLISHED_BASE_URL = "https://design-systems.timds.com";
 export const CONSUMER_VIEWPORTS = Object.freeze(["desktop", "tablet", "phone"]);
 export const CONSUMER_SCHEMES = Object.freeze(["light", "dark"]);
 
+/** The designer's skill: a change inside the design surface of the product. */
+export const CONSUMER_SKILL_NAME = "timds-consume-design-system";
+/** The developer's counterpart: move the pin to a new release and port the designs that changed. */
+export const CONSUMER_UPDATE_SKILL_NAME = "timds-update-design-system";
+/** Every consumer skill `consumer init` renders and `upgrade` refreshes; the always-allowed paths derive from it. */
+export const CONSUMER_SKILL_NAMES = Object.freeze([CONSUMER_SKILL_NAME, CONSUMER_UPDATE_SKILL_NAME]);
+
 /**
  * Paths a consumer PR may always change: the manifest, the TimDS-managed
  * files, and the root files `consumer init` and upgrades write (the root
@@ -61,7 +68,7 @@ export const CONSUMER_ALWAYS_ALLOWED = Object.freeze([
   "yarn.lock",
   ".gitignore",
   CONSUMER_INSTALLATION_PATH,
-  ".agents/skills/timds-consume-design-system/**",
+  ...CONSUMER_SKILL_NAMES.map((name) => `.agents/skills/${name}/**`),
   ".github/workflows/timds-consumer-preview.yml",
   ".github/workflows/timds-designer-change.yml",
   ".claude/launch.json",

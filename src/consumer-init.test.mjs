@@ -632,3 +632,13 @@ test("update skills bind an exact target and distinguish hosted preparation from
     await assert.rejects(renderConsumerSkillFile("timds-update-design-system", manifest, { targetLabel }), /immutable published release/);
   await assert.rejects(renderConsumerSkillFile("timds-update-design-system", manifest, { delivery: "hosted" }), /requires targetLabel/);
 });
+
+test("the designs to match are read under the manifest's Design System path, relative to the app's folder", async () => {
+  const manifest = (designSystemPath, cwd) => ({ schemaVersion: 1, designSystem: { path: designSystemPath, systemId: "timds-example/core", version: "2026.10.27-1", url: "https://public.example.com" }, apps: { web: { cwd, preview: { serve: ["npm", "run", "dev"], port: 4321, routes: ["/contact"], designs: { "/contact": "website:/contact" } }, designSurface: ["src/**"] } } });
+  const designsLine = (skill) => skill.match(/Designs to match:[^\n]*/u)[0];
+  assert.match(designsLine(await renderConsumerSkillFile("timds-consume-design-system", manifest("design-system", "."))), /under `design-system\/dist\/designs\/`/);
+  assert.match(designsLine(await renderConsumerSkillFile("timds-consume-design-system", manifest("design-system", "web"))), /under `\.\.\/design-system\/dist\/designs\/`/);
+  assert.match(designsLine(await renderConsumerSkillFile("timds-consume-design-system", manifest("vendor/brand", "apps/site"))), /under `\.\.\/\.\.\/vendor\/brand\/dist\/designs\/`/);
+  const nested = await renderConsumerSkillFile("timds-consume-design-system", manifest("vendor/brand", "apps/site"));
+  assert.doesNotMatch(nested, /\.\.\/design-system\/dist\/designs/u);
+});

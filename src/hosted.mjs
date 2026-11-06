@@ -386,9 +386,14 @@ export async function runHostedCommand(command, { root = process.cwd(), fixedRoo
     ? normalizeProvider((await readJson(path.join(selected, "timds.json")))?.provider || state?.provider)
     : await workspaceProvider(selected);
   const pending = command === "start" ? await readJson(path.join(selected, PENDING_START_FILE)) : null;
-  const url = portalUrl || process.env.TIMDS_PORTAL_URL || configured?.url || pending?.provider?.url || (destination || ["whoami", "systems"].includes(command) ? await savedPortalUrl({ credentialsPath }) : null);
   // whoami and systems read an identity and its catalog, not a workspace: they answer for any signed-in host.
   const identityOnly = ["whoami", "systems"].includes(command);
+  // A command that acts on a design system named by --system-id (or by the
+  // enclosing hosted workspace) is run from anywhere, the way the hosted
+  // skill does before a workspace exists, so it falls back to the saved
+  // login the way start, join, whoami and systems do.
+  const systemScoped = ["active-work", "principals", "draft-create", "draft-list", "draft-close", "rollback"].includes(command);
+  const url = portalUrl || process.env.TIMDS_PORTAL_URL || configured?.url || pending?.provider?.url || (destination || identityOnly || systemScoped ? await savedPortalUrl({ credentialsPath }) : null);
   if (!url || !identityOnly && configured && configured.kind !== "hosted") throw new Error(NO_HOST);
   const provider = normalizeProvider({ kind: "hosted", url });
   if (!identityOnly && state && state.provider.url !== provider.url) throw new Error("Session belongs to a different TimDS host");

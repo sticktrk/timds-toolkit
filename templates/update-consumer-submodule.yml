@@ -89,7 +89,8 @@ jobs:
           INPUT_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          [[ "$INPUT_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+          # A dated Design System version (YYYY.MM.DD-N) or a legacy MAJOR.MINOR.PATCH one.
+          [[ "$INPUT_VERSION" =~ ^([0-9]{4}\.[0-9]{2}\.[0-9]{2}-[1-9][0-9]*|[0-9]+\.[0-9]+\.[0-9]+)$ ]] \
             || { echo "Invalid version ${INPUT_VERSION}."; exit 1; }
           [[ "$INPUT_SHA" =~ ^[0-9a-f]{40}$ ]] \
             || { echo "Invalid commit ${INPUT_SHA}."; exit 1; }
@@ -135,11 +136,31 @@ jobs:
               echo "changed=false" >> "$GITHUB_OUTPUT"
               exit 0
             fi
-            npm ci --ignore-scripts --no-audit --no-fund
+            if jq -e '.mode == "binary"' .timds/installation.json >/dev/null 2>&1; then
+              # A binary consumer has no package manifest or lockfile: install
+              # the exact executable its installation record selects (the same
+              # verified download as the consumer's own workflows).
+              version="$(jq -er 'select(.schemaVersion == 2 and .mode == "binary" and .executable == "timds-cli") | .version' .timds/installation.json)"
+              [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Invalid binary toolkit release pin" >&2; exit 1; }
+              asset="timds-cli-v${version}-linux-x64"
+              release="https://github.com/sticktrk/timds-toolkit/releases/download/v${version}"
+              directory="$(mktemp -d "$RUNNER_TEMP/timds-binary.XXXXXX")"
+              trap 'rm -rf "$directory"' EXIT
+              curl --fail --location --retry 3 "$release/$asset" --output "$directory/$asset"
+              curl --fail --location --retry 3 "$release/SHA256SUMS" --output "$directory/SHA256SUMS"
+              (cd "$directory" && awk -v asset="$asset" '$2 == asset { print; found = 1 } END { if (!found) exit 1 }' SHA256SUMS | sha256sum --check --strict -)
+              mkdir -p "$HOME/.local/bin"
+              install -m 755 "$directory/$asset" "$HOME/.local/bin/timds-cli"
+              export PATH="$HOME/.local/bin:$PATH"
+              timds="timds-cli"
+            else
+              npm ci --ignore-scripts --no-audit --no-fund
+              timds="npm run --silent timds --"
+            fi
             # Moves designSystem.version and fetches that version's published
             # bundle, verifying every digest, so the pin never names an
             # unpublished release.
-            npm run --silent timds -- consumer update "$DESIGN_SYSTEM_VERSION"
+            $timds consumer update "$DESIGN_SYSTEM_VERSION"
             git switch --create "$UPDATE_BRANCH"
             git add -- timds.consumer.json
             git commit -m "chore: update Design System to ${DESIGN_SYSTEM_VERSION}"
@@ -175,7 +196,7 @@ jobs:
           pr_number="$(gh pr list --repo "${{ inputs.repository }}" --base "${{ inputs.branch }}" --head "$UPDATE_BRANCH" --state open --json number --jq '.[0].number')"
           title="chore: update Design System to ${DESIGN_SYSTEM_VERSION}"
           if [[ "$UPDATE_MODE" == "pin" ]]; then
-            summary="Moves the published Design System pin in \`timds.consumer.json\` to version \`${DESIGN_SYSTEM_VERSION}\` (${{ github.repository }}@${DESIGN_SYSTEM_SHA}); \`npm ci\` fetches that version's bundle."
+            summary="Moves the published Design System pin in \`timds.consumer.json\` to version \`${DESIGN_SYSTEM_VERSION}\` (${{ github.repository }}@${DESIGN_SYSTEM_SHA}); the consumer's toolkit (\`npm ci\`, or \`timds-cli consumer sync\` for a binary consumer) fetches that version's bundle."
           else
             summary="Advances the pinned \`${{ inputs.path }}\` submodule to version \`${DESIGN_SYSTEM_VERSION}\` (${{ github.repository }}@${DESIGN_SYSTEM_SHA})."
           fi

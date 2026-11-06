@@ -64,6 +64,7 @@
     "src/core.mjs",
     "src/agent-skills.mjs",
     "src/skills-install.mjs",
+    "src/skill-names.mjs",
     "src/consumer.mjs",
     "src/consumer-register.mjs",
     "src/consumer-init.mjs",
