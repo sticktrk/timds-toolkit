@@ -26,7 +26,7 @@
 //   the new one, and anything the client changed is kept. A kept edit is
 //   reported when the stock value is news (it differs from every baseline),
 //   not on every sync. Nothing is removed, reordered, or retitled.
-// - Authored fragments the starter mirrors from the golden system (the
+// - Authored fragments the starter ships and manages (the
 //   Digital, Social, and Print overviews) and the toolkit's own Use pages,
 //   rendered by the stock viewer. The viewer, build and check scripts are one
 //   renderer: while any of them is customized and kept, the others' refreshes
@@ -98,7 +98,7 @@ export const starterPlumbingFiles = Object.freeze([
 ]);
 
 /**
- * Authored fragments the starter mirrors from the golden system, and the Use
+ * Authored fragments the starter ships and manages, and the Use
  * pages the toolkit owns (Start, the front page; Compose, the composer and how
  * a system is consumed: browser, llms.txt, the derived layer, MCP, a product
  * pin, the designs; and Install). Each renders

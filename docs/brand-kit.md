@@ -10,7 +10,7 @@ result for a visitor is a brand design system built from their website: the
 foundations a designer would set, the templates such a pipeline promises (posts,
 ads, email, print, decks, a launch page on the brand's components), and a
 composer that makes the first
-one. Where `templates/starter/` mirrors the golden agency-scale system, the
+one. Where `templates/starter/` is structured for an agency-scale system, the
 brand kit is sized to one brand and built so an automated pass can fill it.
 
 The kit provides Minimal, Accent, Bold and Photo treatments, canvases with
@@ -189,7 +189,7 @@ badge print frames. Every piece reads only slot tokens.
 One view per channel, the way the published systems are organized and the
 way `feed` grows a kit. Each channel view opens on an authored overview (the
 treatments, that channel's format catalog, the template) and lists a short
-set of planned pages, five or six chosen from the golden structure, so the
+set of planned pages, five or six chosen from the ordinary starter's structure, so the
 app bar reads as what the system grows into rather than as empty. A planned
 page is declared in the navigation and not yet authored; a designer authors
 it in place, and feed adds new ones as the parent gains them.
