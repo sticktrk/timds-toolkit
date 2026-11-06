@@ -128,7 +128,10 @@ built from the same few blocks.
   `<table class="spec">` for rules, a `.note` for guidance that is not a row,
   a `<pre>` for markup to copy, and a `<figure class="demo">` for a live
   preview. A preview is a figure so its sample text stays out of the derived
-  rules.
+  rules. Put the class names, token names, and markup of a block in a
+  `<details class="spec-drawer"><summary>Spec</summary>…</details>` after the
+  preview, closed by default: the page shows the brand first, and the derived
+  layer reads the drawer's table and code the same as anywhere else.
 - `tokens.json` groups tokens as `group.name` with a string `value` and an
   optional `description`. The build writes each one to `tokens.css` as the CSS
   custom property `--group-name` on `:root`. Add a token before using a new
