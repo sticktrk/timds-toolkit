@@ -8,9 +8,11 @@ releases; this site follows the commit it pins.
 ## How the system reaches the site
 
 __IMPORTS__
-- Nothing is copied out of the submodule. Moving the pin, in a pull request
-  the Design System's release automation opens here, is what changes the
-  brand on this site.
+- Nothing is copied out of the submodule. Moving the pin is what changes the
+  brand on this site: a developer moves it with the
+  `timds-update-design-system` skill, or merges the pull request the Design
+  System's release automation opens here once that system declares this site
+  as its consumer.
 
 ## Which change goes where
 
@@ -19,7 +21,7 @@ __IMPORTS__
 | Pages, posts, menus, media, site settings | The EmDash database | The admin at `/_emdash/admin`, or an agent through the site's EmDash MCP server at `/_emdash/api/mcp`. No pull request. |
 | Layouts, components, page templates, site styles | This repository | A draft pull request that stays inside the design surface in `timds.consumer.json`; review locally or through an enabled TimDS preview before merging. |
 | Colors, fonts, tokens, logos, brand guidance | The Design System repository | A pull request there, then the pin update here. |
-| The design of a page or route, and its states | The Design System repository, under `__DESIGN_SYSTEM_PATH__/dist/designs/` | The designer authors it there in HTML with JavaScript on the system's stylesheets; a developer ports it here. |
+| The design of a page or route, and its states | The Design System repository, authored under its `src/designs/` and built to `__DESIGN_SYSTEM_PATH__/dist/designs/` | The designer authors it there in HTML with JavaScript on the system's stylesheets; a developer ports it here. |
 
 Content never needs a pull request, and the theme is never edited through the
 CMS. When a request mixes them, split it.
@@ -28,7 +30,8 @@ CMS. When a request mixes them, split it.
 
 When the Design System holds a website design (`list_designs` and
 `read_design` on its read MCP server, or `designs.json` and `dist/designs/`
-in the pin), that design is the reference the matching route here must
+in the pin once it is built; the preview builds it on demand), that design
+is the reference the matching route here must
 match: the same markup composed from the same system classes, and every
 state the design shows (a sent form, an empty list, an error) as the route
 can reach it. Port it into this site's layouts and components; never copy a
@@ -68,8 +71,11 @@ __HOSTING__
 ```bash
 git submodule update --init __DESIGN_SYSTEM_PATH__
 npm ci
-npm run dev     # http://localhost:4321
+npm run dev -- --port 4380 --host 127.0.0.1     # http://127.0.0.1:4380
 ```
+
+The site's `.claude/launch.json` entry and its preview serve on port 4380,
+not Astro's default 4321, which the Design System's own dev server uses.
 
 Open `__DEV_SEED_ROUTE__?redirect=/_emdash/admin` once on a fresh checkout. It
 loads the starter's demo content into the local database and signs you in as
