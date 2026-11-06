@@ -181,7 +181,7 @@ the reference the port must match, never the production site itself.
 `src/scripts/compose.js`, `src/styles/canvas.css`,
 `src/styles/viewer.css`), the views in `src/site.json`, the formats in
 `src/formats.json`, and the Digital, Social, and Print overview fragments and
-the Use pages (Compose and Install) the toolkit wrote. Its `starter` field
+the Use pages (Start, the front page; Compose; and Install) the toolkit wrote. Its `starter` field
 selects the stock catalogs, history and fragments; absent means `starter`.
 Brand-kit stock pages use the same unmodified-fragment boundary. Every `upgrade` re-syncs an adopted system: the plumbing is
 brought to stock, new views, planned pages, and formats are appended

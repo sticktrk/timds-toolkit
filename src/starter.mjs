@@ -99,8 +99,9 @@ export const starterPlumbingFiles = Object.freeze([
 
 /**
  * Authored fragments the starter mirrors from the golden system, and the Use
- * pages the toolkit owns (Install, and how a system is consumed: browser,
- * llms.txt, the derived layer, MCP, a product pin, the designs). Each renders
+ * pages the toolkit owns (Start, the front page; Compose, the composer and how
+ * a system is consumed: browser, llms.txt, the derived layer, MCP, a product
+ * pin, the designs; and Install). Each renders
  * the page its path names (src/pages/<view>/index.html is the view's own
  * page, src/pages/<view>/<slug>.html the page <view>/<slug>). A fragment is
  * written when the sync adds its page and refreshed while it is unmodified.
@@ -110,6 +111,7 @@ export const starterManagedFragments = Object.freeze([
   ["src/pages/print/index.html", "starter/src/pages/print/index.html"],
   ["src/pages/social/index.html", "starter/src/pages/social/index.html"],
   ["src/pages/use/index.html", "starter/src/pages/use/index.html"],
+  ["src/pages/use/compose.html", "starter/src/pages/use/compose.html"],
   ["src/pages/use/install.html", "starter/src/pages/use/install.html"],
 ]);
 
@@ -174,6 +176,7 @@ export const legacyStarterFileHashes = new Map([
     "55ccb241300fcadb0a3bf0e980ef2a13b2bb4a3dd455df441d0bf7633ae2cb26", // v0.1.464
     "b5417f9082603d6ff8c0a7aa1a40dbc2e8fd4d4590cae8a244d7208582494f2b", // v0.1.481
     "1c21909153c4aa85dddf8bec19f06ea162bab637d1975ee007cbd70ec48b5299", // v0.1.485
+    "3f04b52e5efac581dc69c05298d4626a370f617db46fa4512e8bb7c90b1150b0", // v0.1.487
   ]],
   ["src/styles/canvas.css", [
     "dd0413554f9308cf3b1c6daedfb51ebb18c464672766b815eebbe77f0c3c6d98",
@@ -185,6 +188,7 @@ export const legacyStarterFileHashes = new Map([
     "afc438a5474fdb6e63f70ffd9330fde1e636b18ba714b61bda32bf9ef00b2fdd", // v0.1.464
     "b9d437b8d8df332d765ed65a1cd7f35e25f011efa94c3090aade69917e5b9940", // v0.1.481
     "8f95580c4578921acbcb6f312cf037e59a5758de494faa4d0e37776a8b2c590f", // v0.1.485
+    "e16affb7ede1627f69c9c220ecea12f6649dcde7564c7b18fef1665e0c9ae12a", // v0.1.487
   ]],
   ["scripts/brand-kit.mjs", [
     "644ade30ac144dc71cb43a127fc456ece032be105ce325d1e9498fa54942d07b", // v0.1.485
@@ -193,10 +197,15 @@ export const legacyStarterFileHashes = new Map([
     "573b6e515900155d96b066900304d8a41b6c1fb26f181e5a51fc457c7264e863", // v0.1.461
     "393e955a544050532430b750481101d32d06e6c06beaef55007227b8f1c36ca2", // v0.1.481
     "49651882b5243054760986a11a892ca3a186b5037510ef3f2732775c863525f6", // v0.1.484
+    "2c4daf4d051e4b0f728673b44edb0da44a83fdc7e48e1d5ff2bbeb6abf6dff74", // v0.1.485
+  ]],
+  ["src/scripts/compose.js", [
+    "9966794077af73ee209dd8fd0ef5030788ec93236766a373e45f4af53ce996e8", // v0.1.485
   ]],
   ["src/pages/use/install.html", [
     "2f592695615a656474cf8034b3d757662fb3468ae5c674f0825b13982a378371", // v0.1.481
     "b03eb3fad31a447052de5a8e6a4f0fd75e919d5de126cee9762eaf9471cab6ae", // v0.1.484
+    "31835d1a617c2a86ef27c7354b0367357ffb516ec7508130cfcc6d2e3db1debd", // v0.1.485
   ]],
 ]);
 
