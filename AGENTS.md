@@ -118,8 +118,8 @@ and `src/formats.json`, merged three ways against the recorded stock baseline
 so entries the client lacks are appended (pages as `planned`), fields still
 equal to the baseline advance, and anything the client changed is kept (and
 reported when the stock value moved, not on every sync), with nothing
-removed, reordered, or retitled; and the overview
-fragments the starter mirrors from the golden system
+removed, reordered, or retitled; and the authored overview
+fragments the starter ships
 (`starterManagedFragments`), written when the sync adds or authors their page
 and refreshed only while unmodified. `src/layout.html` only gains a missing
 stock stylesheet link and the changelog link on its version chip. Every other fragment, `tokens.json`, `system.css`, and
@@ -180,71 +180,69 @@ Custom overrides require reviewed exact runtime versions. Shared geometry and
 fit limits live in `video/board-layouts.mjs`. Keep packed-release checks with
 two brands and before/after visual comparisons in CI.
 
-## The starter scaffold mirrors the golden system
+## The starter scaffold is the canonical structure
 
-One private client Design System is the golden reference for
-`templates/starter/`. Its name never enters this public repository; the
-maintainer supplies it. When it gains a view, a sidebar group, a template
-family, or shared plumbing, rework the starter to match, so a fresh scaffold
-is organized the way a fleshed-out system ends up.
+`templates/starter/` is where a Design System's structure is designed. Its
+views, sidebar groups, catalogs, page treatment and managed fragments are the
+toolkit's own, and the starter-based client systems take every change through
+`starter sync` on upgrade, which is what proves the scaffold against real
+systems. A fleshed-out client system is a source of ideas when designing a new
+view, catalog or template family, not an obligation: nothing here tracks one
+or is kept in step with one.
 
-Mirror structure, never content:
+When borrowing from any client system, take structure, never content. Client
+names, domains and repository names never enter this public repository.
 
-- Views, in `src/site.json`: ids, labels, blurbs, order, sidebar groups, and
-  page lists. Keep the golden view labels (`Web DS`, `Digital DS`); the golden
-  `marketing` view is the starter's `web` view. Keep a page title unless it
-  is ambiguous outside its sidebar group (`LinkedIn specs`, not `Specs`).
-  A page that needs the client's mark, photos, or copy stays `planned`.
-  Author a view's overview when it carries what every system needs:
-  principles, the catalog table, and how a preview is built.
-- Single-owner catalogs become JSON the viewer validates: asset sizes in
-  `src/formats.json`, the counterpart of the golden format modules, with
-  every entry naming its page. A page never restates a size or a token.
-- Preview engines and shared atoms become script-free CSS under
-  `src/styles/`, written against the starter tokens with no color literals.
+- Views live in `src/site.json`: ids, labels, blurbs, order, sidebar groups,
+  and page lists. Keep a page title unless it is ambiguous outside its
+  sidebar group (`LinkedIn specs`, not `Specs`). A page that needs the
+  client's mark, photos, or copy stays `planned`. Author a view's overview
+  when it carries what every system needs: principles, the catalog table,
+  and how a preview is built.
+- Single-owner catalogs are JSON the viewer validates: asset sizes in
+  `src/formats.json`, with every entry naming its page. A page never
+  restates a size or a token.
+- Preview engines and shared atoms are script-free CSS under `src/styles/`,
+  written against the starter tokens with no color literals.
 - Platform facts (standard ad sizes, upload limits, print trims) may be
-  mirrored; say on the page that they need confirming before use.
+  carried over; say on the page that they need confirming before use.
 - Leave out client copy, names and addresses, photos and focus points,
   campaign content, ink builds, field-specific compliance text, and
-  product-specific sub-systems such as an admin theme.
+  product-specific sub-systems.
 
-When mirroring a golden change:
+Some of the starter's shape is deliberate and worth keeping in mind when a
+client system is organized differently. A product-specific utility theme,
+such as an admin theme, is left for the client to add when it has one.
+Typography and color are Brand pages rather than token pages under Web, and
+the Web view lands on its first authored page. Illustration, modules,
+sections and similar libraries go beyond the starter's component set and are
+authored per client; page archetypes are website designs under
+`src/designs/`. The Use view is toolkit guidance on every way to consume a
+system, with no client counterpart.
 
-1. Run `npm run golden-drift -- --golden PATH` against a checkout of the
-   change: it lists the views, groups, pages, and formats the starter lacks
-   or declares differently. Then read the navigation model, catalogs,
-   stylesheet imports, and overview pages before the template pages; the
-   templates follow from those.
-2. Update `src/site.json`, `src/formats.json`, the stylesheets, and the
+When adding a view, a page, or a catalog:
+
+1. Update `src/site.json`, `src/formats.json`, the stylesheets, and the
    fragments. A fresh scaffold must still pass `check` with exactly its two
    expected warnings (no voice page, no annotated logo) and no untyped prose.
-3. Keep the scaffolded `templates/design-system-AGENTS.md`,
+2. Keep the scaffolded `templates/design-system-AGENTS.md`,
    `design-system-README.md`, the edit skill, and this repository's
    `CLAUDE.md` describing the new structure.
-4. A changed plumbing file or managed fragment needs no hash bookkeeping:
+3. A changed plumbing file or managed fragment needs no hash bookkeeping:
    an adopted system's `.timds/starter.json` records what the toolkit last
    wrote, and `starter sync` advances it. `legacyStarterFileHashes` in
    `src/starter.mjs` only recognizes systems scaffolded before the record
-   existed and stays as it is. A new authored page under a mirrored view goes
+   existed and stays as it is. A new authored page under a starter view goes
    in `starterManagedFragments`; a new stylesheet the layout must link goes
    in the plumbing table and the layout link list.
-5. Update the starter assertions in `src/core.test.mjs` (page ids, page
+4. Update the starter assertions in `src/core.test.mjs` (page ids, page
    counts, rendered tables) and `src/mcp.test.mjs` (the stylesheet list),
-   then run `npm test` and `npm run pack:check`. Rerun the drift script
-   until it reports none; a deliberate omission is recorded with its reason
-   in `MAPPING` in `scripts/golden-drift.mjs`, never left as noise.
-6. Cite the golden pull request by number in the commit message, never by
-   repository name.
-
-The golden repository's own workflow opens a `golden-mirror` issue here
-when a merged pull request touched its structure-bearing files (navigation
-model, catalogs and content modules, shared stylesheets, layout). Work the
-issue with the steps above and close it from the mirror pull request.
+   then run `npm test` and `npm run pack:check`.
 
 ## The brand kit mirrors its slot contract
 
 `templates/brand-kit/` is a second starter overlay, selected by
-`init --starter brand-kit`; it does not mirror the golden system's authored
+`init --starter brand-kit`; it does not copy the ordinary starter's authored
 content. It mirrors the slots, samples, views, page ids and exact stock paths
 exported by `src/brand-kit.mjs`. Change the overlay, export, declarations,
 rendering tests, docs and skills together in one release. Shared plumbing

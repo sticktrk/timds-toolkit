@@ -52,7 +52,6 @@
     "pack:check": "npm pack --dry-run",
     "release": "./scripts/release.sh",
     "test:shared-upgrades": "node scripts/check-shared-upgrades.mjs",
-    "golden-drift": "node scripts/golden-drift.mjs",
     "binary:build": "node scripts/binary-build.mjs",
     "binary:smoke": "node scripts/binary-smoke.mjs",
     "binary:smoke:video": "node scripts/binary-video-smoke.mjs"
