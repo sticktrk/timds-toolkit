@@ -96,6 +96,7 @@
     "src/bundle.mjs",
     "src/bundle.d.mts",
     "src/changelog.mjs",
+    "src/agent-pointers.mjs",
     "src/changelog.d.mts",
     "src/tokens.d.mts",
     "src/brand.mjs",

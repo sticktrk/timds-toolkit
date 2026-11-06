@@ -792,8 +792,13 @@ test("loads and validates a standalone repository contract", async (t) => {
   const checked = await checkWorkspace(repoRoot, { skipBuild: true });
   assert.deepEqual(
     checked.artifact.files.map((file) => file.path).sort(),
-    ["brand.json", "index.html", "index.json", "index.md", "llms-full.txt", "llms.txt", "tokens.json"],
+    ["brand.json", "index.html", "index.json", "index.md", "llms-full.txt", "llms.txt", "robots.txt", "tokens.json"],
   );
+  // robots.txt at the site root names the entry point for a crawler; a build's own is kept.
+  assert.match(await fs.readFile(path.join(repoRoot, "dist", "robots.txt"), "utf8"), /^# AI agents and tools: this design system's entry point is \/llms\.txt\n[\s\S]*\nUser-agent: \*\nAllow: \/\n$/);
+  await fs.writeFile(path.join(repoRoot, "dist", "robots.txt"), "User-agent: *\nDisallow: /private/\n", "utf8");
+  await checkWorkspace(repoRoot, { skipBuild: true });
+  assert.equal(await fs.readFile(path.join(repoRoot, "dist", "robots.txt"), "utf8"), "User-agent: *\nDisallow: /private/\n");
   assert.equal(checked.machine.counts.blocks, 1);
   assert.equal(checked.machine.counts.tokens, 0);
 });
@@ -1070,6 +1075,12 @@ test("the starter viewer renders its site model, and its build guards pages, pla
   assert.match(changelogPage, /<span class="td-changelog-current">Current<\/span>/);
   assert.match(overview, /<span class="tag">Planned<\/span>/);
   assert.doesNotMatch(overview, /\{\{/);
+  // An agent sent to the site instead of llms.txt is pointed at it from every page: the head for a reader of the
+  // HTML, one visible line outside <main> for a reader of the extracted text, which drops the head.
+  assert.match(overview, /<!-- AI agents: this design system's entry point is \/llms\.txt [^>]*-->\n    <link rel="llms-txt" type="text\/plain" href="\/llms\.txt">\n    <link rel="alternate" type="text\/markdown" href="index\.md" title="This page as Markdown">\n  <\/head>/);
+  assert.match(overview, /<\/footer>\n    <p class="agents">AI agents: start at <a href="\/llms\.txt">\/llms\.txt<\/a>\. This page as Markdown: <a href="index\.md">index\.md<\/a>\.<\/p>\n  <\/body>/);
+  assert.match(changelogPage, /<link rel="llms-txt" type="text\/plain" href="\/llms\.txt">\n  <\/head>/);
+  assert.match(changelogPage, /<p class="td-changelog-agents">AI agents: start at <a href="\/llms\.txt">\/llms\.txt<\/a>\.<\/p>\n  <\/body>/);
   // The sample website design is listed by the viewer and built by TimDS as whole pages, states beside them.
   assert.match(overview, /<a class="appbar__view" href="\/designs\/"><b>Designs<\/b>/);
   assert.match(overview, /<a href="\/designs\/website\/">Marketing site<\/a><\/td><td>Designs<\/td>[\s\S]*?<td>2 pages<\/td>/);
@@ -1100,6 +1111,10 @@ test("the starter viewer renders its site model, and its build guards pages, pla
   assert.deepEqual(designs, { enabled: true, designCount: 1, pageCount: 2, stateCount: 3, journeyCount: 1, warnings: [] }, "the sample journey covers the sample's pages, so a fresh scaffold has no journey warning");
   assert.deepEqual(machine.index.designs, { url: "/designs.json", count: 1, pages: 2, states: 3, journeys: 1 });
   assert.match(await read("dist/designs/index.html"), /<a class="td-directory-journey" href="\/designs\/website\/journeys\/get-in-touch\/">/);
+  assert.match(await read("dist/designs/index.html"), /<link rel="llms-txt" type="text\/plain" href="\/llms\.txt">[\s\S]*<p class="td-directory-agents">AI agents: start at <a href="\/llms\.txt">\/llms\.txt<\/a>\.<\/p>\n  <\/body>/, "the designs directory points at the entry point");
+  assert.doesNotMatch(await read("dist/designs/website/contact/index.html"), /llms-txt|class="agents"/, "a design is the page as authored");
+  assert.doesNotMatch(await read("dist/brand/color/index.md"), /AI agents/, "the visible line sits outside <main>, so the Markdown mirror has no trace of it");
+  assert.match(await read("dist/robots.txt"), /entry point is \/llms\.txt/);
   assert.match(await read("dist/designs/website/journeys/get-in-touch/index.html"), /<iframe src="\/designs\/website\/contact\/sent\.html" title="Message sent"/);
   const designsDocument = JSON.parse(await read("dist/designs.json"));
   assert.deepEqual(designsDocument.designs[0].pages.map((page) => [page.route, page.title, page.states.map((state) => state.name)]), [["/", "Home", ["default"]], ["/contact", "Contact", ["default", "sent"]]]);

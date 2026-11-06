@@ -50,6 +50,8 @@ body.timds-changelog {
 .timds-changelog code { font: .8125rem/1.6 var(--font-mono, ui-monospace, monospace); color: var(--changelog-muted); }
 .timds-changelog .td-changelog-empty { padding: 1.5rem; border: 1px dashed var(--changelog-line); border-radius: .75rem; color: var(--changelog-muted); }
 .timds-changelog .td-changelog-release .td-changelog-empty { margin-top: 1rem; padding: .75rem 0 0; border: 0; border-radius: 0; font-size: .875rem; }
+.timds-changelog .td-changelog-agents { margin: 0; padding: 1rem 1.5rem 2rem; color: var(--changelog-muted); font-size: .8125rem; text-align: center; }
+.timds-changelog .td-changelog-agents a { color: inherit; }
 @media (max-width: 40rem) {
   .timds-changelog .td-changelog-main { padding-top: 2rem; }
   .timds-changelog .td-changelog-release { padding: 1.25rem; }

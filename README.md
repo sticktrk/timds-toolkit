@@ -657,8 +657,9 @@ Beside the published pages this writes `index.json` (the structured tree, with
 assets joined to their media records), `tokens.json` (the design tokens),
 `brand.json` (the brand kit), `formats.json` (the asset format catalog, when
 the system keeps one), `llms.txt` (the brand essentials and the page index),
-`llms-full.txt` (every page in one file), and an `index.md` Markdown mirror
-of every page.
+`llms-full.txt` (every page in one file), an `index.md` Markdown mirror
+of every page, and, when the entry page is at the artifact root, a
+`robots.txt` that names `llms.txt` (a `robots.txt` the build wrote is kept).
 Every record carries a stable id such as `social/shorts#safe-zones/bottom-band`,
 so an agent can cite a rule and a reviewer can resolve the citation.
 
@@ -762,6 +763,15 @@ variant with its URL, and every asset format with its size — and only then the
 page directory. `llms-full.txt` beside it is every page's Markdown in one
 file, for a tool that reads a single URL. Both are rewritten to absolute URLs
 on publish, so nothing in them depends on a viewer origin.
+
+People send agents to the site as often as to `llms.txt`, so every page the
+starter viewer renders points at it from both places an agent reads: the head
+holds a comment naming the entry point, a `<link rel="llms-txt">` to it, and a
+`<link rel="alternate" type="text/markdown">` to that page's own mirror; the
+body ends with one visible line saying the same, outside `<main>` so the
+mirrors stay free of it. The changelog page and the designs directory carry the
+same pointers; an authored design is published as written. `robots.txt` at the
+site root repeats it for a crawler that reads that file first.
 
 ### The consumer bundle
 

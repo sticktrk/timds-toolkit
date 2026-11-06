@@ -643,6 +643,30 @@ function renderPagenav(authored, current) {
   ].join("\n");
 }
 
+// Agents are sent to the site as often as to llms.txt, so every rendered page
+// says where the agent-readable layer is: a comment and links in the head for
+// a reader of the raw HTML, and one visible line at the end of the body for a
+// reader of the extracted text, which drops the head. The line sits outside
+// <main>, so the Markdown mirrors TimDS harvests from it stay free of it. The
+// viewer adds both itself, so a client's layout needs no placeholder.
+const agentPointers = {
+  head: [
+    "<!-- AI agents: this design system's entry point is /llms.txt (how to use it, the brand essentials, then every page with a link to its Markdown). This page as Markdown: index.md beside it. Every page in one file: /llms-full.txt. -->",
+    '<link rel="llms-txt" type="text/plain" href="/llms.txt">',
+    '<link rel="alternate" type="text/markdown" href="index.md" title="This page as Markdown">',
+  ],
+  body: '<p class="agents">AI agents: start at <a href="/llms.txt">/llms.txt</a>. This page as Markdown: <a href="index.md">index.md</a>.</p>',
+};
+
+function withAgentPointers(html) {
+  const head = /[ \t]*<\/head>/i;
+  const body = /[ \t]*<\/body>/i;
+  if (!head.test(html) || !body.test(html)) throw new Error("src/layout.html must contain </head> and </body>");
+  return html
+    .replace(head, `${agentPointers.head.map((line) => `    ${line}`).join("\n")}\n  </head>`)
+    .replace(body, `    ${agentPointers.body}\n  </body>`);
+}
+
 function fill(template, file, values) {
   return template.replace(placeholder, (match, name, argument) => {
     const value = values[name];
@@ -737,14 +761,14 @@ export async function renderSite() {
     // previous/next links are left out, and the content is wrapped so the
     // chrome's stylesheet can widen the content column for it.
     const landing = page.layout === "landing";
-    rendered.set(page.output, fill(layout, "src/layout.html", {
+    rendered.set(page.output, withAgentPointers(fill(layout, "src/layout.html", {
       ...shared,
       title: escapeHtml(page.title),
       views: renderViews(model, page, designs, hasDesigns),
       sidenav: landing ? "" : renderSidenav(model, page),
       pagenav: `${landing ? "" : renderPagenav(authored, page)}\n        ${enhancements}`,
       content: landing ? `<div class="landing">\n${content.trim()}\n</div>` : content.trim(),
-    }));
+    })));
   }
 
   return {
