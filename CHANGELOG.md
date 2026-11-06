@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Starter sync recognizes every stock version a release shipped of each managed file, not only the hash its record names. A system whose record moved past its files, such as one where a hosted repair reverted the page writes and kept the newer record, had its Use and Install pages still at an earlier release's stock bytes reported as its own page and never refreshed, so its Use page never gained the composer; the next upgrade now brings them to stock. Older stock viewers and viewer stylesheets are recognized the same way. `node scripts/check-starter-history.mjs` walks the release tags and fails when a shipped version is missing from the table, and CI runs it.
+
 - Starter sync holds the stock pages (the Digital, Social and Print overviews and the Use pages) back while `scripts/viewer.mjs` or `scripts/build.mjs` is customized and kept, reporting each as `skipped` with a note naming the renderer, instead of writing a page the kept renderer cannot build and rolling the whole upgrade back on its own check. A hosted upgrade of such a system now lands its dependency, skill and record changes; `timds starter sync --force scripts/viewer.mjs` brings the pages in afterwards.
 
 - Upgrade adopts contract groups (`tokens/`, `media/`, `.timds/contract-layout.json`) only when the migrated groups validate; a legacy `tokens.json` whose token value names a plain custom property, such as `var(--theme-body, var(--text))`, keeps the aggregate layout and the upgrade reports why under `contractMigration.reason` instead of failing its own check.
