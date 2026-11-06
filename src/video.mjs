@@ -404,7 +404,7 @@ export function validateVideoContract(input) {
     const font = object(raw, `video contract brand.fontFiles[${index}]`);
     return {
       family: text(font.family, `video contract brand.fontFiles[${index}].family`),
-      path: safeRelativePath(font.path, `video contract brand.fontFiles[${index}].path`),
+      path: normalizeBrandSource(font.path, `video contract brand.fontFiles[${index}].path`),
       style: text(font.style || "normal", `video contract brand.fontFiles[${index}].style`),
       weight: text(font.weight || "400", `video contract brand.fontFiles[${index}].weight`),
     };
@@ -459,7 +459,7 @@ export function validateVideoContract(input) {
         ui: text(fonts.ui || "sans-serif", "video contract brand.fonts.ui"),
       },
       fontFiles,
-      logo: safeRelativePath(brand.logo, "video contract brand.logo"),
+      logo: normalizeBrandSource(brand.logo, "video contract brand.logo"),
       series: text(brand.series, "video contract brand.series"),
       site: text(brand.site, "video contract brand.site"),
       tagline: text(brand.tagline, "video contract brand.tagline"),

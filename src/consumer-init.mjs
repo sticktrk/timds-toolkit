@@ -55,7 +55,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-import { CONSUMER_INSTALLATION_PATH, CONSUMER_MANIFEST_FILE, consumerPinMode, gitIgnoredPaths, publishedBaseUrl, validateConsumerManifest } from "./consumer.mjs";
+import { CONSUMER_INSTALLATION_PATH, CONSUMER_MANIFEST_FILE, CONSUMER_SKILL_NAME, CONSUMER_SKILL_NAMES, CONSUMER_UPDATE_SKILL_NAME, consumerPinMode, gitIgnoredPaths, publishedBaseUrl, validateConsumerManifest } from "./consumer.mjs";
 import { resolvePublishedBundle, syncConsumerBundle } from "./consumer-sync.mjs";
 import { planConsumerToolkitLock, resolveConsumerToolkitLock, runConsumerNpm } from "./consumer-install.mjs";
 import { acceptsToolkitReleaseRange, runtimeIdentity, toolkitReleaseRange } from "./runtime.mjs";
@@ -65,11 +65,10 @@ import { assertBinaryInstallation, binaryInstallationRecord, readBinaryInstallat
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-export const CONSUMER_SKILL_NAME = "timds-consume-design-system";
+// The skill names are declared in consumer.mjs, next to the always-allowed
+// paths derived from them, and re-exported here for the callers that render them.
+export { CONSUMER_SKILL_NAME, CONSUMER_SKILL_NAMES, CONSUMER_UPDATE_SKILL_NAME };
 export const CONSUMER_SKILL_PATH = `.agents/skills/${CONSUMER_SKILL_NAME}`;
-// The developer's counterpart: move the pin to a new release and port the designs that changed.
-export const CONSUMER_UPDATE_SKILL_NAME = "timds-update-design-system";
-export const CONSUMER_SKILL_NAMES = [CONSUMER_SKILL_NAME, CONSUMER_UPDATE_SKILL_NAME];
 export const CONSUMER_WORKFLOW_PATH = ".github/workflows/timds-consumer-preview.yml";
 export const CONSUMER_DESIGNER_WORKFLOW_PATH = ".github/workflows/timds-designer-change.yml";
 export const CONSUMER_LAUNCH_PATH = ".claude/launch.json";
@@ -352,7 +351,12 @@ function list(values) {
   return values.map(code).join(", ");
 }
 
-function appSection(name, app, invocation = "npm run timds --") {
+/** Where an app's folder finds the built designs: the manifest's Design System path, relative to that folder. */
+function designsPathFrom(app, designSystemPath) {
+  return `${path.posix.join(path.posix.relative(app.cwd, "."), designSystemPath, "dist", "designs")}/`;
+}
+
+function appSection(name, app, invocation = "npm run timds --", designSystemPath = "design-system") {
   const cwd = app.cwd === "." ? "repository root" : `${code(`${app.cwd}/`)}`;
   const preview = app.preview;
   const lines = [`### ${code(name)}`, ""];
@@ -365,7 +369,7 @@ function appSection(name, app, invocation = "npm run timds --") {
   }
   if (preview.routes?.length) lines.push(`- Review routes: ${list(preview.routes)}.`);
   const designs = Object.entries(preview.designs || {});
-  if (designs.length) lines.push(`- Designs to match: ${designs.map(([route, reference]) => `${code(route)} matches ${code(reference)}`).join(", ")}. The preview shows each design beside its route; read it with ${code("read_design")} or under ${code(`${app.cwd === "." ? "" : "../"}design-system/dist/designs/`)} after the pin is built.`);
+  if (designs.length) lines.push(`- Designs to match: ${designs.map(([route, reference]) => `${code(route)} matches ${code(reference)}`).join(", ")}. The preview shows each design beside its route; read it with ${code("read_design")} or under ${code(designsPathFrom(app, designSystemPath))} after the pin is built.`);
   lines.push(`- Review at: ${list(preview.viewports)} widths; ${list(preview.schemes)} schemes.`);
   lines.push(`- Design surface (may change): ${list(app.designSurface)}.`);
   lines.push(app.protected.length
@@ -439,7 +443,7 @@ export async function renderConsumerSkillFile(skillName, manifest, options = {})
   const source = await fs.readFile(path.join(packageRoot, "skills", skillName, "SKILL.md"), "utf8");
   const binary = options.mode === "binary";
   const invocation = binary ? "timds-cli" : "npm run timds --";
-  const apps = Object.entries(validated.apps).map(([name, app]) => appSection(name, app, invocation)).join("\n\n");
+  const apps = Object.entries(validated.apps).map(([name, app]) => appSection(name, app, invocation, validated.designSystem.path)).join("\n\n");
   let text = source;
   for (const [placeholder, replacement] of Object.entries({ ...pinSections(validated.designSystem, binary, options), ...updateSections(options) })) text = text.replace(placeholder, () => replacement);
   if (binary) {

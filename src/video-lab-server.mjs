@@ -360,7 +360,8 @@ export async function readVideoLabInput(workspace, name) {
 
 // --- render jobs ----------------------------------------------------------------------
 
-export function createRenderJobs(workspace, { runLab = runVideoLab } = {}) {
+// `python` and `voice` are the `--python` and `--voice` flags of `video lab --serve`: every render the lab starts narrates with them, the way `video lab NAME --render` does.
+export function createRenderJobs(workspace, { runLab = runVideoLab, python = undefined, voice = undefined } = {}) {
   const jobs = new Map();
   let active = null;
   return {
@@ -376,7 +377,7 @@ export function createRenderJobs(workspace, { runLab = runVideoLab } = {}) {
       const job = { id: randomUUID(), name, status: "running", log: [], startedAt: new Date().toISOString(), finishedAt: null, error: null, output: null };
       jobs.set(job.id, job);
       active = job;
-      runLab(workspace, name, { render: true, silent, captureOutput: true, log: (line) => job.log.push(line) })
+      runLab(workspace, name, { render: true, silent, captureOutput: true, python, voice, log: (line) => job.log.push(line) })
         .then((result) => {
           job.status = "done";
           job.finishedAt = new Date().toISOString();
@@ -470,11 +471,11 @@ export function createVideoLabServer(workspace, { jobs = createRenderJobs(worksp
   });
 }
 
-export async function serveVideoLab(workspace, { port = VIDEO_LAB_DEFAULT_PORT, log = () => {} } = {}) {
+export async function serveVideoLab(workspace, { port = VIDEO_LAB_DEFAULT_PORT, log = () => {}, python = undefined, voice = undefined } = {}) {
   const numericPort = Number(port);
   if (!Number.isInteger(numericPort) || numericPort < 1 || numericPort > 65_535) throw new Error("video lab port must be between 1 and 65535");
   await loadVideoWorkspace(workspace);
-  const server = createVideoLabServer(workspace);
+  const server = createVideoLabServer(workspace, { jobs: createRenderJobs(workspace, { python, voice }) });
   await new Promise((resolve, reject) => {
     server.once("error", reject);
     server.listen(numericPort, "127.0.0.1", resolve);

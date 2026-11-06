@@ -58,16 +58,19 @@ jobs:
           git switch -c timds/dependency-upgrade
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # Fail if checks wrote authored source. Only dependency selection, the
-          # already adopted managed boundary, and the rebuilt artifact (whose
-          # extracted index records the engine version) may appear in an upgrade PR.
+          # Fail if checks wrote authored source. The selected release declares
+          # what its upgrade writes (the dependency selection, the managed
+          # boundary, the starter sync, the contract-group migration, and the
+          # rebuilt artifact, whose extracted index records the engine version);
+          # anything else in an upgrade PR is authored source.
           node --input-type=module <<'JS'
           import {execFileSync} from 'node:child_process';
           import {existsSync} from 'node:fs';
+          const {isUpgradeWritePath} = await import('@dtconcepts/timds');
+          if (typeof isUpgradeWritePath !== 'function') throw new Error('The selected TimDS release does not declare its upgrade write boundary; select 0.1.492 or newer, or review this migration manually.');
           const prefix = existsSync('timds.json') ? '' : 'design-system/';
           const changed = execFileSync('git', ['status', '--porcelain', '--untracked-files=all'], {encoding: 'utf8'}).trimEnd().split('\n').filter(Boolean).map(line => line.slice(3));
-          const allowed = file => ['package.json', 'package-lock.json', '.github/workflows/timds-upgrade.yml', '.github/workflows/timds-design-system.yml', '.github/workflows/update-consumer-submodule.yml', 'scripts/release.mjs', 'scripts/release.sh', 'scripts/check-versions.mjs', 'scripts/prepare-merge-release.mjs', 'scripts/prepare-merge-release.test.mjs'].includes(file) || file === `${prefix}.timds/installation.json` || ['.agents/skills/timds-edit-design-system/', '.agents/skills/timds-create-video/', `${prefix}dist/`].some(root => file.startsWith(root));
-          const unexpected = changed.filter(file => !allowed(file));
+          const unexpected = changed.filter(file => !isUpgradeWritePath(file, {designSystemPrefix: prefix}));
           if (unexpected.length) throw new Error(`Checks changed authored files: ${unexpected.join(', ')}. Review this migration manually.`);
           JS
           git add --all

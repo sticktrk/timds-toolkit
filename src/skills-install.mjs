@@ -38,13 +38,14 @@ import { fileURLToPath } from "node:url";
 import { isBinaryRuntime } from "./executable.mjs";
 import { renderBinaryInstructions } from "./binary-installation.mjs";
 import { runtimeIdentity } from "./runtime.mjs";
+import { installableSkillNames } from "./skill-names.mjs";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 /** The agent skill directories, relative to the folder (or home) they are installed under. */
 export const SKILL_DIRECTORIES = Object.freeze([".agents/skills", ".claude/skills", ".cursor/skills"]);
 /** The system-independent designer skills `skills install` copies as they ship. */
-export const INSTALLABLE_SKILL_NAMES = Object.freeze(["timds-edit-design-system", "design-start", "design-media", "design-ship", "design-handoff"]);
+export const INSTALLABLE_SKILL_NAMES = installableSkillNames;
 /** The template folder of the hosted skill, rendered per system under `hostedSkillName`. */
 export const HOSTED_SKILL_TEMPLATE = "timds-hosted-design-system";
 /** The placeholders the hosted skill template may carry; the host's fill and this one supply exactly these. */

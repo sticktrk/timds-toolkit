@@ -86,13 +86,21 @@ export async function readParentRecord(root) {
   return value === undefined ? null : validateParentRecord(value);
 }
 
+/**
+ * The exact source files `.timds/stock.json` may name, as a designer reads
+ * them. The pattern below is the same list; the MCP editing guide and the
+ * refusal message both read this constant so they cannot drift from it.
+ */
+export const STOCK_RECORD_PATH_KINDS = Object.freeze(['src/pages/**/*.html', 'src/styles/**/*.css', 'src/layout.html', 'src/copy.json']);
+const STOCK_RECORD_PATH = /^src\/(?:pages\/.+\.html|styles\/.+\.css|layout\.html|copy\.json)$/;
+
 /** Stock names exact source files. Globs, links and other authored layers are refused. */
 export async function validateStockRecord(value, root) {
   const at = STOCK_RECORD_FILE;
   if (!object(value) || value.schemaVersion !== 1 || !onlyKeys(value, ['schemaVersion', 'paths']) || !Array.isArray(value.paths) || value.paths.length > 4000) throw new Error(`${at} must contain schemaVersion 1 and up to 4000 paths`);
   const seen = new Set();
   for (const file of value.paths) {
-    if (typeof file !== 'string' || !/^src\/(?:pages\/.+\.html|styles\/.+\.css|layout\.html|copy\.json)$/.test(file) || /[\x00-\x1f\x7f\\*?\[\]{}]/.test(file) || file.split('/').some(part => !part || part === '.' || part === '..') || seen.has(file)) throw new Error(`${at} must name unique exact src/pages HTML files, src/styles CSS files, src/layout.html or src/copy.json`);
+    if (typeof file !== 'string' || !STOCK_RECORD_PATH.test(file) || /[\x00-\x1f\x7f\\*?\[\]{}]/.test(file) || file.split('/').some(part => !part || part === '.' || part === '..') || seen.has(file)) throw new Error(`${at} must name unique exact existing files matching ${STOCK_RECORD_PATH_KINDS.join(', ')}`);
     seen.add(file);
     if (root) {
       try { await regularPath(root, file); }

@@ -572,3 +572,29 @@ test("join accepts a Studio invite link, which names the session and its host", 
   assert.deepEqual(urls, ["https://host.example/api/timds/sessions/22222222-2222-4222-8222-222222222222/join", "https://override.example/api/timds/sessions/22222222-2222-4222-8222-222222222222/join"]);
   assert.equal(await fs.readFile(path.join(directory, "linked", "note.txt"), "utf8"), "shared");
 });
+
+test("system-scoped commands run before a workspace exists reuse the saved login, as the hosted skill expects", async t => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "timds-system-scoped-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const credentialsPath = path.join(directory, "credentials.json");
+  await saveAccessToken("https://saved.test", "timds_saved", { credentialsPath });
+  const requests = [];
+  const fetchImpl = async (url, options) => {
+    requests.push({ url, method: options.method, authorization: options.headers.Authorization, body: options.body ? JSON.parse(options.body) : null });
+    return response({ apiVersion: 1, items: [] });
+  };
+  // No workspace, no portal flag, no TIMDS_PORTAL_URL: the saved login selects the host, as for whoami and systems.
+  const root = path.join(directory, "nowhere");
+  await runHostedCommand("active-work", { root, credentialsPath, systemId: "example/core", fetchImpl });
+  assert.deepEqual(requests.at(-1), { url: "https://saved.test/api/timds/design-systems/example%2Fcore/active-work", method: "GET", authorization: "Bearer timds_saved", body: null });
+  await runHostedCommand("draft-list", { root, credentialsPath, systemId: "example/core", fetchImpl });
+  assert.equal(requests.at(-1).url, "https://saved.test/api/timds/design-systems/example%2Fcore/drafts");
+  await runHostedCommand("draft-create", { root, credentialsPath, systemId: "example/core", name: "spring-refresh", fetchImpl });
+  assert.equal(requests.at(-1).method, "POST");
+  assert.equal(requests.at(-1).body.name, "spring-refresh");
+  await runHostedCommand("draft-close", { root, credentialsPath, systemId: "example/core", name: "spring-refresh", fetchImpl });
+  assert.match(requests.at(-1).url, /drafts\/spring-refresh\/close$/);
+  // The system is still required, and a signed-out machine still gets the login advice.
+  await assert.rejects(runHostedCommand("active-work", { root, credentialsPath, fetchImpl }), /Provide --system-id/);
+  await assert.rejects(runHostedCommand("active-work", { root, credentialsPath: path.join(directory, "none.json"), systemId: "example/core", fetchImpl }), /No TimDS host configured/);
+});

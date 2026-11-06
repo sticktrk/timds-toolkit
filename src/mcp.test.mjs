@@ -4,6 +4,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { STOCK_RECORD_PATH_KINDS } from "./offshoot-contract.mjs";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -303,6 +304,9 @@ test("the editing guide carries the rules without local-only steps", async (t) =
   for (const local of ["npm ci", "git switch", "git clone", "npm run timds", "doctor", "timds -- dev"]) {
     assert.ok(!guide.includes(local), local);
   }
+  // The stock declaration rule lists exactly the paths the contract accepts, src/copy.json included.
+  for (const kind of STOCK_RECORD_PATH_KINDS) assert.ok(guide.includes(`\`${kind}\``), kind);
+  assert.ok(guide.includes("`src/copy.json`"));
 
   const repoRoot = await standaloneRepo(t);
   const client = await connect(await createDesignSystemMcpServer({ root: repoRoot }));
