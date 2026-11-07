@@ -1,13 +1,17 @@
 // A parent supplies an offshoot's structural stock. Feeding reuses the starter's
-// three-way catalog merge and plumbing ownership, and never copies authored
-// source: a page, system stylesheet, layout, token or media remains the child's.
+// three-way catalog merge and plumbing ownership. The toolkit keeps code, the
+// parent keeps design: the pages, stylesheets, layout and copy the parent's
+// `.timds/stock.json` declares are refreshed by the hash `.timds/parent.json`
+// recorded when they were last written. A stock file the child changed or
+// removed is a graft and is kept, `--force` included; tokens, media, designs
+// and every undeclared file remain the child's and are never copied.
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { isPlumbingPath, readParentRecord, regularPath, validateParentRecord } from "./offshoot-contract.mjs";
 import { requireCleanPaths } from "./clean-tree.mjs";
-import { decodeOffshootSource, structureSite } from "./offshoots.mjs";
+import { declaredStock, decodeOffshootSource, stockHashes, structureSite } from "./offshoots.mjs";
 import { compareDesignSystemVersions, parseDesignSystemVersion } from "./changelog.mjs";
 import {
   STARTER_RECORD_FILE, STARTER_SITE_FILE, STARTER_FORMATS_FILE,
@@ -20,6 +24,23 @@ const cleanTreeMessage = "Feed refuses to run over uncommitted changes to the fi
 const sha256 = (text) => createHash("sha256").update(text).digest("hex");
 const json = (value) => `${JSON.stringify(value, null, 2)}\n`;
 const object = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+
+async function optionalBytes(file) {
+  try { return await fs.readFile(file); }
+  catch (error) { if (error.code === "ENOENT") return null; throw error; }
+}
+
+/** The page a stock fragment renders: `src/pages/<view>/index.html` is the
+ * view's own page and `src/pages/<view>/<slug>.html` is `<view>/<slug>`. */
+function stockPageId(relative) {
+  const match = /^src\/pages\/([^/]+)\/(.+)\.html$/.exec(relative);
+  if (!match) return null;
+  return match[2] === "index" ? match[1] : `${match[1]}/${match[2]}`;
+}
+
+function sameIdentity(left, right) {
+  return ["systemId", "sourceId", "version", "commit"].filter((key) => left?.[key] !== right?.[key]);
+}
 
 async function optional(file) {
   try { return await fs.readFile(file, "utf8"); }
@@ -42,18 +63,37 @@ async function targetPath(root, relative) {
 }
 
 /** Feed a verified published source snapshot (the same shape as source export).
- * Only catalogs, recorded plumbing and the two bookkeeping records are written.
- * `force` names plumbing paths; it never reaches authored source. */
-export async function feedOffshoot({ designSystemRoot, source, check = null, force = [], decideCustomized = null }) {
+ * Only catalogs, recorded plumbing, the parent's declared stock (while the
+ * child's copy is unmodified, or absent and never written) and the two
+ * bookkeeping records are written. `force` names plumbing paths; it never
+ * reaches declared stock or other authored source. A record without stock
+ * hashes needs `baseline`, the release it names, to adopt them. `hostedRunner`
+ * lets the host's own runner feed a hosted session workspace. */
+export async function feedOffshoot({ designSystemRoot, source, baseline = null, check = null, force = [], decideCustomized = null, hostedRunner = false }) {
   const parent = await readParentRecord(designSystemRoot);
   if (!parent) throw new Error("This system has no .timds/parent.json; only an offshoot can be fed");
-  if (await optional(path.join(designSystemRoot, ".timds/session.json"))) throw new Error("Feed is not available in a hosted session; feed the source repository instead");
+  if (!hostedRunner && await optional(path.join(designSystemRoot, ".timds/session.json"))) throw new Error("Feed is not available in a hosted session; feed the source repository instead (the host's runner sets TIMDS_HOSTED_RUNNER=1 to feed its own workspace)");
   if (!source || !(Array.isArray(source.files) || source.files instanceof Map) || !object(source.parent)) throw new Error("Feed requires a published parent source snapshot");
   const { systemId, sourceId, version, commit } = source.parent;
   const identity = { systemId, sourceId, version, commit };
   if (identity.systemId !== parent.systemId || identity.sourceId !== parent.sourceId) throw new Error("The source snapshot belongs to a different parent system or source");
   if (parseDesignSystemVersion(identity.version) && parseDesignSystemVersion(parent.version) && compareDesignSystemVersions(identity.version, parent.version) < 0) throw new Error(`Feed requires a parent release at or after ${parent.version}; ${identity.version} is older`);
   const sourceFiles = decodeOffshootSource(source);
+  // Records shot before stock hashes are adopted from the release they name:
+  // a child file still equal to that release's bytes is unmodified stock.
+  let recordedFiles = parent.files;
+  const adopted = !object(recordedFiles);
+  if (adopted) {
+    if (!baseline) throw new Error(`.timds/parent.json predates stock hashes; feed needs the release it was shot from (${parent.systemId} ${parent.version} at ${parent.commit}) as a baseline to adopt them: pass --baseline-file with that release's source export under the host runner, or let timds feed read it from the same source`);
+    if (!(Array.isArray(baseline.files) || baseline.files instanceof Map) || !object(baseline.parent)) throw new Error("The feed baseline must be a published parent source snapshot");
+    const mismatch = sameIdentity(baseline.parent, parent);
+    if (mismatch.length) throw new Error(`The feed baseline is not the release .timds/parent.json records (${parent.systemId} ${parent.version} at ${parent.commit}); its ${mismatch.join(", ")} differ${mismatch.length === 1 ? "s" : ""}`);
+    const baselineFiles = decodeOffshootSource(baseline);
+    recordedFiles = stockHashes(baselineFiles, await declaredStock(baselineFiles));
+  }
+  const declared = await declaredStock(sourceFiles);
+  // Plumbing stays the toolkit's even where a stylesheet path is also declared.
+  const stockPaths = (declared?.paths ?? []).filter((relative) => !isPlumbingPath(relative));
   const manifest = sourceJson(sourceFiles, "timds.json");
   if (manifest?.systemId !== identity.systemId || manifest?.version !== identity.version) throw new Error("The parent source identity or version disagrees with its release");
   const rawSite = sourceJson(sourceFiles, STARTER_SITE_FILE);
@@ -62,22 +102,25 @@ export async function feedOffshoot({ designSystemRoot, source, check = null, for
   // before either the planner or a target write sees them.
   validateParentRecord({ schemaVersion: 1, ...identity, mode: parent.mode, baseline: { site: rawSite, formats } });
   const site = parent.mode === "structure" ? structureSite(rawSite) : rawSite;
-  const nextParent = { ...parent, version: identity.version, commit: identity.commit, baseline: { site, formats } };
+  const nextStockFiles = { ...recordedFiles };
+  const nextParent = { ...parent, version: identity.version, commit: identity.commit, baseline: { site, formats }, files: nextStockFiles };
   const record = await readStarterRecord(designSystemRoot);
   const stockRecord = sourceJson(sourceFiles, STARTER_RECORD_FILE, false);
   if (parent.mode === "structure" && (stockRecord?.schemaVersion !== 1 || stockRecord.plumbing !== "toolkit" || !object(stockRecord.files))) throw new Error("Structure feed requires recorded toolkit plumbing in the parent");
   const stockFiles = object(stockRecord?.files) ? stockRecord.files : {};
   const selected = Object.keys(stockFiles).filter(isPlumbingPath);
+  const forcedStock = force.find((relative) => !isPlumbingPath(relative) && (stockPaths.includes(relative) || Object.hasOwn(recordedFiles, relative)));
+  if (forcedStock) throw new Error(`Feed --force replaces only named plumbing files; ${forcedStock} is the parent's declared stock, which feed refreshes only while it is unmodified and never forces over your graft. Accept the parent's version by editing the file`);
   if (force.some((relative) => !selected.includes(relative))) throw new Error("Feed --force replaces only named plumbing files in the parent's recorded stock; authored content is never replaced");
   const plumbing = record?.plumbing ?? "recorded";
   const files = [], writes = [], pendingCustomized = [], nextFiles = { ...record?.files };
   const plan = async (relative, content, status, note, desiredMode) => {
     const file = await targetPath(designSystemRoot, relative);
-    const current = await optional(file);
+    const current = await optionalBytes(file);
     const originalMode = current === null ? null : (await fs.stat(file)).mode & 0o777;
     const mode = desiredMode ?? originalMode ?? 0o644;
     const modeChanged = content !== null && mode !== originalMode;
-    const changed = content !== null && (content !== current || modeChanged);
+    const changed = content !== null && (current === null || !current.equals(Buffer.from(content)) || modeChanged);
     if (!changed && status === "updated") status = "current";
     if (modeChanged && current !== null && status === "current") status = "updated";
     const reported = { path: relative, status, ...(note ? { note } : {}) };
@@ -113,8 +156,69 @@ export async function feedOffshoot({ designSystemRoot, source, check = null, for
     if (planned.status !== "customized") nextFiles[relative] = stockFiles[relative];
     await plan(relative, planned.write || planned.status === "current" ? desired : null, planned.status, note, entry.mode === "100755" ? 0o755 : 0o644);
   }
+  // Declared stock follows the parent while the child's copy still equals the
+  // bytes last written for it. Anything else is the child's graft: kept, and
+  // reported as shading the parent only when the parent's bytes moved.
+  const stock = [], grafts = [], createdPages = new Set();
+  for (const relative of stockPaths) {
+    const bytes = sourceFiles.get(relative);
+    const parentHash = sha256(bytes);
+    const recorded = recordedFiles[relative];
+    const file = await targetPath(designSystemRoot, relative);
+    const current = await optionalBytes(file);
+    const shades = parentHash !== recorded;
+    let status, note;
+    if (current === null && recorded === undefined) {
+      status = "created";
+      nextStockFiles[relative] = parentHash;
+      const id = stockPageId(relative);
+      if (id) createdPages.add(id);
+      await plan(relative, bytes, status, undefined, 0o644);
+    } else if (current === null) {
+      status = "customized";
+      note = "removed in this system; a graft, never recreated";
+      grafts.push({ path: relative, shades, removed: true, note });
+      await plan(relative, null, status, note);
+    } else {
+      const currentHash = sha256(current);
+      if (currentHash === parentHash) {
+        status = "current";
+        nextStockFiles[relative] = parentHash;
+        await plan(relative, null, status);
+      } else if (currentHash === recorded) {
+        status = "updated";
+        nextStockFiles[relative] = parentHash;
+        await plan(relative, bytes, status);
+      } else {
+        status = "customized";
+        note = shades ? "your graft; kept over the parent's change" : "your graft; kept";
+        grafts.push({ path: relative, shades, note });
+        await plan(relative, null, status, note);
+      }
+    }
+    stock.push({ path: relative, status, ...(note ? { note } : {}) });
+  }
   const currentSite = JSON.parse(await fs.readFile(await regularPath(designSystemRoot, STARTER_SITE_FILE), "utf8"));
-  const merged = mergeSiteModel(currentSite, site, [parent.baseline.site]);
+  const findPage = (model, id) => {
+    for (const view of Array.isArray(model?.views) ? model.views : []) {
+      const page = (Array.isArray(view?.pages) ? view.pages : []).find((candidate) => (candidate?.slug ? `${view.id}/${candidate.slug}` : view.id) === id);
+      if (page) return page;
+    }
+    return null;
+  };
+  // A page whose stock fragment the feed creates is authored from then on: the
+  // viewer refuses a planned page whose file exists.
+  const authoredPages = new Set([...createdPages].filter((id) => findPage(currentSite, id)?.planned === true));
+  const merged = mergeSiteModel(currentSite, site, [parent.baseline.site], { authoredPages, fragmentExists: (id) => createdPages.has(id) });
+  for (const id of createdPages) {
+    // A structure parent's catalog marks every page planned, which the merge
+    // copies onto a page it adds; the created fragment un-plans it here.
+    const page = findPage(merged.site, id);
+    if (page?.planned === true) {
+      delete page.planned;
+      merged.changes.advanced.push(`${id}.planned`);
+    }
+  }
   const currentFormatsText = await optional(await targetPath(designSystemRoot, STARTER_FORMATS_FILE));
   const currentFormats = currentFormatsText === null ? null : JSON.parse(currentFormatsText);
   const mergedFormats = formats === null
@@ -147,13 +251,13 @@ export async function feedOffshoot({ designSystemRoot, source, check = null, for
     }
     if (record) await plan(STARTER_RECORD_FILE, json({ ...record, files: nextFiles }), "updated");
   }
-  const report = { designSystemRoot, parent: nextParent, previousParent: parent, files, written: writes.map((write) => write.relative), site: merged.changes, formats: mergedFormats.changes, plumbing, check: null, record: path.join(designSystemRoot, PARENT_FILE), recordWritten: writes.some((write) => write.relative === PARENT_FILE) };
+  const report = { designSystemRoot, parent: nextParent, previousParent: parent, files, written: writes.map((write) => write.relative), site: merged.changes, formats: mergedFormats.changes, stock, grafts, adopted, plumbing, check: null, record: path.join(designSystemRoot, PARENT_FILE), recordWritten: writes.some((write) => write.relative === PARENT_FILE) };
   if (!writes.length) return report;
   await requireCleanPaths(designSystemRoot, writes.map((write) => write.relative), { message: cleanTreeMessage });
   try {
     for (const write of writes) {
       await fs.mkdir(path.dirname(write.file), { recursive: true });
-      await fs.writeFile(write.file, write.content, { encoding: "utf8", mode: write.mode });
+      await fs.writeFile(write.file, write.content, typeof write.content === "string" ? { encoding: "utf8", mode: write.mode } : { mode: write.mode });
       await fs.chmod(write.file, write.mode);
     }
     if (check) report.check = await check();
@@ -161,7 +265,7 @@ export async function feedOffshoot({ designSystemRoot, source, check = null, for
     for (const write of writes) {
       if (write.current === null) await fs.rm(write.file, { force: true });
       else {
-        await fs.writeFile(write.file, write.current, "utf8");
+        await fs.writeFile(write.file, write.current);
         await fs.chmod(write.file, write.originalMode);
       }
     }
@@ -176,5 +280,17 @@ export function describeFeed(report) {
   const ordinary = describeStarterSync({ ...report, site: { ...report.site, kept: [] }, formats: { ...report.formats, kept: [] } });
   lines.push(...ordinary);
   for (const graft of kept) lines.push(`Your graft shades the parent's change at ${graft.path}; kept ${JSON.stringify(graft.current)} (parent: ${JSON.stringify(graft.stock)}). Keep your graft, or edit that field to let the parent through.`);
+  for (const entry of report.stock ?? []) {
+    if (entry.status !== "created") continue;
+    const id = stockPageId(entry.path);
+    lines.push(id ? `New stock page from the parent: ${entry.path}, catalog page ${id}.` : `New stock file from the parent: ${entry.path}.`);
+  }
+  for (const graft of report.grafts ?? []) {
+    if (!graft.shades) continue;
+    lines.push(graft.removed
+      ? `Your graft shades the parent's change at ${graft.path}; removed in this system and kept removed. Accept the parent's version by restoring the file.`
+      : `Your graft shades the parent's change at ${graft.path}; kept. Accept the parent's version by editing the file.`);
+  }
+  if (report.adopted && report.written?.length) lines.push("Adopted stock hashes from the release this system was shot from; later feeds compare against them.");
   return lines;
 }

@@ -26,23 +26,29 @@
 //   the new one, and anything the client changed is kept. A kept edit is
 //   reported when the stock value is news (it differs from every baseline),
 //   not on every sync. Nothing is removed, reordered, or retitled.
-// - Authored fragments the starter ships and manages (the
-//   Digital, Social, and Print overviews) and the toolkit's own Use pages,
-//   rendered by the stock viewer. The viewer, build and check scripts are one
-//   renderer: while any of them is customized and kept, the others' refreshes
-//   and every refreshed or new stock fragment wait (`skipped`, with a note
-//   naming the kept file). A stock page the kept renderer has never seen may
-//   use placeholders it cannot build, and a stock check script expects the
-//   stock viewer beside it; either would fail the sync's own check and roll
-//   the whole upgrade back, where holding them lets the dependency, skill and
+// - Authored fragments the ordinary starter ships and manages (the
+//   Digital, Social, and Print overviews) and the toolkit's own Use pages
+//   (Start, Compose with every way to consume a system, and Install),
+//   rendered by the stock viewer. They are written when the sync adds their
+//   page and refreshed only while they still match what the toolkit wrote. A
+//   fragment that differs is this system's own page and is never replaced,
+//   --force included. The viewer, build and check scripts are one renderer:
+//   while any of them is customized and kept, the others' refreshes and every
+//   refreshed or new stock fragment wait (`skipped`, with a note naming the
+//   kept file). A stock page the kept renderer has never seen may use
+//   placeholders it cannot build, and a stock check script expects the stock
+//   viewer beside it; either would fail the sync's own check and roll the
+//   whole upgrade back, where holding them lets the dependency, skill and
 //   record changes land.
-//   Install and every way to consume a system, are written when the sync adds
-//   their page and refreshed only while they still match what the toolkit
-//   wrote. A fragment that differs is this system's own page and is never
-//   replaced, --force included. Every other fragment, tokens.json, the
-//   system stylesheet, and the layout shell are the client's; the layout
-//   only gains a missing stylesheet link and the changelog link on its
-//   version chip.
+//   The brand kit manages no fragment: its pages are seed-only, written once
+//   by `init --starter brand-kit` from templates/brand-kit/ and authored from
+//   then on on the published kit parent (the toolkit keeps code, the parent
+//   keeps design). No sync or upgrade refreshes, writes, records, guards or
+//   reports a kit page; a view or page the kit's catalog gains is appended
+//   as planned, with no fragment written for it.
+//   Every other fragment, tokens.json, the system stylesheet, and the layout
+//   shell are the client's; the layout only gains a missing stylesheet link
+//   and the changelog link on its version chip.
 //
 // The sync rewrites the catalogs and the layout whole, so a CLI refuses to
 // run it over uncommitted changes to the files it writes (`starterSyncPaths`)
@@ -118,12 +124,19 @@ export const starterManagedFragments = Object.freeze([
 /** The plumbing that renders the stock fragments; a kept customization of either holds those fragments back. */
 export const starterRendererFiles = Object.freeze(["scripts/viewer.mjs", "scripts/build.mjs", "scripts/check.mjs"]);
 
-/** Kind-specific stock pages share the same preservation rule as overviews. */
+/**
+ * The managed fragments of a starter kind. The ordinary starter's overviews
+ * and Use pages are managed; the brand kit's pages are seed-only (written once
+ * by init, authored on the published kit parent, never refreshed by sync), so
+ * the kit has none and its record lists plumbing only.
+ */
 export function starterFragments(kind = "starter") {
-  return starterKind(kind) === "starter" ? starterManagedFragments : brandKitStockPaths
-    .filter(relative => relative.startsWith("src/pages/"))
-    .map(relative => [relative, `brand-kit/${relative}`]);
+  return starterKind(kind) === "starter" ? starterManagedFragments : [];
 }
+
+/** Kit pages earlier releases recorded as managed fragments; a sync drops their stale hashes from any record. */
+const retiredKitFragments = new Set(brandKitStockPaths.filter((relative) => relative.startsWith("src/pages/")));
+const retiredFragmentPaths = (kind) => (kind === "brand-kit" ? retiredKitFragments : new Set());
 
 /** Every file the selected sync may write, for clean-tree guards and rollback. */
 export function starterPaths(kind = "starter") {
@@ -681,7 +694,10 @@ export async function syncStarter({ designSystemRoot, version, check = null, dec
   const stock = await stockStarter(kind);
   const files = [];
   const writes = [];
-  const recordedFiles = parent ? { ...record?.files } : {};
+  // An offshoot keeps the hashes it was recorded with, except the kit pages
+  // earlier releases recorded as managed: they are seed-only now, so a kit
+  // child's record drops them like any kit system's.
+  const recordedFiles = parent ? Object.fromEntries(Object.entries(record?.files ?? {}).filter(([relative]) => !retiredFragmentPaths(kind).has(relative))) : {};
   const plan = (relative, status, content, current, note) => {
     files.push(note ? { note, path: relative, status } : { path: relative, status });
     if (content !== null && content !== undefined && content !== current) writes.push({ content, current, file: resolve(relative), relative });

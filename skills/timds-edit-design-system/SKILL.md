@@ -310,11 +310,13 @@ changelog link on its version chip.
 For a requested parent update, commit current changes and run `timds feed`
 with an optional `--version RELEASE`. `--from ../parent` uses a local committed
 tree and the saved source UUID. Feed advances catalog fields equal to the
-baseline and appends missing entries with pages planned. The child's edits
-are grafts and stay. Explain each newly reported graft shading a parent
-change, then keep it or edit that field according to the designer's choice.
+baseline, appends missing entries with pages planned, and refreshes the
+files the parent's `.timds/stock.json` declares while this system's copy is
+unmodified. The child's edits, in a catalog field or a stock file, are grafts
+and stay. Explain each newly reported graft shading a parent change, then
+keep it or edit that field or file according to the designer's choice.
 Plumbing follows the ownership record. `--force PATH` reaches only named
-plumbing and never replaces authored pages, styles, layout, tokens or media.
+plumbing and never replaces grafts, tokens, media or designs.
 Feed refuses uncommitted changes to files it writes, checks the workspace and
 restores its writes on failure; success advances the parent baseline.
 

@@ -254,9 +254,14 @@ from that pure source module so the viewer and integrations use one contract.
 
 `.timds/starter.json` records `starter` (`starter` when absent). Starter sync
 selects catalogs, managed fragments, stock template paths and
-`templates/starter-history/<kind>/` from it. A brand-kit structure offshoot
-retains the kind. No upgrade changes kinds or replaces authored token maps,
-copy, media, evidence, system styles, or customized fragments. The kit's
+`templates/starter-history/<kind>/` from it. The kit manages no fragment: its
+pages are seed-only, written once by `init --starter brand-kit` and authored
+from then on on the published kit parent (the toolkit keeps code, the parent
+keeps design), so no sync or upgrade writes, refreshes, records or reports
+them, and pages its catalog gains are appended as planned without a fragment.
+Kit children follow the parent's pages through `feed`. A brand-kit structure
+offshoot retains the kind. No upgrade changes kinds or replaces authored token
+maps, copy, media, evidence, system styles, or customized fragments. The kit's
 `src/copy.json` is designer-owned data that may be explicitly declared stock;
 its existence does not add it to the upgrade write boundary. Keep the
 ordinary starter's compatibility and the kit's stock and inverted-palette
@@ -288,24 +293,29 @@ Local/git initialization keeps its existing release automation. Session API
 version 1 is implemented in `src/hosted.mjs`; CLI and MCP commands must share
 that implementation and keep files/token boundaries covered by tests.
 
-Offshoots record their immediate parent release and structural feed baseline
-in `.timds/parent.json`. Check validates it without mutation; sessions cannot
+Offshoots record their immediate parent release, structural feed baseline
+and the hash of every declared stock file it last wrote (`files`) in
+`.timds/parent.json`. Check validates it without mutation; sessions cannot
 create, edit or delete it. `.timds/stock.json` is a designer-authored exception
 under `.timds`: exact existing regular `src/pages/**/*.html`,
 `src/styles/**/*.css`, `src/layout.html` and `src/copy.json` paths only, never
-globs or links. The copy file remains authored source after creation.
+globs or links. Declared files stay outside every ordinary upgrade.
 Structure creation includes those declarations, verified recorded plumbing,
 whole formats, planned pages and token `initial` placeholders reported as
 unresolved warnings. `shoot` creates a local independent repository without
 registering or publishing; `feed` reuses starter merges against the parent's
-baseline and never replaces authored source, even with force. Parent baselines
-advance only after a successful check, with rollback on failure. Ordinary
+baseline and refreshes declared stock only while the child's file still equals
+its recorded hash; a changed or removed stock file is a graft and is kept, and
+force never reaches stock or other authored source. A record without `files`
+is adopted from the release it names. Parent baselines and hashes advance only
+after a successful check, with rollback on failure. Ordinary
 starter sync/upgrade keeps offshoot plumbing current and preserves its parent
 record and catalog baselines; it still maintains missing stock stylesheet links
 and the changelog version-chip link within the narrow layout boundary.
 `sever` requires confirmation and removes only
 the local parent record; hosted catalog severing remains a host operation.
-Public derived readers and provenance expose lineage or null, never baselines.
+Public derived readers and provenance expose lineage or null, never baselines
+or stock hashes.
 See `docs/offshoots.md` for the contract and command details.
 
 

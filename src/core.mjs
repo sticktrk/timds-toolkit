@@ -26,7 +26,7 @@ import { isBinaryRuntime, javascriptCommand, packageIdentity, runtimeEnvironment
 import { assertBinaryInstallation, binaryInstallationRecord, binaryWorkspaceCommand, isStockWorkspace, readBinaryInstallation, readInstallation, renderBinaryInstructions, requireBinaryRelease, stockWorkspaceCommands, withBinarySelection, withFileRollback } from "./binary-installation.mjs";
 import { CONTRACT_LAYOUT_FILE, hasContractGroups, migrateContractGroups, syncContractViews } from "./contract-groups.mjs";
 import { parentLineage, readParentRecord, validateOffshootRecords } from "./offshoot-contract.mjs";
-import { loadOffshootSource, severOffshoot, shootOffshoot } from "./offshoots.mjs";
+import { loadOffshootSource, readOffshootSourceFile, severOffshoot, shootOffshoot } from "./offshoots.mjs";
 import { describeFeed, feedOffshoot } from "./feed.mjs";
 import { requireCleanPaths } from "./clean-tree.mjs";
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -92,7 +92,7 @@ import {
 
 const supportedSchemaVersions = new Set([1, 2]);
 const shootUsage = 'timds shoot SYSTEM|./LOCAL-PATH --system-id NEW-ID [--root NEW-PATH] [--name NAME] [--mode full|structure] [--version LABEL] [--portal-url URL] [--source-id UUID] [--ref GIT-REF] [--install] [--json]';
-const feedUsage = 'timds feed [--root PATH] [--version LABEL] [--portal-url URL] [--from LOCAL-PATH] [--source-id UUID] [--ref GIT-REF] [--force PATH...] [--json]';
+const feedUsage = 'timds feed [--root PATH] [--version LABEL] [--portal-url URL] [--from LOCAL-PATH] [--source-id UUID] [--ref GIT-REF] [--source-file PATH [--baseline-file PATH]] [--force PATH...] [--json]';
 const workspaceCommandNames = ["install", "dev", "build", "check"];
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const toolkitPackageName = "@dtconcepts/timds";
@@ -2051,13 +2051,35 @@ export async function runCli(argv) {
   }
   if (command === "feed") {
     if ((positional.length && !options.force) || (options.force && !positional.length)) throw new Error(`Usage: ${feedUsage}`);
-    const workspace = await loadWorkspace(root);
-    const parent = workspace.parentRecord;
-    if (!parent) throw new Error('This system has no parent to feed');
-    const source = await loadOffshootSource(options.from || parent.systemId, {...options, local: Boolean(options.from), sourceId: options.sourceId || parent.sourceId, portalUrl: options.portalUrl || workspace.manifest.provider?.url}, {decoded: true});
-    const result = await feedOffshoot({designSystemRoot: workspace.designSystemRoot, source, check: () => checkWorkspace(root), force: positional, decideCustomized: positional.length ? null : terminalPlumbingPrompt()});
-    if (options.json) output(JSON.stringify(result, null, 2));
-    else { for (const line of describeFeed(result)) output(line); output(result.written.length ? 'Review and commit the feed.' : 'The parent feed is current.'); }
+    if (options.sourceFile && ['from', 'version', 'ref', 'sourceId', 'portalUrl'].some(name => options[name] !== undefined)) throw new Error(`Usage: ${feedUsage}\n--source-file reads a published source export and cannot be combined with --from, --version, --ref, --source-id or --portal-url`);
+    if (options.baselineFile && !options.sourceFile) throw new Error(`Usage: ${feedUsage}\n--baseline-file requires --source-file`);
+    const feed = async () => {
+      const workspace = await loadWorkspace(root);
+      const parent = workspace.parentRecord;
+      if (!parent) throw new Error('This system has no parent to feed');
+      // A record shot before stock hashes needs the release it names to adopt
+      // them; one with `files`, even empty, never reads a baseline.
+      const needsBaseline = !Object.hasOwn(parent, 'files');
+      let source, baseline = null;
+      if (options.sourceFile) {
+        source = await readOffshootSourceFile(options.sourceFile);
+        if (needsBaseline && options.baselineFile) baseline = await readOffshootSourceFile(options.baselineFile, '--baseline-file');
+      } else {
+        const sourceOptions = {...options, local: Boolean(options.from), sourceId: options.sourceId || parent.sourceId, portalUrl: options.portalUrl || workspace.manifest.provider?.url};
+        source = await loadOffshootSource(options.from || parent.systemId, sourceOptions, {decoded: true});
+        if (needsBaseline) {
+          baseline = await loadOffshootSource(options.from || parent.systemId, {...sourceOptions, version: parent.version, ...(options.from ? {ref: parent.commit} : {})}, {decoded: true});
+          if (baseline.parent?.commit !== parent.commit) throw new Error(`The parent's ${parent.version} release is now at ${baseline.parent?.commit}, not the commit .timds/parent.json records (${parent.commit}); feed cannot adopt stock hashes from a moved release`);
+        }
+      }
+      return feedOffshoot({designSystemRoot: workspace.designSystemRoot, source, baseline, check: () => checkWorkspace(root), force: positional, decideCustomized: positional.length ? null : terminalPlumbingPrompt(), hostedRunner: process.env.TIMDS_HOSTED_RUNNER === '1'});
+    };
+    // With --json, stdout is exactly one report (or { ok: false, error }) and the
+    // check's progress goes to stderr, so a host records it without parsing prose.
+    if (options.json) return runJsonCommand(async () => { const result = await feed(); return {result, report: result}; }, {fallbackCode: 'feed_failed'});
+    const result = await feed();
+    for (const line of describeFeed(result)) output(line);
+    output(result.written.length ? 'Review and commit the feed.' : 'The parent feed is current.');
     return result;
   }
   if (command === "sever") {

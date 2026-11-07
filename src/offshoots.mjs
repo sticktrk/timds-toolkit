@@ -1,6 +1,8 @@
 // Local offshoot creation mirrors the host's version-1 source transform.
 // Source is an immutable release or Git tree; writing is confined to a new,
 // empty destination. Host provisioning, grants and catalog lineage stay there.
+// The parent record names the stock the release shipped, by hash, so feed can
+// later refresh it while the child's own edits (grafts) stay.
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
@@ -84,6 +86,20 @@ function parse(files, file, required = true) {
   return value;
 }
 
+/** A release's validated `.timds/stock.json`: exact regular files it ships. */
+export async function declaredStock(files) {
+  const stock = parse(files, '.timds/stock.json', false);
+  if (!stock) return null;
+  await validateStockRecord(stock);
+  for (const file of stock.paths) if (!files.has(file) || files.get(file).mode === '120000') throw new Error(`Stock must name an existing regular source file: ${file}`);
+  return stock;
+}
+
+/** SHA-256 of each declared stock file's source bytes; `{}` when none is declared. */
+export function stockHashes(files, stock) {
+  return Object.fromEntries((stock?.paths || []).map(file => [file, sha256(files.get(file))]));
+}
+
 /** The host's structure baseline deliberately contains no authored summaries. */
 export function structureSite(site) {
   return {views: (site.views || []).map(view => ({id: view.id, label: view.label, pages: (view.pages || []).map(page => ({slug: page.slug || '', title: page.title, ...(page.group ? {group: page.group} : {}), planned: true}))}))};
@@ -104,11 +120,10 @@ async function transformDecodedOffshoot(source, {mode = 'full', systemId, name} 
   const {systemId: parentId, sourceId, version, commit} = source.parent || {};
   const parent = validateParentRecord({schemaVersion: 1, systemId: parentId, sourceId, version, commit, mode, baseline});
   if (manifest.systemId !== parent.systemId || manifest.version !== parent.version) throw new Error('The parent source identity or version disagrees with its release');
-  const stock = parse(original, '.timds/stock.json', false);
-  if (stock) {
-    await validateStockRecord(stock);
-    for (const file of stock.paths) if (!original.has(file) || original.get(file).mode === '120000') throw new Error(`Stock must name an existing regular source file: ${file}`);
-  }
+  const stock = await declaredStock(original);
+  // The record remembers the bytes of every stock file this release shipped, so
+  // a later feed tells an unmodified copy from the child's graft.
+  parent.files = stockHashes(original, stock);
   let result = new Map(original);
   const set = (file, bytes) => { const content = Buffer.from(bytes); content.mode = '100644'; result.set(file, content); };
   if (mode === 'structure') {
@@ -195,6 +210,28 @@ async function localSource(directory, options) {
   if (options.version && options.version !== 'latest' && options.version !== manifest.version) throw new Error('The local Git revision does not declare the requested version; select it with --ref');
   if (!options.sourceId && !manifest.sourceId) throw new Error('A local parent needs --source-id UUID (the source identity); --ref selects its immutable Git revision');
   return {parent: {systemId: manifest.systemId, sourceId: options.sourceId || manifest.sourceId, version: manifest.version, commit}, files};
+}
+
+/** Read a published source export (the JSON a release's source route returns)
+ * that a host materialised on disk. Bounded like a fetched export; decoding
+ * and path validation happen in decodeOffshootSource. */
+export async function readOffshootSourceFile(file, label = '--source-file') {
+  const limit = Math.ceil(MAX_SOURCE / 3) * 4 + MAX_FILES * 4096;
+  const handle = await fs.open(path.resolve(file), 'r').catch(error => { if (error.code === 'ENOENT') throw new Error(`${label} names a missing file: ${file}`); throw error; });
+  let text;
+  try {
+    const info = await handle.stat();
+    if (!info.isFile()) throw new Error(`${label} must be a regular file: ${file}`);
+    if (info.size > limit) throw new Error(`${label} exceeds the offshoot source export limit: ${file}`);
+    text = await handle.readFile('utf8');
+  } finally { await handle.close(); }
+  let value;
+  try { value = JSON.parse(text); } catch (error) { throw new Error(`${label} is invalid JSON: ${error.message}`); }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} must contain a source export object`);
+  if (value.apiVersion !== undefined && value.apiVersion !== 1) throw new Error(`${label} has unsupported apiVersion ${JSON.stringify(value.apiVersion)}; expected 1`);
+  if (!value.parent || typeof value.parent !== 'object' || Array.isArray(value.parent) || !Array.isArray(value.files)) throw new Error(`${label} must contain a parent identity and a files array`);
+  const files = decodeOffshootSource(value);
+  return {parent: value.parent, files};
 }
 
 /** CLI operations retain validated native bytes; public callers receive wire files. */

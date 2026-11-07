@@ -67,16 +67,21 @@ test('the CLI selects the brand-kit overlay for a hosted scaffold before depende
   await assert.rejects(fs.access(path.join(root, '.github/workflows')), { code: 'ENOENT' });
 });
 
-test('brand-kit init selects only the overlay authored surface and its first sync is a no-op', async t => {
+test('brand-kit init seeds every stock page once and records plumbing only, and its first sync is a no-op', async t => {
   const { root, read } = await fixture(t);
   const record = await readStarterRecord(root);
   assert.equal(record.starter, 'brand-kit');
   assert.deepEqual(record.baseline.site, { views: brandKitViews });
   assert.deepEqual(JSON.parse(await read('src/site.json')), record.baseline.site);
   assert.equal(JSON.parse(await read('src/site.json')).home, undefined);
-  assert.deepEqual(Object.keys(record.files).sort(), [...starterPlumbingFiles, ...starterFragments('brand-kit')].map(([relative]) => relative).sort());
+  assert.deepEqual(starterFragments('brand-kit'), [], 'the kit manages no fragment');
+  assert.deepEqual(Object.keys(record.files).sort(), starterPlumbingFiles.map(([relative]) => relative).sort());
+  for (const relative of brandKitStockPaths) {
+    assert.equal(await read(relative), await fs.readFile(path.join(packageRoot, 'templates/brand-kit', relative), 'utf8'), `init seeds ${relative}`);
+  }
+  await fs.access(path.join(root, 'src/pages/brand/evidence.html'));
   assert.ok(!Object.hasOwn(record.files, 'src/copy.json'));
-  assert.ok(!Object.hasOwn(record.files, 'src/pages/brand/evidence.html'));
+  assert.ok(!Object.keys(record.files).some(relative => relative.startsWith('src/pages/')));
   assert.equal(await read('scripts/brand-kit.mjs'), await fs.readFile(path.join(packageRoot, 'src/brand-kit.mjs'), 'utf8'));
   for (const relative of ['src/pages/digital', 'src/designs/website', 'src/pages/print/letterheads.html']) {
     await assert.rejects(fs.access(path.join(root, relative)), { code: 'ENOENT' });
@@ -87,13 +92,39 @@ test('brand-kit init selects only the overlay authored surface and its first syn
   assert.deepEqual(synced.written, []);
   assert.equal(synced.recordWritten, false);
   assert.equal(synced.starter, 'brand-kit');
+  assert.deepEqual(synced.files.filter(file => file.path.startsWith('src/pages/')), []);
   assert.equal(await read('.timds/starter.json'), before);
   assert.equal(git(root, 'status', '--porcelain'), '');
-  assert.equal(stockTemplatePath('src/pages/index.html', 'brand-kit'), path.join(packageRoot, 'templates/brand-kit/src/pages/index.html'));
+  assert.throws(() => stockTemplatePath('src/pages/index.html', 'brand-kit'), /is not a starter file the toolkit writes/);
   assert.equal(stockTemplatePath('scripts/brand-kit.mjs', 'brand-kit'), path.join(packageRoot, 'src/brand-kit.mjs'));
 });
 
-test('brand-kit sync merges its own catalog history and keeps authored copy, evidence and changed stock pages', async t => {
+test('a fresh brand kit passes check, and neither starter sync nor upgrade writes or reports a kit page', async t => {
+  const { root, read } = await fixture(t);
+  await quiet(() => checkWorkspace(root));
+  assert.equal(git(root, 'status', '--porcelain'), '', 'check leaves the tracked scaffold untouched');
+  const before = await read('.timds/starter.json');
+  const synced = await quiet(() => syncStarterWorkspace(root));
+  assert.deepEqual(synced.written, []);
+  assert.equal(synced.recordWritten, false);
+  assert.deepEqual(synced.files.filter(file => file.path.startsWith('src/pages/')), []);
+  assert.equal(git(root, 'status', '--porcelain'), '');
+  const lines = [];
+  await runWithOutputSink(line => lines.push(line), () => runCli(['upgrade', '--root', root, '--json']));
+  const report = JSON.parse(lines.join('\n'));
+  assert.equal(report.ok, true);
+  assert.equal(report.toolkit.selected, version);
+  assert.equal(report.starter.starter, 'brand-kit');
+  assert.equal(report.starter.state, 'current');
+  assert.deepEqual(report.starter.written, []);
+  assert.equal(report.starter.recordWritten, false);
+  assert.deepEqual(report.starter.files.filter(file => file.path.startsWith('src/pages/')), []);
+  assert.deepEqual(report.starter.files.map(file => file.path).sort(), [...starterPlumbingFiles.map(([relative]) => relative), 'src/formats.json', 'src/layout.html', 'src/site.json'].sort());
+  assert.equal(await read('.timds/starter.json'), before);
+  assert.equal(git(root, 'status', '--porcelain'), '', 'upgrade writes nothing on a fresh scaffold');
+});
+
+test('brand-kit sync merges its own catalog history, appends added pages as planned, and never touches a kit page', async t => {
   const { root, read, write } = await fixture(t);
   const historical = JSON.parse(await fs.readFile(path.join(packageRoot, 'templates/starter-history/brand-kit/site-1.json'), 'utf8'));
   const current = structuredClone(historical);
@@ -105,9 +136,9 @@ test('brand-kit sync merges its own catalog history and keeps authored copy, evi
   await fs.rm(path.join(root, 'src/pages/decks'), { recursive: true });
   const record = JSON.parse(await read('.timds/starter.json'));
   record.baseline.site = historical;
-  const oldFragment = '<span class="eyebrow">Ads</span><h1 class="page-title">Earlier overview</h1>\n';
-  await write('src/pages/ads/index.html', oldFragment);
-  record.files['src/pages/ads/index.html'] = hash(oldFragment);
+  const oldPage = '<span class="eyebrow">Ads</span><h1 class="page-title">Earlier overview</h1>\n';
+  await write('src/pages/ads/index.html', oldPage);
+  record.files['src/pages/ads/index.html'] = hash(oldPage);
   await write('.timds/starter.json', json(record));
   const authored = {
     'src/copy.json': json({ name: 'The chosen name' }),
@@ -122,11 +153,34 @@ test('brand-kit sync merges its own catalog history and keeps authored copy, evi
   const after = JSON.parse(await read('src/site.json'));
   assert.equal(after.views.find(view => view.id === 'social').blurb, 'Our social catalog');
   assert.ok(!after.views.some(view => view.id === 'digital'), 'the original starter catalog never enters a kit');
-  assert.equal(await read('src/pages/ads/index.html'), await fs.readFile(stockTemplatePath('src/pages/ads/index.html', 'brand-kit'), 'utf8'));
-  assert.equal(synced.files.find(file => file.path === 'src/pages/index.html').status, 'customized');
+  const decks = after.views.find(view => view.id === 'decks');
+  assert.ok(decks.pages.length > 0);
+  for (const page of decks.pages) assert.equal(page.planned, true, `decks/${page.slug ?? ''} is appended as planned`);
+  await assert.rejects(fs.access(path.join(root, 'src/pages/decks')), { code: 'ENOENT' }, 'no fragment is written for an added kit page');
+  assert.equal(await read('src/pages/ads/index.html'), oldPage, 'a stock page at an older text is not refreshed');
+  assert.deepEqual(synced.files.filter(file => file.path.startsWith('src/pages/')), [], 'no kit page appears in the files report');
+  assert.ok(!synced.written.some(relative => relative.startsWith('src/pages/')));
   for (const [relative, content] of Object.entries(authored)) assert.equal(await read(relative), content, relative);
-  for (const [relative] of starterFragments('brand-kit').filter(([relative]) => relative.startsWith('src/pages/decks/'))) await fs.access(path.join(root, relative));
+  const nextRecord = JSON.parse(await read('.timds/starter.json'));
+  assert.deepEqual(Object.keys(nextRecord.files).sort(), starterPlumbingFiles.map(([relative]) => relative).sort(), 'a stale page hash drops out of the record');
   assert.deepEqual((await syncStarter({ designSystemRoot: root, version })).written, []);
+});
+
+test('a kit record that still lists page hashes loses them on its next sync and no page is written', async t => {
+  const { root, read, write } = await fixture(t);
+  const record = JSON.parse(await read('.timds/starter.json'));
+  const pages = brandKitStockPaths.filter(relative => relative.startsWith('src/pages/'));
+  for (const relative of pages) record.files[relative] = hash(await fs.readFile(path.join(packageRoot, 'templates/brand-kit', relative), 'utf8'));
+  record.files['src/pages/social/posts.html'] = hash('an earlier stock text\n');
+  await write('.timds/starter.json', json(record));
+  const changed = `${await read('src/pages/social/posts.html')}\n<!-- authored on the parent -->\n`;
+  await write('src/pages/social/posts.html', changed);
+  const synced = await syncStarter({ designSystemRoot: root, version });
+  assert.equal(synced.recordWritten, true);
+  assert.deepEqual(synced.written, []);
+  assert.deepEqual(synced.files.filter(file => file.path.startsWith('src/pages/')), []);
+  assert.equal(await read('src/pages/social/posts.html'), changed);
+  assert.deepEqual(Object.keys(JSON.parse(await read('.timds/starter.json')).files).sort(), starterPlumbingFiles.map(([relative]) => relative).sort());
 });
 
 test('a kit record without a site baseline bootstraps only from its own kind history', async t => {
@@ -144,22 +198,26 @@ test('a kit record without a site baseline bootstraps only from its own kind his
   assert.equal(JSON.parse(await read('.timds/starter.json')).starter, 'brand-kit');
 });
 
-test('kit-specific managed pages participate in dirty guards while builder-owned data does not', async t => {
+test('kit pages and builder-owned data stay outside the dirty guard; plumbing, catalogs, layout and record stay inside', async t => {
   const { root, read, write } = await fixture(t);
   const page = 'src/pages/social/posts.html';
   const before = await read(page);
   await write(page, `${before}\n<!-- draft change -->\n`);
-  await assert.rejects(quiet(() => syncStarterWorkspace(root)), /Starter sync refuses[\s\S]*src\/pages\/social\/posts\.html/);
-  await write(page, before);
   await write('src/copy.json', json({ name: 'A draft name' }));
   await fs.appendFile(path.join(root, 'src/pages/brand/evidence.html'), '\n<!-- draft evidence -->\n');
-  assert.deepEqual((await quiet(() => syncStarterWorkspace(root))).written, []);
-  assert.ok(starterPaths('brand-kit').includes('src/pages/social/posts.html'));
-  assert.ok(!starterPaths('brand-kit').includes('src/copy.json'));
-  assert.ok(!starterPaths('brand-kit').includes('src/pages/brand/evidence.html'));
+  const synced = await quiet(() => syncStarterWorkspace(root));
+  assert.deepEqual(synced.written, []);
+  assert.equal(await read(page), `${before}\n<!-- draft change -->\n`);
+  const paths = starterPaths('brand-kit');
+  assert.deepEqual(paths.filter(relative => relative.startsWith('src/pages/')), []);
+  assert.deepEqual(paths.sort(), [...starterPlumbingFiles.map(([relative]) => relative), 'src/site.json', 'src/formats.json', 'src/layout.html', '.timds/starter.json'].sort());
+  assert.ok(!paths.includes('src/copy.json'));
+  await write(page, before);
+  await fs.appendFile(path.join(root, 'src/layout.html'), '\n<!-- draft layout -->\n');
+  await assert.rejects(quiet(() => syncStarterWorkspace(root)), /Starter sync refuses[\s\S]*src\/layout\.html/);
 });
 
-test('a failed brand-kit sync restores its pages, shared modules and record together', async t => {
+test('a failed brand-kit sync restores its shared modules and record together and never recreates a removed kit page', async t => {
   const { root, read, write } = await fixture(t);
   const record = JSON.parse(await read('.timds/starter.json'));
   const oldModule = '// earlier shared slot module\n';
@@ -172,6 +230,9 @@ test('a failed brand-kit sync restores its pages, shared modules and record toge
   assert.equal(await read('scripts/brand-kit.mjs'), oldModule);
   assert.equal(await read('.timds/starter.json'), originalRecord);
   await assert.rejects(fs.access(path.join(root, 'src/pages/index.html')), { code: 'ENOENT' });
+  const synced = await syncStarter({ designSystemRoot: root, version });
+  assert.deepEqual(synced.written, ['scripts/brand-kit.mjs']);
+  await assert.rejects(fs.access(path.join(root, 'src/pages/index.html')), { code: 'ENOENT' }, 'sync never recreates a removed kit page');
 });
 
 test('structure shoots preserve the selected brand-kit starter and its explicitly declared source', async t => {
@@ -194,6 +255,16 @@ test('structure shoots preserve the selected brand-kit starter and its explicitl
   assert.match(await fs.readFile(path.join(child, 'dist/index.html'), 'utf8'), /href="\/designs\/"/);
   assert.match(await fs.readFile(path.join(child, 'dist/designs/index.html'), 'utf8'), /No website designs yet/);
   await assert.rejects(fs.access(path.join(child, 'dist/designs/parent-only')), { code: 'ENOENT' });
+  const childRecordFile = path.join(child, '.timds/starter.json');
+  const childRecord = JSON.parse(await fs.readFile(childRecordFile, 'utf8'));
+  childRecord.files['src/pages/social/posts.html'] = hash('an earlier stock page\n');
+  childRecord.files['src/pages/index.html'] = hash(await read('src/pages/index.html'));
+  await fs.writeFile(childRecordFile, json(childRecord));
+  const childPage = await fs.readFile(path.join(child, 'src/pages/social/posts.html'), 'utf8');
+  const childSync = await syncStarter({ designSystemRoot: child, version });
+  assert.deepEqual(childSync.files.filter(file => file.path.startsWith('src/pages/')), []);
+  assert.deepEqual(Object.keys(JSON.parse(await fs.readFile(childRecordFile, 'utf8')).files).sort(), starterPlumbingFiles.map(([relative]) => relative).sort(), "a kit offshoot's record is plumbing-only after sync");
+  assert.equal(await fs.readFile(path.join(child, 'src/pages/social/posts.html'), 'utf8'), childPage);
 });
 
 test('an old record without a starter kind continues to select the original scaffold', async t => {
