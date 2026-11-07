@@ -33,6 +33,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { spawn } from "node:child_process";
 import { CLAUDE_SKILLS_LINK, linkClaudeSkills } from "./agent-skills.mjs";
 import { SKILLS_HELP, installSkills, staleSkillsNotice } from "./skills-install.mjs";
+import { standaloneReleaseAutomationFiles, dependencyAutomationFiles, starterTemplateFiles } from "./release-resources.mjs";
 import { designerSkillNames, designSystemSkillNames } from "./skill-names.mjs";
 import { createHash } from "node:crypto";
 import { createReadStream, existsSync } from "node:fs";
@@ -98,21 +99,6 @@ const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "
 const toolkitPackageName = "@dtconcepts/timds";
 const standaloneReleaseAutomation = "merge-patch-v1";
 const dependencyPrAutomation = "upgrade-pr-v1";
-// The managed automation boundary: [repository path, template name]. Both the
-// migration that writes these files and the installation record that hashes
-// them read this one table.
-const standaloneReleaseAutomationFiles = Object.freeze([
-  [".github/workflows/timds-design-system.yml", "timds-standalone.yml"],
-  [".github/workflows/update-consumer-submodule.yml", "update-consumer-submodule.yml"],
-  ["scripts/release.mjs", "starter/scripts/release.mjs"],
-  ["scripts/release.sh", "starter/scripts/release.sh"],
-  ["scripts/check-versions.mjs", "starter/scripts/check-versions.mjs"],
-  ["scripts/prepare-merge-release.mjs", "starter/scripts/prepare-merge-release.mjs"],
-  ["scripts/prepare-merge-release.test.mjs", "starter/scripts/prepare-merge-release.test.mjs"],
-]);
-const dependencyAutomationFiles = Object.freeze([
-  [".github/workflows/timds-upgrade.yml", "timds-upgrade.yml"],
-]);
 // Stock release files shipped before installation.json recorded managed-file
 // hashes. Every hash a template has had must stay here so an unmodified adopter
 // is never mistaken for a customized one.
@@ -1328,14 +1314,13 @@ export async function initializeRepository(repoRootInput, {
   await writeIfMissing(path.join(designSystemRoot, "README.md"), renderTemplate(await template("design-system-README.md")), created);
   await writeIfMissing(path.join(designSystemRoot, CHANGELOG_FILE), (await template("CHANGELOG.md")).replaceAll("__VERSION__", initialVersion), created);
   if (createsContract) {
-    const base = path.join(packageRoot, "templates", "starter");
-    if (selectedStarter !== "starter") {
-      // The selected overlay supplies its own catalogs and authored surface.
-      // Copy it first, then shared files that it does not replace; default
-      // pages and sample designs never enter a different starter's source.
-      await copyDirectory(path.join(packageRoot, "templates", selectedStarter), designSystemRoot, { created });
+    for (const [relative, resource] of await starterTemplateFiles(selectedStarter)) {
+      const destination = path.join(designSystemRoot, relative);
+      if (existsSync(destination)) continue;
+      await fs.mkdir(path.dirname(destination), { recursive: true });
+      await fs.copyFile(path.join(packageRoot, resource), destination);
+      created.push(destination);
     }
-    await copyDirectory(base, designSystemRoot, { created, filter: selectedStarter === "starter" ? null : file => !["src/pages", "src/designs"].includes(path.relative(base, file).split(path.sep).join("/")) });
     // Shared source modules are mapped once, not duplicated in each template.
     for (const [relative, name] of starterPlumbingFiles) {
       await writeIfMissing(path.join(designSystemRoot, relative), await template(name), created);

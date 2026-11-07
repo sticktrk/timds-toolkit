@@ -14,6 +14,11 @@ npm test
 npm run pack:check
 ```
 
+The public `@dtconcepts/timds/release-metadata` export describes npm starter
+resources and renders managed bytes without workspace, clock, or config input.
+Keep its policies aligned with init/upgrade/starter sync; seed-only resources
+never become overwrite permissions. See `docs/release-metadata.md`.
+
 Keep package releases cohesive. A version must carry compatible CLI behavior,
 templates, workflows, and skill instructions together. Update or add tests
 whenever managed-file behavior changes.
