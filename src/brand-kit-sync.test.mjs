@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { checkWorkspace, initializeRepository, runCli, runWithOutputSink, syncStarterWorkspace } from './core.mjs';
+import { checkWorkspace, initializeRepository, runCli, runWithOutputSink, syncStarterWorkspace, upgradeRepository } from './core.mjs';
 import { brandKitStockPaths, brandKitViews } from './brand-kit.mjs';
 import { loadOffshootSource, shootOffshoot } from './offshoots.mjs';
 import { readStarterRecord, starterFragments, starterPaths, starterPlumbingFiles, stockTemplatePath, syncStarter } from './starter.mjs';
@@ -127,6 +127,58 @@ test('brand-kit sync merges its own catalog history and keeps authored copy, evi
   for (const [relative, content] of Object.entries(authored)) assert.equal(await read(relative), content, relative);
   for (const [relative] of starterFragments('brand-kit').filter(([relative]) => relative.startsWith('src/pages/decks/'))) await fs.access(path.join(root, relative));
   assert.deepEqual((await syncStarter({ designSystemRoot: root, version })).written, []);
+});
+
+for (const customized of [false, true]) test(`upgrade brings a pre-landing kit current and preserves ${customized ? 'authored Use content and routing' : 'its overview and an incomplete starter record'}`, async t => {
+  const { root, read, write } = await fixture(t);
+  const historical = JSON.parse(await fs.readFile(path.join(packageRoot, 'templates/starter-history/brand-kit/site-1.json'), 'utf8'));
+  const site = structuredClone(historical);
+  const record = await readStarterRecord(root);
+  record.baseline.site = historical;
+  // Files may lag behind the record: released hashes, not just recorded
+  // hashes, must identify the stock composer and Install page.
+  if (!customized) delete record.baseline.site;
+  delete record.files['src/pages/use/compose.html'];
+  await fs.rm(path.join(root, 'src/pages/use/compose.html'));
+  const stock = JSON.parse(await read('.timds/stock.json'));
+  stock.paths = stock.paths.filter(relative => relative !== 'src/pages/use/compose.html');
+  await write('.timds/stock.json', json(stock));
+  const oldUse = await fs.readFile(path.join(packageRoot, 'src/fixtures/brand-kit-before-landing/use.html'), 'utf8');
+  const oldInstall = await fs.readFile(path.join(packageRoot, 'src/fixtures/brand-kit-before-landing/install.html'), 'utf8');
+  const authoredUse = `${oldUse}\n<!-- Owner's composer guidance. -->\n`;
+  if (customized) {
+    site.home = 'social';
+    Object.assign(site.views.find(view => view.id === 'use').pages[0], {title: 'Our studio', layout: 'page'});
+  }
+  await write('src/site.json', json(site));
+  await write('.timds/starter.json', json(record));
+  await write('src/pages/use/index.html', customized ? authoredUse : oldUse);
+  await write('src/pages/use/install.html', oldInstall);
+  for (const page of ['components', 'layout']) await write(`src/pages/web/${page}.html`, await fs.readFile(path.join(packageRoot, `src/fixtures/brand-kit-before-landing/${page}.html`), 'utf8'));
+  const preserved = Object.fromEntries(await Promise.all(['src/copy.json', 'tokens/color.json', 'media.json', 'src/pages/brand/evidence.html', 'src/styles/system.css', 'src/layout.html', '.timds/stock.json'].map(async relative => [relative, await read(relative)])));
+  git(root, 'add', '--all'); git(root, 'commit', '-qm', 'Kit before the landing split');
+  await quiet(() => checkWorkspace(root));
+  const upgraded = await quiet(() => upgradeRepository(root));
+  assert.deepEqual(upgraded.starter.site.addedPages, ['use/compose']);
+  const after = JSON.parse(await read('src/site.json'));
+  const use = after.views.find(view => view.id === 'use');
+  assert.deepEqual(use.pages.map(page => page.slug), ['', 'compose', 'install']);
+  assert.equal(use.pages[1].promote, 'Start making');
+  assert.equal(use.pages[1].planned, undefined);
+  assert.equal(use.pages[0].layout, customized ? 'page' : 'landing');
+  assert.equal(use.pages[0].title, customized ? 'Our studio' : 'Landing');
+  assert.equal(after.home, customized ? 'social' : undefined);
+  assert.equal(await read('src/pages/use/index.html'), customized ? authoredUse : await fs.readFile(stockTemplatePath('src/pages/use/index.html', 'brand-kit'), 'utf8'));
+  assert.equal(upgraded.starter.files.find(file => file.path === 'src/pages/use/index.html').status, customized ? 'customized' : 'updated');
+  for (const [relative, content] of Object.entries(preserved)) assert.equal(await read(relative), content, relative);
+  assert.match(await read('dist/use/compose/index.html'), /data-compose /);
+  assert.match(await read('dist/use/install/index.html'), /href="\/use\/compose\/#mcp"/);
+  if (!customized) assert.match(await read('dist/use/index.html'), /<div class="landing">/);
+  assert.equal(upgraded.starter.check.machine.counts.untyped, 0);
+  git(root, 'add', '--all'); git(root, 'commit', '-qm', 'Upgrade the kit');
+  const repeated = await quiet(() => upgradeRepository(root));
+  assert.deepEqual(repeated.starter.written, []);
+  assert.equal(repeated.starter.recordWritten, false);
 });
 
 test('a kit record without a site baseline bootstraps only from its own kind history', async t => {
