@@ -121,10 +121,16 @@ Paths name exact existing regular `src/pages/**/*.html` or
 `src/copy.json`. Globs, symbolic links,
 media, designs and configuration are refused. Check validates this declaration;
 the toolkit never infers whether authored content is safe to reuse. The
-declaration opts those bodies, styles, and copy samples into structure creation
-only. The copy file stays authored afterwards, outside ordinary upgrades. Included
-pages must be self-contained: a link to an omitted design or asset fails the
-resulting workspace check. Feed never refreshes these authored files.
+declaration opts those bodies, styles, layout and copy samples into structure
+creation, and in both modes it names the files feed keeps following the parent
+while the child leaves them unmodified (see below). Ordinary upgrades never
+touch them. Included pages must be self-contained: a link to an omitted design
+or asset fails the resulting workspace check. A declared path that is also
+plumbing (`src/styles/viewer.css`, `canvas.css`) stays the toolkit's and the
+stock pass skips it. A declared `src/layout.html` must carry the stylesheet
+links and changelog version chip that starter sync maintains on the parent
+too: a later local insertion changes the child's bytes and makes the layout a
+graft.
 
 ## Feed and grafts
 
@@ -142,24 +148,84 @@ shades a new parent change; keeping it is the default. To accept that parent
 value, edit the named catalog field and review the result. Reports do not
 repeat a conflict after its baseline has advanced.
 
-Only catalogs, verified recorded plumbing and the two bookkeeping records
-can change. Authored fragments, layout, styles, tokens, media and designs
-are never refreshed, including files initially included as parent stock.
+Only catalogs, verified recorded plumbing, the parent's declared stock and
+the two bookkeeping records can change. Tokens, media, designs, Evidence and
+every file the parent does not declare are never copied.
 Plumbing follows `.timds/starter.json`'s ownership mode: `toolkit` replaces
 and reports changes; `recorded` keeps a customized file unless the terminal
 prompt approves replacement or `--force scripts/viewer.mjs` names it.
 In full mode, customized parent plumbing that no longer matches its recorded
 hash is authored source: feed reports and skips it while merging catalogs.
 Force cannot copy it. Structure mode continues to require verified plumbing.
-`--force` never reaches authored content. Commit or stash uncommitted changes
-to any file feed will write first.
+`--force` never reaches authored content and refuses a stock path. Commit or
+stash uncommitted changes to any file feed will write first.
 
-Feed runs check and advances the parent version, commit and catalog baseline
-only on success. A failure restores all source files and both records. The
-check may regenerate ignored build output. Feeding is unavailable inside a
-hosted session; a hosted Request to do this remains host follow-up work.
-Repeating a feed at the same release leaves unchanged files reported as
-`current` in both the terminal report and `--json` output.
+Declared stock follows the parent by hash. For each path the new release's
+`.timds/stock.json` declares, feed compares the child's file with the hash
+`.timds/parent.json` recorded when it was last written:
+
+- `updated`: the child's file equals the recorded hash and the parent's bytes
+  moved; feed writes the parent's bytes.
+- `current`: the child's file equals the recorded hash and the parent is
+  unchanged, or it already equals the parent's bytes (the hash advances).
+- `created`: the parent newly declares a path the child lacks and never had;
+  feed writes it, and the catalog page that fragment renders is no longer
+  planned.
+- `customized`: a graft. The child changed the file, or removed one it was
+  given, which stays absent. Feed never writes a graft and reports it as
+  shading the parent's change only when the parent's bytes moved since the
+  recorded hash.
+
+To accept the parent's version of a graft, replace the file's content with the
+parent's (or restore a removed file) and review it; the next feed records it as
+`current`. A successful feed advances the hash of every updated, created or
+current file. A kept graft keeps the hash last written for it, so reverting it
+to that version makes it stock again; a graft first met with no recorded hash
+(the child authored the path before the parent declared it) records the
+parent's hash it was offered, so deleting it later keeps it removed. Hashes for paths the parent stopped
+declaring are kept, and their files are left alone.
+
+A record without `files`, from a child shot before stock hashes, is adopted on
+its first feed. Feed reads the release the record names (its version and
+commit) from the same source as the new release: the host, the local Git
+parent at the recorded commit for `--from`, or `--baseline-file`. A child file
+equal to that release's declared bytes is unmodified stock. The adopted hashes
+are written with the first successful feed; without a baseline, feed refuses
+before writing anything.
+
+Feed runs check and advances the parent version, commit, catalog baseline and
+stock hashes only on success. A failure restores all source files and both
+records. The check may regenerate ignored build output. Repeating a feed at
+the same release leaves unchanged files reported as `current` in both the
+terminal report and `--json` output.
+
+The host's runner feeds a hosted session workspace from the source export it
+materialises (the shape the release source route returns):
+
+```bash
+TIMDS_HOSTED_RUNNER=1 timds feed --source-file export.json \
+  [--baseline-file baseline.json] --json
+```
+
+`--source-file` cannot be combined with `--from`, `--version`, `--ref`,
+`--source-id` or `--portal-url`, and `--baseline-file` requires it. Without
+`TIMDS_HOSTED_RUNNER=1`, feed still refuses a tree carrying
+`.timds/session.json`. With `--json`, stdout is one JSON document and progress
+goes to stderr. The report carries `files` (every file's status), `site` and
+`formats` (catalog changes), `stock` (the declared-stock entries), `grafts`
+(`[{path, shades, note, removed?}]`), `adopted`, `written`, `check`, `parent`
+(the advanced record with its `files`) and `previousParent`. A failure prints
+`{ok:false,error:{code,message}}` and exits nonzero, so a host branches on
+`code` rather than the message: `dirty_worktree` (uncommitted changes to files
+the feed writes), `check_failed` (the workspace check failed and the feed was
+rolled back), `not_offshoot` (no `.timds/parent.json`), `parent_mismatch` (the
+source belongs to another parent, is older than the recorded release, disagrees
+with its own release identity, or the baseline is not the recorded release),
+`baseline_required` (a record shot before stock hashes and no baseline) or
+`feed_failed` (anything else). The hosted
+feed operation, its reconciler, publication gate and lineage advance, a
+proposal flow back to the parent, and moving pages between views are host or
+later work, not performed here.
 
 ## Records and readers
 
@@ -176,19 +242,29 @@ The host and local shoot write this schema without credentials:
   "baseline": {
     "site": {"views": [{"id":"web","label":"Web DS","pages":[{"slug":"","title":"Overview","planned":true}]}]},
     "formats": null
+  },
+  "files": {
+    "src/pages/brand/color.html": "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae"
   }
 }
 ```
 
 The baseline holds the parent's site/formats catalogs. Structure baselines
-use sanitized site structure. Check validates
+use sanitized site structure. `files` maps every path the release's
+`.timds/stock.json` declared, in both modes, to the SHA-256 of the bytes last
+written for it (`{}` when nothing is declared); records without it stay valid
+until feed adopts them. A child whose inherited toolkit pin (its
+`package-lock.json` entry, else `.timds/installation.json`) predates stock
+hashes gets a record without `files`, which that older CLI can read, until it
+is upgraded and fed; feed refuses a child whose selected toolkit is older than
+the running release, naming the upgrade to run first. Check validates
 the file without rewriting it. Sessions may receive/read this record but
 cannot create, edit or delete it; `.timds/stock.json` is designer-authored.
 
 The derived index, MCP `describe_system` / `read_derived_layer`, and provenance
 carry `lineage:{systemId,sourceId,version,commit,mode}` or `null`. Older
 published layers without lineage read as `null`. Public readers do not
-receive the source merge baseline. Publication binds lineage to the committed
+receive the source merge baseline or the stock hashes. Publication binds lineage to the committed
 source and verifies it in the returned provenance stamp.
 
 ## Sever

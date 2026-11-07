@@ -6,8 +6,8 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { feedOffshoot, describeFeed } from "./feed.mjs";
-import { loadOffshootSource } from "./offshoots.mjs";
-import { runCli, runWithOutputSink } from "./core.mjs";
+import { loadOffshootSource, shootOffshoot } from "./offshoots.mjs";
+import { initializeRepository, runCli, runWithOutputSink } from "./core.mjs";
 import { syncStarter } from "./starter.mjs";
 
 const json = (value) => `${JSON.stringify(value, null, 2)}\n`;
@@ -26,11 +26,11 @@ async function write(root, file, text) {
 const read = (root, file) => fs.readFile(path.join(root, file), "utf8");
 const readJson = async (root, file) => JSON.parse(await read(root, file));
 
-async function fixture(t, { plumbing = "toolkit", mode = "full", git = false } = {}) {
+async function fixture(t, { plumbing = "toolkit", mode = "full", git = false, stockFiles = {}, extra = {} } = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "timds-feed-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const baselineSite = mode === "full" ? structuredClone(site) : { views: [{ id: "web", label: "Web DS", pages: [{ slug: "", title: "Overview", planned: true }] }] };
-  const parent = { schemaVersion: 1, ...identity, mode, baseline: { site: baselineSite, formats } };
+  const parent = { schemaVersion: 1, ...identity, mode, baseline: { site: baselineSite, formats }, ...(stockFiles ? { files: stockFiles } : {}) };
   const texts = {
     ".timds/parent.json": json(parent),
     ".timds/starter.json": json({ schemaVersion: 1, version: "0.1.0", plumbing, baseline: { site: { views: [] }, formats: {} }, files: { "scripts/build.mjs": hash(script), "src/pages/web/index.html": hash("<h1>Child</h1>\n") } }),
@@ -38,6 +38,7 @@ async function fixture(t, { plumbing = "toolkit", mode = "full", git = false } =
     "scripts/build.mjs": script, "src/pages/web/index.html": "<h1>Child</h1>\n",
     "src/layout.html": "<main>{{content}}</main>\n", "src/styles/system.css": ".child {}\n",
     "tokens.json": '{"color":{"brand":{"value":"red"}}}\n', "media.json": '{"schemaVersion":2,"assets":[]}\n',
+    ...extra,
   };
   for (const [file, text] of Object.entries(texts)) await write(root, file, text);
   if (git) {
@@ -48,7 +49,7 @@ async function fixture(t, { plumbing = "toolkit", mode = "full", git = false } =
   return { root, parent, texts };
 }
 
-function nextSource({ version = "1.1.0", commit = "2".repeat(40), build = nextScript } = {}) {
+function nextSource({ version = "1.1.0", commit = "2".repeat(40), build = nextScript, stock = null } = {}) {
   const nextSite = structuredClone(site);
   Object.assign(nextSite.views[0], { label: "Web System", blurb: "Interfaces and email" });
   nextSite.views[0].pages[0].title = "Web overview";
@@ -62,7 +63,49 @@ function nextSource({ version = "1.1.0", commit = "2".repeat(40), build = nextSc
     sourceFile("src/pages/web/buttons.html", "<h1>Parent button</h1>\n"),
     sourceFile("src/styles/system.css", ".parent {}\n"), sourceFile("src/layout.html", "<body>Parent</body>\n"),
     sourceFile("tokens.json", "{}\n"),
-  ] };
+  ].filter((file) => !stock || !Object.hasOwn(stock, file.path)).concat(stock ? [
+    ...Object.entries(stock).map(([file, text]) => sourceFile(file, text)),
+    sourceFile(".timds/stock.json", json({ schemaVersion: 1, paths: Object.keys(stock) })),
+  ] : []) };
+}
+
+// Two parent releases declaring stock, and a child shot from the first that
+// holds a graft that shades a parent change, one that does not, a deleted
+// stock page, and unmodified stock; the second release adds a stock page.
+const page = (file) => `src/pages/web/${file}.html`;
+const releaseOne = { [page("graft")]: "<h1>Graft one</h1>\n", [page("plain")]: "<h1>Plain one</h1>\n", [page("gone")]: "<h1>Gone one</h1>\n", [page("kept")]: "<h1>Kept</h1>\n", "src/styles/system.css": ".parent {}\n" };
+const releaseTwo = { ...releaseOne, [page("graft")]: "<h1>Graft two</h1>\n", [page("plain")]: "<h1>Plain two</h1>\n", [page("gone")]: "<h1>Gone two</h1>\n", [page("buttons")]: "<h1>Parent button</h1>\n" };
+const childStock = { [page("graft")]: "<h1>Child graft</h1>\n", [page("plain")]: releaseOne[page("plain")], [page("kept")]: "<h1>Child kept</h1>\n", "src/styles/system.css": releaseOne["src/styles/system.css"] };
+const releaseOneHashes = Object.fromEntries(Object.entries(releaseOne).map(([file, text]) => [file, hash(text)]));
+const baselineSource = () => nextSource({ version: identity.version, commit: identity.commit, stock: releaseOne });
+const stockFixture = (t, options = {}) => fixture(t, { stockFiles: releaseOneHashes, extra: childStock, ...options });
+
+async function assertStockOutcome(root, report, { adopted = false } = {}) {
+  const status = Object.fromEntries(report.stock.map((entry) => [entry.path, entry.status]));
+  assert.deepEqual(status, { [page("graft")]: "customized", [page("plain")]: "updated", [page("gone")]: "customized", [page("kept")]: "customized", "src/styles/system.css": "current", [page("buttons")]: "created" });
+  for (const entry of report.stock) assert.deepEqual(report.files.find((file) => file.path === entry.path), entry, entry.path);
+  assert.deepEqual(report.grafts.map(({ path: file, shades }) => [file, shades]), [[page("graft"), true], [page("gone"), true], [page("kept"), false]]);
+  assert.match(report.grafts.find((graft) => graft.path === page("gone")).note, /removed in this system.*never recreated/);
+  assert.equal(report.adopted, adopted);
+  assert.equal(await read(root, page("graft")), childStock[page("graft")]);
+  assert.equal(await read(root, page("kept")), childStock[page("kept")]);
+  assert.equal(await read(root, page("plain")), releaseTwo[page("plain")]);
+  assert.equal(await read(root, page("buttons")), releaseTwo[page("buttons")]);
+  assert.equal((await fs.stat(path.join(root, page("buttons")))).mode & 0o777, 0o644);
+  await assert.rejects(fs.access(path.join(root, page("gone"))), { code: "ENOENT" });
+  const buttons = (await readJson(root, "src/site.json")).views[0].pages.find((entry) => entry.slug === "buttons");
+  assert.equal(buttons.planned, undefined, "the created stock page is authored in the catalog");
+  const record = await readJson(root, ".timds/parent.json");
+  assert.deepEqual(record.files, {
+    [page("graft")]: hash(releaseOne[page("graft")]), [page("gone")]: hash(releaseOne[page("gone")]), [page("kept")]: hash(releaseOne[page("kept")]),
+    [page("plain")]: hash(releaseTwo[page("plain")]), [page("buttons")]: hash(releaseTwo[page("buttons")]), "src/styles/system.css": hash(releaseOne["src/styles/system.css"]),
+  });
+  assert.deepEqual(report.parent.files, record.files);
+  const lines = describeFeed(report).join("\n");
+  assert.match(lines, /Your graft shades the parent's change at src\/pages\/web\/graft\.html; kept\. Accept the parent's version by editing the file\./);
+  assert.match(lines, /shades the parent's change at src\/pages\/web\/gone\.html; removed in this system/);
+  assert.doesNotMatch(lines, /shades the parent's change at src\/pages\/web\/kept\.html/);
+  assert.match(lines, /New stock page from the parent: src\/pages\/web\/buttons\.html, catalog page web\/buttons/);
 }
 
 test("feed advances unchanged fields, preserves grafts and authored source, and records the new baseline", async (t) => {
@@ -103,7 +146,7 @@ test("feed accepts additive parent export fields while persisting only the linea
     Object.assign(source.parent, { schemaVersion: 7, mode: "future-mode", releaseMetadata: { published: true }, baseline: "export metadata" });
     await feedOffshoot({ designSystemRoot: root, source });
     const actual = await readJson(root, ".timds/parent.json");
-    assert.deepEqual(Object.keys(actual).sort(), ["schemaVersion", "systemId", "sourceId", "version", "commit", "mode", "baseline"].sort());
+    assert.deepEqual(Object.keys(actual).sort(), ["schemaVersion", "systemId", "sourceId", "version", "commit", "mode", "baseline", "files"].sort());
     assert.deepEqual({ systemId: actual.systemId, sourceId: actual.sourceId, version: actual.version, commit: actual.commit }, expectedIdentity);
     assert.equal(actual.schemaVersion, 1);
     assert.equal(actual.mode, parent.mode);
@@ -291,4 +334,238 @@ test("offshoot starter sync maintains layout plumbing links and version chip wit
   for (const file of [".timds/parent.json", "src/site.json", "src/formats.json", "src/pages/web/index.html"]) assert.equal(await read(root, file), texts[file], file);
   assert.deepEqual((await readJson(root, ".timds/starter.json")).baseline, JSON.parse(texts[".timds/starter.json"]).baseline);
   await assert.rejects(fs.access(path.join(root, "src/pages/use/index.html")), { code: "ENOENT" });
+});
+
+test("feed refreshes declared stock by recorded hash, keeps grafts, creates new stock pages and advances hashes", async (t) => {
+  const { root } = await stockFixture(t);
+  let checks = 0;
+  const source = nextSource({ stock: releaseTwo });
+  const report = await feedOffshoot({ designSystemRoot: root, source, check: async () => { checks++; return { ok: true }; } });
+  assert.equal(checks, 1);
+  await assertStockOutcome(root, report);
+  for (const file of [page("plain"), page("buttons"), ".timds/parent.json", "src/site.json"]) assert.ok(report.written.includes(file), file);
+  for (const file of [page("graft"), page("kept"), page("gone"), "src/styles/system.css"]) assert.ok(!report.written.includes(file), file);
+
+  const again = await feedOffshoot({ designSystemRoot: root, source, check: async () => { throw new Error("must not check an unchanged feed"); } });
+  assert.deepEqual(again.written, []);
+  assert.ok(again.stock.filter((entry) => entry.status !== "customized").every((entry) => entry.status === "current"));
+  assert.deepEqual(again.stock.filter((entry) => entry.status === "customized").map((entry) => entry.path), [page("graft"), page("gone"), page("kept")]);
+
+  // Reverting a graft to the bytes last written for it makes it stock again.
+  await write(root, page("graft"), releaseOne[page("graft")]);
+  const reverted = await feedOffshoot({ designSystemRoot: root, source });
+  assert.equal(reverted.stock.find((entry) => entry.path === page("graft")).status, "updated");
+  assert.equal(await read(root, page("graft")), releaseTwo[page("graft")]);
+  // A child copy that already equals the parent's bytes is current and its hash advances.
+  const { root: matching } = await stockFixture(t, { extra: { ...childStock, [page("kept")]: releaseTwo[page("kept")], [page("graft")]: releaseTwo[page("graft")] } });
+  const advanced = await feedOffshoot({ designSystemRoot: matching, source });
+  assert.equal(advanced.stock.find((entry) => entry.path === page("graft")).status, "current");
+  assert.equal((await readJson(matching, ".timds/parent.json")).files[page("graft")], hash(releaseTwo[page("graft")]));
+});
+
+test("a graft first met without a recorded hash remembers the parent's bytes it was offered", async (t) => {
+  const childPage = "<h1>Child button</h1>\n";
+  const offered = { [page("buttons")]: "<h1>Parent button</h1>\n" };
+  const source = nextSource({ stock: offered });
+  const buttonsPage = async (root) => (await readJson(root, "src/site.json")).views[0].pages.find((entry) => entry.slug === "buttons");
+
+  // The child authored the page itself before the parent declared that path.
+  const { root } = await fixture(t, { stockFiles: {}, extra: { [page("buttons")]: childPage } });
+  const first = await feedOffshoot({ designSystemRoot: root, source });
+  assert.deepEqual(first.stock, [{ path: page("buttons"), status: "customized", note: "your graft; kept over the parent's change" }]);
+  assert.deepEqual(first.grafts.map(({ path: file, shades, removed }) => [file, shades, removed]), [[page("buttons"), true, undefined]]);
+  assert.equal(await read(root, page("buttons")), childPage);
+  assert.deepEqual((await readJson(root, ".timds/parent.json")).files, { [page("buttons")]: hash(offered[page("buttons")]) }, "the offered version is recorded");
+  assert.equal((await buttonsPage(root)).planned, true);
+
+  // Deleting it afterwards is a removed graft: never recreated, still planned.
+  await fs.rm(path.join(root, page("buttons")));
+  const removed = await feedOffshoot({ designSystemRoot: root, source });
+  assert.deepEqual(removed.stock.map((entry) => [entry.path, entry.status]), [[page("buttons"), "customized"]]);
+  assert.deepEqual(removed.grafts.map(({ path: file, shades, removed: gone }) => [file, shades, gone]), [[page("buttons"), false, true]]);
+  await assert.rejects(fs.access(path.join(root, page("buttons"))), { code: "ENOENT" });
+  assert.equal((await buttonsPage(root)).planned, true, "the committed deletion stays planned");
+  assert.doesNotMatch(describeFeed(removed).join("\n"), /shades the parent's change at src\/pages\/web\/buttons\.html/);
+
+  // Reverting it to the parent's bytes makes it stock again.
+  await write(root, page("buttons"), offered[page("buttons")]);
+  const reverted = await feedOffshoot({ designSystemRoot: root, source });
+  assert.equal(reverted.stock.find((entry) => entry.path === page("buttons")).status, "current");
+  assert.deepEqual(reverted.grafts, []);
+
+  // A kept first-met graft shades only when the parent's bytes move again.
+  const { root: kept } = await fixture(t, { stockFiles: {}, extra: { [page("buttons")]: childPage } });
+  await feedOffshoot({ designSystemRoot: kept, source });
+  const same = await feedOffshoot({ designSystemRoot: kept, source });
+  assert.deepEqual(same.grafts.map(({ path: file, shades }) => [file, shades]), [[page("buttons"), false]]);
+  assert.doesNotMatch(describeFeed(same).join("\n"), /shades the parent's change at src\/pages\/web\/buttons\.html/);
+  const moved = await feedOffshoot({ designSystemRoot: kept, source: nextSource({ version: "1.2.0", commit: "3".repeat(40), stock: { [page("buttons")]: "<h1>Parent button two</h1>\n" } }) });
+  assert.deepEqual(moved.grafts.map(({ path: file, shades }) => [file, shades]), [[page("buttons"), true]]);
+  assert.match(describeFeed(moved).join("\n"), /Your graft shades the parent's change at src\/pages\/web\/buttons\.html; kept\./);
+  assert.equal(await read(kept, page("buttons")), childPage);
+  assert.equal((await readJson(kept, ".timds/parent.json")).files[page("buttons")], hash(offered[page("buttons")]), "a kept graft keeps the hash recorded for it");
+});
+
+test("feed refuses a child whose lock selects an older toolkit before changing any file", async (t) => {
+  const pkg = JSON.parse(await fs.readFile(new URL("../package.json", import.meta.url), "utf8"));
+  const lock = (version) => json({ name: "child", lockfileVersion: 3, requires: true, packages: { "": { name: "child" }, [`node_modules/${pkg.name}`]: { version } } });
+  const { root, texts } = await stockFixture(t, { extra: { ...childStock, "package-lock.json": lock("0.1.400") } });
+  await assert.rejects(feedOffshoot({ designSystemRoot: root, source: nextSource({ stock: releaseTwo }), check: async () => { throw new Error("must not check"); } }), (error) => error.message.includes("selects toolkit 0.1.400") && error.message.includes(`timds upgrade --version ${pkg.version}`));
+  for (const [file, text] of Object.entries(texts)) assert.equal(await read(root, file), text, file);
+  await assert.rejects(fs.access(path.join(root, page("buttons"))), { code: "ENOENT" });
+  await write(root, "package-lock.json", lock(pkg.version));
+  const report = await feedOffshoot({ designSystemRoot: root, source: nextSource({ stock: releaseTwo }) });
+  await assertStockOutcome(root, report);
+});
+
+test("a failed check rolls back refreshed and created stock with both records", async (t) => {
+  const { root, texts } = await stockFixture(t);
+  await assert.rejects(feedOffshoot({ designSystemRoot: root, source: nextSource({ stock: releaseTwo }), check: async () => { throw new Error("stock build failed"); } }), /rolled back.*stock build failed/);
+  for (const [file, text] of Object.entries(texts)) assert.equal(await read(root, file), text, file);
+  await assert.rejects(fs.access(path.join(root, page("buttons"))), { code: "ENOENT" });
+  await assert.rejects(fs.access(path.join(root, page("gone"))), { code: "ENOENT" });
+});
+
+test("feed --force never reaches declared stock", async (t) => {
+  const { root, texts } = await stockFixture(t);
+  for (const forced of [page("graft"), page("plain")]) {
+    await assert.rejects(feedOffshoot({ designSystemRoot: root, source: nextSource({ stock: releaseTwo }), force: [forced] }), /--force replaces only named plumbing files; .* is the parent's declared stock/);
+  }
+  for (const [file, text] of Object.entries(texts)) assert.equal(await read(root, file), text, file);
+});
+
+test("a structure offshoot un-plans the catalog page of a stock fragment the feed creates", async (t) => {
+  const { root } = await stockFixture(t, { mode: "structure" });
+  const report = await feedOffshoot({ designSystemRoot: root, source: nextSource({ stock: releaseTwo }) });
+  const pages = (await readJson(root, "src/site.json")).views[0].pages;
+  assert.equal(pages.find((entry) => entry.slug === "buttons").planned, undefined);
+  assert.equal(pages.find((entry) => entry.slug === "").planned, true, "pages without a created fragment stay planned");
+  assert.ok(report.site.advanced.includes("web/buttons.planned"));
+});
+
+test("a record shot before stock hashes adopts them from its baseline release on the first feed", async (t) => {
+  const { root, texts } = await stockFixture(t, { stockFiles: null });
+  const source = nextSource({ stock: releaseTwo });
+  await assert.rejects(feedOffshoot({ designSystemRoot: root, source }), /predates stock hashes.*example\/core 1\.0\.0 at 1{40}.*--baseline-file/);
+  for (const [file, text] of Object.entries(texts)) assert.equal(await read(root, file), text, file);
+  const moved = baselineSource(); moved.parent.commit = "9".repeat(40);
+  await assert.rejects(feedOffshoot({ designSystemRoot: root, source, baseline: moved }), /baseline is not the release .*commit differs/);
+  for (const [file, text] of Object.entries(texts)) assert.equal(await read(root, file), text, file);
+  const report = await feedOffshoot({ designSystemRoot: root, source, baseline: baselineSource() });
+  await assertStockOutcome(root, report, { adopted: true });
+  assert.match(describeFeed(report).join("\n"), /Adopted stock hashes/);
+  const next = await feedOffshoot({ designSystemRoot: root, source, check: async () => { throw new Error("must not check an unchanged feed"); } });
+  assert.equal(next.adopted, false, "a record with files never reads a baseline again");
+  assert.deepEqual(next.written, []);
+});
+
+test("a record with empty stock hashes never needs a baseline", async (t) => {
+  const { root } = await fixture(t);
+  const report = await feedOffshoot({ designSystemRoot: root, source: nextSource({ stock: { [page("buttons")]: "<h1>Parent button</h1>\n" } }) });
+  assert.equal(report.adopted, false);
+  assert.deepEqual(report.stock, [{ path: page("buttons"), status: "created" }]);
+  assert.deepEqual((await readJson(root, ".timds/parent.json")).files, { [page("buttons")]: hash("<h1>Parent button</h1>\n") });
+});
+
+const runnerSourceId = "11111111-1111-4111-8111-111111111111";
+const gitIn = (root, ...args) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+async function exportSource(root, file) {
+  const source = await loadOffshootSource(root, { sourceId: runnerSourceId });
+  await fs.writeFile(file, json({ apiVersion: 1, ...source }));
+  return source;
+}
+
+async function runnerFixture(t) {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "timds-feed-runner-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const parentRoot = path.join(directory, "parent"), child = path.join(directory, "child");
+  await fs.mkdir(parentRoot);
+  gitIn(parentRoot, "init", "-q", "-b", "main"); gitIn(parentRoot, "config", "user.email", "test@example.com"); gitIn(parentRoot, "config", "user.name", "Test");
+  await runWithOutputSink(() => {}, () => initializeRepository(parentRoot, { standalone: true, systemId: "example/core", name: "Example Core" }));
+  await write(parentRoot, ".timds/stock.json", json({ schemaVersion: 1, paths: ["src/pages/brand/color.html", "src/styles/system.css"] }));
+  gitIn(parentRoot, "add", "--all"); gitIn(parentRoot, "commit", "-qm", "Parent release one");
+  const one = path.join(directory, "one.json"), two = path.join(directory, "two.json");
+  const first = await exportSource(parentRoot, one);
+  await shootOffshoot({ destination: child, source: first, systemId: "example/child" });
+  gitIn(child, "config", "user.email", "test@example.com"); gitIn(child, "config", "user.name", "Test");
+  gitIn(child, "add", "--all"); gitIn(child, "commit", "-qm", "Child");
+  const color = `${await read(parentRoot, "src/pages/brand/color.html")}\n<p>Parent release two.</p>\n`;
+  await write(parentRoot, "src/pages/brand/color.html", color);
+  gitIn(parentRoot, "add", "--all"); gitIn(parentRoot, "commit", "-qm", "Parent release two");
+  const second = await exportSource(parentRoot, two);
+  await write(child, ".timds/session.json", "{}\n");
+  const previous = process.env.TIMDS_HOSTED_RUNNER;
+  t.after(() => { if (previous === undefined) delete process.env.TIMDS_HOSTED_RUNNER; else process.env.TIMDS_HOSTED_RUNNER = previous; });
+  return { parentRoot, child, one, two, first, second, color };
+}
+
+async function runFeed(args) {
+  const output = [];
+  await runWithOutputSink((line) => output.push(line), () => runCli(["feed", ...args]));
+  return JSON.parse(output.join("\n"));
+}
+
+/** Run a `feed --json` that must refuse, and return the `error.code` its `{ ok: false }` document carries. */
+async function feedFailure(args, expected) {
+  const output = [];
+  await assert.rejects(runWithOutputSink((line) => output.push(line), () => runCli(["feed", ...args])), expected);
+  const receipt = JSON.parse(output.join("\n"));
+  assert.equal(receipt.ok, false);
+  return receipt.error.code;
+}
+
+test("the host runner feeds a hosted workspace from a source export and reports everything it records", async (t) => {
+  const { child, two, first, second, color } = await runnerFixture(t);
+  delete process.env.TIMDS_HOSTED_RUNNER;
+  await assert.rejects(runFeed(["--root", child, "--source-file", two, "--json"]), /not available in a hosted session.*TIMDS_HOSTED_RUNNER=1/);
+  await assert.rejects(runFeed(["--root", child, "--source-file", two, "--from", child, "--json"]), /Usage: timds feed[\s\S]*cannot be combined with --from/);
+  await assert.rejects(runFeed(["--root", child, "--source-file", two, "--version", "latest"]), /cannot be combined/);
+  await assert.rejects(runFeed(["--root", child, "--baseline-file", two]), /--baseline-file requires --source-file/);
+  process.env.TIMDS_HOSTED_RUNNER = "1";
+  const report = await runFeed(["--root", child, "--source-file", two, "--json"]);
+  assert.equal(await read(child, "src/pages/brand/color.html"), color);
+  assert.deepEqual(report.stock, [{ path: "src/pages/brand/color.html", status: "updated" }, { path: "src/styles/system.css", status: "current" }]);
+  assert.deepEqual(report.grafts, []);
+  assert.equal(report.adopted, false);
+  assert.ok(report.check, "the workspace check ran");
+  assert.ok(Array.isArray(report.files) && report.site && report.formats && Array.isArray(report.written));
+  assert.deepEqual({ ...report.parent, baseline: undefined, files: undefined }, { ...report.previousParent, baseline: undefined, files: undefined, commit: second.parent.commit });
+  assert.equal(report.previousParent.commit, first.parent.commit);
+  assert.equal(report.parent.files["src/pages/brand/color.html"], hash(color));
+  assert.ok(report.written.includes("src/pages/brand/color.html") && report.written.includes(".timds/parent.json"));
+});
+
+test("the host runner adopts stock hashes for an older child through --baseline-file", async (t) => {
+  const { child, one, two, color } = await runnerFixture(t);
+  const record = await readJson(child, ".timds/parent.json");
+  delete record.files;
+  await write(child, ".timds/parent.json", json(record));
+  gitIn(child, "commit", "-qam", "Record before stock hashes");
+  process.env.TIMDS_HOSTED_RUNNER = "1";
+  assert.equal(await feedFailure(["--root", child, "--source-file", two, "--json"], /predates stock hashes[\s\S]*--baseline-file/), "baseline_required");
+  assert.equal(await feedFailure(["--root", child, "--source-file", two, "--baseline-file", two, "--json"], /baseline is not the release .*commit differs/), "parent_mismatch");
+  const report = await runFeed(["--root", child, "--source-file", two, "--baseline-file", one, "--json"]);
+  assert.equal(report.adopted, true);
+  assert.equal(await read(child, "src/pages/brand/color.html"), color);
+  assert.deepEqual(Object.keys((await readJson(child, ".timds/parent.json")).files).sort(), ["src/pages/brand/color.html", "src/styles/system.css"]);
+});
+
+test("feed --json names a system without a parent record as not_offshoot", async (t) => {
+  const { child, two } = await runnerFixture(t);
+  await fs.rm(path.join(child, ".timds/parent.json"));
+  process.env.TIMDS_HOSTED_RUNNER = "1";
+  assert.equal(await feedFailure(["--root", child, "--source-file", two, "--json"], /no parent to feed/), "not_offshoot");
+});
+
+test("feed --from reads the recorded release from the local parent to adopt stock hashes", async (t) => {
+  const { parentRoot, child, color } = await runnerFixture(t);
+  await fs.rm(path.join(child, ".timds/session.json"));
+  const record = await readJson(child, ".timds/parent.json");
+  delete record.files;
+  await write(child, ".timds/parent.json", json(record));
+  gitIn(child, "commit", "-qam", "Record before stock hashes");
+  const report = await runFeed(["--root", child, "--from", parentRoot, "--source-id", runnerSourceId, "--json"]);
+  assert.equal(report.adopted, true);
+  assert.equal(await read(child, "src/pages/brand/color.html"), color);
+  assert.deepEqual(report.stock.map((entry) => entry.status), ["updated", "current"]);
 });

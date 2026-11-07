@@ -1,6 +1,9 @@
 // The public records shared by host provisioning, local offshoot operations,
 // checking and readers. The parent record is lineage, never an authored edit;
 // stock is an explicit designer declaration, never inferred from content.
+// The parent record also remembers the hash of every stock file it last wrote
+// (`files`), so feed refreshes unmodified stock and keeps a child's grafts;
+// those hashes, like the catalog baseline, never leave the repository.
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { normalizeFormatCatalog } from './formats.mjs';
@@ -36,15 +39,16 @@ function validateBaselineSite(site) {
 /** Validate the version-1 host/local lineage record without rewriting it. */
 export function validateParentRecord(value) {
   const at = PARENT_RECORD_FILE;
-  if (!object(value) || value.schemaVersion !== 1 || !onlyKeys(value, ['schemaVersion', 'systemId', 'sourceId', 'version', 'commit', 'mode', 'baseline'])) throw new Error(`${at} must be a schemaVersion 1 parent record`);
+  if (!object(value) || value.schemaVersion !== 1 || !onlyKeys(value, ['schemaVersion', 'systemId', 'sourceId', 'version', 'commit', 'mode', 'baseline', 'files'])) throw new Error(`${at} must be a schemaVersion 1 parent record`);
   parentLineage(value);
+  if (Object.hasOwn(value, 'files')) validateStockHashes(value.files);
   if (!object(value.baseline) || !onlyKeys(value.baseline, ['site', 'formats']) || !Object.hasOwn(value.baseline, 'formats')) throw new Error(`${at} needs baseline.site and baseline.formats`);
   validateBaselineSite(value.baseline.site);
   if (value.baseline.formats !== null) normalizeFormatCatalog(value.baseline.formats, { where: `${at} baseline.formats` });
   return value;
 }
 
-/** Public ancestry omits the structural baseline and any host authority. */
+/** Public ancestry omits the structural baseline, the stock hashes and any host authority. */
 export function parentLineage(record) {
   if (record === null || record === undefined) return null;
   const at = PARENT_RECORD_FILE;
@@ -93,6 +97,19 @@ export async function readParentRecord(root) {
  */
 export const STOCK_RECORD_PATH_KINDS = Object.freeze(['src/pages/**/*.html', 'src/styles/**/*.css', 'src/layout.html', 'src/copy.json']);
 const STOCK_RECORD_PATH = /^src\/(?:pages\/.+\.html|styles\/.+\.css|layout\.html|copy\.json)$/;
+const exactStockPath = file => typeof file === 'string' && STOCK_RECORD_PATH.test(file) && !/[\x00-\x1f\x7f\\*?\[\]{}]/.test(file) && !file.split('/').some(part => !part || part === '.' || part === '..');
+
+/** The hashes a parent record keeps for the stock files it last wrote: exact
+ * stock paths to lowercase SHA-256 hex. An empty object is a hashed record
+ * with nothing declared; an absent one is an older record awaiting adoption. */
+function validateStockHashes(files) {
+  const at = `${PARENT_RECORD_FILE} files`;
+  if (!object(files) || Object.keys(files).length > 4000) throw new Error(`${at} must map up to 4000 stock paths to SHA-256 hashes`);
+  for (const [file, digest] of Object.entries(files)) {
+    if (!exactStockPath(file)) throw new Error(`${at} must name exact files matching ${STOCK_RECORD_PATH_KINDS.join(', ')}: ${JSON.stringify(file)}`);
+    if (typeof digest !== 'string' || !/^[a-f0-9]{64}$/.test(digest)) throw new Error(`${at} needs a lowercase SHA-256 hash for ${file}`);
+  }
+}
 
 /** Stock names exact source files. Globs, links and other authored layers are refused. */
 export async function validateStockRecord(value, root) {
@@ -100,7 +117,7 @@ export async function validateStockRecord(value, root) {
   if (!object(value) || value.schemaVersion !== 1 || !onlyKeys(value, ['schemaVersion', 'paths']) || !Array.isArray(value.paths) || value.paths.length > 4000) throw new Error(`${at} must contain schemaVersion 1 and up to 4000 paths`);
   const seen = new Set();
   for (const file of value.paths) {
-    if (typeof file !== 'string' || !STOCK_RECORD_PATH.test(file) || /[\x00-\x1f\x7f\\*?\[\]{}]/.test(file) || file.split('/').some(part => !part || part === '.' || part === '..') || seen.has(file)) throw new Error(`${at} must name unique exact existing files matching ${STOCK_RECORD_PATH_KINDS.join(', ')}`);
+    if (!exactStockPath(file) || seen.has(file)) throw new Error(`${at} must name unique exact existing files matching ${STOCK_RECORD_PATH_KINDS.join(', ')}`);
     seen.add(file);
     if (root) {
       try { await regularPath(root, file); }
