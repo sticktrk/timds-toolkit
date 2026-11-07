@@ -104,3 +104,19 @@ test('release gating includes a separate secret-free quarantined download and fu
   assert.ok(release.jobs.publish.needs.includes('binaries'));
   assert.ok(release.jobs['attach-binaries'].needs.includes('binaries'));
 });
+
+test('npm publishes only after the executables are served from the public download host', () => {
+  const host = release.jobs['host-binaries'];
+  assert.deepEqual(host.needs, ['create-release', 'binaries']);
+  assert.ok(release.jobs.publish.needs.includes('host-binaries'));
+  for (const [result, expected] of [['success', 'true'], ['failure', 'false'], ['skipped', 'false']]) {
+    const context = { github: { event_name: 'release' }, needs: { 'create-release': { result: 'skipped' }, binaries: { result: 'success' }, 'host-binaries': { result } } };
+    assert.equal(evaluate(release.jobs.publish.if, context), expected, result);
+  }
+  const verify = host.steps.findIndex(step => step.run === 'node scripts/binary-release.mjs');
+  const upload = host.steps.findIndex(step => /scripts\/binary-host\.mjs upload/.test(step.run || ''));
+  assert.ok(verify >= 0 && verify < upload, 'the release is verified before it is uploaded');
+  assert.deepEqual(Object.keys(host.steps[upload].env).filter(name => name.startsWith('TIMDS_DOWNLOAD_')).sort(), ['TIMDS_DOWNLOAD_ACCESS_KEY_ID', 'TIMDS_DOWNLOAD_BUCKET', 'TIMDS_DOWNLOAD_ENDPOINT', 'TIMDS_DOWNLOAD_SECRET_ACCESS_KEY']);
+  assert.equal(host.permissions.contents, 'read');
+  assert.equal(host.steps.find(step => step.uses === 'actions/checkout@v6').with['persist-credentials'], false);
+});

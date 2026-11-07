@@ -11,6 +11,14 @@ import { legacyStarterFileHashes } from './starter.mjs';
 
 const selection = new AsyncLocalStorage();
 export const BINARY_INSTALLATION_FILE = '.timds/installation.json';
+/**
+ * Public, immutable home of every released executable: `<base>/v<version>/<asset>`
+ * with the per-asset `.sha256`, the build `.json` and `SHA256SUMS` beside it.
+ * The stock workflows and the install docs download from here; the release
+ * workflow uploads here before npm publishes (scripts/binary-host.mjs).
+ */
+export const BINARY_DOWNLOAD_BASE = 'https://downloads.timds.com/timds-cli';
+export const binaryDownloadUrl = (version, asset = '') => `${BINARY_DOWNLOAD_BASE}/v${version}${asset ? `/${asset}` : ''}`;
 export const stockWorkspaceCommands = Object.freeze(Object.fromEntries(['dev', 'build', 'check'].map(name => [name, ['timds-cli', 'run', `scripts/${name}.mjs`]])));
 export const binaryInstallationRecord = (previous = {}) => ({ ...previous, schemaVersion: 2, mode: 'binary', name: runtimeIdentity.name, version: runtimeIdentity.version, executable: 'timds-cli' });
 export async function readInstallation(root) {
