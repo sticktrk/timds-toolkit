@@ -215,7 +215,14 @@ goes to stderr. The report carries `files` (every file's status), `site` and
 `formats` (catalog changes), `stock` (the declared-stock entries), `grafts`
 (`[{path, shades, note, removed?}]`), `adopted`, `written`, `check`, `parent`
 (the advanced record with its `files`) and `previousParent`. A failure prints
-`{ok:false,error:{code:"feed_failed",message}}` and exits nonzero. The hosted
+`{ok:false,error:{code,message}}` and exits nonzero, so a host branches on
+`code` rather than the message: `dirty_worktree` (uncommitted changes to files
+the feed writes), `check_failed` (the workspace check failed and the feed was
+rolled back), `not_offshoot` (no `.timds/parent.json`), `parent_mismatch` (the
+source belongs to another parent, is older than the recorded release, disagrees
+with its own release identity, or the baseline is not the recorded release),
+`baseline_required` (a record shot before stock hashes and no baseline) or
+`feed_failed` (anything else). The hosted
 feed operation, its reconciler, publication gate and lineage advance, a
 proposal flow back to the parent, and moving pages between views are host or
 later work, not performed here.
