@@ -279,7 +279,11 @@ are escaped in both ordinary and indexed placeholders.
 
 Media uses the existing catalog keys, such as `logo` and `photo-1`. An asset
 may additionally name a regular local file through `path: "src/assets/..."`.
-The catalog still requires its existing stable public URL and media metadata.
+A source-backed entry may omit `publicUrl` when it declares this exact local
+path. Its content type, size, hash and other media metadata remain required.
+This supports captured inline SVGs without inventing a public URL. Remote
+asset consumers still require publication before they can fetch such an entry;
+the built pages and derived brand kit reference the verified local artifact.
 The viewer emits the matching `/assets/...` path, refuses traversal and
 symbolic links, and rejects an explicitly named file that does not exist.
 On grouped systems, `media/*.json` is canonical and `media.json` is generated.
@@ -373,3 +377,7 @@ the accent in `color.accent-ink`. `check` reports an accent that is nearly
 the text color, an accent below 3:1 on the background, and a fixed type scale
 whose steps are out of order, so a designer corrects the slot rather than the
 page.
+
+Structure offshoots retain the Start page’s `layout: "landing"` metadata, so
+the native viewer keeps its full-width landing treatment when creating a kit.
+Page promotion metadata is retained too, including Compose’s Start making action.

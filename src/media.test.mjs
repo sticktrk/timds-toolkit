@@ -18,6 +18,14 @@ test("published media may name a bounded local source copy and its provenance la
   assert.throws(() => validateMediaCatalog({ assets: [{ ...asset, publicUrl: "" }] }), /publicUrl is required/, "a local preview copy does not relax the published catalog URL contract");
 });
 
+test("source-backed media can omit a public URL but must declare an exact local path", () => {
+  const asset = record("inline-logo", "<svg/>", {path: "src/assets/logo.svg", contentType: "image/svg+xml"});
+  delete asset.publicUrl;
+  assert.deepEqual(validateMediaCatalog({schemaVersion: 2, assets: [asset]}).assets[0], asset);
+  assert.throws(() => validateMediaCatalog({assets: [{...asset, path: undefined}]}), /publicUrl is required/);
+  assert.throws(() => validateMediaCatalog({assets: [{...asset, path: "src/assets/../private.svg"}]}), /exact file/);
+});
+
 function record(key, content, overrides = {}) {
   return {
     bytes: Buffer.byteLength(content),

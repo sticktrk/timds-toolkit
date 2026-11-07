@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { checkWorkspace, initializeRepository, runCli, runWithOutputSink, syncStarterWorkspace } from './core.mjs';
-import { decodeOffshootSource, loadOffshootSource, severOffshoot, shootOffshoot, transformOffshoot } from './offshoots.mjs';
+import { decodeOffshootSource, loadOffshootSource, severOffshoot, shootOffshoot, structureSite, transformOffshoot } from './offshoots.mjs';
 import { packageRoot } from './executable.mjs';
 
 const sourceId = '11111111-1111-4111-8111-111111111111';
@@ -343,4 +343,10 @@ test('CLI shoot, feed and sever use the local parent and preserve a plain system
   assert.ok(lines.some(line => line.includes('Created structure offshoot')));
   assert.ok(lines.some(line => line.includes('Severed example/core')));
   assert.equal((await checkWorkspace(destination)).offshoot.parent, null);
+});
+
+test('structure offshoots retain Landing layout without copying authored summaries', () => {
+  const result = structureSite({views: [{id: 'use', label: 'Use', summary: 'Client copy', pages: [{slug: '', title: 'Start', layout: 'landing', summary: 'Client copy'}, {slug: 'compose', title: 'Compose', promote: 'Start making'}]}]});
+  assert.deepEqual(result.views[0].pages, [{slug: '', title: 'Start', layout: 'landing', planned: true}, {slug: 'compose', title: 'Compose', promote: 'Start making', planned: true}]);
+  assert.equal(result.views[0].summary, undefined);
 });

@@ -86,7 +86,7 @@ function parse(files, file, required = true) {
 
 /** The host's structure baseline deliberately contains no authored summaries. */
 export function structureSite(site) {
-  return {views: (site.views || []).map(view => ({id: view.id, label: view.label, pages: (view.pages || []).map(page => ({slug: page.slug || '', title: page.title, ...(page.group ? {group: page.group} : {}), planned: true}))}))};
+  return {views: (site.views || []).map(view => ({id: view.id, label: view.label, pages: (view.pages || []).map(page => ({slug: page.slug || '', title: page.title, ...(page.group ? {group: page.group} : {}), ...(page.layout === 'landing' ? {layout: 'landing'} : {}), ...(typeof page.promote === 'string' || page.promote === true ? {promote: page.promote} : {}), planned: true}))}))};
 }
 function placeholderTokens(tokens) {
   return Object.fromEntries(Object.entries(tokens).filter(([, value]) => value && typeof value === 'object' && !Array.isArray(value)).map(([key, value]) => [key, Object.hasOwn(value, 'value') || Object.hasOwn(value, '$value') ? {value: 'initial'} : placeholderTokens(value)]));
