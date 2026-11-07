@@ -303,7 +303,14 @@ a count, `{{page:ID}}` is a page's address (refusing a planned page),
 `{{nearest:ID}}` is the same with a fallback to its view's first authored
 page (then the overview) while it is planned, so a managed fragment can link
 client pages before they exist, and `{{sitemap}}` is the table of every
-page. The kit opens on its overview. The starter's views (Brand, Web DS,
+page. The kit keeps its overview at `/`, with Landing at `/use/`, the
+promoted Compose at `/use/compose/`, and Install at `/use/install/`. Its
+landing uses its own copy slots and format catalog, and its composer offers
+every catalog group, including print event formats. Kit foundations and
+channel overviews lead with previews and fold slot evidence and technical
+tables into Spec drawers. Starter sync advances unchanged page `layout` and
+`promote` fields against the recorded baseline and preserves authored choices.
+The starter's views (Brand, Web DS,
 Digital DS, Social DS, Print DS, and Use, the toolkit's own guidance on
 consuming a system) are the canonical structure; client systems are a source
 of ideas, not a mirror. Planned pages are never built, so a fresh scaffold

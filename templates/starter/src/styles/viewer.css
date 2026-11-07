@@ -335,7 +335,7 @@ pre { margin: var(--space-6) 0 0; padding: var(--space-4) var(--space-6); overfl
   isolation: isolate;
 }
 .portal-hero__inner { display: grid; gap: var(--space-6); max-width: 42rem; padding: clamp(var(--space-8), 6vw, 3.5rem); animation: landing-fade 1.1s ease both; }
-.portal-hero__kicker { margin: 0; color: color-mix(in srgb, var(--color-accent) 45%, var(--color-surface)); font-size: var(--type-label); font-weight: 800; letter-spacing: 0.13em; text-transform: uppercase; }
+.portal-hero__kicker { margin: 0; color: var(--color-surface); font-size: var(--type-label); font-weight: 800; letter-spacing: 0.13em; text-transform: uppercase; }
 .portal-hero__title { margin: 0; font-family: var(--font-serif); font-size: clamp(2.5rem, 5.2vw, 4.5rem); font-weight: 500; letter-spacing: -0.03em; line-height: 1.02; }
 .portal-hero__title em, .portal-cta__title em { color: color-mix(in srgb, var(--color-accent) 45%, var(--color-surface)); font-style: italic; }
 .lines .line { display: block; overflow: hidden; padding-bottom: 0.08em; }

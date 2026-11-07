@@ -35,6 +35,7 @@
     "src/pages/decks/index.html",
     "src/pages/decks/slides.html",
     "src/pages/use/index.html",
+    "src/pages/use/compose.html",
     "src/pages/use/install.html"
   ]
 }

@@ -97,6 +97,24 @@ test("mergeSiteModel appends what the client lacks, advances untouched stock fie
   assert.deepEqual([...declaredPageIds(site)], ["brand/logo", "brand/mascot", "video", "web/layout", "web/spacing", "web/email", "print", "print/letterheads"]);
 });
 
+test("site merges advance stock page layout and promotion while retaining authored choices", () => {
+  const previous = { views: [{ id: "use", pages: [{ slug: "", title: "Compose" }, { slug: "install", title: "Install", layout: "page", promote: "Install" }] }] };
+  const next = structuredClone(previous);
+  Object.assign(next.views[0].pages[0], { title: "Landing", layout: "landing" });
+  Object.assign(next.views[0].pages[1], { layout: "landing", promote: "Connect" });
+  const stock = mergeSiteModel(previous, next, [previous]);
+  assert.deepEqual(stock.site, next);
+  assert.deepEqual(stock.changes.advanced, ["use.title", "use.layout", "use/install.layout", "use/install.promote"]);
+  const authored = structuredClone(previous);
+  authored.views[0].pages[0].layout = "page";
+  authored.views[0].pages[1].promote = "Get connected";
+  const kept = mergeSiteModel(authored, next, [previous]);
+  assert.equal(kept.site.views[0].pages[0].layout, "page");
+  assert.equal(kept.site.views[0].pages[1].promote, "Get connected");
+  assert.deepEqual(kept.changes.kept.map(change => change.path), ["use.layout", "use/install.promote"]);
+  assert.deepEqual(mergeSiteModel(kept.site, next, [next]).changes.kept, []);
+});
+
 test("site merges preserve the existing home route, including an absent selection", () => {
   const overview = { views: [] };
   const use = { home: "use", views: [] };
