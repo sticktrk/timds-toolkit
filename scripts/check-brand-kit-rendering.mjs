@@ -130,7 +130,7 @@ function inspectPage(treatments, {accentOnly = false, expectedAccentLogo = null}
       if (primary && alternate && (logos.length !== 1 || logos[0].hasAttribute('data-on-dark') !== (expected === 'dark'))) failures.push(`${describe(canvas)} selected an unreadable logo variant`);
     }
   }
-  const textSelector = '.canvas *, .button, .field label, .field input, .field small, .card *, .badge, .site-nav a, .site-footer, .site-footer *, .appbar *, .sidenav *';
+  const textSelector = '.canvas *, .landing *, .ground *, .button, .field label, .field input, .field small, .card *, .badge, .site-nav a, .site-footer, .site-footer *, .appbar *, .sidenav *';
   for (const element of accentOnly ? [] : new Set(document.querySelectorAll(textSelector))) {
     if (!visible(element) || ![...element.childNodes].some(node => node.nodeType === Node.TEXT_NODE && node.textContent.trim())) continue;
     const style = getComputedStyle(element), ink = rgba(style.color);
@@ -223,7 +223,7 @@ try {
       results.errors.push(...result.failures.map(failure => `${scenario} ${id}: ${failure}`));
       // Every authored page is inspected; screenshots concentrate on previews
       // plus the overview/component/layout pages so artifacts stay reviewable.
-      if (result.count.canvas || ['index', 'web/components', 'web/layout'].includes(id)) {
+      if (result.count.canvas || ['index', 'use', 'brand/color', 'brand/typography', 'web/spacing', 'web/components', 'web/layout'].includes(id)) {
         const clips = await page.evaluate(accentOnly => {
           const selectors = accentOnly ? ['.canvas--accent'] : ['.canvas--minimal', '.canvas--accent', '.canvas--bold, .canvas--ink', '.canvas--photo'];
           const canvases = selectors.map(selector => document.querySelector(selector)).filter(Boolean);
@@ -238,6 +238,31 @@ try {
           await fs.writeFile(path.join(directory, `${id.replaceAll('/', '-')}-${name}.png`), Buffer.from(screenshot.value.data, 'base64'));
         }
       }
+    }
+    if (['stock', 'inverted'].includes(scenario)) {
+      for (const width of [1440, 390]) {
+        await page.setViewport({width, height: 1050, deviceScaleFactor: 1});
+        await page.goto({url: `${origin}/use/`, timeout: 15_000});
+        const landing = await page.evaluate(() => ({
+          overflow: document.documentElement.scrollWidth > innerWidth + 1,
+          composerLinks: [...document.querySelectorAll('.asset-card[href*="?format="]')].map(link => link.href),
+        }));
+        assert.equal(landing.overflow, false, `${scenario} landing overflows at ${width}px`);
+        assert.equal(landing.composerLinks.length, 24);
+        const screenshot = await page._client().send('Page.captureScreenshot', {format: 'png'});
+        await fs.writeFile(path.join(directory, `use-${width}.png`), Buffer.from(screenshot.value.data, 'base64'));
+        for (const format of ['business-card', 'name-badge', 'slide-1920x1080']) {
+          await page.goto({url: `${origin}/use/compose/?format=${format}`, timeout: 15_000});
+          const selection = await page.evaluate(() => {
+            const input = document.querySelector('input[name="preset"]:checked');
+            return {format: input?.value, visible: !input?.closest('.tabs__panel')?.hidden, size: document.querySelector('.compose__size').textContent};
+          });
+          assert.equal(selection.format, format, `${scenario} ${width}px deep link`);
+          assert.equal(selection.visible, true, `${format} tab is visible`);
+          if (format !== 'slide-1920x1080') assert.match(selection.size, / in/);
+        }
+      }
+      await page.setViewport({width: 1440, height: 1050, deviceScaleFactor: 1});
     }
     console.log(`Brand kit ${scenario}: checked ${current.pages.length} pages, ${current.pages.reduce((total, result) => total + result.count.canvas, 0)} canvases and ${current.pages.reduce((total, result) => total + result.count.text, 0)} text pairs`);
   }

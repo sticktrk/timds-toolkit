@@ -357,8 +357,15 @@
       "pages": [
         {
           "slug": "",
+          "title": "Landing",
+          "summary": "Explore the kit, choose a format and start making on brand.",
+          "layout": "landing"
+        },
+        {
+          "slug": "compose",
           "title": "Compose",
-          "summary": "Make a first asset from the system and a brief."
+          "summary": "Make an asset from any channel in the kit’s format catalog and a brief.",
+          "promote": "Start making"
         },
         {
           "slug": "install",
