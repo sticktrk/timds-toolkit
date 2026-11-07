@@ -37,21 +37,53 @@ until steps 1–4 are done: until then, every release would stop at
 `host-binaries`, and a binary system that upgraded would download from an
 address that does not exist yet.
 
-1. **Bucket.** In Cloudflare → R2, create a bucket named `timds-downloads`.
-   To use another name, set it as the repository variable `TIMDS_R2_BUCKET`
-   (and in your shell for step 4).
-2. **Public domain.** In the bucket's Settings → Public access → Custom
-   Domains, connect `downloads.timds.com`. The timds.com zone must be on the
-   same Cloudflare account. Leave the `r2.dev` URL disabled. If you choose a
-   different hostname, change `BINARY_DOWNLOAD_BASE` and the stock templates
-   with it; the test in `src/binary-installation.test.mjs` names every place
-   that must agree.
-3. **Credentials.** In R2 → Manage API tokens, create an account API token with
-   **Object Read & Write** limited to `timds-downloads`. In this repository's
-   Settings → Secrets and variables → Actions, add:
-   - `TIMDS_R2_ENDPOINT`: `https://<account-id>.r2.cloudflarestorage.com`
-   - `TIMDS_R2_ACCESS_KEY_ID`: the token's access key ID
-   - `TIMDS_R2_SECRET_ACCESS_KEY`: the token's secret access key
+Steps 1–3 use the Cloudflare CLI (`cf`) and `gh`. The dashboard works too:
+R2 → bucket → Settings → Custom Domains, and R2 → Manage API tokens with
+**Object Read & Write** on the one bucket.
+
+1. **Bucket.** Create `timds-downloads`. To use another name, set it as the
+   repository variable `TIMDS_DOWNLOAD_BUCKET` (and in your shell for step 4).
+
+   ```bash
+   cf r2 buckets create --name timds-downloads
+   ```
+
+2. **Public domain.** Connect `downloads.timds.com`; the timds.com zone must be
+   on the same account. The bucket's `r2.dev` address stays disabled. If you
+   choose another hostname, change `BINARY_DOWNLOAD_BASE` and the stock
+   templates with it; the test in `src/binary-installation.test.mjs` names
+   every place that must agree.
+
+   ```bash
+   cf r2 buckets domains custom create timds-downloads --domain downloads.timds.com --zone-id "$(cf zones list --name timds.com | jq -r '.[0].id')" --enabled --min-tls 1.2
+   ```
+
+3. **Credentials.** Create an account API token limited to item read and
+   write on this one bucket, and store it as the repository's Actions secrets
+   without printing it. R2's S3 access key ID is the token's ID and its
+   secret access key is the SHA-256 of the token's value:
+
+   ```bash
+   (
+   set -euo pipefail
+   account="$(cf auth whoami | jq -r '.accounts[0].id')"
+   read_group="$(cf accounts tokens permission-groups list | jq -r '.[] | select(.name == "Workers R2 Storage Bucket Item Read") | .id')"
+   write_group="$(cf accounts tokens permission-groups list | jq -r '.[] | select(.name == "Workers R2 Storage Bucket Item Write") | .id')"
+   policies="$(jq -nc --arg r "com.cloudflare.edge.r2.bucket.${account}_default_timds-downloads" --arg read "$read_group" --arg write "$write_group" '[{effect: "allow", resources: {($r): "*"}, permission_groups: [{id: $read}, {id: $write}]}]')"
+   token="$(cf accounts tokens create --name "timds-toolkit release: timds-downloads upload" --policies "$policies")"
+   printf '%s' "https://${account}.r2.cloudflarestorage.com" | gh secret set TIMDS_DOWNLOAD_ENDPOINT -R sticktrk/timds-toolkit
+   printf '%s' "$token" | jq -jr '.id' | gh secret set TIMDS_DOWNLOAD_ACCESS_KEY_ID -R sticktrk/timds-toolkit
+   printf '%s' "$token" | jq -jr '.value' | shasum -a 256 | cut -d' ' -f1 | tr -d '\n' | gh secret set TIMDS_DOWNLOAD_SECRET_ACCESS_KEY -R sticktrk/timds-toolkit
+   gh secret list -R sticktrk/timds-toolkit | grep TIMDS_DOWNLOAD_
+   )
+   ```
+
+   The release workflow reads `TIMDS_DOWNLOAD_ENDPOINT`,
+   `TIMDS_DOWNLOAD_ACCESS_KEY_ID` and `TIMDS_DOWNLOAD_SECRET_ACCESS_KEY`.
+   GitHub secrets cannot be read back, so step 4 needs credentials in your
+   shell: either an R2 key that already covers every bucket (the
+   `CLOUDFLARE_*` fallback below), or a second token made the same way with
+   its three values exported under the `TIMDS_DOWNLOAD_*` names.
 4. **Copy the existing releases.** Releases from 0.1.478 to the current one
    only exist on GitHub Releases. From a checkout with `gh` signed in and the
    `aws` CLI installed, export the three values from step 3 (the script also
