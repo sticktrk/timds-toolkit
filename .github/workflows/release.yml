@@ -152,10 +152,10 @@ jobs:
       - name: Upload the executables to the public download host and read them back
         env:
           RELEASE_TAG: ${{ needs.create-release.outputs.tag || github.event.release.tag_name }}
-          TIMDS_R2_ENDPOINT: ${{ secrets.TIMDS_R2_ENDPOINT }}
-          TIMDS_R2_ACCESS_KEY_ID: ${{ secrets.TIMDS_R2_ACCESS_KEY_ID }}
-          TIMDS_R2_SECRET_ACCESS_KEY: ${{ secrets.TIMDS_R2_SECRET_ACCESS_KEY }}
-          TIMDS_R2_BUCKET: ${{ vars.TIMDS_R2_BUCKET }}
+          TIMDS_DOWNLOAD_ENDPOINT: ${{ secrets.TIMDS_DOWNLOAD_ENDPOINT }}
+          TIMDS_DOWNLOAD_ACCESS_KEY_ID: ${{ secrets.TIMDS_DOWNLOAD_ACCESS_KEY_ID }}
+          TIMDS_DOWNLOAD_SECRET_ACCESS_KEY: ${{ secrets.TIMDS_DOWNLOAD_SECRET_ACCESS_KEY }}
+          TIMDS_DOWNLOAD_BUCKET: ${{ vars.TIMDS_DOWNLOAD_BUCKET }}
         run: node scripts/binary-host.mjs upload "${RELEASE_TAG#v}"
 
   # Releases created with GITHUB_TOKEN do not trigger another release workflow.

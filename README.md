@@ -1864,7 +1864,7 @@ without the six Apple signing secrets (`TIMDS_MACOS_CERTIFICATE_BASE64`,
 `TIMDS_NOTARY_APPLE_ID`, `TIMDS_NOTARY_TEAM_ID`, `TIMDS_NOTARY_PASSWORD`; see
 [signing](docs/binary-packaging.md)), and it publishes to npm only after the
 executables are uploaded to the public download host, which needs the
-`TIMDS_R2_ENDPOINT`, `TIMDS_R2_ACCESS_KEY_ID` and `TIMDS_R2_SECRET_ACCESS_KEY`
+`TIMDS_DOWNLOAD_ENDPOINT`, `TIMDS_DOWNLOAD_ACCESS_KEY_ID` and `TIMDS_DOWNLOAD_SECRET_ACCESS_KEY`
 secrets ([download host](docs/binary-hosting.md)). If npm publishing fails after the
 release was created, use **Re-run failed jobs** to retry publishing the same
 version. **Run workflow** or **Re-run all jobs** creates another patch release.

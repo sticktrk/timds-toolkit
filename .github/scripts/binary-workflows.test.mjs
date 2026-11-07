@@ -116,7 +116,7 @@ test('npm publishes only after the executables are served from the public downlo
   const verify = host.steps.findIndex(step => step.run === 'node scripts/binary-release.mjs');
   const upload = host.steps.findIndex(step => /scripts\/binary-host\.mjs upload/.test(step.run || ''));
   assert.ok(verify >= 0 && verify < upload, 'the release is verified before it is uploaded');
-  assert.deepEqual(Object.keys(host.steps[upload].env).filter(name => name.startsWith('TIMDS_R2_')).sort(), ['TIMDS_R2_ACCESS_KEY_ID', 'TIMDS_R2_BUCKET', 'TIMDS_R2_ENDPOINT', 'TIMDS_R2_SECRET_ACCESS_KEY']);
+  assert.deepEqual(Object.keys(host.steps[upload].env).filter(name => name.startsWith('TIMDS_DOWNLOAD_')).sort(), ['TIMDS_DOWNLOAD_ACCESS_KEY_ID', 'TIMDS_DOWNLOAD_BUCKET', 'TIMDS_DOWNLOAD_ENDPOINT', 'TIMDS_DOWNLOAD_SECRET_ACCESS_KEY']);
   assert.equal(host.permissions.contents, 'read');
   assert.equal(host.steps.find(step => step.uses === 'actions/checkout@v6').with['persist-credentials'], false);
 });

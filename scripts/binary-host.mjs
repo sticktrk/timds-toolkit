@@ -15,10 +15,10 @@
 // never names a file that is not there yet, and every upload is read back
 // from the public URL and compared before the run succeeds.
 //
-// Credentials: TIMDS_R2_ENDPOINT, TIMDS_R2_ACCESS_KEY_ID and
-// TIMDS_R2_SECRET_ACCESS_KEY (falling back to the CLOUDFLARE_S3_API_ENDPOINT,
+// Credentials: TIMDS_DOWNLOAD_ENDPOINT, TIMDS_DOWNLOAD_ACCESS_KEY_ID and
+// TIMDS_DOWNLOAD_SECRET_ACCESS_KEY (falling back to the CLOUDFLARE_S3_API_ENDPOINT,
 // CLOUDFLARE_ACCESS_KEY and CLOUDFLARE_SECRET_ACCESS_KEY names in a local
-// .env); TIMDS_R2_BUCKET overrides the bucket name. Uses the aws CLI.
+// .env); TIMDS_DOWNLOAD_BUCKET overrides the bucket name. Uses the aws CLI.
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
@@ -80,12 +80,12 @@ export async function readRelease(directory, version) {
 }
 
 function hostConfig(env = process.env) {
-  const endpoint = env.TIMDS_R2_ENDPOINT || env.CLOUDFLARE_S3_API_ENDPOINT;
-  const accessKey = env.TIMDS_R2_ACCESS_KEY_ID || env.CLOUDFLARE_ACCESS_KEY;
-  const secretKey = env.TIMDS_R2_SECRET_ACCESS_KEY || env.CLOUDFLARE_SECRET_ACCESS_KEY;
-  if (!endpoint || !accessKey || !secretKey) throw new Error('Set TIMDS_R2_ENDPOINT, TIMDS_R2_ACCESS_KEY_ID and TIMDS_R2_SECRET_ACCESS_KEY (see docs/binary-hosting.md).');
+  const endpoint = env.TIMDS_DOWNLOAD_ENDPOINT || env.CLOUDFLARE_S3_API_ENDPOINT;
+  const accessKey = env.TIMDS_DOWNLOAD_ACCESS_KEY_ID || env.CLOUDFLARE_ACCESS_KEY;
+  const secretKey = env.TIMDS_DOWNLOAD_SECRET_ACCESS_KEY || env.CLOUDFLARE_SECRET_ACCESS_KEY;
+  if (!endpoint || !accessKey || !secretKey) throw new Error('Set TIMDS_DOWNLOAD_ENDPOINT, TIMDS_DOWNLOAD_ACCESS_KEY_ID and TIMDS_DOWNLOAD_SECRET_ACCESS_KEY (see docs/binary-hosting.md).');
   return {
-    bucket: env.TIMDS_R2_BUCKET || DEFAULT_BUCKET,
+    bucket: env.TIMDS_DOWNLOAD_BUCKET || DEFAULT_BUCKET,
     endpoint,
     env: {
       ...env,

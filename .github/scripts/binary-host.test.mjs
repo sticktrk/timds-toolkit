@@ -64,10 +64,10 @@ test('an incomplete or inconsistent release is refused before anything is upload
 test('a real upload names the credentials it needs instead of guessing', async t => {
   const directory = await release(t);
   const saved = {};
-  for (const name of ['TIMDS_R2_ENDPOINT', 'TIMDS_R2_ACCESS_KEY_ID', 'TIMDS_R2_SECRET_ACCESS_KEY', 'CLOUDFLARE_S3_API_ENDPOINT', 'CLOUDFLARE_ACCESS_KEY', 'CLOUDFLARE_SECRET_ACCESS_KEY']) {
+  for (const name of ['TIMDS_DOWNLOAD_ENDPOINT', 'TIMDS_DOWNLOAD_ACCESS_KEY_ID', 'TIMDS_DOWNLOAD_SECRET_ACCESS_KEY', 'CLOUDFLARE_S3_API_ENDPOINT', 'CLOUDFLARE_ACCESS_KEY', 'CLOUDFLARE_SECRET_ACCESS_KEY']) {
     saved[name] = process.env[name];
     delete process.env[name];
   }
   t.after(() => { for (const [name, value] of Object.entries(saved)) if (value !== undefined) process.env[name] = value; });
-  await assert.rejects(uploadRelease(directory, version, { log: () => {} }), /Set TIMDS_R2_ENDPOINT, TIMDS_R2_ACCESS_KEY_ID and TIMDS_R2_SECRET_ACCESS_KEY/);
+  await assert.rejects(uploadRelease(directory, version, { log: () => {} }), /Set TIMDS_DOWNLOAD_ENDPOINT, TIMDS_DOWNLOAD_ACCESS_KEY_ID and TIMDS_DOWNLOAD_SECRET_ACCESS_KEY/);
 });
