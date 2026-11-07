@@ -109,7 +109,7 @@ tokens; the rest are declared as planned and built once someone writes them.
 The starter `dev` server builds once and serves on `http://127.0.0.1:4321`. It
 does not watch files, so rerun `__TIMDS_CLI__ check` after an edit and reload.
 
-Fresh ordinary scaffolds select `home: "use"` in `src/site.json`, serving Use at
+Fresh scaffolds select `home: "use"` in `src/site.json`, serving Use at
 `/` and the overview at `/overview/`. With `home` unset, the overview stays at
 `/` and Use stays at `/use/`. Starter sync, upgrade and parent feeds preserve
 this routing choice, including its absence, so existing authored links keep
@@ -117,14 +117,15 @@ working.
 
 ## Brand-kit systems
 
-When the starter record says `brand-kit`, the kit opens on its overview and
+When the starter record says `brand-kit`, a fresh kit opens on Landing and
 organizes Brand, Web, Social, Ads, Email, Print, Events, Decks and Use separately.
 Its stock pages read tokens, copy and media slots in Minimal, Accent, Bold and
 Photo treatments. The designer's agent fills the data and records evidence;
 the owner reviews what is observed, assumed or unresolved. Copy stays in
 `src/copy.json`, small approved local media stays in `src/assets/` with its
 catalog record, and the Evidence page keeps captured facts and decisions.
-Use has a Landing page at `/use/`, Compose at `/use/compose/`, and Install.
+Use has Landing (at `/` by default), Compose at `/use/compose/`, and Install.
+The overview is preserved at `/overview/` with the default home choice.
 The promoted “Start making” action opens Compose, whose presets include every
 kit format, including Print, Events and Decks. Landing cards select a format
 for the composer. Foundation and channel pages show previews before the Spec

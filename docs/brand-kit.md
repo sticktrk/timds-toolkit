@@ -196,8 +196,9 @@ app bar reads as what the system grows into rather than as empty. A planned
 page is declared in the navigation and not yet authored; a designer authors
 it in place, and feed adds new ones as the parent gains them.
 
-`home` unset: `/` is the overview (coverage, what was assumed, what to check,
-one line per view on what it holds and what it grows into, sitemap).
+Fresh kits select `home: "use"`: `/` is Landing and `/overview/` holds the
+overview (coverage, what was assumed, what to check, one line per view on
+what it holds and what it grows into, sitemap).
 
 | View | Authored | Planned |
 | --- | --- | --- |
@@ -211,11 +212,12 @@ one line per view on what it holds and what it grows into, sitemap).
 | Decks | Overview, Slides (title, section, content, closing) | Presentation templates, Webinar title slides |
 | Use | Landing, Compose, Install | none |
 
-The Use landing at `/use/` is a portal into the kit’s six format channels.
+The Use landing at `/` by default is a portal into the kit’s six format channels.
 Its cards open `/use/compose/?format=ID`; Compose is the promoted “Start
 making” action and reads all seven catalog groups (including print event
 formats). `/use/install/` links to the composer’s tool and product guidance.
-The overview remains at `/`; no upgrade changes the authored `home` choice.
+No upgrade changes the authored `home` choice; existing kits with it unset
+keep the overview at `/` and Landing at `/use/`.
 Foundation and channel pages lead with previews and keep slot evidence and
 technical tables in closed Spec drawers, still available to the derived layer.
 
@@ -280,7 +282,11 @@ are escaped in both ordinary and indexed placeholders.
 
 Media uses the existing catalog keys, such as `logo` and `photo-1`. An asset
 may additionally name a regular local file through `path: "src/assets/..."`.
-The catalog still requires its existing stable public URL and media metadata.
+A source-backed entry may omit `publicUrl` when it declares this exact local
+path. Its content type, size, hash and other media metadata remain required.
+This supports captured inline SVGs without inventing a public URL. Remote
+asset consumers still require publication before they can fetch such an entry;
+the built pages and derived brand kit reference the verified local artifact.
 The viewer emits the matching `/assets/...` path, refuses traversal and
 symbolic links, and rejects an explicitly named file that does not exist.
 On grouped systems, `media/*.json` is canonical and `media.json` is generated.
@@ -383,3 +389,7 @@ the accent in `color.accent-ink`. `check` reports an accent that is nearly
 the text color, an accent below 3:1 on the background, and a fixed type scale
 whose steps are out of order, so a designer corrects the slot rather than the
 page.
+
+Structure offshoots retain the Start page’s `layout: "landing"` metadata, so
+the native viewer keeps its full-width landing treatment when creating a kit.
+Page promotion metadata is retained too, including Compose’s Start making action.
