@@ -111,7 +111,7 @@ init`. The descriptor names the applicable operations:
 - `replace-placeholders` requires explicit replacements. For npm docs the CLI
   is `npm run timds --`; contract description, dist/media/skill locations depend
   on standalone versus embedded layout. `CHANGELOG.md` needs an explicit
-  `__VERSION__` baseline label, normally `YYYY-MM-DD-1`.
+  `__VERSION__` baseline label, normally `YYYY.MM.DD-1`.
 - `initialize-manifest` requires identity, baseline version, layout, provider,
   description and optional consumer configuration. The CLI also applies these
   fields to the parsed template and serializes JSON.
