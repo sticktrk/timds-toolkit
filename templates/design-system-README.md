@@ -190,10 +190,11 @@ files under `src/pages/`, CSS files under `src/styles/`, `src/layout.html`, or `
 Globs, links, media, designs and configuration are refused.
 
 `.timds/parent.json` records schema version 1, the parent system ID and source
-UUID, version, source commit, mode and `baseline: {site, formats}`. It is
+UUID, version, source commit, mode, `baseline: {site, formats}` and `files`,
+the hash of each declared stock file the parent last wrote. It is
 protected ancestry, preserved by starter sync and upgrade. For an offshoot,
-those commands update toolkit plumbing while leaving catalogs to the parent
-feed and authored fragments to this system. Layout maintenance remains limited
+those commands update toolkit plumbing while leaving catalogs and declared
+stock to the parent feed and every other page to this system. Layout maintenance remains limited
 to missing stock stylesheet links and the changelog version-chip link.
 
 `__TIMDS_CLI__ feed [--version RELEASE]` advances unchanged catalog fields,
@@ -201,8 +202,10 @@ appends missing entries with pages planned, and keeps local edits as grafts.
 Use `--from ../parent` for a local committed parent tree with the saved source
 UUID. A reported graft shading a parent change can be kept or edited to let
 the parent through. Plumbing follows its ownership record; `--force PATH`
-reaches only named plumbing. Authored pages, styles, layout, tokens and media
-are never replaced. Feed requires clean files where it writes, checks the
+reaches only named plumbing. A declared stock file is refreshed while this
+system's copy is unmodified; a changed or removed copy is a graft and stays,
+and tokens, media, designs and undeclared files are never replaced. Feed
+requires clean files where it writes, checks the
 workspace and rolls its writes back on failure. The baseline advances only
 on success.
 

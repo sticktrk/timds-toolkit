@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -67,6 +68,63 @@ test('shoot creates full and structure offshoots that pass a real workspace chec
   await shootOffshoot({destination: skeleton, source: {...source, files: source.files.filter(file => file.path !== '.timds/stock.json')}, mode: 'structure', systemId: 'example/skeleton', check: checkWorkspace});
   assert.equal((await checkWorkspace(skeleton)).machine.index.pages.length >= 1, true);
   assert.match(await fs.readFile(path.join(skeleton, 'src/styles/system.css'), 'utf8'), /Replace placeholder tokens/);
+});
+
+test('shoot records the hash of every declared stock file in both modes, and an empty map without a declaration', async t => {
+  const {root, directory, source} = await fixture(t);
+  const sha256 = async relative => createHash('sha256').update(await fs.readFile(path.join(root, relative))).digest('hex');
+  const expected = {'src/pages/brand/color.html': await sha256('src/pages/brand/color.html'), 'src/styles/system.css': await sha256('src/styles/system.css')};
+  for (const mode of ['full', 'structure']) {
+    const destination = path.join(directory, `hashed-${mode}`);
+    const result = await shootOffshoot({destination, source, mode, systemId: `example/hashed-${mode}`});
+    const record = JSON.parse(await fs.readFile(path.join(destination, '.timds/parent.json'), 'utf8'));
+    assert.deepEqual(record.files, expected, mode);
+    assert.deepEqual(result.parent.files, expected, mode);
+    const checked = await checkWorkspace(destination);
+    assert.deepEqual(checked.offshoot.parent.files, expected, 'check accepts the hashed record');
+    assert.equal('files' in checked.machine.index.lineage, false, 'lineage never carries the hashes');
+    const transformed = await transformOffshoot(source, {mode, systemId: `example/wire-${mode}`});
+    assert.deepEqual(transformed.parent.files, expected);
+    const bare = await transformOffshoot({...source, files: source.files.filter(file => file.path !== '.timds/stock.json')}, {mode, systemId: `example/bare-${mode}`});
+    assert.deepEqual(bare.parent.files, {}, `${mode} without a stock declaration`);
+    assert.deepEqual(JSON.parse(Buffer.from(bare.files.find(file => file.path === '.timds/parent.json').content, 'base64').toString('utf8')).files, {});
+  }
+});
+
+test('shoot omits stock hashes when the child inherits a toolkit older than the running release', async t => {
+  const {directory, source} = await fixture(t);
+  const pkg = JSON.parse(await fs.readFile(new URL('../package.json', import.meta.url), 'utf8'));
+  const text = (files, file) => JSON.parse(Buffer.from(files.find(entry => entry.path === file).content, 'base64').toString('utf8'));
+  const replace = (from, file, value) => {
+    const copy = structuredClone(from), content = Buffer.from(json(value)).toString('base64'), entry = copy.files.find(candidate => candidate.path === file);
+    if (entry) entry.content = content; else copy.files.push({path: file, mode: '100644', encoding: 'base64', content});
+    return copy;
+  };
+  const locked = version => replace(source, 'package-lock.json', {name: 'parent', lockfileVersion: 3, requires: true, packages: {'': {name: 'parent'}, [`node_modules/${pkg.name}`]: {version}}});
+  for (const mode of ['full', 'structure']) {
+    const older = path.join(directory, `older-${mode}`);
+    const result = await shootOffshoot({destination: older, source: locked('0.1.400'), mode, systemId: `example/older-${mode}`});
+    const record = JSON.parse(await fs.readFile(path.join(older, '.timds/parent.json'), 'utf8'));
+    assert.equal(Object.hasOwn(record, 'files'), false, `${mode}: a pre-hash record for the older CLI`);
+    assert.equal(Object.hasOwn(result.parent, 'files'), false);
+    const current = path.join(directory, `current-${mode}`);
+    await shootOffshoot({destination: current, source: locked(pkg.version), mode, systemId: `example/current-${mode}`});
+    assert.ok(Object.hasOwn(JSON.parse(await fs.readFile(path.join(current, '.timds/parent.json'), 'utf8')), 'files'), `${mode}: the running release reads the hashes`);
+    assert.equal(Object.hasOwn((await transformOffshoot(locked('not-a-version'), {mode, systemId: `example/unparsable-${mode}`})).parent, 'files'), false, `${mode}: an unparsable pin counts as older`);
+  }
+  // Without a lock the installation record selects the runtime: the parent's in
+  // full mode, and the one structure mode writes from the starter record.
+  const unlocked = {...source, files: source.files.filter(file => file.path !== 'package-lock.json')};
+  const installation = text(unlocked.files, '.timds/installation.json'), starter = text(unlocked.files, '.timds/starter.json');
+  const olderInstallation = replace(unlocked, '.timds/installation.json', {...installation, version: '0.1.400'});
+  const full = await transformOffshoot(olderInstallation, {mode: 'full', systemId: 'example/older-installation'});
+  assert.equal(Object.hasOwn(text(full.files, '.timds/parent.json'), 'files'), false);
+  const structure = await transformOffshoot(olderInstallation, {mode: 'structure', systemId: 'example/structure-installation'});
+  assert.equal(text(structure.files, '.timds/installation.json').version, starter.version);
+  assert.ok(Object.hasOwn(text(structure.files, '.timds/parent.json'), 'files'), 'structure mode selects the version it writes');
+  const olderStarter = replace(unlocked, '.timds/starter.json', {...starter, version: '0.1.400'});
+  assert.equal(Object.hasOwn(text((await transformOffshoot(olderStarter, {mode: 'structure', systemId: 'example/older-starter'})).files, '.timds/parent.json'), 'files'), false);
+  assert.ok(Object.hasOwn((await transformOffshoot(unlocked, {mode: 'full', systemId: 'example/unlocked-current'})).parent, 'files'));
 });
 
 test('structure shoots retain the verified composer and explicitly declared copy samples', async t => {
@@ -143,7 +201,7 @@ test('shoot selects only parent lineage fields from extensible host export metad
   const {source} = await fixture(t);
   source.parent = {...source.parent, schemaVersion: 17, mode: 'export', baseline: {private: true}, exportedAt: '2026-11-03T00:00:00Z'};
   const transformed = await transformOffshoot(source, {systemId: 'example/export-child'});
-  assert.deepEqual(Object.keys(transformed.parent), ['schemaVersion', 'systemId', 'sourceId', 'version', 'commit', 'mode', 'baseline']);
+  assert.deepEqual(Object.keys(transformed.parent), ['schemaVersion', 'systemId', 'sourceId', 'version', 'commit', 'mode', 'baseline', 'files']);
   assert.equal(transformed.parent.schemaVersion, 1);
   assert.equal(transformed.parent.mode, 'full');
   assert.equal(transformed.parent.commit, source.parent.commit);
