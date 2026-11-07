@@ -180,7 +180,9 @@ To accept the parent's version of a graft, replace the file's content with the
 parent's (or restore a removed file) and review it; the next feed records it as
 `current`. A successful feed advances the hash of every updated, created or
 current file. A kept graft keeps the hash last written for it, so reverting it
-to that version makes it stock again. Hashes for paths the parent stopped
+to that version makes it stock again; a graft first met with no recorded hash
+(the child authored the path before the parent declared it) records the
+parent's hash it was offered, so deleting it later keeps it removed. Hashes for paths the parent stopped
 declaring are kept, and their files are left alone.
 
 A record without `files`, from a child shot before stock hashes, is adopted on
@@ -244,7 +246,11 @@ The baseline holds the parent's site/formats catalogs. Structure baselines
 use sanitized site structure. `files` maps every path the release's
 `.timds/stock.json` declared, in both modes, to the SHA-256 of the bytes last
 written for it (`{}` when nothing is declared); records without it stay valid
-until feed adopts them. Check validates
+until feed adopts them. A child whose inherited toolkit pin (its
+`package-lock.json` entry, else `.timds/installation.json`) predates stock
+hashes gets a record without `files`, which that older CLI can read, until it
+is upgraded and fed; feed refuses a child whose selected toolkit is older than
+the running release, naming the upgrade to run first. Check validates
 the file without rewriting it. Sessions may receive/read this record but
 cannot create, edit or delete it; `.timds/stock.json` is designer-authored.
 

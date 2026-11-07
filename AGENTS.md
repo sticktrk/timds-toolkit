@@ -294,8 +294,9 @@ version 1 is implemented in `src/hosted.mjs`; CLI and MCP commands must share
 that implementation and keep files/token boundaries covered by tests.
 
 Offshoots record their immediate parent release, structural feed baseline
-and the hash of every declared stock file it last wrote (`files`) in
-`.timds/parent.json`. Check validates it without mutation; sessions cannot
+and the hash of every declared stock file it last wrote (`files`, omitted
+while the child's selected toolkit predates the running release, which feed
+refuses until it is upgraded) in `.timds/parent.json`. Check validates it without mutation; sessions cannot
 create, edit or delete it. `.timds/stock.json` is a designer-authored exception
 under `.timds`: exact existing regular `src/pages/**/*.html`,
 `src/styles/**/*.css`, `src/layout.html` and `src/copy.json` paths only, never

@@ -3,15 +3,19 @@
 // parent keeps design: the pages, stylesheets, layout and copy the parent's
 // `.timds/stock.json` declares are refreshed by the hash `.timds/parent.json`
 // recorded when they were last written. A stock file the child changed or
-// removed is a graft and is kept, `--force` included; tokens, media, designs
-// and every undeclared file remain the child's and are never copied.
+// removed is a graft and is kept, `--force` included; a graft first met with
+// no recorded hash records the parent's hash it was offered. Tokens, media,
+// designs and every undeclared file remain the child's and are never copied.
+// Feed writes the hashed record, so it refuses a child whose selected toolkit
+// predates the running release (that older CLI could not read the record).
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { isPlumbingPath, readParentRecord, regularPath, validateParentRecord } from "./offshoot-contract.mjs";
 import { requireCleanPaths } from "./clean-tree.mjs";
-import { declaredStock, decodeOffshootSource, stockHashes, structureSite } from "./offshoots.mjs";
+import { declaredStock, decodeOffshootSource, predatesRunningToolkit, selectedToolkitVersionIn, stockHashes, structureSite } from "./offshoots.mjs";
+import { runtimeIdentity } from "./runtime.mjs";
 import { compareDesignSystemVersions, parseDesignSystemVersion } from "./changelog.mjs";
 import {
   STARTER_RECORD_FILE, STARTER_SITE_FILE, STARTER_FORMATS_FILE,
@@ -73,6 +77,8 @@ export async function feedOffshoot({ designSystemRoot, source, baseline = null, 
   const parent = await readParentRecord(designSystemRoot);
   if (!parent) throw new Error("This system has no .timds/parent.json; only an offshoot can be fed");
   if (!hostedRunner && await optional(path.join(designSystemRoot, ".timds/session.json"))) throw new Error("Feed is not available in a hosted session; feed the source repository instead (the host's runner sets TIMDS_HOSTED_RUNNER=1 to feed its own workspace)");
+  const selectedToolkit = await selectedToolkitVersionIn(designSystemRoot);
+  if (predatesRunningToolkit(selectedToolkit)) throw new Error(`This system selects toolkit ${selectedToolkit}, older than the running ${runtimeIdentity.version}, and that CLI cannot read the stock hashes feed records in .timds/parent.json. Upgrade the system's toolkit first (timds upgrade --version ${runtimeIdentity.version}, or the host's upgrade), commit, then feed`);
   if (!source || !(Array.isArray(source.files) || source.files instanceof Map) || !object(source.parent)) throw new Error("Feed requires a published parent source snapshot");
   const { systemId, sourceId, version, commit } = source.parent;
   const identity = { systemId, sourceId, version, commit };
@@ -192,6 +198,10 @@ export async function feedOffshoot({ designSystemRoot, source, baseline = null, 
       } else {
         status = "customized";
         note = shades ? "your graft; kept over the parent's change" : "your graft; kept";
+        // A graft first met without a recorded hash (the child authored the
+        // path before the parent declared it) remembers the parent's bytes it
+        // was offered, so a later deletion stays a removed graft.
+        if (recorded === undefined) nextStockFiles[relative] = parentHash;
         grafts.push({ path: relative, shades, note });
         await plan(relative, null, status, note);
       }
