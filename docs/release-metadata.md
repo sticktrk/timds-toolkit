@@ -1,0 +1,157 @@
+# Installed toolkit release metadata
+
+`@dtconcepts/timds/release-metadata` is a read-only Node ESM export for hosts and
+build tools. It works from the published npm tarball without the toolkit source
+checkout or installed dependencies. It describes **the exact imported package**;
+it never resolves `latest`, fetches another version, initializes a repository,
+runs a build, or reads user configuration. Hosts select and independently verify
+the npm tarball/lockfile integrity before importing it. A package cannot include
+its own final tarball integrity without changing that integrity.
+
+```js
+import {
+  describeToolkitRelease,
+  readToolkitReleaseResource,
+  renderToolkitManagedFiles,
+} from '@dtconcepts/timds/release-metadata';
+
+const selection = {schemaVersion: 1, starter: 'brand-kit'};
+const release = await describeToolkitRelease(selection);
+const rendered = await renderToolkitManagedFiles({
+  ...selection,
+  hostedSkill: {
+    portalUrl: 'https://host.example.com',
+    systemId: 'example/core',
+    systemName: 'Example Design System',
+    studioUrl: 'https://host.example.com/studio/example',
+  },
+});
+const manifest = rendered.files.map(({path, mode, sha256, policy}) => ({path, mode, sha256, policy}));
+const seed = release.files.find(file => file.path === 'src/pages/index.html');
+const template = await readToolkitReleaseResource(seed.resource, selection);
+```
+
+The schema version defaults to `1`, and the starter defaults to `starter`.
+Only `starter` and `brand-kit` are supported. Unknown schemas, starter kinds,
+options, undeclared resource paths, missing required resources, and symlink or
+special-file resources fail explicitly. Each call returns fresh objects.
+Paths use `/`; entries are sorted by path with code-point ordering. The same
+explicit inputs and package bytes produce the same result regardless of working
+directory, time, timezone, saved host settings, or binary-runtime environment.
+This export always describes **npm** output, including hosted skill rendering.
+
+## Descriptor and resource bytes
+
+`describeToolkitRelease(selection)` returns:
+
+- `schemaVersion`, `starter`, and `toolkit: {name, version}` identifying the exact
+  installed package, independently from the metadata schema.
+- `resources`: unique package-relative paths with raw `sha256`, UTF-8 byte count
+  `bytes`, and canonical Git file `mode` (`100644` or `100755`). These hashes
+  describe packaged resources, including unrendered templates.
+- `files`: output `path`, resource lookup key `resource`, replacement `policy`,
+  and `operation`; parameterized operations also list their `parameters`.
+- `symlinks`: `.claude/skills`, target `../.agents/skills`, mode `120000`, and
+  the `create-if-absent` policy shared with initialization and upgrade.
+- `generated`: version metadata records and package initialization inputs,
+  separate from resource content. These are declarations, not pre-rendered
+  records or an exhaustive inventory of a built scaffold.
+
+`readToolkitReleaseResource(packagePath, selection)` returns one declared
+resource's metadata plus UTF-8 `content`. Arbitrary paths and resources belonging
+only to the other starter are refused. Template selection and automation paths
+are shared with init/upgrade, and the plumbing, fragment, and skill sets come
+from the same definitions that starter sync and skill installation use.
+
+## Ownership and rendering
+
+| Policy | Meaning |
+| --- | --- |
+| `starter-plumbing` | Toolkit-owned when the starter record says `plumbing: "toolkit"`; otherwise replace only recognized stock hashes, subject to the existing sync policy. |
+| `stock-fragment` | Ordinary starter pages; refresh only while unchanged. Customized fragments are authored and are never force-replaced. |
+| `managed-skill` | The six design-system skills copied by init/upgrade. |
+| `hosted-skill` | Parameterized hosted skill; require explicit system identity before trusting any output path/hash. |
+| `release-automation` | Standalone release files; require standalone initialization or explicit auto-release adoption. |
+| `dependency-automation` | Dependency PR workflow; require explicit dependency-PR adoption. |
+| `catalog-merge` | Site/format catalogs use their recorded three-way merge; a raw template hash is never replacement permission. |
+| `layout-patch` | Only missing stock stylesheet/changelog links may be added to the authored layout. |
+| `seed-only` | Initial content owned by its author thereafter. All brand-kit pages are seed-only, including its Use pages. |
+| `version-metadata` | Generated installation/starter records, distinct from authored content and from managed-file changes. |
+| `create-if-absent` | Create the declared link only when nothing exists at its destination. |
+
+`renderToolkitManagedFiles(options)` returns `{schemaVersion, toolkit, starter,
+files}`. Each file has `path`, `mode`, `content`, `sha256`, and `policy`. The hash
+is over the **final UTF-8 content**; for the symlink, content is the literal
+relative link target. File modes are canonical fresh-package modes. Upgrading an
+existing file may preserve its current mode; this API does not mutate files or
+decide which existing paths a host is authorized to replace.
+
+The default render includes starter plumbing, ordinary stock fragments, managed
+skills, and the conditional Claude skills link. Catalogs, authored layouts,
+seeds, and generated installation records are excluded. `releaseAutomation:
+true` and `dependencyAutomation: true` explicitly include their respective
+conditional managed sets; their defaults are false. A `hostedSkill` object uses
+the same renderer as `timds skills install` and adds its rendered files under
+`.agents/skills/<resolved skill name>/`. `portalUrl` and `systemId` are required;
+`systemName` defaults to the system ID and `studioUrl` to the host's `/studio/`.
+A hosted destination colliding with a toolkit skill is rejected.
+
+The descriptor's hosted path contains `__SKILL_NAME__` and its resource hashes
+cover placeholders. These are **not** final trusted paths or rendered hashes.
+Only the renderer's result can supply those. Hosts should independently enforce
+supported schema, policies, path and mode constraints, adoption records, and
+recognized previous hashes before installing anything.
+
+## Seed transformations and host responsibilities
+
+Raw seeds are not a promise that copying templates reproduces all of `timds
+init`. The descriptor names the applicable operations:
+
+- `copy` means verbatim seed bytes.
+- `replace-placeholders` requires explicit replacements. For npm docs the CLI
+  is `npm run timds --`; contract description, dist/media/skill locations depend
+  on standalone versus embedded layout. `CHANGELOG.md` needs an explicit
+  `__VERSION__` baseline label, normally `YYYY-MM-DD-1`.
+- `initialize-manifest` requires identity, baseline version, layout, provider,
+  description and optional consumer configuration. The CLI also applies these
+  fields to the parsed template and serializes JSON.
+- `contract-groups` migrates token/media seeds into grouped contract files;
+  `append-ignore-lines` adds selected standalone/hosted ignore entries.
+- `three-way-merge` and `patch-missing-links` describe existing sync operations,
+  not instructions to replace the entire resource destination.
+
+The CLI's current initialization derives its initial date from the clock and
+its default repository identity from the target directory. This metadata API
+never does so. A host preparing deterministic seed scaffolds must explicitly
+select those inputs and retain its own initializer policy. The export is not a
+replacement for the full CLI initializer: generated package/manifest records,
+contract migration, build output and host-specific files remain separate.
+
+Hosts own Preview script conversion, lockfile generation, artifact storage,
+publication policy and target selection. Host transformations invalidate the
+pre-transformation rendered hash, so hash the final bytes separately. The
+metadata does not authorize replacing authored content and does not supply a
+trusted external-package integrity assertion.
+
+For a compact release comparison, compare rendered entries by path, mode and
+hash using identical explicit inputs. Report added/removed/changed managed paths
+separately from seed resource changes, generated records and `toolkit.version`.
+A version-only record change must not be presented as an authored-content
+change. The selected package's npm integrity remains a separate provenance
+field in the host's artifact.
+
+## Compatibility and verification
+
+Schema 1 fixes the data shapes and policy meanings above. Package releases may
+add/remove/change resource entries; hosts must fail closed on unsupported
+schema/policy values instead of inferring ownership from a path. Legacy hosts
+can retain CLI generation until they select a toolkit release with this export.
+No release publication or host dependency bump is required to prepare that
+fallback.
+
+`src/release-metadata.test.mjs` checks both kinds against actual initialization,
+template versus rendered skill hashes, authored/conditional boundaries, packed
+package import and declarations outside the checkout without dependencies,
+deterministic explicit inputs, and invalid schema/resource failures. Run
+`npm test` and `npm run pack:check` before publishing a release containing a
+metadata change.
