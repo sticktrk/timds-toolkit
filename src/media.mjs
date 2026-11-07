@@ -155,12 +155,12 @@ function normalizedCatalogAsset(value, index, schemaVersion) {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{7,99}$/.test(id)) throw new Error(`${label}.id is invalid`);
   const contentType = boundedString(asset.contentType, `${label}.contentType`, 200, { required: true });
   const legacy = schemaVersion === 1;
-  const publicUrl = legacy && String(asset.visibility || "private") !== "public"
+  const publicUrl = asset.publicUrl === undefined && asset.path !== undefined ? undefined : legacy && String(asset.visibility || "private") !== "public"
     ? boundedString(asset.publicUrl, `${label}.publicUrl`, 2_000)
     : stablePublicUrl(asset.publicUrl, `${label}.publicUrl`);
   if (publicUrl) stablePublicUrl(publicUrl, `${label}.publicUrl`);
-  // Optional source copy used by slot-driven previews. Public catalog entries
-  // still keep their stable URL; the viewer separately verifies local bytes.
+  // Source-backed assets may omit publicUrl until publication. The viewer
+  // verifies the exact local bytes; remote consumers still require a URL.
   const localPath = asset.path;
   if (localPath !== undefined && (typeof localPath !== "string" || !/^src\/assets\/[a-zA-Z0-9._/-]+$/.test(localPath) || localPath.split("/").some(part => !part || part === "." || part === ".."))) {
     throw new Error(`${label}.path must name an exact file under src/assets/`);
@@ -173,7 +173,7 @@ function normalizedCatalogAsset(value, index, schemaVersion) {
     id,
     key: mediaKey(asset.key || (legacy ? id.toLowerCase() : ""), `${label}.key`),
     kind: boundedString(asset.kind || mediaKind(contentType), `${label}.kind`, 40, { required: true }),
-    publicUrl,
+    ...(publicUrl === undefined ? {} : { publicUrl }),
     sha256: validatedSha(asset.sha256, `${label}.sha256`),
     tags: normalizedTags(asset.tags, `${label}.tags`),
     title: boundedString(asset.title, `${label}.title`, 300, { required: true }),

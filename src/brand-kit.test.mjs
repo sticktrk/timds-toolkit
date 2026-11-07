@@ -47,7 +47,7 @@ test('the brand-kit slot export owns the exact foundation, copy, page and stock 
   }
   assert.deepEqual(await json('src/copy.json'), brandKitCopySamples);
   assert.ok(Object.values(await json('src/copy.json')).every(value => typeof value === 'string'));
-  assert.deepEqual(await json('src/site.json'), {views: brandKitViews});
+  assert.deepEqual(await json('src/site.json'), {home: 'use', views: brandKitViews});
   assert.deepEqual(await json('.timds/stock.json'), {schemaVersion: 1, paths: brandKitStockPaths});
   assert.deepEqual(brandKitViews.map(view => view.id), ['brand', 'web', 'social', 'ads', 'email', 'print', 'events', 'decks', 'use']);
   assert.deepEqual(brandKitPages.builderOwned, ['brand/evidence']);
@@ -90,7 +90,7 @@ test('each kit format names an authored template with all four treatments and ch
   assert.deepEqual([...compose.matchAll(/\{\{presets:([^}]+)\}\}/g)].map(match => match[1]), Object.keys(catalog));
   const landing = await read('src/pages/use/index.html');
   assert.deepEqual([...landing.matchAll(/\?format=([^"&]+)/g)].map(match => match[1]).sort(), [...ids].sort());
-  assert.ok(!Object.hasOwn(await json('src/site.json'), 'home'), 'the kit opens on its overview');
+  assert.equal((await json('src/site.json')).home, 'use', 'the kit opens on its landing page');
 });
 
 test('the built kit quotes every slot key and its exported guidance without a preinstalled package', async t => {
@@ -115,8 +115,12 @@ test('the built kit quotes every slot key and its exported guidance without a pr
   // The kit stylesheet never splits the chrome from the content by system preference.
   assert.doesNotMatch(await fs.readFile(path.join(directory, 'src/styles/system.css'), 'utf8'), /prefers-color-scheme/);
   assert.match(site.files.get('index.html'), /href="\/designs\/"/);
-  const landing = site.files.get('use/index.html');
+  const landing = site.files.get('index.html');
+  const overview = site.files.get('overview/index.html');
   const compose = site.files.get('use/compose/index.html');
+  assert.match(overview, /Coverage and assumptions/);
+  assert.match(overview, /What the kit holds/);
+  assert.equal(site.files.has('use/index.html'), false);
   assert.match(landing, /<div class="landing">/);
   assert.match(landing, /<nav class="sidenav" aria-label="Pages">\s*<\/nav>/);
   assert.doesNotMatch(landing, /class="pagenav"|data-compose /);
@@ -124,8 +128,8 @@ test('the built kit quotes every slot key and its exported guidance without a pr
   assert.match(landing, /<b>24<\/b><span>catalog formats<\/span>/);
   assert.match(landing, /<b>9<\/b><span>views, one brand<\/span>/);
   assert.match(compose, /data-compose /);
-  assert.match(compose, /href="\/use\/">the landing page<\/a>/);
-  assert.match(compose, /href="\/">the overview<\/a>/);
+  assert.match(compose, /href="\/">the landing page<\/a>/);
+  assert.match(compose, /href="\/overview\/">the overview<\/a>/);
   const formats = Object.values(await json('src/formats.json')).flatMap(group => Object.keys(group.formats));
   assert.deepEqual([...compose.matchAll(/name="preset" value="([^"]+)"/g)].map(match => match[1]), formats);
   assert.equal((compose.match(/data-prompt="[^"]+" checked/g) || []).length, 1);
@@ -141,6 +145,8 @@ test('the built kit quotes every slot key and its exported guidance without a pr
   // Keep the two readiness gaps explicit instead of claiming the page is absent.
   assert.deepEqual(site.warnings, ['Brand kit voice is assumed; replace copy.voice with evidence-backed guidance before publishing.']);
   const checked = await runWithOutputSink(() => {}, () => checkWorkspace(directory));
+  assert.ok(checked.machine.pages.some(page => page.id === 'overview'), 'the overview remains in the agent index');
+  assert.match(await fs.readFile(path.join(directory, 'dist/llms.txt'), 'utf8'), /\/overview\/index\.md/);
   assert.equal(checked.machine.counts.untyped, 0);
   assert.deepEqual(checked.machine.warnings, ['no asset is annotated data-timds-role="logo"; the brand kit has no logo']);
   assert.deepEqual(checked.designs, { enabled: true, designCount: 0, pageCount: 0, stateCount: 0, journeyCount: 0, warnings: [] });

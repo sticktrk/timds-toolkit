@@ -303,8 +303,9 @@ a count, `{{page:ID}}` is a page's address (refusing a planned page),
 `{{nearest:ID}}` is the same with a fallback to its view's first authored
 page (then the overview) while it is planned, so a managed fragment can link
 client pages before they exist, and `{{sitemap}}` is the table of every
-page. The kit keeps its overview at `/`, with Landing at `/use/`, the
-promoted Compose at `/use/compose/`, and Install at `/use/install/`. Its
+page. Fresh kits select `home: "use"`, with Landing at `/`, the overview at
+`/overview/`, the promoted Compose at `/use/compose/`, and Install at
+`/use/install/`. Its
 landing uses its own copy slots and format catalog, and its composer offers
 every catalog group, including print event formats. Kit foundations and
 channel overviews lead with previews and fold slot evidence and technical

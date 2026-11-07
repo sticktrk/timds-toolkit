@@ -71,9 +71,9 @@ test('brand-kit init seeds every stock page once and records plumbing only, and 
   const { root, read } = await fixture(t);
   const record = await readStarterRecord(root);
   assert.equal(record.starter, 'brand-kit');
-  assert.deepEqual(record.baseline.site, { views: brandKitViews });
+  assert.deepEqual(record.baseline.site, { home: 'use', views: brandKitViews });
   assert.deepEqual(JSON.parse(await read('src/site.json')), record.baseline.site);
-  assert.equal(JSON.parse(await read('src/site.json')).home, undefined);
+  assert.equal(JSON.parse(await read('src/site.json')).home, 'use');
   assert.deepEqual(starterFragments('brand-kit'), [], 'the kit manages no fragment');
   assert.deepEqual(Object.keys(record.files).sort(), starterPlumbingFiles.map(([relative]) => relative).sort());
   for (const relative of brandKitStockPaths) {

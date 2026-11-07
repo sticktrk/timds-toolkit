@@ -103,7 +103,7 @@ built from the same few blocks.
   navigation order. A view is `{ "id", "label", "blurb", "pages" }`; a page
   is `{ "slug", "title", "summary" }` plus an optional `group` heading for
   the sidebar and the `planned`, `promote`, and `layout` keys below. The root
-  `home` names the view whose own page is served at `/` (a fresh ordinary
+  `home` names the view whose own page is served at `/` (a fresh
   scaffold says `"use"`; unset keeps the overview there). The page
   `<view>/<slug>` is authored in `src/pages/<view>/<slug>.html` and built to
   `dist/<view>/<slug>/index.html`; an empty slug is the view's own page,
@@ -185,7 +185,8 @@ framework's layout.
 
 When `.timds/starter.json` records `starter: "brand-kit"`, this system has
 Brand, Web, Social, Ads, Email, Print, Events, Decks and Use views, with the
-overview at `/` and an empty Designs directory. Use has Landing at `/use/`,
+overview and an empty Designs directory. Fresh kits select `home: "use"`,
+serving Landing at `/` and the overview at `/overview/`. Use also has
 Compose at `/use/compose/` (the promoted “Start making” action), and Install.
 Landing opens the composer on a catalog format; Compose offers every format,
 grouped by channel, including print events. Keep previews before the Spec

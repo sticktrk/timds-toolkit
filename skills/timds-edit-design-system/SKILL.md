@@ -122,8 +122,9 @@ layout instead.
 ## Fill a brand-kit system
 
 When `.timds/starter.json` says `starter: "brand-kit"`, use the kit's slot
-contract and keep its nine channel views. The overview stays at `/`; Use has
-Landing at `/use/`, Compose at `/use/compose/`, and Install. Keep Compose as
+contract and keep its nine channel views. Fresh kits select `home: "use"`,
+with Landing at `/` and the overview at `/overview/`. Use also has Compose
+at `/use/compose/` and Install. Keep Compose as
 the promoted “Start making” action, with presets from every catalog group
 (including print events), and Landing cards linked by `?format=ID`. Keep
 foundation and channel previews before the Spec drawers containing slot
