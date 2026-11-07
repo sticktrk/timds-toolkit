@@ -124,7 +124,11 @@ Photo treatments. The designer's agent fills the data and records evidence;
 the owner reviews what is observed, assumed or unresolved. Copy stays in
 `src/copy.json`, small approved local media stays in `src/assets/` with its
 catalog record, and the Evidence page keeps captured facts and decisions.
-The composer uses the kit's Social, Ads and Email formats. Whole-page Designs
+Use has a Landing page at `/use/`, Compose at `/use/compose/`, and Install.
+The promoted “Start making” action opens Compose, whose presets include every
+kit format, including Print, Events and Decks. Landing cards select a format
+for the composer. Foundation and channel pages show previews before the Spec
+drawers with slot evidence and technical tables. Whole-page Designs
 begin empty and are authored for this system before a developer ports a release
 into the product. An upgrade keeps shared plumbing current and preserves these
 authored values and pages.

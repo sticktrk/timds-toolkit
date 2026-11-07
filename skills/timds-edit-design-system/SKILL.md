@@ -122,7 +122,13 @@ layout instead.
 ## Fill a brand-kit system
 
 When `.timds/starter.json` says `starter: "brand-kit"`, use the kit's slot
-contract and keep its nine channel views. Fill authored token maps, string
+contract and keep its nine channel views. The overview stays at `/`; Use has
+Landing at `/use/`, Compose at `/use/compose/`, and Install. Keep Compose as
+the promoted “Start making” action, with presets from every catalog group
+(including print events), and Landing cards linked by `?format=ID`. Keep
+foundation and channel previews before the Spec drawers containing slot
+evidence and technical tables. Preserve an authored `home` choice.
+Fill authored token maps, string
 values in `src/copy.json`, media records and approved assets, and record capture
 facts and owner decisions on `brand/evidence`; do not regenerate the stock
 pages. Preserve confirmed/observed/assumed/unresolved labels, and never label

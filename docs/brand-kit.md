@@ -176,7 +176,8 @@ Consecutive slot placeholders on a page render as one table with one header.
 | Decks | title, section, content, closing slide | 1920×1080 |
 | Web | launch page demo: hero, three sections, one call to action, footer, live on the components | the Layout page; whole pages are the system's own designs |
 
-The composer's presets are the Social, Ads and Email formats, so the first
+The composer's presets cover every catalog group, including Print, Events
+and Decks, so the first
 thing a visitor makes after the kit opens works.
 
 Shared pieces in `canvas.css`: `.canvas--accent`, `.canvas--photo`
@@ -208,7 +209,15 @@ one line per view on what it holds and what it grows into, sitemap).
 | Print | Overview, One-page sheet, Flyer and poster, Business card | Letterheads, Brochures, Booklets, Notepads, Banners |
 | Events | Overview, Event poster, Event post and story, Name badge | Webinar banners, Virtual backgrounds, Eventbrite and Facebook covers |
 | Decks | Overview, Slides (title, section, content, closing) | Presentation templates, Webinar title slides |
-| Use | Compose, Install | none |
+| Use | Landing, Compose, Install | none |
+
+The Use landing at `/use/` is a portal into the kit’s six format channels.
+Its cards open `/use/compose/?format=ID`; Compose is the promoted “Start
+making” action and reads all seven catalog groups (including print event
+formats). `/use/install/` links to the composer’s tool and product guidance.
+The overview remains at `/`; no upgrade changes the authored `home` choice.
+Foundation and channel pages lead with previews and keep slot evidence and
+technical tables in closed Spec drawers, still available to the derived layer.
 
 Designs keep their contract and their place in the app bar, with no sample
 page: `src/designs/` is present and empty, the designs build renders nothing
@@ -216,7 +225,7 @@ for it, and the Designs directory and Install page say that whole pages are
 authored per system by a designer's agent. The actual designs are each
 system's own.
 
-The contract declares 33 authored pages, including the overview and builder-owned
+The contract declares 34 authored pages, including the overview and builder-owned
 Evidence page, and 24 planned pages. Each of the 24 formats names an authored
 page. Carousel previews cover cover, point and last stages; deck previews cover
 title, section, content and closing slides, each in all four treatments.
@@ -329,6 +338,12 @@ the kit baseline, and a page the kit catalog gains is appended as planned with
 no fragment written. Authored tokens, copy, media, evidence, system styles and
 layout content retain their ownership boundaries. No ordinary upgrade
 converts one starter kind into another or resets these authored values.
+
+A stock parent declaring the Use landing must also declare
+`src/pages/use/compose.html` and `src/pages/use/install.html` in
+`.timds/stock.json`, because the landing links both pages. Fresh kits declare
+all three; an older parent’s stock declaration is designer-owned and must
+explicitly include the new composer before a structure shoot.
 
 A structure shoot retains recorded `src/scripts/compose.js`, declared
 `src/copy.json`, and the selected starter kind. It still requires verified

@@ -177,7 +177,8 @@ export const brandKitViews = freeze([
     planned('webinar-titles', 'Webinar title slides', 'Opening frames for live presentations.'),
   ]},
   {id: 'use', label: 'Use', blurb: 'Make and connect', pages: [
-    page('', 'Compose', 'Make a first asset from the system and a brief.'),
+    {...page('', 'Landing', 'Explore the kit, choose a format and start making on brand.'), layout: 'landing'},
+    {...page('compose', 'Compose', 'Make an asset from any channel in the kit’s format catalog and a brief.'), promote: 'Start making'},
     page('install', 'Install', 'Connect tools and author whole pages with a designer’s agent.'),
   ]},
 ]);
