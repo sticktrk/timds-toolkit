@@ -2056,7 +2056,7 @@ export async function runCli(argv) {
     const feed = async () => {
       const workspace = await loadWorkspace(root);
       const parent = workspace.parentRecord;
-      if (!parent) throw new Error('This system has no parent to feed');
+      if (!parent) throw Object.assign(new Error('This system has no parent to feed'), {failureCode: 'not_offshoot'});
       // A record shot before stock hashes needs the release it names to adopt
       // them; one with `files`, even empty, never reads a baseline.
       const needsBaseline = !Object.hasOwn(parent, 'files');
@@ -2072,7 +2072,7 @@ export async function runCli(argv) {
           if (baseline.parent?.commit !== parent.commit) throw new Error(`The parent's ${parent.version} release is now at ${baseline.parent?.commit}, not the commit .timds/parent.json records (${parent.commit}); feed cannot adopt stock hashes from a moved release`);
         }
       }
-      return feedOffshoot({designSystemRoot: workspace.designSystemRoot, source, baseline, check: () => checkWorkspace(root), force: positional, decideCustomized: positional.length ? null : terminalPlumbingPrompt(), hostedRunner: process.env.TIMDS_HOSTED_RUNNER === '1'});
+      return feedOffshoot({designSystemRoot: workspace.designSystemRoot, source, baseline, check: () => checkWorkspace(root).catch((caught) => { throw Object.assign(caught, {failureCode: caught?.failureCode ?? 'check_failed'}); }), force: positional, decideCustomized: positional.length ? null : terminalPlumbingPrompt(), hostedRunner: process.env.TIMDS_HOSTED_RUNNER === '1'});
     };
     // With --json, stdout is exactly one report (or { ok: false, error }) and the
     // check's progress goes to stderr, so a host records it without parsing prose.

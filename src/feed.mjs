@@ -75,25 +75,25 @@ async function targetPath(root, relative) {
  * lets the host's own runner feed a hosted session workspace. */
 export async function feedOffshoot({ designSystemRoot, source, baseline = null, check = null, force = [], decideCustomized = null, hostedRunner = false }) {
   const parent = await readParentRecord(designSystemRoot);
-  if (!parent) throw new Error("This system has no .timds/parent.json; only an offshoot can be fed");
+  if (!parent) throw Object.assign(new Error("This system has no .timds/parent.json; only an offshoot can be fed"), { failureCode: "not_offshoot" });
   if (!hostedRunner && await optional(path.join(designSystemRoot, ".timds/session.json"))) throw new Error("Feed is not available in a hosted session; feed the source repository instead (the host's runner sets TIMDS_HOSTED_RUNNER=1 to feed its own workspace)");
   const selectedToolkit = await selectedToolkitVersionIn(designSystemRoot);
   if (predatesRunningToolkit(selectedToolkit)) throw new Error(`This system selects toolkit ${selectedToolkit}, older than the running ${runtimeIdentity.version}, and that CLI cannot read the stock hashes feed records in .timds/parent.json. Upgrade the system's toolkit first (timds upgrade --version ${runtimeIdentity.version}, or the host's upgrade), commit, then feed`);
   if (!source || !(Array.isArray(source.files) || source.files instanceof Map) || !object(source.parent)) throw new Error("Feed requires a published parent source snapshot");
   const { systemId, sourceId, version, commit } = source.parent;
   const identity = { systemId, sourceId, version, commit };
-  if (identity.systemId !== parent.systemId || identity.sourceId !== parent.sourceId) throw new Error("The source snapshot belongs to a different parent system or source");
-  if (parseDesignSystemVersion(identity.version) && parseDesignSystemVersion(parent.version) && compareDesignSystemVersions(identity.version, parent.version) < 0) throw new Error(`Feed requires a parent release at or after ${parent.version}; ${identity.version} is older`);
+  if (identity.systemId !== parent.systemId || identity.sourceId !== parent.sourceId) throw Object.assign(new Error("The source snapshot belongs to a different parent system or source"), { failureCode: "parent_mismatch" });
+  if (parseDesignSystemVersion(identity.version) && parseDesignSystemVersion(parent.version) && compareDesignSystemVersions(identity.version, parent.version) < 0) throw Object.assign(new Error(`Feed requires a parent release at or after ${parent.version}; ${identity.version} is older`), { failureCode: "parent_mismatch" });
   const sourceFiles = decodeOffshootSource(source);
   // Records shot before stock hashes are adopted from the release they name:
   // a child file still equal to that release's bytes is unmodified stock.
   let recordedFiles = parent.files;
   const adopted = !object(recordedFiles);
   if (adopted) {
-    if (!baseline) throw new Error(`.timds/parent.json predates stock hashes; feed needs the release it was shot from (${parent.systemId} ${parent.version} at ${parent.commit}) as a baseline to adopt them: pass --baseline-file with that release's source export under the host runner, or let timds feed read it from the same source`);
+    if (!baseline) throw Object.assign(new Error(`.timds/parent.json predates stock hashes; feed needs the release it was shot from (${parent.systemId} ${parent.version} at ${parent.commit}) as a baseline to adopt them: pass --baseline-file with that release's source export under the host runner, or let timds feed read it from the same source`), { failureCode: "baseline_required" });
     if (!(Array.isArray(baseline.files) || baseline.files instanceof Map) || !object(baseline.parent)) throw new Error("The feed baseline must be a published parent source snapshot");
     const mismatch = sameIdentity(baseline.parent, parent);
-    if (mismatch.length) throw new Error(`The feed baseline is not the release .timds/parent.json records (${parent.systemId} ${parent.version} at ${parent.commit}); its ${mismatch.join(", ")} differ${mismatch.length === 1 ? "s" : ""}`);
+    if (mismatch.length) throw Object.assign(new Error(`The feed baseline is not the release .timds/parent.json records (${parent.systemId} ${parent.version} at ${parent.commit}); its ${mismatch.join(", ")} differ${mismatch.length === 1 ? "s" : ""}`), { failureCode: "parent_mismatch" });
     const baselineFiles = decodeOffshootSource(baseline);
     recordedFiles = stockHashes(baselineFiles, await declaredStock(baselineFiles));
   }
@@ -101,7 +101,7 @@ export async function feedOffshoot({ designSystemRoot, source, baseline = null, 
   // Plumbing stays the toolkit's even where a stylesheet path is also declared.
   const stockPaths = (declared?.paths ?? []).filter((relative) => !isPlumbingPath(relative));
   const manifest = sourceJson(sourceFiles, "timds.json");
-  if (manifest?.systemId !== identity.systemId || manifest?.version !== identity.version) throw new Error("The parent source identity or version disagrees with its release");
+  if (manifest?.systemId !== identity.systemId || manifest?.version !== identity.version) throw Object.assign(new Error("The parent source identity or version disagrees with its release"), { failureCode: "parent_mismatch" });
   const rawSite = sourceJson(sourceFiles, STARTER_SITE_FILE);
   const formats = sourceJson(sourceFiles, STARTER_FORMATS_FILE, false);
   // Reuse the contract validator to reject malformed source identity/catalogs
@@ -279,7 +279,7 @@ export async function feedOffshoot({ designSystemRoot, source, baseline = null, 
         await fs.chmod(write.file, write.originalMode);
       }
     }
-    throw new Error(`Feed was rolled back because the workspace update failed: ${error.message}`);
+    throw Object.assign(new Error(`Feed was rolled back because the workspace update failed: ${error.message}`), typeof error?.failureCode === "string" ? { failureCode: error.failureCode } : {});
   }
   return report;
 }

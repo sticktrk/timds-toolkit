@@ -505,6 +505,15 @@ async function runFeed(args) {
   return JSON.parse(output.join("\n"));
 }
 
+/** Run a `feed --json` that must refuse, and return the `error.code` its `{ ok: false }` document carries. */
+async function feedFailure(args, expected) {
+  const output = [];
+  await assert.rejects(runWithOutputSink((line) => output.push(line), () => runCli(["feed", ...args])), expected);
+  const receipt = JSON.parse(output.join("\n"));
+  assert.equal(receipt.ok, false);
+  return receipt.error.code;
+}
+
 test("the host runner feeds a hosted workspace from a source export and reports everything it records", async (t) => {
   const { child, two, first, second, color } = await runnerFixture(t);
   delete process.env.TIMDS_HOSTED_RUNNER;
@@ -533,12 +542,19 @@ test("the host runner adopts stock hashes for an older child through --baseline-
   await write(child, ".timds/parent.json", json(record));
   gitIn(child, "commit", "-qam", "Record before stock hashes");
   process.env.TIMDS_HOSTED_RUNNER = "1";
-  await assert.rejects(runFeed(["--root", child, "--source-file", two, "--json"]), /predates stock hashes[\s\S]*--baseline-file/);
-  await assert.rejects(runFeed(["--root", child, "--source-file", two, "--baseline-file", two, "--json"]), /baseline is not the release .*commit differs/);
+  assert.equal(await feedFailure(["--root", child, "--source-file", two, "--json"], /predates stock hashes[\s\S]*--baseline-file/), "baseline_required");
+  assert.equal(await feedFailure(["--root", child, "--source-file", two, "--baseline-file", two, "--json"], /baseline is not the release .*commit differs/), "parent_mismatch");
   const report = await runFeed(["--root", child, "--source-file", two, "--baseline-file", one, "--json"]);
   assert.equal(report.adopted, true);
   assert.equal(await read(child, "src/pages/brand/color.html"), color);
   assert.deepEqual(Object.keys((await readJson(child, ".timds/parent.json")).files).sort(), ["src/pages/brand/color.html", "src/styles/system.css"]);
+});
+
+test("feed --json names a system without a parent record as not_offshoot", async (t) => {
+  const { child, two } = await runnerFixture(t);
+  await fs.rm(path.join(child, ".timds/parent.json"));
+  process.env.TIMDS_HOSTED_RUNNER = "1";
+  assert.equal(await feedFailure(["--root", child, "--source-file", two, "--json"], /no parent to feed/), "not_offshoot");
 });
 
 test("feed --from reads the recorded release from the local parent to adopt stock hashes", async (t) => {
