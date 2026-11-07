@@ -91,6 +91,42 @@ test('shoot records the hash of every declared stock file in both modes, and an 
   }
 });
 
+test('shoot omits stock hashes when the child inherits a toolkit older than the running release', async t => {
+  const {directory, source} = await fixture(t);
+  const pkg = JSON.parse(await fs.readFile(new URL('../package.json', import.meta.url), 'utf8'));
+  const text = (files, file) => JSON.parse(Buffer.from(files.find(entry => entry.path === file).content, 'base64').toString('utf8'));
+  const replace = (from, file, value) => {
+    const copy = structuredClone(from), content = Buffer.from(json(value)).toString('base64'), entry = copy.files.find(candidate => candidate.path === file);
+    if (entry) entry.content = content; else copy.files.push({path: file, mode: '100644', encoding: 'base64', content});
+    return copy;
+  };
+  const locked = version => replace(source, 'package-lock.json', {name: 'parent', lockfileVersion: 3, requires: true, packages: {'': {name: 'parent'}, [`node_modules/${pkg.name}`]: {version}}});
+  for (const mode of ['full', 'structure']) {
+    const older = path.join(directory, `older-${mode}`);
+    const result = await shootOffshoot({destination: older, source: locked('0.1.400'), mode, systemId: `example/older-${mode}`});
+    const record = JSON.parse(await fs.readFile(path.join(older, '.timds/parent.json'), 'utf8'));
+    assert.equal(Object.hasOwn(record, 'files'), false, `${mode}: a pre-hash record for the older CLI`);
+    assert.equal(Object.hasOwn(result.parent, 'files'), false);
+    const current = path.join(directory, `current-${mode}`);
+    await shootOffshoot({destination: current, source: locked(pkg.version), mode, systemId: `example/current-${mode}`});
+    assert.ok(Object.hasOwn(JSON.parse(await fs.readFile(path.join(current, '.timds/parent.json'), 'utf8')), 'files'), `${mode}: the running release reads the hashes`);
+    assert.equal(Object.hasOwn((await transformOffshoot(locked('not-a-version'), {mode, systemId: `example/unparsable-${mode}`})).parent, 'files'), false, `${mode}: an unparsable pin counts as older`);
+  }
+  // Without a lock the installation record selects the runtime: the parent's in
+  // full mode, and the one structure mode writes from the starter record.
+  const unlocked = {...source, files: source.files.filter(file => file.path !== 'package-lock.json')};
+  const installation = text(unlocked.files, '.timds/installation.json'), starter = text(unlocked.files, '.timds/starter.json');
+  const olderInstallation = replace(unlocked, '.timds/installation.json', {...installation, version: '0.1.400'});
+  const full = await transformOffshoot(olderInstallation, {mode: 'full', systemId: 'example/older-installation'});
+  assert.equal(Object.hasOwn(text(full.files, '.timds/parent.json'), 'files'), false);
+  const structure = await transformOffshoot(olderInstallation, {mode: 'structure', systemId: 'example/structure-installation'});
+  assert.equal(text(structure.files, '.timds/installation.json').version, starter.version);
+  assert.ok(Object.hasOwn(text(structure.files, '.timds/parent.json'), 'files'), 'structure mode selects the version it writes');
+  const olderStarter = replace(unlocked, '.timds/starter.json', {...starter, version: '0.1.400'});
+  assert.equal(Object.hasOwn(text((await transformOffshoot(olderStarter, {mode: 'structure', systemId: 'example/older-starter'})).files, '.timds/parent.json'), 'files'), false);
+  assert.ok(Object.hasOwn((await transformOffshoot(unlocked, {mode: 'full', systemId: 'example/unlocked-current'})).parent, 'files'));
+});
+
 test('structure shoots retain the verified composer and explicitly declared copy samples', async t => {
   const {root, directory} = await fixture(t);
   const copy = json({name: 'Sample brand', tagline: 'A useful idea, clearly expressed.'});

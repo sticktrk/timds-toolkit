@@ -363,6 +363,61 @@ test("feed refreshes declared stock by recorded hash, keeps grafts, creates new 
   assert.equal((await readJson(matching, ".timds/parent.json")).files[page("graft")], hash(releaseTwo[page("graft")]));
 });
 
+test("a graft first met without a recorded hash remembers the parent's bytes it was offered", async (t) => {
+  const childPage = "<h1>Child button</h1>\n";
+  const offered = { [page("buttons")]: "<h1>Parent button</h1>\n" };
+  const source = nextSource({ stock: offered });
+  const buttonsPage = async (root) => (await readJson(root, "src/site.json")).views[0].pages.find((entry) => entry.slug === "buttons");
+
+  // The child authored the page itself before the parent declared that path.
+  const { root } = await fixture(t, { stockFiles: {}, extra: { [page("buttons")]: childPage } });
+  const first = await feedOffshoot({ designSystemRoot: root, source });
+  assert.deepEqual(first.stock, [{ path: page("buttons"), status: "customized", note: "your graft; kept over the parent's change" }]);
+  assert.deepEqual(first.grafts.map(({ path: file, shades, removed }) => [file, shades, removed]), [[page("buttons"), true, undefined]]);
+  assert.equal(await read(root, page("buttons")), childPage);
+  assert.deepEqual((await readJson(root, ".timds/parent.json")).files, { [page("buttons")]: hash(offered[page("buttons")]) }, "the offered version is recorded");
+  assert.equal((await buttonsPage(root)).planned, true);
+
+  // Deleting it afterwards is a removed graft: never recreated, still planned.
+  await fs.rm(path.join(root, page("buttons")));
+  const removed = await feedOffshoot({ designSystemRoot: root, source });
+  assert.deepEqual(removed.stock.map((entry) => [entry.path, entry.status]), [[page("buttons"), "customized"]]);
+  assert.deepEqual(removed.grafts.map(({ path: file, shades, removed: gone }) => [file, shades, gone]), [[page("buttons"), false, true]]);
+  await assert.rejects(fs.access(path.join(root, page("buttons"))), { code: "ENOENT" });
+  assert.equal((await buttonsPage(root)).planned, true, "the committed deletion stays planned");
+  assert.doesNotMatch(describeFeed(removed).join("\n"), /shades the parent's change at src\/pages\/web\/buttons\.html/);
+
+  // Reverting it to the parent's bytes makes it stock again.
+  await write(root, page("buttons"), offered[page("buttons")]);
+  const reverted = await feedOffshoot({ designSystemRoot: root, source });
+  assert.equal(reverted.stock.find((entry) => entry.path === page("buttons")).status, "current");
+  assert.deepEqual(reverted.grafts, []);
+
+  // A kept first-met graft shades only when the parent's bytes move again.
+  const { root: kept } = await fixture(t, { stockFiles: {}, extra: { [page("buttons")]: childPage } });
+  await feedOffshoot({ designSystemRoot: kept, source });
+  const same = await feedOffshoot({ designSystemRoot: kept, source });
+  assert.deepEqual(same.grafts.map(({ path: file, shades }) => [file, shades]), [[page("buttons"), false]]);
+  assert.doesNotMatch(describeFeed(same).join("\n"), /shades the parent's change at src\/pages\/web\/buttons\.html/);
+  const moved = await feedOffshoot({ designSystemRoot: kept, source: nextSource({ version: "1.2.0", commit: "3".repeat(40), stock: { [page("buttons")]: "<h1>Parent button two</h1>\n" } }) });
+  assert.deepEqual(moved.grafts.map(({ path: file, shades }) => [file, shades]), [[page("buttons"), true]]);
+  assert.match(describeFeed(moved).join("\n"), /Your graft shades the parent's change at src\/pages\/web\/buttons\.html; kept\./);
+  assert.equal(await read(kept, page("buttons")), childPage);
+  assert.equal((await readJson(kept, ".timds/parent.json")).files[page("buttons")], hash(offered[page("buttons")]), "a kept graft keeps the hash recorded for it");
+});
+
+test("feed refuses a child whose lock selects an older toolkit before changing any file", async (t) => {
+  const pkg = JSON.parse(await fs.readFile(new URL("../package.json", import.meta.url), "utf8"));
+  const lock = (version) => json({ name: "child", lockfileVersion: 3, requires: true, packages: { "": { name: "child" }, [`node_modules/${pkg.name}`]: { version } } });
+  const { root, texts } = await stockFixture(t, { extra: { ...childStock, "package-lock.json": lock("0.1.400") } });
+  await assert.rejects(feedOffshoot({ designSystemRoot: root, source: nextSource({ stock: releaseTwo }), check: async () => { throw new Error("must not check"); } }), (error) => error.message.includes("selects toolkit 0.1.400") && error.message.includes(`timds upgrade --version ${pkg.version}`));
+  for (const [file, text] of Object.entries(texts)) assert.equal(await read(root, file), text, file);
+  await assert.rejects(fs.access(path.join(root, page("buttons"))), { code: "ENOENT" });
+  await write(root, "package-lock.json", lock(pkg.version));
+  const report = await feedOffshoot({ designSystemRoot: root, source: nextSource({ stock: releaseTwo }) });
+  await assertStockOutcome(root, report);
+});
+
 test("a failed check rolls back refreshed and created stock with both records", async (t) => {
   const { root, texts } = await stockFixture(t);
   await assert.rejects(feedOffshoot({ designSystemRoot: root, source: nextSource({ stock: releaseTwo }), check: async () => { throw new Error("stock build failed"); } }), /rolled back.*stock build failed/);
