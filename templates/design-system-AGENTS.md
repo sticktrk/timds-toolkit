@@ -185,7 +185,11 @@ framework's layout.
 
 When `.timds/starter.json` records `starter: "brand-kit"`, this system has
 Brand, Web, Social, Ads, Email, Print, Events, Decks and Use views, with the
-overview at `/` and an empty Designs directory. Stock pages read foundation
+overview at `/` and an empty Designs directory. Use has Landing at `/use/`,
+Compose at `/use/compose/` (the promoted “Start making” action), and Install.
+Landing opens the composer on a catalog format; Compose offers every format,
+grouped by channel, including print events. Keep previews before the Spec
+drawers that hold slot evidence and technical tables. Stock pages read foundation
 tokens, `src/copy.json` and media slots; keep their guidance in the pages and
 put captured facts and owner decisions on `brand/evidence`. Fill data instead
 of regenerating every page. Labels are confirmed, observed, assumed and

@@ -11,6 +11,7 @@
 //   node scripts/check-starter-history.mjs --print   # also print the missing entries
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { legacyStarterFileHashes, starterFragments, starterPlumbingFiles } from "../src/starter.mjs";
 
 const git = (...args) => execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
@@ -21,7 +22,8 @@ if (!tags.length) throw new Error("No release tags in this checkout; fetch them 
 
 const missing = new Map();
 for (const [relative, templateName] of [...starterPlumbingFiles, ...starterFragments("starter"), ...starterFragments("brand-kit")]) {
-  const current = sha256(git("show", `HEAD:${repoPath(templateName)}`));
+  // Check the edited templates too, including a new fragment not yet in HEAD.
+  const current = sha256(readFileSync(repoPath(templateName), "utf8"));
   const known = new Set(legacyStarterFileHashes.get(relative) ?? []);
   for (const tag of tags) {
     let text;
