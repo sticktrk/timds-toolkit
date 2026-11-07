@@ -184,6 +184,7 @@ export const legacyStarterFileHashes = new Map([
     "c01549fcb01e1f1c44493d4c4a60864beaf3919cc2c570e5ea2d3aaed16e3d38", // v0.1.485
   ]],
   ["src/styles/viewer.css", [
+    "2813d7d4635c74786b275e2df298974d806ac415d87c6de7f28bf85fca685971", // v0.1.491
     "bb9a4ff63a56bcdea1a91b7322e4b7a480c57af6597a332a774cdbe8c9d98c63",
     "89c7ba85c684a91a0cbf8b7269529da767d25a9c8f4b069c531f36443af74574", // v0.1.461
     "afc438a5474fdb6e63f70ffd9330fde1e636b18ba714b61bda32bf9ef00b2fdd", // v0.1.464
@@ -194,12 +195,14 @@ export const legacyStarterFileHashes = new Map([
   ]],
   ["scripts/brand-kit.mjs", [
     "644ade30ac144dc71cb43a127fc456ece032be105ce325d1e9498fa54942d07b", // v0.1.485
+    "8eb530135ce7789ba386414d2646e0a672118a836db6103097016a45585c19f6", // v0.1.487
   ]],
   ["src/pages/use/index.html", [
     "573b6e515900155d96b066900304d8a41b6c1fb26f181e5a51fc457c7264e863", // v0.1.461
     "393e955a544050532430b750481101d32d06e6c06beaef55007227b8f1c36ca2", // v0.1.481
     "49651882b5243054760986a11a892ca3a186b5037510ef3f2732775c863525f6", // v0.1.484
     "2c4daf4d051e4b0f728673b44edb0da44a83fdc7e48e1d5ff2bbeb6abf6dff74", // v0.1.485
+    "3fcd8b43e6a0894ef53a52df96b5ea747d12667ea3aec90833bfb28f8eced50b", // v0.1.485
   ]],
   ["src/scripts/compose.js", [
     "9966794077af73ee209dd8fd0ef5030788ec93236766a373e45f4af53ce996e8", // v0.1.485
@@ -208,18 +211,51 @@ export const legacyStarterFileHashes = new Map([
     "2f592695615a656474cf8034b3d757662fb3468ae5c674f0825b13982a378371", // v0.1.481
     "b03eb3fad31a447052de5a8e6a4f0fd75e919d5de126cee9762eaf9471cab6ae", // v0.1.484
     "31835d1a617c2a86ef27c7354b0367357ffb516ec7508130cfcc6d2e3db1debd", // v0.1.485
+    "d624265f40b4220641ae050b2ffa152da7a97fc3ffc6843fb9e6ab0c255778cb", // v0.1.485
   ]],
   ["src/pages/digital/index.html", [
     "6db0f5c312100e4df3dca3e022da8959633d3efac5a05de7d01af2af4593c717", // v0.1.451
   ]],
   ["src/pages/print/index.html", [
     "3beb96006d13ad20ec6b50ba39ebab1e2b4ea6be1b7c3b4618d2a88061fa1e50", // v0.1.451
+    "a1259b108ce77b645c959af3412aacb546b2d875c3b2bb8a2b667814759e98c8", // v0.1.485
   ]],
   ["src/pages/social/index.html", [
     "fa10c0442225ec7f67a3b88e2d8277793186e27036dbc257b39432b903e3fbe4", // v0.1.451
+    "2056c921e5828bda290a4abce5feb171ba1c5939690e6dd9240ea7bf0d637d26", // v0.1.485
   ]],
   ["src/pages/use/compose.html", [
     "b13c74cb4e280e4726cbfa11abcfa42ac998034c6b52cb9d22f8d6e7abed2bdf", // v0.1.490, v0.1.491
+  ]],
+  ["src/pages/index.html", [
+    "2c487c2600f24e9737299266851b95a0a1ecbb0669eb3565a9d7b161e0ab1ffa", // v0.1.485
+  ]],
+  ["src/pages/brand/color.html", [
+    "68279f0647799f639559aea4c9660c4a91bbe8b5df90294c35144a9bc601ec2e", // v0.1.485
+  ]],
+  ["src/pages/brand/typography.html", [
+    "971fe2f608149e27abaea0f1add8e3da00024ae7574d0d71f1a1335afbb8f3b9", // v0.1.485
+  ]],
+  ["src/pages/web/components.html", [
+    "50a94e4a882eaad9fff948558cf73d1b89b21d05e3edeb64aa258058b5ec7cde", // v0.1.485
+  ]],
+  ["src/pages/web/spacing.html", [
+    "a0111dcc7cbe6d58eee4902c81fdcbca860ccb5fd83b67671b104850187a53cd", // v0.1.485
+  ]],
+  ["src/pages/web/layout.html", [
+    "2f5d5db62a0b3c245b2e784b52eb0880f52807335794b93e2cd2e2fe69ad779d", // v0.1.485
+  ]],
+  ["src/pages/ads/index.html", [
+    "36a56a4d48655494e6c3870d19d806a9d5a11f89ca541495d97b0172bd6f22d3", // v0.1.485
+  ]],
+  ["src/pages/email/index.html", [
+    "2e631f102d614771e0ccbc27eb4b493f37231a63959008a2cb70cf98763b2f82", // v0.1.485
+  ]],
+  ["src/pages/events/index.html", [
+    "e6cc3e6e22957f839b18be5345eb162aa859102f01316323747071c0a370a3c7", // v0.1.485
+  ]],
+  ["src/pages/decks/index.html", [
+    "7f755faed78d58e789911aaade4105b8d5ecfd75f281b9e2adef039be6f1d059", // v0.1.485
   ]],
 ]);
 
@@ -319,8 +355,8 @@ function advanceOrKeep(changes, target, field, stock, candidates, label) {
  * appended with every page planned unless its fragment exists; pages a
  * declared view lacks are inserted after the last of their stock predecessors
  * the view has, planned the same way, so the client's own order never moves.
- * A label, blurb, title, group, or summary still equal to a baseline advances
- * to the stock value; one the client changed is kept, and reported when the
+ * A label, blurb, title, group, summary, layout or promotion still equal to a
+ * baseline advances to stock; one the client changed is kept and reported when the
  * stock value moved. `planned` is never changed on a declared page except for
  * the ids in `authoredPages`, whose fragments the caller writes. `home` stays
  * the system's routing choice, including its absence: moving it would break
@@ -361,7 +397,7 @@ export function mergeSiteModel(current, next, baselines, { fragmentExists = () =
       anchor = Math.max(anchor, index);
       const page = view.pages[index];
       const basePages = baseViews.map((baseView) => baseView.pages?.find((candidate) => (candidate?.slug ?? "") === slug)).filter(Boolean);
-      for (const field of ["title", "group", "summary"]) advanceOrKeep(changes, page, field, nextPage[field], basePages, `${id}.${field}`);
+      for (const field of ["title", "group", "summary", "layout", "promote"]) advanceOrKeep(changes, page, field, nextPage[field], basePages, `${id}.${field}`);
       if (authoredPages.has(id) && page.planned === true) {
         delete page.planned;
         changes.advanced.push(`${id}.planned`);

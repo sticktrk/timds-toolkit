@@ -17,6 +17,8 @@ export interface BrandKitPage {
   readonly title: string;
   readonly summary: string;
   readonly planned?: true;
+  readonly layout?: 'landing';
+  readonly promote?: string;
 }
 export interface BrandKitView {
   readonly id: string;
