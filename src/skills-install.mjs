@@ -153,7 +153,7 @@ export function hostedSkillSystem({ portalUrl, systemId, systemName = null, stud
 }
 
 /** Every file under `skills/<name>` in the package as `{ relative, content }`, sorted. */
-async function bundledSkillFiles(name) {
+async function bundledSkillFiles(name, { binary = isBinaryRuntime() } = {}) {
   const skillRoot = path.join(packageRoot, "skills", name);
   const files = [];
   async function walk(directory) {
@@ -164,7 +164,7 @@ async function bundledSkillFiles(name) {
     }
   }
   await walk(skillRoot);
-  return isBinaryRuntime() ? files.map(file => ({...file, content: renderBinaryInstructions(file.content)})) : files;
+  return binary ? files.map(file => ({...file, content: renderBinaryInstructions(file.content)})) : files;
 }
 
 /**
@@ -172,7 +172,7 @@ async function bundledSkillFiles(name) {
  * under the folder `system.skill`. Refuses a template placeholder this fill
  * does not know, so the template and the host's fill stay in step.
  */
-export async function renderHostedSkillFiles(system) {
+export async function renderHostedSkillFiles(system, options) {
   const resolved = hostedSkillSystem(system);
   const values = {
     __SKILL_NAME__: resolved.skill,
@@ -181,7 +181,7 @@ export async function renderHostedSkillFiles(system) {
     __HOST_ORIGIN__: resolved.portalUrl,
     __STUDIO_URL__: resolved.studioUrl,
   };
-  return (await bundledSkillFiles(HOSTED_SKILL_TEMPLATE)).map((file) => ({
+  return (await bundledSkillFiles(HOSTED_SKILL_TEMPLATE, options)).map((file) => ({
     relative: file.relative,
     content: file.content.replace(/__[A-Z_]+__/g, (placeholder) => {
       if (!(placeholder in values)) throw new Error(`Unfilled hosted skill placeholder ${placeholder} in skills/${HOSTED_SKILL_TEMPLATE}/${file.relative}`);

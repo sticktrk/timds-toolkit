@@ -1900,6 +1900,12 @@ npm run timds -- init --standalone --root ./new-system --name "Client Design Sys
 
 `--json` returns the initialization result with the manifest, layout, exact toolkit package version, created paths, and validation artifact. Existing contracts retain their identity; conflicting explicit inputs are rejected.
 
+Hosts preparing releases can use the read-only
+[`@dtconcepts/timds/release-metadata` package export](docs/release-metadata.md)
+for deterministic resource metadata and exact managed-file bytes from the
+installed npm package. Starter seed templates, rendered hosted skills, and
+upgrade-managed files have separate policies and hashes.
+
 ### Hosted design sessions
 
 A `provider` setting in `timds.json` selects the workflow. `{ "kind": "local" }`
