@@ -116,14 +116,57 @@ jobs:
       ref: ${{ needs.create-release.outputs.sha || github.ref }}
       require_apple_signing: true
 
-  # Releases created with GITHUB_TOKEN do not trigger another release workflow.
-  # Publish here as well as for releases created by the local release command.
-  publish:
+  # Clients download executables from the public host (BINARY_DOWNLOAD_BASE),
+  # never from this repository's releases. npm publishes only once this
+  # release's executables are served there, so no published version lacks them.
+  # Setup: docs/binary-hosting.md.
+  host-binaries:
     needs: [create-release, binaries]
     if: >-
       ${{ !cancelled() &&
           (github.event_name == 'release' || needs.create-release.result == 'success') &&
           needs.binaries.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.create-release.outputs.sha || github.ref }}
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.22.0
+          package-manager-cache: false
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: timds-native-*
+          path: dist/binary
+          merge-multiple: true
+      - name: Verify release identities and create the checksum manifest
+        run: node scripts/binary-release.mjs
+        env:
+          RELEASE_TAG: ${{ needs.create-release.outputs.tag || github.event.release.tag_name }}
+      - name: Upload the executables to the public download host and read them back
+        env:
+          RELEASE_TAG: ${{ needs.create-release.outputs.tag || github.event.release.tag_name }}
+          TIMDS_DOWNLOAD_ENDPOINT: ${{ secrets.TIMDS_DOWNLOAD_ENDPOINT }}
+          TIMDS_DOWNLOAD_ACCESS_KEY_ID: ${{ secrets.TIMDS_DOWNLOAD_ACCESS_KEY_ID }}
+          TIMDS_DOWNLOAD_SECRET_ACCESS_KEY: ${{ secrets.TIMDS_DOWNLOAD_SECRET_ACCESS_KEY }}
+          TIMDS_DOWNLOAD_BUCKET: ${{ vars.TIMDS_DOWNLOAD_BUCKET }}
+        run: node scripts/binary-host.mjs upload "${RELEASE_TAG#v}"
+
+  # Releases created with GITHUB_TOKEN do not trigger another release workflow.
+  # Publish here as well as for releases created by the local release command.
+  publish:
+    needs: [create-release, binaries, host-binaries]
+    if: >-
+      ${{ !cancelled() &&
+          (github.event_name == 'release' || needs.create-release.result == 'success') &&
+          needs.binaries.result == 'success' &&
+          needs.host-binaries.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

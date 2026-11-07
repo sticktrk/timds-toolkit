@@ -143,6 +143,9 @@ release can publish. The binary pipeline gates npm publication, and both the
 published-release event and the manual release path use the exact same release
 commit. The attachment step checks the tag against package.json, checks both
 platform identities, the clean source commit and manifest/lockfile hashes, and verifies executable hashes before creating SHA256SUMS.
+The same verification runs before the executables are uploaded to the public
+download host, which npm publication waits on; see
+[binary-hosting.md](binary-hosting.md).
 
 ## Signing
 

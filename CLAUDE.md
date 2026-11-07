@@ -410,6 +410,9 @@ Npm installations retain the bounded requirement and resolved lockfile.
 
 Run `npm run binary:smoke` and `npm run binary:smoke:video` after a binary build.
 Native macOS arm64 and Linux x64 CI runs the complete suite and these clean-PATH
-checks before either release path publishes. See `docs/binary-installation.md`
+checks before either release path publishes. Clients download executables
+from the public R2 host (`BINARY_DOWNLOAD_BASE`, uploaded by
+`scripts/binary-host.mjs` before npm publishes), never from GitHub Releases;
+see `docs/binary-hosting.md`. See `docs/binary-installation.md`
 and `docs/binary-packaging.md` for installation, migration, cache integrity,
 platform floors, external prerequisites and actual signing status.
