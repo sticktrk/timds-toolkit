@@ -1881,7 +1881,7 @@ test("the upgrade write boundary covers the managed boundary, both starters' syn
     for (const file of ["package.json", "package-lock.json", ".claude/skills", ".github/workflows/timds-upgrade.yml", ".github/workflows/update-consumer-submodule.yml", "scripts/release.sh", `${prefix}.timds/installation.json`, `${prefix}.timds/starter.json`, `${prefix}.timds/contract-layout.json`, `${prefix}tokens.json`, `${prefix}tokens/color.json`, `${prefix}media/logos.json`, `${prefix}dist/index.json`]) {
       assert.ok(isUpgradeWritePath(file, options), file);
     }
-    for (const file of [`${prefix}src/index.html`, `${prefix}src/styles/system.css`, `${prefix}src/pages/brand/index.html`, `${prefix}src/copy.json`, `${prefix}timds.json`, `${prefix}.timds/parent.json`, `${prefix}.timds/stock.json`, `${prefix}CHANGELOG.md`, `${prefix}.gitignore`, ".agents/skills/custom/SKILL.md", "web/package.json"]) {
+    for (const file of [`${prefix}src/index.html`, `${prefix}src/styles/system.css`, `${prefix}src/pages/brand/index.html`, `${prefix}src/pages/ads/index.html`, `${prefix}src/pages/social/posts.html`, `${prefix}src/copy.json`, `${prefix}timds.json`, `${prefix}.timds/parent.json`, `${prefix}.timds/stock.json`, `${prefix}CHANGELOG.md`, `${prefix}.gitignore`, ".agents/skills/custom/SKILL.md", "web/package.json"]) {
       assert.ok(!isUpgradeWritePath(file, options), file);
     }
   }

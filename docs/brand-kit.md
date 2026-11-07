@@ -42,9 +42,10 @@ deliberate design of those five, plus the data contract the builder fills.
 Pages and data have separate owners so shared guidance can advance without
 replacing the brand's values:
 
-- **The starter owns every stock page except builder-owned Evidence**: brand guidance, the component library, the
-  templates, the Use pages. They are stock, written against slots, and read
-  the same on every brand. They say, per slot, what was observed, what was
+- **The published parent owns every stock page except builder-owned Evidence**: brand guidance, the component library, the
+  templates, the Use pages. The starter seeds them once; after that they are
+  authored on the parent and reach children through `feed`. They are stock,
+  written against slots, and read the same on every brand. They say, per slot, what was observed, what was
   assumed and why, and what the owner should check.
 - **The builder owns data only**: the authored `tokens/*.json` maps (values with their label),
   `src/copy.json` (the brand's words), the media catalog and `src/assets/`
@@ -195,8 +196,9 @@ app bar reads as what the system grows into rather than as empty. A planned
 page is declared in the navigation and not yet authored; a designer authors
 it in place, and feed adds new ones as the parent gains them.
 
-`home` unset: `/` is the overview (coverage, what was assumed, what to check,
-one line per view on what it holds and what it grows into, sitemap).
+Fresh kits select `home: "use"`: `/` is Landing and `/overview/` holds the
+overview (coverage, what was assumed, what to check, one line per view on
+what it holds and what it grows into, sitemap).
 
 | View | Authored | Planned |
 | --- | --- | --- |
@@ -210,11 +212,12 @@ one line per view on what it holds and what it grows into, sitemap).
 | Decks | Overview, Slides (title, section, content, closing) | Presentation templates, Webinar title slides |
 | Use | Landing, Compose, Install | none |
 
-The Use landing at `/use/` is a portal into the kit’s six format channels.
+The Use landing at `/` by default is a portal into the kit’s six format channels.
 Its cards open `/use/compose/?format=ID`; Compose is the promoted “Start
 making” action and reads all seven catalog groups (including print event
 formats). `/use/install/` links to the composer’s tool and product guidance.
-The overview remains at `/`; no upgrade changes the authored `home` choice.
+No upgrade changes the authored `home` choice; existing kits with it unset
+keep the overview at `/` and Landing at `/use/`.
 Foundation and channel pages lead with previews and keep slot evidence and
 technical tables in closed Spec drawers, still available to the derived layer.
 
@@ -328,11 +331,17 @@ pages, plus an empty Designs directory. Shared renderer, canvas, composer and
 build scripts come from the ordinary starter; the slot data module comes from
 `src/brand-kit.mjs`. No shared plumbing is duplicated in the overlay.
 
-Starter sync selects the stock catalogs, managed fragments, template paths
-and history by that record. Histories live under
-`templates/starter-history/<kind>/`. A fresh kit's first sync is a no-op.
-Catalogs merge against the kit baseline, stock fragments refresh only while
-unmodified, and authored tokens, copy, media, evidence, system styles and
+Starter sync selects the stock catalogs, template paths and history by that
+record. Histories live under `templates/starter-history/<kind>/`. A fresh
+kit's first sync is a no-op. The kit's pages are seed-only: init writes them
+once from `templates/brand-kit/`, and no later sync or upgrade refreshes,
+records, guards or reports them. The kit's `.timds/starter.json` `files` lists
+plumbing only; page hashes an older release recorded drop out on the next
+sync. The toolkit keeps code, the parent keeps design: the kit's pages, system
+stylesheet, layout and copy samples are authored on the published parent, and
+`templates/brand-kit/` is only the seed for a new one. Catalogs merge against
+the kit baseline, and a page the kit catalog gains is appended as planned with
+no fragment written. Authored tokens, copy, media, evidence, system styles and
 layout content retain their ownership boundaries. No ordinary upgrade
 converts one starter kind into another or resets these authored values.
 
@@ -345,7 +354,10 @@ explicitly include the new composer before a structure shoot.
 A structure shoot retains recorded `src/scripts/compose.js`, declared
 `src/copy.json`, and the selected starter kind. It still requires verified
 plumbing hashes and exact regular stock paths. The child keeps its parent's
-structural feed baseline, while ordinary toolkit sync refreshes plumbing.
+structural feed baseline and the hashes of the stock it received, while
+ordinary toolkit sync refreshes plumbing only. Children follow the parent's
+pages through `feed`, which refreshes each declared file while the child's
+copy is unmodified and keeps the child's grafts (see `docs/offshoots.md`).
 
 Publishing a stock parent is an operator action after scaffolding with
 `--provider hosted`: provision the source through the advanced route, publish

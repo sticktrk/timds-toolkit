@@ -30,6 +30,12 @@ export type ParentRecord = SystemLineage & {
     site: ParentSiteCatalog;
     formats: Record<string, unknown> | null;
   };
+  /**
+   * SHA-256 hex of every declared stock file as the parent last wrote it,
+   * keyed by its exact path. Absent on records shot before stock hashes,
+   * which feed adopts from that release; never part of public lineage.
+   */
+  files?: Record<string, string>;
 };
 
 export type StockRecord = { schemaVersion: 1; paths: string[] };

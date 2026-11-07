@@ -103,7 +103,7 @@ built from the same few blocks.
   navigation order. A view is `{ "id", "label", "blurb", "pages" }`; a page
   is `{ "slug", "title", "summary" }` plus an optional `group` heading for
   the sidebar and the `planned`, `promote`, and `layout` keys below. The root
-  `home` names the view whose own page is served at `/` (a fresh ordinary
+  `home` names the view whose own page is served at `/` (a fresh
   scaffold says `"use"`; unset keeps the overview there). The page
   `<view>/<slug>` is authored in `src/pages/<view>/<slug>.html` and built to
   `dist/<view>/<slug>/index.html`; an empty slug is the view's own page,
@@ -185,7 +185,8 @@ framework's layout.
 
 When `.timds/starter.json` records `starter: "brand-kit"`, this system has
 Brand, Web, Social, Ads, Email, Print, Events, Decks and Use views, with the
-overview at `/` and an empty Designs directory. Use has Landing at `/use/`,
+overview and an empty Designs directory. Fresh kits select `home: "use"`,
+serving Landing at `/` and the overview at `/overview/`. Use also has
 Compose at `/use/compose/` (the promoted “Start making” action), and Install.
 Landing opens the composer on a catalog format; Compose offers every format,
 grouped by channel, including print events. Keep previews before the Spec
@@ -379,8 +380,10 @@ saved source UUID. Unchanged catalog fields advance, missing entries are
 appended with pages planned, and the child's edits remain as grafts. A graft
 covering a new parent change is reported so the designer can keep it or edit
 that field to let the parent through. Plumbing follows its recorded ownership.
-`--force PATH` applies only to named plumbing; authored pages, styles, layout,
-tokens and media are never replaced. Commit changes first: feed refuses
+The files the parent's `.timds/stock.json` declares follow the parent while
+this system's copy is unmodified; a changed or removed copy is a graft and
+stays. `--force PATH` applies only to named plumbing; grafts, tokens, media,
+designs and undeclared files are never replaced. Commit changes first: feed refuses
 uncommitted changes to files it writes, runs the workspace check and restores
 its writes if checking fails. Only success advances the parent baseline.
 

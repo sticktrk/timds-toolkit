@@ -126,7 +126,7 @@ test('help and usage errors expose every offshoot source and installation flag',
   const shoot = help.find(line => line.includes('timds shoot')).trim();
   const feed = help.find(line => line.includes('timds feed')).trim();
   for (const flag of ['--name', '--portal-url', '--source-id', '--ref', '--install', '--json']) assert.ok(shoot.includes(flag), flag);
-  for (const flag of ['--from', '--portal-url', '--source-id', '--ref', '--force', '--json']) assert.ok(feed.includes(flag), flag);
+  for (const flag of ['--from', '--portal-url', '--source-id', '--ref', '--source-file', '--baseline-file', '--force', '--json']) assert.ok(feed.includes(flag), flag);
   await assert.rejects(runCli(['shoot']), error => error.message === `Usage: ${shoot}`);
   await assert.rejects(runCli(['feed', '--force']), error => error.message === `Usage: ${feed}`);
 });

@@ -157,3 +157,35 @@ test('the stock record path kinds are the paths the validator accepts, and the r
   assert.deepEqual([...STOCK_RECORD_PATH_KINDS], ['src/pages/**/*.html', 'src/styles/**/*.css', 'src/layout.html', 'src/copy.json']);
   await assert.rejects(validateStockRecord({ schemaVersion: 1, paths: ['src/assets/image.png'] }, null), new RegExp(STOCK_RECORD_PATH_KINDS.map(kind => kind.replace(/[.*]/g, '\\$&')).join(', ')));
 });
+
+test('parent records may name the stock hashes they last wrote, which never reach public lineage', async t => {
+  const digest = 'c'.repeat(64);
+  const files = { 'src/pages/brand/index.html': digest, 'src/styles/system.css': '0'.repeat(64), 'src/layout.html': digest, 'src/copy.json': digest };
+  for (const record of [{ ...parent(), files }, { ...parent(), files: {} }]) {
+    assert.equal(validateParentRecord(record), record);
+    const lineage = parentLineage(record);
+    assert.deepEqual(Object.keys(lineage).sort(), ['commit', 'mode', 'sourceId', 'systemId', 'version']);
+    const directory = await root(t);
+    await write(directory, '.timds/parent.json', json(record));
+    assert.deepEqual(await readParentRecord(directory), record);
+    const derived = await readDerivedLayer(directory, { systemId: 'example/child', version: '1.0.0' });
+    assert.deepEqual(derived.lineage, lineage);
+    assert.equal(JSON.stringify(derived).includes(digest), false, 'the derived layer carries no stock hash');
+    const stamp = createPublicationStampFromFiles({
+      sourceCommit: 'b'.repeat(40),
+      sourceFiles: [
+        { path: 'timds.json', content: json({ systemId: 'example/child', name: 'Example', version: '1.0.0', artifact: { entry: 'index.html' } }) },
+        { path: 'tokens.json', content: '{}' }, { path: '.timds/parent.json', content: json(record) },
+      ],
+      artifactFiles: [{ path: 'index.html', content: '<h1>Example</h1>' }],
+    });
+    assert.deepEqual(stamp.lineage, lineage);
+    assert.equal(JSON.stringify(stamp).includes(digest), false, 'the publication stamp carries no stock hash');
+  }
+  const invalid = [
+    null, [], 'hash', { 'src/pages/../secret.html': digest }, { 'src/pages/*.html': digest }, { 'tokens.json': digest },
+    { 'src/designs/page.html': digest }, { 'src/pages//index.html': digest }, { 'src/layout.html': 'C'.repeat(64) },
+    { 'src/layout.html': 'c'.repeat(63) }, { 'src/layout.html': 42 }, { 'src/layout.html': null },
+  ];
+  for (const value of invalid) assert.throws(() => validateParentRecord({ ...parent(), files: value }), /\.timds\/parent\.json files/, JSON.stringify(value));
+});
