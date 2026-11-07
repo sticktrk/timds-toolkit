@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -67,6 +68,27 @@ test('shoot creates full and structure offshoots that pass a real workspace chec
   await shootOffshoot({destination: skeleton, source: {...source, files: source.files.filter(file => file.path !== '.timds/stock.json')}, mode: 'structure', systemId: 'example/skeleton', check: checkWorkspace});
   assert.equal((await checkWorkspace(skeleton)).machine.index.pages.length >= 1, true);
   assert.match(await fs.readFile(path.join(skeleton, 'src/styles/system.css'), 'utf8'), /Replace placeholder tokens/);
+});
+
+test('shoot records the hash of every declared stock file in both modes, and an empty map without a declaration', async t => {
+  const {root, directory, source} = await fixture(t);
+  const sha256 = async relative => createHash('sha256').update(await fs.readFile(path.join(root, relative))).digest('hex');
+  const expected = {'src/pages/brand/color.html': await sha256('src/pages/brand/color.html'), 'src/styles/system.css': await sha256('src/styles/system.css')};
+  for (const mode of ['full', 'structure']) {
+    const destination = path.join(directory, `hashed-${mode}`);
+    const result = await shootOffshoot({destination, source, mode, systemId: `example/hashed-${mode}`});
+    const record = JSON.parse(await fs.readFile(path.join(destination, '.timds/parent.json'), 'utf8'));
+    assert.deepEqual(record.files, expected, mode);
+    assert.deepEqual(result.parent.files, expected, mode);
+    const checked = await checkWorkspace(destination);
+    assert.deepEqual(checked.offshoot.parent.files, expected, 'check accepts the hashed record');
+    assert.equal('files' in checked.machine.index.lineage, false, 'lineage never carries the hashes');
+    const transformed = await transformOffshoot(source, {mode, systemId: `example/wire-${mode}`});
+    assert.deepEqual(transformed.parent.files, expected);
+    const bare = await transformOffshoot({...source, files: source.files.filter(file => file.path !== '.timds/stock.json')}, {mode, systemId: `example/bare-${mode}`});
+    assert.deepEqual(bare.parent.files, {}, `${mode} without a stock declaration`);
+    assert.deepEqual(JSON.parse(Buffer.from(bare.files.find(file => file.path === '.timds/parent.json').content, 'base64').toString('utf8')).files, {});
+  }
 });
 
 test('structure shoots retain the verified composer and explicitly declared copy samples', async t => {
@@ -143,7 +165,7 @@ test('shoot selects only parent lineage fields from extensible host export metad
   const {source} = await fixture(t);
   source.parent = {...source.parent, schemaVersion: 17, mode: 'export', baseline: {private: true}, exportedAt: '2026-11-03T00:00:00Z'};
   const transformed = await transformOffshoot(source, {systemId: 'example/export-child'});
-  assert.deepEqual(Object.keys(transformed.parent), ['schemaVersion', 'systemId', 'sourceId', 'version', 'commit', 'mode', 'baseline']);
+  assert.deepEqual(Object.keys(transformed.parent), ['schemaVersion', 'systemId', 'sourceId', 'version', 'commit', 'mode', 'baseline', 'files']);
   assert.equal(transformed.parent.schemaVersion, 1);
   assert.equal(transformed.parent.mode, 'full');
   assert.equal(transformed.parent.commit, source.parent.commit);

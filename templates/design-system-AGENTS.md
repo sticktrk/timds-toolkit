@@ -375,8 +375,10 @@ saved source UUID. Unchanged catalog fields advance, missing entries are
 appended with pages planned, and the child's edits remain as grafts. A graft
 covering a new parent change is reported so the designer can keep it or edit
 that field to let the parent through. Plumbing follows its recorded ownership.
-`--force PATH` applies only to named plumbing; authored pages, styles, layout,
-tokens and media are never replaced. Commit changes first: feed refuses
+The files the parent's `.timds/stock.json` declares follow the parent while
+this system's copy is unmodified; a changed or removed copy is a graft and
+stays. `--force PATH` applies only to named plumbing; grafts, tokens, media,
+designs and undeclared files are never replaced. Commit changes first: feed refuses
 uncommitted changes to files it writes, runs the workspace check and restores
 its writes if checking fails. Only success advances the parent baseline.
 
