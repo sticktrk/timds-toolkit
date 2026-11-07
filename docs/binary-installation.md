@@ -62,9 +62,10 @@ package and native binaries from the same commit before distribution.
 
 ## Download and install
 
-Choose an exact released version from the
-[release downloads](https://github.com/sticktrk/timds-toolkit/releases). The
-initial supported downloads are macOS Apple Silicon (`darwin-arm64`) and
+Choose an exact released version: `npm view @dtconcepts/timds version` prints
+the current one. Every release from 0.1.478 on is served, unchanged and never
+overwritten, under `https://downloads.timds.com/timds-cli/v<version>/` (see
+[binary-hosting.md](binary-hosting.md)). The initial supported downloads are macOS Apple Silicon (`darwin-arm64`) and
 Linux x86-64 with glibc (`linux-x64`). No package-manager command is needed:
 
 ```sh
@@ -73,7 +74,7 @@ set -eu
 VERSION=0.1.RELEASE_NUMBER # replace with the exact release you selected
 TARGET=darwin-arm64       # or linux-x64
 ASSET="timds-cli-v${VERSION}-${TARGET}"
-BASE="https://github.com/sticktrk/timds-toolkit/releases/download/v${VERSION}"
+BASE="https://downloads.timds.com/timds-cli/v${VERSION}"
 curl --fail --location "$BASE/$ASSET" -o "$ASSET"
 curl --fail --location "$BASE/$ASSET.sha256" -o "$ASSET.sha256"
 shasum -a 256 --check "$ASSET.sha256" # Linux can use sha256sum --check

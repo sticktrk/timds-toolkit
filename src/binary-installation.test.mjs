@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { binaryInstallationRecord, isStockWorkspace, stockWorkspaceCommands, withFileRollback } from './binary-installation.mjs';
+import { BINARY_DOWNLOAD_BASE, binaryDownloadUrl, binaryInstallationRecord, isStockWorkspace, stockWorkspaceCommands, withFileRollback } from './binary-installation.mjs';
 import { runtimeIdentity } from './runtime.mjs';
 
 const packageRoot = fileURLToPath(new URL('../', import.meta.url)).replace(/\/$/, '');
@@ -205,4 +205,25 @@ test('binary global skill installation renders hosted instructions without npm b
   const text = await fs.readFile(path.join(root, '.agents/skills', name, 'SKILL.md'), 'utf8');
   assert.match(text, /Use `timds-cli <command>`/);
   assert.doesNotMatch(text, /npx --yes|npm ci|npm install|never pin a/);
+});
+
+test('every executable download names the one public download host', async () => {
+  assert.equal(binaryDownloadUrl('0.1.500', 'SHA256SUMS'), `${BINARY_DOWNLOAD_BASE}/v0.1.500/SHA256SUMS`);
+  const surfaces = [];
+  for (const directory of ['templates', 'docs']) {
+    for (const entry of await fs.readdir(path.join(packageRoot, directory), {withFileTypes: true})) {
+      if (entry.isFile() && /\.(ya?ml|md)$/.test(entry.name)) surfaces.push(`${directory}/${entry.name}`);
+    }
+  }
+  surfaces.push('README.md');
+  let downloads = 0;
+  for (const surface of surfaces) {
+    const text = await fs.readFile(path.join(packageRoot, surface), 'utf8');
+    assert.doesNotMatch(text, /github\.com\/[^/\s]+\/timds-toolkit\/releases/, `${surface} downloads executables from GitHub Releases`);
+    for (const [, base] of text.matchAll(/(https:\/\/[^\s"']+)\/v\$\{(?:version|VERSION)\}/g)) {
+      assert.equal(base, BINARY_DOWNLOAD_BASE, `${surface} downloads from ${base}`);
+      downloads += 1;
+    }
+  }
+  assert.ok(downloads >= 7, `expected the stock workflows and install docs to download executables, found ${downloads}`);
 });

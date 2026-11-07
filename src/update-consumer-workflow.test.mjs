@@ -100,8 +100,8 @@ test("a published pin moves with the npm toolkit when the consumer has one", asy
 
 test("a published pin moves with the exact verified executable when the consumer is binary", async (t) => {
   const calls = await pinUpdate(t, {installation: {schemaVersion: 2, mode: "binary", name: "@dtconcepts/timds", version: "0.2.3", executable: "timds-cli"}});
-  assert.match(calls, /^curl .*releases\/download\/v0\.2\.3\/timds-cli-v0\.2\.3-linux-x64 /mu);
-  assert.match(calls, /^curl .*releases\/download\/v0\.2\.3\/SHA256SUMS /mu);
+  assert.match(calls, /^curl .* https:\/\/downloads\.timds\.com\/timds-cli\/v0\.2\.3\/timds-cli-v0\.2\.3-linux-x64 /mu);
+  assert.match(calls, /^curl .* https:\/\/downloads\.timds\.com\/timds-cli\/v0\.2\.3\/SHA256SUMS /mu);
   assert.match(calls, /^timds-cli consumer update 2026\.11\.06-1$/mu);
   assert.doesNotMatch(calls, /^npm /mu);
 });

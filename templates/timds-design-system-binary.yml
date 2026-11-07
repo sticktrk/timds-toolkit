@@ -35,7 +35,7 @@ jobs:
           directory="$RUNNER_TEMP/timds-bin"
           mkdir -p "$directory"
           asset="timds-cli-v${version}-linux-x64"
-          base="https://github.com/sticktrk/timds-toolkit/releases/download/v${version}"
+          base="https://downloads.timds.com/timds-cli/v${version}"
           curl --fail --location "$base/$asset" -o "$directory/$asset"
           curl --fail --location "$base/$asset.sha256" -o "$directory/$asset.sha256"
           (cd "$directory" && sha256sum --strict --check "$asset.sha256")
