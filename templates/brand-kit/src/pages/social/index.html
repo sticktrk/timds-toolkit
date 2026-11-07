@@ -4,23 +4,33 @@
 <div class="rule"></div>
 <section class="block" id="treatments">
 <div class="block__head"><h2 class="h2">Four treatments</h2><p>Every preview reads the same foundation slots. Color literals belong in tokens, and every ground has a named ink.</p></div>
+<figure class="demo"><div class="ground" style="background:var(--color-canvas);color:var(--color-ink)"><b>Minimal</b><span>{{copy:headlines.0}}</span></div><div class="ground" style="background:var(--color-accent);color:var(--color-accent-ink)"><b>Accent</b><span>{{copy:headlines.0}}</span></div><div class="ground" style="background:var(--color-ink-ground);color:var(--color-ink-ground-text)"><b>Bold</b><span>{{copy:headlines.0}}</span></div></figure>
+<details class="spec-drawer">
+<summary>Spec</summary>
 <table class="spec"><thead><tr><th>Treatment</th><th>Ground</th><th>Ink</th><th>Mark</th><th>When a slot is missing</th></tr></thead><tbody>
 <tr><td>Minimal</td><td><code>color.canvas</code></td><td><code>color.ink</code></td><td><code>media.logo</code></td><td>Use the labeled stock sample; confirm the real pairing before delivery.</td></tr>
 <tr><td>Accent</td><td><code>color.accent</code></td><td><code>color.accent-ink</code></td><td><code>media.logo</code> or <code>media.logo-on-dark</code> by contrast</td><td>Use the labeled stock sample; confirm the real pairing before delivery.</td></tr>
 <tr><td>Bold</td><td><code>color.ink-ground</code></td><td><code>color.ink-ground-text</code></td><td><code>media.logo-on-dark</code></td><td>Use the labeled stock sample; confirm the real pairing before delivery.</td></tr>
 <tr><td>Photo</td><td><code>color.ink-ground</code></td><td><code>color.ink-ground-text</code></td><td><code>media.logo-on-dark</code></td><td>Use Bold until an approved photo is available.</td></tr>
 </tbody></table>
+</details>
 </section>
 <section class="block" id="catalog">
 <div class="block__head"><h2 class="h2">Format catalog</h2><p>Confirm platform specifications and printer requirements before production. This catalog is the single source of sizes.</p></div>
+<details class="spec-drawer">
+<summary>Spec</summary>
 {{formats:social}}
+</details>
 </section>
 <section class="block" id="building">
 <div class="block__head"><h2 class="h2">How a preview is built</h2><p>A catalog format defines the frame. Shared canvas pieces read tokens, copy and media slots inside its safe area.</p></div>
+<details class="spec-drawer">
+<summary>Spec</summary>
 <table class="spec"><thead><tr><th>Part</th><th>Owner</th></tr></thead><tbody>
 <tr><td>Frame and safe area</td><td>The format catalog supplies size, safe area, bleed and platform overlays.</td></tr>
 <tr><td>Treatment</td><td>The ground selects its paired ink and the appropriate mark.</td></tr>
 <tr><td>Content</td><td>Copy and media slots supply the brand’s words and approved assets.</td></tr>
 <tr><td>Review</td><td>Check actual size, contrast, crop and every unresolved label.</td></tr>
 </tbody></table>
+</details>
 </section>

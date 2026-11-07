@@ -51,7 +51,7 @@ test('the brand-kit slot export owns the exact foundation, copy, page and stock 
   assert.deepEqual(await json('.timds/stock.json'), {schemaVersion: 1, paths: brandKitStockPaths});
   assert.deepEqual(brandKitViews.map(view => view.id), ['brand', 'web', 'social', 'ads', 'email', 'print', 'events', 'decks', 'use']);
   assert.deepEqual(brandKitPages.builderOwned, ['brand/evidence']);
-  assert.equal(brandKitPages.authored.length, 33);
+  assert.equal(brandKitPages.authored.length, 34);
   assert.equal(brandKitPages.planned.length, 24);
   assert.ok(!brandKitStockPaths.includes('src/pages/brand/evidence.html'));
   assert.ok(brandKitStockPaths.includes('src/copy.json'));
@@ -86,8 +86,10 @@ test('each kit format names an authored template with all four treatments and ch
   for (const stage of ['cover', 'point', 'last']) assert.equal((carousel.match(new RegExp(`data-stage="${stage}"`, 'g')) || []).length, 4, stage);
   const deck = await read('src/pages/decks/slides.html');
   for (const stage of ['title', 'section', 'content', 'closing']) assert.equal((deck.match(new RegExp(`data-stage="${stage}"`, 'g')) || []).length, 4, stage);
-  const compose = await read('src/pages/use/index.html');
-  for (const [, id] of compose.matchAll(/name="preset" value="([^"]+)"/g)) assert.ok(ids.has(id), `composer preset ${id}`);
+  const compose = await read('src/pages/use/compose.html');
+  assert.deepEqual([...compose.matchAll(/\{\{presets:([^}]+)\}\}/g)].map(match => match[1]), Object.keys(catalog));
+  const landing = await read('src/pages/use/index.html');
+  assert.deepEqual([...landing.matchAll(/\?format=([^"&]+)/g)].map(match => match[1]).sort(), [...ids].sort());
   assert.ok(!Object.hasOwn(await json('src/site.json'), 'home'), 'the kit opens on its overview');
 });
 
@@ -113,6 +115,27 @@ test('the built kit quotes every slot key and its exported guidance without a pr
   // The kit stylesheet never splits the chrome from the content by system preference.
   assert.doesNotMatch(await fs.readFile(path.join(directory, 'src/styles/system.css'), 'utf8'), /prefers-color-scheme/);
   assert.match(site.files.get('index.html'), /href="\/designs\/"/);
+  const landing = site.files.get('use/index.html');
+  const compose = site.files.get('use/compose/index.html');
+  assert.match(landing, /<div class="landing">/);
+  assert.match(landing, /<nav class="sidenav" aria-label="Pages">\s*<\/nav>/);
+  assert.doesNotMatch(landing, /class="pagenav"|data-compose /);
+  assert.match(landing, /<a class="appbar__cta" href="\/use\/compose\/">Start making<\/a>/);
+  assert.match(landing, /<b>24<\/b><span>catalog formats<\/span>/);
+  assert.match(landing, /<b>9<\/b><span>views, one brand<\/span>/);
+  assert.match(compose, /data-compose /);
+  assert.match(compose, /href="\/use\/">the landing page<\/a>/);
+  assert.match(compose, /href="\/">the overview<\/a>/);
+  const formats = Object.values(await json('src/formats.json')).flatMap(group => Object.keys(group.formats));
+  assert.deepEqual([...compose.matchAll(/name="preset" value="([^"]+)"/g)].map(match => match[1]), formats);
+  assert.equal((compose.match(/data-prompt="[^"]+" checked/g) || []).length, 1);
+  assert.match(compose, /value="business-card"[^>]+data-unit="in"/);
+  assert.match(compose, /npx --yes @dtconcepts\/timds@latest consumer init --system ID/);
+  for (const anchor of ['mcp', 'products', 'change']) assert.ok(site.files.get('use/install/index.html').includes(`/use/compose/#${anchor}`));
+  for (const id of ['brand/color', 'brand/typography', 'web/spacing', 'web/components', 'social', 'ads', 'email', 'print', 'events', 'decks']) {
+    const page = site.files.get(`${id}/index.html`);
+    assert.match(page, /<figure[\s\S]*<details class="spec-drawer">\s*<summary>Spec<\/summary>/, id);
+  }
   assert.deepEqual(await colorLiterals(), []);
   // Voice guidance is authored, but its neutral sample is not brand evidence.
   // Keep the two readiness gaps explicit instead of claiming the page is absent.
