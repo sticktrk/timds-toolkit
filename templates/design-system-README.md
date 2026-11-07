@@ -109,7 +109,7 @@ tokens; the rest are declared as planned and built once someone writes them.
 The starter `dev` server builds once and serves on `http://127.0.0.1:4321`. It
 does not watch files, so rerun `__TIMDS_CLI__ check` after an edit and reload.
 
-Fresh ordinary scaffolds select `home: "use"` in `src/site.json`, serving Use at
+Fresh scaffolds select `home: "use"` in `src/site.json`, serving Use at
 `/` and the overview at `/overview/`. With `home` unset, the overview stays at
 `/` and Use stays at `/use/`. Starter sync, upgrade and parent feeds preserve
 this routing choice, including its absence, so existing authored links keep
@@ -117,14 +117,15 @@ working.
 
 ## Brand-kit systems
 
-When the starter record says `brand-kit`, the kit opens on its overview and
+When the starter record says `brand-kit`, a fresh kit opens on Landing and
 organizes Brand, Web, Social, Ads, Email, Print, Events, Decks and Use separately.
 Its stock pages read tokens, copy and media slots in Minimal, Accent, Bold and
 Photo treatments. The designer's agent fills the data and records evidence;
 the owner reviews what is observed, assumed or unresolved. Copy stays in
 `src/copy.json`, small approved local media stays in `src/assets/` with its
 catalog record, and the Evidence page keeps captured facts and decisions.
-Use has a Landing page at `/use/`, Compose at `/use/compose/`, and Install.
+Use has Landing (at `/` by default), Compose at `/use/compose/`, and Install.
+The overview is preserved at `/overview/` with the default home choice.
 The promoted “Start making” action opens Compose, whose presets include every
 kit format, including Print, Events and Decks. Landing cards select a format
 for the composer. Foundation and channel pages show previews before the Spec
@@ -190,10 +191,11 @@ files under `src/pages/`, CSS files under `src/styles/`, `src/layout.html`, or `
 Globs, links, media, designs and configuration are refused.
 
 `.timds/parent.json` records schema version 1, the parent system ID and source
-UUID, version, source commit, mode and `baseline: {site, formats}`. It is
+UUID, version, source commit, mode, `baseline: {site, formats}` and `files`,
+the hash of each declared stock file the parent last wrote. It is
 protected ancestry, preserved by starter sync and upgrade. For an offshoot,
-those commands update toolkit plumbing while leaving catalogs to the parent
-feed and authored fragments to this system. Layout maintenance remains limited
+those commands update toolkit plumbing while leaving catalogs and declared
+stock to the parent feed and every other page to this system. Layout maintenance remains limited
 to missing stock stylesheet links and the changelog version-chip link.
 
 `__TIMDS_CLI__ feed [--version RELEASE]` advances unchanged catalog fields,
@@ -201,8 +203,10 @@ appends missing entries with pages planned, and keeps local edits as grafts.
 Use `--from ../parent` for a local committed parent tree with the saved source
 UUID. A reported graft shading a parent change can be kept or edited to let
 the parent through. Plumbing follows its ownership record; `--force PATH`
-reaches only named plumbing. Authored pages, styles, layout, tokens and media
-are never replaced. Feed requires clean files where it writes, checks the
+reaches only named plumbing. A declared stock file is refreshed while this
+system's copy is unmodified; a changed or removed copy is a graft and stays,
+and tokens, media, designs and undeclared files are never replaced. Feed
+requires clean files where it writes, checks the
 workspace and rolls its writes back on failure. The baseline advances only
 on success.
 

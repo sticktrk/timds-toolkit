@@ -66,7 +66,9 @@ Report in the designer's terms, not the toolkit's:
   kit lacks (from `brand`), each gap with what would fill it. In the starter
   the front page is the Use view's landing page, and its Start, Compose and
   Install pages are stock fragments the toolkit refreshes on every upgrade
-  while they are unmodified, so a change there is a change to stock.
+  while they are unmodified, so a change there is a change to stock. A brand
+  kit's pages are seeded once and authored on its published parent instead;
+  an offshoot's declared stock pages follow that parent through `feed`.
 - Whether the system is an offshoot (`.timds/parent.json` names the parent
   release it was shot from); that lineage is protected and `feed` brings
   parent changes in.

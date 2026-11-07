@@ -976,9 +976,14 @@ check before creation completes.
 
 `timds feed` merges the next parent release against that record: unchanged
 catalog fields advance, missing entries are added as planned pages, and local
-grafts stay. Authored source is never replaced; failed checks roll back the
-feed. Ordinary upgrades keep plumbing current and leave the parent's structure
-alone, while maintaining the layout's stock stylesheet and version-chip links.
+grafts stay. The files the parent declares as stock follow it by the hash
+`.timds/parent.json` recorded when they were last written: an unmodified copy
+is refreshed, one the child changed or removed is a graft and is kept. Every
+other authored file is never replaced; failed checks roll back the feed. The
+host's runner feeds a session workspace with `--source-file` (and, for a child
+shot before stock hashes, `--baseline-file`) and `--json`. Ordinary upgrades
+keep plumbing current and leave the parent's structure alone, while
+maintaining the layout's stock stylesheet and version-chip links.
 `timds sever` confirms before removing the parent baseline. See
 [offshoots](docs/offshoots.md) for local Git parents, stock declarations,
 lineage readers and the hosted catalog boundary.

@@ -19,7 +19,7 @@ const output = path.resolve(process.env.TIMDS_VISUAL_OUTPUT || path.join(os.tmpd
 const readJson = async file => JSON.parse(await fs.readFile(file, 'utf8'));
 const writeJson = async (file, value) => fs.writeFile(file, `${JSON.stringify(value, null, 2)}\n`);
 const sourcePath = id => `src/pages/${id === 'index' ? 'index' : id.includes('/') ? id : `${id}/index`}.html`;
-const urlPath = id => id === 'index' ? '/' : `/${id}/`;
+const urlPath = id => id === 'use' ? '/' : id === 'index' ? '/overview/' : `/${id}/`;
 const invertedColors = {
   canvas: '#14212d', surface: '#1b2c3b', ink: '#f5f7fa', muted: '#bdcbd8', line: '#607589',
   accent: '#f0ce70', 'accent-ink': '#17202a', 'accent-soft': '#34423e', 'accent-2': '#c8b4ff',
@@ -242,7 +242,7 @@ try {
     if (['stock', 'inverted'].includes(scenario)) {
       for (const width of [1440, 390]) {
         await page.setViewport({width, height: 1050, deviceScaleFactor: 1});
-        await page.goto({url: `${origin}/use/`, timeout: 15_000});
+        await page.goto({url: `${origin}/`, timeout: 15_000});
         const landing = await page.evaluate(() => ({
           overflow: document.documentElement.scrollWidth > innerWidth + 1,
           composerLinks: [...document.querySelectorAll('.asset-card[href*="?format="]')].map(link => link.href),
