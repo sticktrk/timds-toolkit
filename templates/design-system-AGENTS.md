@@ -346,7 +346,7 @@ An offshoot starts from a parent's published source release and retains its
 ancestry in `.timds/parent.json`. The schema-1 record holds the parent's
 `systemId`, source UUID (`sourceId`), release `version`, source `commit`,
 `mode` (`full` or `structure`), and `baseline: {site, formats}` for future
-feeds. Do not edit or delete it as design work; hosted sessions refuse both.
+feeds. Do not edit or delete it as design work.
 Ordinary starter sync and upgrade preserve it and update toolkit plumbing
 without importing the toolkit's catalogs or fragments into an offshoot. It
 still maintains missing stock stylesheet links and the changelog version-chip
@@ -389,9 +389,7 @@ its writes if checking fails. Only success advances the parent baseline.
 
 Sever permanently removes the local baseline and requires confirmation
 (`__TIMDS_CLI__ sever --yes` for an explicitly authorized sever). Source stays
-in place and the system becomes independent. Feed and sever cannot run in a
-hosted session. Before publishing a severed hosted source, the host must also
-update its catalog lineage; local sever does not perform that operation.
+in place and the system becomes independent.
 
 ## Write pages the derived layer can read
 
@@ -517,13 +515,10 @@ them, logos, asset formats), so what reaches the kit reaches every tool.
 ## Media boundary
 
 - Never commit full-resolution images, video masters, B-roll, source audio, or other large originals to Git or `dist/`.
-- This phase supports public assets only. Put originals under ignored `media-local/` and register them with `__TIMDS_CLI__ assets add FILE --key LOGICAL_KEY`.
-- Run `__TIMDS_CLI__ login` once, then `__TIMDS_CLI__ assets publish`. `submit` also publishes changed staged files before validation.
+- This phase supports public assets only. Put originals under ignored `media-local/` and register them with `__TIMDS_CLI__ assets add FILE --key LOGICAL_KEY`. A staged file resolves only on this workstation until it is published to a TimDS host (see "If you use TimDS Cloud").
 - The starter viewer resolves `{{media:KEY}}` to a catalog asset's optional regular `src/assets/` path; its published URL and metadata remain in the media catalog. Missing keys use labeled stock fallbacks. An explicitly named missing path, a link, or traversal fails the build. Existing pages may still reference a published asset by its stable `publicUrl`. A framework viewer can resolve keys with `resolveMediaSource` and serve staged local files with `localMediaResponse` from `@dtconcepts/timds/media`.
-- Staging records the current catalog checksum. Publication refuses conflicting replacements and asset-ID reuse across logical keys. Keep reviewed derivatives: remove stale entries from `.timds/local-media.json` or restore them with `assets pull KEY --force`. Restage with `assets add` only for a reviewed, intentional replacement, never to push an old original over an optimized key.
-- TimDS measures video and audio metadata with `ffprobe` during `assets add`; use `__TIMDS_CLI__ assets backfill-metadata` to repair older records from stable public URLs without re-uploading them.
+- TimDS measures video and audio metadata with `ffprobe` during `assets add`.
 - Keep only the returned stable record in `media.json`. Never place access tokens, R2 credentials, object keys, expiring signed URLs, `.timds/local-media.json`, or raw `media-local/` files in Git.
-- Use `__TIMDS_CLI__ assets pull KEY` to restore a published original into the ignored local workspace.
 - Small optimized images, icons, and fonts required to render the viewer may remain in `dist/` within the artifact limits.
 
 ## Command reference
@@ -623,13 +618,6 @@ request here, and the product waits for the next release.
 - `__TIMDS_CLI__ submit` may create a branch, commit, push, and draft pull request only when the user asks.
 - In a standalone repository with managed automatic releases, every accepted
   `main` change becomes a dated release and a source-linked artifact candidate.
-  The portal's Automatic updates setting controls promotion: ON releases the
-  root; OFF requires operator publication in the portal.
-- Only when authorized, `__TIMDS_CLI__ publish` builds, pushes the artifact ref
-  and requests promotion with an unbound operator token. A matching live stamp
-  is a no-op; stale stamps fail. Success with ON verifies the public root;
-  OFF reports the waiting candidate and portal link. `extract --publish` is
-  a separate CDN upload and does not promote the root.
 - Only a DT Concepts operator may approve that merge or roll back a TimDS
   version.
 - When `timds.json.consumer` is present, the standalone workflow publishes the
@@ -684,12 +672,44 @@ Agents author key maps in `tokens/<group>.json` and `media/<group>.json`.
 `.timds/contract-layout.json` exists. `upgrade` migrates the earlier aggregates;
 `check` enforces group layout and reference integrity. Do not edit generated
 views. Token values may reference another key with `{color.brand.600}`.
+Product repositories remain pinned to their published version until the
+developer changes that pin.
 
-Humans direct work, inspect status/history, publish and roll back. In hosted
-systems the agent uses `timds_*` MCP tools to claim paths, start or join a
-session, update and submit with the human intent in `note`. Claims are advisory.
-A named draft has members and no expiry; `start --draft NAME` targets it.
-Read active work before editing. Resolve exactly the returned conflict key
-with `PATH#KEY=mine|theirs`; never replace unrelated changes. Return the live
-URL and frozen submission preview to the human. Product repositories remain
-pinned to their published version until the developer changes that pin.
+## If you use TimDS Cloud
+
+Everything above works with a local or Git checkout and no host. When this
+system publishes media or releases through a TimDS host (the one
+`media.portalUrl` in `timds.json` names) or works in hosted sessions, these
+additions apply; `.agents/skills/timds-edit-design-system/references/timds-cloud.md`
+at the repository root has the detail.
+
+- Media: run `__TIMDS_CLI__ login` once, then `__TIMDS_CLI__ assets publish`.
+  `submit` also publishes changed staged files before validation. Staging
+  records the current catalog checksum. Publication refuses conflicting
+  replacements and asset-ID reuse across logical keys. Keep reviewed
+  derivatives: remove stale entries from `.timds/local-media.json` or restore
+  them with `assets pull KEY --force`. Restage with `assets add` only for a
+  reviewed, intentional replacement, never to push an old original over an
+  optimized key. Use `__TIMDS_CLI__ assets pull KEY` to restore a published
+  original into the ignored local workspace, and
+  `__TIMDS_CLI__ assets backfill-metadata` to repair older records from stable
+  public URLs without re-uploading them.
+- Publication: the portal's Automatic updates setting controls promotion of
+  each release candidate: ON releases the root; OFF requires operator
+  publication in the portal. Only when authorized, `__TIMDS_CLI__ publish`
+  builds, pushes the artifact ref and requests promotion with an unbound
+  operator token. A matching live stamp is a no-op; stale stamps fail. Success
+  with ON verifies the public root; OFF reports the waiting candidate and
+  portal link. `extract --publish` is a separate CDN upload and does not
+  promote the root.
+- Offshoots: hosted sessions refuse to edit or delete `.timds/parent.json`.
+  Feed and sever cannot run in a hosted session. Before publishing a severed
+  hosted source, the host must also update its catalog lineage; local sever
+  does not perform that operation.
+- Hosted sessions: humans direct work, inspect status/history, publish and
+  roll back. In hosted systems the agent uses `timds_*` MCP tools to claim paths, start or join a
+  session, update and submit with the human intent in `note`. Claims are advisory.
+  A named draft has members and no expiry; `start --draft NAME` targets it.
+  Read active work before editing. Resolve exactly the returned conflict key
+  with `PATH#KEY=mine|theirs`; never replace unrelated changes. Return the live
+  URL and frozen submission preview to the human.
