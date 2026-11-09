@@ -100,6 +100,16 @@ __DERIVED_LAYER__
   Never mark a note addressed that you did not address; say why instead, or
   `consumer notes resolve <id> --dismiss` when the designer agreed to drop
   it. Without portal access, use the request and pull-request comments.
+- **Pull-request previews.** Automatic previews require the repository
+  variable `TIMDS_PREVIEWS_ENABLED=true` and the `TIMDS_ACCESS_TOKEN` secret.
+  They are off by default; without a token the workflow skips all preview
+  work. When enabled, `timds-consumer-preview` comments a preview link for
+  each app whose design surface the pull request changes (every app when it
+  moves the pin or changes the manifest) and updates it on each push; a pull
+  request that touches no surface gets no preview. Give the designer that
+  link when available.
+- **Shared imagery.** The Design System publishes registered media with
+  `assets publish`.
 - **Hosted read tools.** The `.mcp.json` entry for `timds-design-system-read`
   reaches the portal over HTTP and needs `TIMDS_ACCESS_TOKEN` in the
   environment.
@@ -124,9 +134,9 @@ __DERIVED_LAYER__
    and say what would need a developer.
 3. Never add dependencies or change the product's framework configuration.
 4. Never commit media masters, video, audio, or full-resolution photography.
-   Shared imagery belongs to the Design System and is published with
-   `assets add` and `assets publish` using that repository's selected toolkit;
-   reference its stable URL or media key here. Small optimized images may
+   Shared imagery belongs to the Design System and is registered there with
+   `assets add` using that repository's selected toolkit; reference its
+   stable URL or media key here. Small optimized images may
    live in the product only where its rules allow them.
 5. Keep light and dark schemes, desktop and phone widths, focus states, and
    contrast working.
@@ -161,15 +171,9 @@ npm run timds -- consumer check --base origin/__DEFAULT_BRANCH__
 3. Write the description for the designer: what changed and why in plain
    language, which pages and routes to look at, and anything left undecided.
    No code walkthrough.
-4. Automatic previews require the repository variable
-   `TIMDS_PREVIEWS_ENABLED=true` and the `TIMDS_ACCESS_TOKEN` secret. They are
-   off by default; without a token the workflow skips all preview work. When
-   enabled, `timds-consumer-preview` comments a preview link for each app
-   whose design surface the pull request changes (every app when it moves
-   the pin or changes the manifest) and updates it on each push; a pull
-   request that touches no surface gets no preview. Give the designer that
-   link when available. Otherwise provide the local review URL and
-   screenshots; do not wait for or promise a cloud preview.
+4. For the designer, provide the local review URL and
+   screenshots; do not wait for or promise a cloud preview (see **If you use
+   TimDS Cloud**).
 5. Never merge, mark ready for review, deploy, move the Design System pin, or
    change managed TimDS files (everything under
    `.agents/skills/timds-consume-design-system/`,

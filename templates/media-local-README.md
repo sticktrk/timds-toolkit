@@ -13,10 +13,12 @@ __TIMDS_CLI__ assets add __MEDIA_LOCAL__example.mp4 --key example-video
 Staging records the file in `.timds/local-media.json`. The starter viewer
 does not read this directory: `{{media:KEY}}` resolves to a small optimized
 copy under `src/assets/`, and only a framework viewer that serves staged
-files with `localMediaResponse` shows the original locally. `assets publish`
-or `submit` uploads it to TimDS storage and writes only its public CDN record
-to the media catalog.
+files with `localMediaResponse` shows the original locally.
 
+## If you use TimDS Cloud
+
+`__TIMDS_CLI__ assets publish` (and Git `submit`) uploads staged files to
+TimDS storage and writes only their public CDN record to the media catalog.
 Staging remembers the catalog checksum. If publication reports a conflict,
 remove the stale entry from `.timds/local-media.json` to keep the published
 record, or restore it with `__TIMDS_CLI__ assets pull KEY --force`. Restage
