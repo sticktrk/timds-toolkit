@@ -1,3 +1,9 @@
+/**
+ * @deprecated The `@dtconcepts/timds/merge` export is server logic. TimDS hosts
+ * now carry their own copy of this module, and this export will be removed in
+ * a later toolkit release. Nothing in the toolkit imports it. See "Public
+ * toolkit boundary" in AGENTS.md.
+ */
 /** Pure three-way source merge. No repository, filesystem, transport or host state. */
 const fail = message => Object.assign(new Error(message), { statusCode: 400 });
 const MISSING = Symbol('missing');

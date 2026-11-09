@@ -367,7 +367,9 @@ behavior.
   starter sync, feed and selection share.
 - `src/contract-groups.mjs` splits `tokens.json`/`media.json` into authored
   `tokens/` and `media/` key maps and regenerates the views; `src/merge.mjs`
-  is the three-way file-tree merge (`mergeFileTrees`) hosted updates use.
+  is the three-way file-tree merge (`mergeFileTrees`) hosts used; its
+  `./merge` export is deprecated (hosts vendor it) and will be removed. See
+  "Public toolkit boundary" in `AGENTS.md`.
 - `src/consumer.mjs` is `runConsumerCli` and `consumer check`;
   `consumer-register.mjs` (`register`, `updates`), `consumer-notes.mjs`
   (`notes`), `consumer-preview.mjs` with `consumer-browser.mjs` and
