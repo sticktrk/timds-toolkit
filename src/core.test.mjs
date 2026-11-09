@@ -23,6 +23,7 @@ import {
   validateManifest,
   isUpgradeWritePath,
   upgradeWriteBoundary,
+  workspaceCommandEnvironment,
 } from "./core.mjs";
 import { VIDEO_HELP } from "./video.mjs";
 import { describeStarterSync, forceReplaceable, starterManagedFragments, starterPlumbingFiles } from "./starter.mjs";
@@ -46,6 +47,9 @@ const toolkitVersion = JSON.parse(
 ).version;
 
 const templatesRoot = fileURLToPath(new URL("../templates/", import.meta.url));
+// A scaffold in a temporary folder has no node_modules: the stub scripts find
+// the renderer the way they do under timds check before the first install.
+const viewerEnv = workspaceCommandEnvironment();
 const starterFixtureRoot = fileURLToPath(new URL("./fixtures/starter-before-formats/", import.meta.url));
 
 function gitInit(repoRoot) {
@@ -859,7 +863,9 @@ test("initializes the reusable standalone repository shape", async (t) => {
   await fs.access(path.join(repoRoot, "src", "layout.html"));
   await fs.access(path.join(repoRoot, "src", "pages", "index.html"));
   await fs.access(path.join(repoRoot, "scripts", "build.mjs"));
-  await fs.access(path.join(repoRoot, "scripts", "viewer.mjs"));
+  await assert.rejects(fs.access(path.join(repoRoot, "scripts", "viewer.mjs")), { code: "ENOENT" }, "the renderer is resolved from the package, not copied");
+  assert.match(await fs.readFile(path.join(repoRoot, "scripts", "build.mjs"), "utf8"), /@dtconcepts\/timds\/viewer/);
+  assert.deepEqual(Object.entries(JSON.parse(await fs.readFile(path.join(repoRoot, ".timds", "starter.json"), "utf8"))).filter(([key]) => ["level", "declined"].includes(key)), [["declined", []], ["level", 3]], "init records the current starter level");
   await fs.access(path.join(repoRoot, "scripts", "check-versions.mjs"));
   await fs.access(path.join(repoRoot, "scripts", "prepare-merge-release.mjs"));
   await fs.access(path.join(repoRoot, "scripts", "prepare-merge-release.test.mjs"));
@@ -1009,7 +1015,7 @@ test("the starter viewer resolves Use links with and without a home view and rej
   await initializeRepository(repoRoot, { standalone: true });
   const sitePath = path.join(repoRoot, "src/site.json");
   const site = JSON.parse(await fs.readFile(sitePath, "utf8"));
-  const build = () => execFileSync(process.execPath, ["scripts/build.mjs"], { cwd: repoRoot, encoding: "utf8", stdio: "pipe" });
+  const build = () => execFileSync(process.execPath, ["scripts/build.mjs"], { cwd: repoRoot, encoding: "utf8", env: viewerEnv, stdio: "pipe" });
   delete site.home;
   await writeJson(sitePath, site);
   build();
@@ -1031,7 +1037,7 @@ test("the starter viewer resolves Use links with and without a home view and rej
 test("the starter viewer renders its site model, and its build guards pages, placeholders, and color literals", async (t) => {
   const repoRoot = await temporaryDirectory(t);
   await initializeRepository(repoRoot, { standalone: true, name: "Client & Co" });
-  const run = (script) => execFileSync("node", [`scripts/${script}.mjs`], { cwd: repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  const run = (script) => execFileSync("node", [`scripts/${script}.mjs`], { cwd: repoRoot, encoding: "utf8", env: viewerEnv, stdio: ["ignore", "pipe", "pipe"] });
   const fails = (script, pattern) => assert.throws(() => run(script), (error) => pattern.test(String(error.stderr)));
   const read = (relative) => fs.readFile(path.join(repoRoot, relative), "utf8");
   const site = JSON.parse(await read("src/site.json"));
@@ -1139,7 +1145,8 @@ test("the starter viewer renders its site model, and its build guards pages, pla
   await fs.rm(path.join(repoRoot, "src/designs/website/pages/about.html"));
   // A state without its default page, and a view that would collide with the designs output, both stop the build.
   await fs.writeFile(path.join(repoRoot, "src/designs/website/pages/orders.empty.html"), "<h1>No orders</h1>\n");
-  await assert.rejects(checkWorkspace(repoRoot), /route \/orders of design website has states .* but no default page; author pages\/orders\.html first/);
+  // The stock build renders the designs itself; a captured run carries its error output.
+  await assert.rejects(runWithOutputSink(() => {}, () => checkWorkspace(repoRoot)), /route \/orders of design website has states .* but no default page; author pages\/orders\.html first/);
   await fs.rm(path.join(repoRoot, "src/designs/website/pages/orders.empty.html"));
   site.views.push({ id: "designs", label: "Designs", pages: [{ slug: "", title: "Designs", planned: true }] });
   await writeJson(path.join(repoRoot, "src/site.json"), site);
@@ -1198,9 +1205,8 @@ test("designs init adopts website designs in a system scaffolded without them", 
   const repoRoot = await temporaryDirectory(t);
   await initializeRepository(repoRoot, { standalone: true });
   const read = (relative) => fs.readFile(path.join(repoRoot, relative), "utf8");
-  // Simulate the earlier scaffold: no designs or shared slot helper, and no layout block.
+  // Simulate the earlier scaffold: no designs, and no layout block.
   await fs.rm(path.join(repoRoot, "src/designs"), { recursive: true });
-  await fs.rm(path.join(repoRoot, "scripts/brand-kit.mjs"));
   const stylesheet = await read("src/styles/system.css");
   const stripped = stylesheet.replace(/\/\* ---- site layout ---- \*\/[\s\S]*?\/\* ---- end site layout ---- \*\/\n/, "");
   assert.notEqual(stripped, stylesheet);
@@ -1209,7 +1215,7 @@ test("designs init adopts website designs in a system scaffolded without them", 
 
   const result = await initializeDesigns(repoRoot);
   await fs.access(path.join(repoRoot, "src/designs/website/pages/contact.sent.html"));
-  assert.deepEqual(result.scripts, [{ path: "scripts/build.mjs", status: "customized" }, { path: "scripts/viewer.mjs", status: "current" }, { path: "scripts/brand-kit.mjs", status: "created" }]);
+  assert.deepEqual(result.scripts, [{ path: "scripts/build.mjs", status: "customized" }]);
   assert.equal(result.stylesheet, "appended", "the stock token names let the layout block be restored");
   assert.deepEqual(result.missingClasses, []);
   assert.match(await read("src/styles/system.css"), /\/\* ---- site layout ---- \*\/[\s\S]*\.site-footer/);
@@ -1235,7 +1241,7 @@ test("designs init adopts website designs in a system scaffolded without them", 
   staleRecord.files["scripts/build.mjs"] = "stale";
   await writeJson(path.join(repoRoot, ".timds/starter.json"), staleRecord);
   const forced = await initializeDesigns(repoRoot, { force: true });
-  assert.deepEqual(forced.scripts.map((script) => script.status), ["updated", "current", "current"]);
+  assert.deepEqual(forced.scripts.map((script) => script.status), ["updated"]);
   assert.doesNotMatch(await read("scripts/build.mjs"), /client change/);
   const stockBuild = await fs.readFile(path.join(templatesRoot, "starter/scripts/build.mjs"), "utf8");
   assert.equal(JSON.parse(await read(".timds/starter.json")).files["scripts/build.mjs"], createHash("sha256").update(stockBuild).digest("hex"));
@@ -1344,8 +1350,6 @@ test("starter sync adopts a scaffold from before the asset views, and upgrade ke
     ["scripts/build.mjs", "updated"],
     ["scripts/check.mjs", "updated"],
     ["scripts/dev.mjs", "current"],
-    ["scripts/viewer.mjs", "updated"],
-    ["scripts/brand-kit.mjs", "created"],
     ["src/scripts/compose.js", "created"],
     ["src/styles/canvas.css", "created"],
     ["src/styles/viewer.css", "current"],
@@ -1357,21 +1361,27 @@ test("starter sync adopts a scaffold from before the asset views, and upgrade ke
     ["src/pages/use/index.html", "created"],
     ["src/pages/use/compose.html", "created"],
     ["src/pages/use/install.html", "created"],
+    ["scripts/viewer.mjs", "removed"],
     ["src/layout.html", "updated"],
   ]);
+  // The stock scripts became the stubs, so the copied viewer at its released bytes left with the renderer-package step; the
+  // Use view the sync added is already the Start landing, and the visible home-landing step waits for a decision.
+  assert.deepEqual([result.levels.previous, result.levels.level, result.levels.steps.map((step) => [step.step, step.outcome]), result.levels.stopped], [0, 2, [["renderer-package", "applied"], ["use-start-title", "applied"], ["home-landing", "pending"]], { step: "home-landing", reason: "visible" }]);
   assert.deepEqual(result.site, { addedPages: ["web/email", "web/email-templates"], addedViews: ["digital", "social", "print", "use"], advanced: ["web.label", "web.blurb"], kept: [] });
   assert.deepEqual([result.formats.addedGroups, result.formats.addedFormats.length, result.formats.kept, result.formats.skipped], [["print", "digital", "social"], 48, [], []]);
   // Structure and plumbing advance to stock while the original front page stays.
   const stockSite = JSON.parse(await fs.readFile(path.join(templatesRoot, "starter/src/site.json"), "utf8"));
   delete stockSite.home;
   assert.deepEqual(JSON.parse(await read("src/site.json")), stockSite);
-  for (const relative of ["src/formats.json", "src/layout.html", "scripts/viewer.mjs", "scripts/check.mjs", "src/styles/canvas.css", "src/pages/print/index.html", "src/pages/use/index.html"]) {
+  for (const relative of ["src/formats.json", "src/layout.html", "scripts/build.mjs", "scripts/check.mjs", "src/styles/canvas.css", "src/pages/print/index.html", "src/pages/use/index.html"]) {
     assert.equal(await read(relative), await fs.readFile(path.join(templatesRoot, "starter", relative), "utf8"), relative);
   }
+  await assert.rejects(fs.access(path.join(repoRoot, "scripts/viewer.mjs")), { code: "ENOENT" });
   assert.doesNotMatch(await read("src/pages/index.html"), /Digital DS/, "the client's own overview fragment is never rewritten");
-  assert.deepEqual(result.check.machine.warnings.map((warning) => warning.split(":")[0]), ["guidance group voice is empty", 'no asset is annotated data-timds-role="logo"; the brand kit has no logo']);
+  assert.deepEqual(result.check.machine.warnings.map((warning) => warning.split(":")[0]), ["guidance group voice is empty", 'no asset is annotated data-timds-role="logo"; the brand kit has no logo', "Starter step home-landing (level 3) changes what visitors see and waits for a decision"]);
   const record = JSON.parse(await read(".timds/starter.json"));
   assert.equal(record.version, toolkitVersion);
+  assert.deepEqual([record.level, record.declined], [2, []]);
   assert.deepEqual(Object.keys(record.files).sort(), [...starterPlumbingFiles, ...starterManagedFragments].map(([relative]) => relative).sort());
   assert.deepEqual(record.baseline.site, JSON.parse(await fs.readFile(path.join(templatesRoot, "starter/src/site.json"), "utf8")));
 
@@ -1405,15 +1415,16 @@ test("starter sync adopts a scaffold from before the asset views, and upgrade ke
   assert.equal(jsonReport.ok, true);
   assert.deepEqual([jsonReport.starter.state, jsonReport.starter.adopted, jsonReport.starter.plumbing, jsonReport.starter.version], ["current", false, "recorded", toolkitVersion]);
   assert.deepEqual([jsonReport.starter.written, jsonReport.starter.customized, jsonReport.starter.replaceable], [[], ["scripts/dev.mjs"], ["scripts/dev.mjs"]]);
-  assert.equal(jsonReport.starter.current.length, forcedUpgrade.starter.files.length - 1);
+  assert.equal(jsonReport.starter.currentFiles.length, forcedUpgrade.starter.files.length - 1);
+  assert.deepEqual([jsonReport.starter.level, jsonReport.starter.current, jsonReport.starter.behind, jsonReport.starter.renderer, jsonReport.starter.kept, jsonReport.starter.pending.map((step) => step.id)], [2, 3, 1, "kept", ["scripts/dev.mjs"], ["home-landing"]]);
   assert.deepEqual(jsonReport.starter.site, { addedPages: [], addedViews: [], advanced: [], kept: [] });
   assert.deepEqual(jsonReport.starter.formats.skipped, []);
   assert.deepEqual([jsonReport.starter.check, jsonReport.check], [null, null]);
   assert.deepEqual(jsonReport.designs, { setUp: true, designs: 1, pages: 2 });
 
   // A sync that fails its check runs before the managed files are touched, so the upgrade aborts with the repository as it was and a plain rerun is not refused.
-  const stockViewer = await read("scripts/viewer.mjs");
-  await fs.writeFile(path.join(repoRoot, "scripts/viewer.mjs"), `${stockViewer}\nthrow new Error("client change broke the viewer");\n`);
+  const manifest = JSON.parse(await read("timds.json"));
+  await writeJson(path.join(repoRoot, "timds.json"), { ...manifest, workspace: { ...manifest.workspace, after: { build: [["node", "-e", "console.error('client change broke the build'); process.exit(1)"]] } } });
   await fs.rm(path.join(repoRoot, "src/styles/canvas.css"));
   await fs.rm(path.join(repoRoot, ".agents/skills/timds-edit-design-system"), { recursive: true });
   commitAll(repoRoot, "Break the viewer and drop the managed skill");
@@ -1422,14 +1433,14 @@ test("starter sync adopts a scaffold from before the asset views, and upgrade ke
       // The JSON receipt of the same failure classifies it as a failed check, not a refusal.
       const receipt = await jsonFailure(["upgrade", "--root", repoRoot, "--json"], /Starter sync was rolled back/);
       assert.deepEqual([receipt.ok, receipt.error.code], [false, "check_failed"]);
-      assert.match(receipt.error.message, /client change broke the viewer/);
+      assert.match(receipt.error.message, /client change broke the build/);
     }
     await assert.rejects(upgradeRepository(repoRoot), /Starter sync was rolled back because the workspace check failed afterwards/, `attempt ${attempt}`);
     await assert.rejects(fs.access(path.join(repoRoot, ".agents/skills/timds-edit-design-system")), /ENOENT/, "the managed skill was not reinstalled by the aborted upgrade");
     await assert.rejects(fs.access(path.join(repoRoot, "src/styles/canvas.css")), /ENOENT/);
     assert.equal(execFileSync("git", ["status", "--porcelain", "--untracked-files=all"], { cwd: repoRoot, encoding: "utf8" }).trim(), "", "nothing is left behind");
   }
-  execFileSync("git", ["checkout", "HEAD~1", "--", "scripts/viewer.mjs", "src/styles/canvas.css", ".agents/skills/timds-edit-design-system"], { cwd: repoRoot, stdio: "ignore" });
+  execFileSync("git", ["checkout", "HEAD~1", "--", "timds.json", "src/styles/canvas.css", ".agents/skills/timds-edit-design-system"], { cwd: repoRoot, stdio: "ignore" });
   commitAll(repoRoot, "Restore the viewer");
   await fs.rm(path.join(repoRoot, ".timds/starter.json"));
   commitAll(repoRoot, "Drop the record");
@@ -1518,15 +1529,21 @@ test("starter sync reports customized files, rolls back when they break the chec
   assert.deepEqual([recordOnly.adopted, recordOnly.written, recordOnly.recordWritten, recordOnly.check, recordOnly.plumbing], [true, [], true, null, "recorded"]);
   assert.equal(JSON.parse(await read(".timds/starter.json")).plumbing, undefined);
 
+  // A customized stub script keeps the whole copied renderer of a system that
+  // still has one: the other scripts and the stock pages wait, the copied
+  // viewer stays, and the renderer-package step reports renderer_kept.
   await rewindStarter(repoRoot);
   await fs.appendFile(path.join(repoRoot, "scripts/dev.mjs"), "\n// client change\n");
   const devOnly = await syncStarterWorkspace(repoRoot);
   assert.deepEqual(devOnly.files.find((file) => file.path === "scripts/dev.mjs"), { path: "scripts/dev.mjs", status: "customized" });
-  assert.match(await read("scripts/dev.mjs"), /client change/, "a customized script the check does not need is reported and kept");
-  assert.equal(await read("scripts/viewer.mjs"), await fs.readFile(path.join(templatesRoot, "starter/scripts/viewer.mjs"), "utf8"));
-  assert.equal(devOnly.check.machine.warnings.length, 2);
+  assert.match(await read("scripts/dev.mjs"), /client change/, "a customized script is reported and kept");
+  assert.equal(await read("scripts/viewer.mjs"), await fs.readFile(path.join(starterFixtureRoot, "scripts/viewer.mjs"), "utf8"), "the copied viewer stays while the renderer is kept");
+  for (const relative of ["scripts/build.mjs", "scripts/check.mjs"]) assert.equal(devOnly.files.find((file) => file.path === relative).status, "skipped", relative);
+  assert.deepEqual([devOnly.levels.level, devOnly.status.renderer, devOnly.status.kept, [...new Set(devOnly.status.conflicts.map((conflict) => `${conflict.step}:${conflict.reason}`))]], [0, "kept", ["scripts/dev.mjs"], ["renderer-package:renderer_kept"]]);
+  assert.deepEqual(devOnly.check.machine.warnings.map((warning) => warning.split(" (")[0]), ["guidance group voice is empty: no brand/voice page; declare it in timds.json brand.guidance.voice", 'no asset is annotated data-timds-role="logo"; the brand kit has no logo', "The copied renderer is kept"]);
   const record = JSON.parse(await read(".timds/starter.json"));
   assert.equal(record.files["scripts/dev.mjs"], undefined, "a customized file is not recorded as toolkit-written");
+  assert.equal(record.level, 0, "the level stays below the step that did not settle");
 
   // A customized viewer cannot render the new overviews, and the stock check
   // expects the stock viewer beside it: the renderer and the stock pages wait,
@@ -1535,22 +1552,22 @@ test("starter sync reports customized files, rolls back when they break the chec
   const customizedViewer = `${await read("scripts/viewer.mjs")}\n// client change\n`;
   await fs.writeFile(path.join(repoRoot, "scripts/viewer.mjs"), customizedViewer);
   const held = await syncStarterWorkspace(repoRoot);
-  assert.deepEqual(held.files.find((file) => file.path === "scripts/viewer.mjs"), { path: "scripts/viewer.mjs", status: "customized" });
+  assert.equal(held.files.find((file) => file.path === "scripts/viewer.mjs").status, "customized");
   for (const relative of ["scripts/build.mjs", "scripts/check.mjs"]) {
     const file = held.files.find((entry) => entry.path === relative);
     assert.equal(file.status, "skipped", relative);
-    assert.match(file.note, /^held back: scripts\/viewer\.mjs is this system's own and the stock version expects the stock renderer beside it; port the renderer, or run timds starter sync --force scripts\/viewer\.mjs to replace it$/, relative);
+    assert.match(file.note, /^held back: scripts\/dev\.mjs and scripts\/viewer\.mjs are this system's own and the stock version expects the stock renderer beside it; port the renderer, or run timds starter sync --force scripts\/dev\.mjs scripts\/viewer\.mjs to replace it$/, relative);
     assert.equal(await read(relative), await fs.readFile(path.join(starterFixtureRoot, relative), "utf8"), `${relative} stays at the version the kept viewer works with`);
   }
   for (const [relative] of starterManagedFragments) {
     const file = held.files.find((entry) => entry.path === relative);
     assert.equal(file.status, "skipped", relative);
-    assert.match(file.note, /^held back: scripts\/viewer\.mjs is this system's own and may not render the stock page;/, relative);
+    assert.match(file.note, /^held back: scripts\/dev\.mjs and scripts\/viewer\.mjs are this system's own and may not render the stock page;/, relative);
     await assert.rejects(fs.access(path.join(repoRoot, relative)), /ENOENT/, relative);
   }
   assert.ok(!held.written.some((relative) => relative.startsWith("src/pages/") || ["scripts/viewer.mjs", "scripts/build.mjs", "scripts/check.mjs"].includes(relative)), JSON.stringify(held.written));
   assert.ok(held.written.includes("src/styles/canvas.css") && held.written.includes("src/formats.json"), "plumbing outside the renderer and the catalogs still land");
-  assert.equal(held.check.machine.warnings.length, 2, "the kept renderer still passes the check");
+  assert.equal(held.check.machine.warnings.length, 3, "the kept renderer still passes the check, with a warning that names it");
   assert.equal(await read("scripts/viewer.mjs"), customizedViewer);
   assert.deepEqual(forceReplaceable(held), ["scripts/dev.mjs", "scripts/viewer.mjs"]);
   const heldRecord = JSON.parse(await read(".timds/starter.json"));
@@ -1561,9 +1578,9 @@ test("starter sync reports customized files, rolls back when they break the chec
   const ownOverview = '<span class="eyebrow">Print</span>\n<h1 class="page-title">Our print</h1>\n<section class="block" id="rules"><h2 class="h2">Rules</h2><p>Paper first.</p></section>\n';
   await fs.mkdir(path.join(repoRoot, "src/pages/print"), { recursive: true });
   await fs.writeFile(path.join(repoRoot, "src/pages/print/index.html"), ownOverview);
-  await assert.rejects(syncStarterWorkspace(repoRoot, { force: ["src/pages/print/index.html"] }), /--force replaces only the starter's stock scripts and stylesheets, named one by one: scripts\/build\.mjs, .*\. Not src\/pages\/print\/index\.html;/);
+  await assert.rejects(syncStarterWorkspace(repoRoot, { force: ["src/pages/print/index.html"] }), /--force replaces only the starter's stock scripts and stylesheets, and removes the copied renderer, named one by one: scripts\/build\.mjs, .*\. Not src\/pages\/print\/index\.html;/);
   await assert.rejects(syncStarterWorkspace(repoRoot, { force: ["scripts/viewer.mjs", "scripts/nope.mjs"] }), /Not scripts\/nope\.mjs;/);
-  // In a terminal the sync asks about each customized file instead; the answers decide, and a diff can be shown first.
+  // In a terminal the sync asks about each customized stub instead; the answers decide, and a diff can be shown first.
   const asked = [];
   const diffed = [];
   const prompt = createPlumbingPrompt({
@@ -1573,28 +1590,30 @@ test("starter sync reports customized files, rolls back when they break the chec
   const decisions = [];
   const answered = await syncStarterWorkspace(repoRoot, { decideCustomized: async (file) => {
     decisions.push(file.path);
-    return file.path === "scripts/dev.mjs" ? prompt(file) : "replace";
+    return prompt(file);
   } });
-  assert.deepEqual(decisions, ["scripts/dev.mjs", "scripts/viewer.mjs"]);
+  assert.deepEqual(decisions, ["scripts/dev.mjs"], "the copied viewer is removed only by name, never at a prompt");
   assert.deepEqual([asked.length, diffed], [3, [["scripts/dev.mjs", true]]], "the diff was shown once and an unknown answer was asked again");
   assert.deepEqual(answered.files.find((file) => file.path === "scripts/dev.mjs"), { note: "kept at the prompt", path: "scripts/dev.mjs", status: "customized" });
-  assert.deepEqual(answered.files.find((file) => file.path === "scripts/viewer.mjs"), { note: "replaced at the prompt", path: "scripts/viewer.mjs", status: "updated" });
-  assert.doesNotMatch(await read("scripts/viewer.mjs"), /client change/);
-  assert.equal(answered.check.machine.warnings.length, 2);
-  await fs.writeFile(path.join(repoRoot, "scripts/viewer.mjs"), customizedViewer);
-  const forced = await syncStarterWorkspace(repoRoot, { force: ["scripts/viewer.mjs"] });
-  assert.deepEqual(forced.files.find((file) => file.path === "scripts/viewer.mjs"), { note: "replaced with --force", path: "scripts/viewer.mjs", status: "updated" });
-  assert.deepEqual(forced.files.find((file) => file.path === "scripts/dev.mjs"), { path: "scripts/dev.mjs", status: "customized" }, "a customized file not named stays customized");
-  assert.deepEqual(forceReplaceable(forced), ["scripts/dev.mjs"]);
-  assert.match(await read("scripts/dev.mjs"), /client change/);
-  assert.doesNotMatch(await read("scripts/viewer.mjs"), /client change/);
+  assert.equal(answered.files.find((file) => file.path === "scripts/viewer.mjs").status, "customized");
+  // Naming only the viewer is not enough while the customized dev script may still use it: nothing of the renderer moves.
+  const viewerOnly = await syncStarterWorkspace(repoRoot, { force: ["scripts/viewer.mjs"] });
+  assert.equal(await read("scripts/viewer.mjs"), customizedViewer);
+  assert.deepEqual([viewerOnly.levels.level, viewerOnly.status.kept], [0, ["scripts/dev.mjs"]]);
+  const forced = await syncStarterWorkspace(repoRoot, { force: ["scripts/dev.mjs", "scripts/viewer.mjs"] });
+  assert.deepEqual(forced.files.find((file) => file.path === "scripts/viewer.mjs"), { note: "removed with --force", path: "scripts/viewer.mjs", status: "removed" });
+  assert.deepEqual(forced.files.find((file) => file.path === "scripts/dev.mjs"), { note: "replaced with --force", path: "scripts/dev.mjs", status: "updated" });
+  await assert.rejects(fs.access(path.join(repoRoot, "scripts/viewer.mjs")), { code: "ENOENT" });
+  assert.deepEqual(forceReplaceable(forced), []);
+  for (const relative of ["scripts/build.mjs", "scripts/check.mjs", "scripts/dev.mjs"]) assert.equal(await read(relative), await fs.readFile(path.join(templatesRoot, "starter", relative), "utf8"), relative);
+  assert.deepEqual([forced.levels.level, forced.status.renderer, forced.status.pending.map((step) => step.id)], [2, "package", ["home-landing"]]);
   assert.deepEqual(forced.files.find((file) => file.path === "src/pages/print/index.html"), { note: "this system's own page; never replaced, --force included", path: "src/pages/print/index.html", status: "customized" });
   assert.equal(await read("src/pages/print/index.html"), ownOverview);
   assert.ok(!forceReplaceable(forced).includes("src/pages/print/index.html"), "a kept fragment is not something --force would replace");
   const printView = JSON.parse(await read("src/site.json")).views.find((view) => view.id === "print");
   assert.equal(printView.pages[0].planned, undefined, "the overview is authored because its fragment exists");
   assert.match(await read("dist/print/index.html"), /Paper first/);
-  assert.equal(forced.check.machine.warnings.length, 2);
+  assert.equal(forced.check.machine.warnings.length, 3, "the two scaffold warnings and the visible step that waits");
 });
 
 test("starter sync merges around a view the client already declared", async (t) => {
@@ -1634,7 +1653,7 @@ test("starter sync merges around a view the client already declared", async (t) 
   assert.deepEqual([quiet.written, quiet.site.kept, quiet.formats.kept], [[], [], []]);
   assert.equal(result.files.find((file) => file.path === "src/pages/print/index.html").status, "created", "the overview fragment is written because the sync added its page");
   assert.deepEqual(result.formats.skipped, []);
-  assert.equal(result.check.machine.warnings.length, 2);
+  assert.equal(result.check.machine.warnings.length, 3, "the two scaffold warnings and the visible home-landing step that waits for a decision");
   assert.match(await read("dist/print/index.html"), /Letterhead · US Letter/);
   assert.match(await read("dist/print/letterheads/index.html"), /Lead with the answer/);
 
@@ -1650,7 +1669,7 @@ test("starter sync merges around a view the client already declared", async (t) 
   assert.ok(plannedOverview.site.advanced.includes("social.planned"));
   assert.deepEqual(plannedOverview.site.kept.map((kept) => kept.path), ["social.label", "social.blurb", "social.title", "social.group", "social.summary"]);
   assert.match(await read("dist/social/index.html"), /<h1 class="page-title">/);
-  assert.equal(plannedOverview.check.machine.warnings.length, 2);
+  assert.equal(plannedOverview.check.machine.warnings.length, 3, "with the visible home-landing step that waits");
 });
 
 test("a later scaffold advances starter fields the client never changed and keeps the ones they did", async (t) => {
@@ -1747,7 +1766,7 @@ test("preview and starter dev explain an occupied port without a stack trace", a
   await assert.rejects(runCli(["preview", "--root", root, "--no-build", "--port", String(port)]), /already in use.*timds preview --port/);
   const { execFile } = await import("node:child_process");
   const { promisify } = await import("node:util");
-  await assert.rejects(promisify(execFile)(process.execPath, ["scripts/dev.mjs"], { cwd: root, env: { ...process.env, PORT: String(port) } }), error => {
+  await assert.rejects(promisify(execFile)(process.execPath, ["scripts/dev.mjs"], { cwd: root, env: { ...viewerEnv, PORT: String(port) } }), error => {
     assert.match(error.stderr, /already in use.*timds dev --port/);
     assert.doesNotMatch(error.stderr, /Unhandled|at Server/);
     return true;

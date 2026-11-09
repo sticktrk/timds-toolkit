@@ -80,13 +80,13 @@ repository root, so each one is also a slash command.
 | `src/designs/` | Website designs: whole pages in HTML with JavaScript on the system's stylesheets, one directory per design | Edit |
 | `src/layout.html` | The shell every page shares: app bar, page navigation, content slot | Edit |
 | `src/styles/system.css`, `src/assets/` | The system's own styles and small optimized assets | Edit |
-| `scripts/build.mjs`, `dev.mjs`, `check.mjs`, `viewer.mjs`, `brand-kit.mjs`, `src/scripts/compose.js`, `src/styles/canvas.css`, `src/styles/viewer.css` | Shared build, viewer, slot data and composer plumbing, the format preview engine, and the documentation chrome | Managed by starter sync, which replaces them on upgrade; use authored tokens, pages and `system.css` for design changes |
+| `scripts/build.mjs`, `dev.mjs`, `check.mjs`, `src/scripts/compose.js`, `src/styles/canvas.css`, `src/styles/viewer.css` | The build, dev and check stubs that run the TimDS renderer from the package (`@dtconcepts/timds/viewer`), composer plumbing, the format preview engine, and the documentation chrome | Managed by starter sync, which replaces them on upgrade; use authored tokens, pages and `system.css` for design changes, and `workspace.after.build` in `timds.json` for an extra build step |
 | `CHANGELOG.md` | Designer-facing release notes, rendered at `/changelog/` in the built system | Add to `## Unreleased`, leading with the area the change touches |
 | `README.md`, `AGENTS.md`, `CLAUDE.md` | This system's own documentation (`CLAUDE.md` imports `AGENTS.md` for Claude Code) | Keep accurate as the system changes |
 | `timds.json` | Manifest: identity, version, artifact entry, workspace commands, the `bundle` globs naming what a website loads | Only `brand` and `machine` mappings; the rest is protected |
 | `media-local/` | Ignored full-resolution originals | Stage files here |
 | `dist/` | Generated artifact and derived layer | Never edit by hand; an embedded system commits the rebuilt `dist/` with each change (see "Source and artifact boundary") |
-| `.timds/starter.json` | The starter kind and what the toolkit last wrote (see "The starter stays current through upgrade") | Protected; written by `init`, `starter sync`, and `upgrade` |
+| `.timds/starter.json` | The starter kind, its starter level and declined steps, and what the toolkit last wrote (see "The starter stays current through upgrade") | Protected; written by `init`, `starter sync`, and `upgrade` |
 | `.timds/stock.json` | Explicit reusable source for structure offshoots | Declare reviewed exact source paths; see Offshoots |
 | `.timds/parent.json` | Parent release identity and feed baseline, when this system is an offshoot | Protected; changed only by shoot, feed, or confirmed sever |
 | Other `.timds/` files, release scripts, and the repository root's `.agents/skills/` and `.github/workflows/` | Managed tooling | Protected; see the last section |
@@ -303,8 +303,8 @@ The scaffold's plumbing and structure are kept current by TimDS, the way its
 skills are: `.timds/starter.json` records the selected starter kind and what the toolkit wrote, and every
 `__TIMDS_CLI__ upgrade` re-syncs it (a system scaffolded before the record
 existed opts in once with `__TIMDS_CLI__ starter sync`). The sync brings
-the stock `scripts/build.mjs`, `check.mjs`, `dev.mjs`, `viewer.mjs`,
-`brand-kit.mjs`, `src/scripts/compose.js`,
+the stock `scripts/build.mjs`, `check.mjs` and `dev.mjs` (stubs that run the
+renderer from the package), `src/scripts/compose.js`,
 `src/styles/canvas.css`, and `src/styles/viewer.css` to the installed
 release: in a system scaffolded by `init` they are the toolkit's outright
 (`"plumbing": "toolkit"` in the record), so a local change to them is
@@ -330,9 +330,24 @@ an overview fragment); the
 sync refuses to run over uncommitted changes to the files it writes, and one
 that would fail `check` is rolled back. So: edit
 `system.css` and the pages freely, but leave the stock scripts
-and `viewer.css` alone unless the change is meant to stay local, and expect
-new planned pages after an upgrade, which are primitives to author, not
-mistakes to delete.
+and `viewer.css` alone unless the change is meant to stay local (an extra
+build step is a command in `timds.json` `workspace.after.build`, run after
+every stock build), and expect new planned pages after an upgrade, which are
+primitives to author, not mistakes to delete.
+
+Defaults this system never chose move through numbered starter steps, and
+the record keeps the `level` reached and the steps `declined`.
+`__TIMDS_CLI__ starter status` says how far behind the starter this system
+is, what is pending, and whether the renderer is the package's, a stock copy
+an earlier release left (`scripts/viewer.mjs`, removed by the next upgrade),
+or a copy kept because a renderer file was changed here (`renderer_kept`:
+move the extra steps to `workspace.after.build`, then
+`__TIMDS_CLI__ starter sync --force` the kept file). Upgrade applies every
+step that does not change what visitors see; a step that does (making the
+Use landing the front page at `/` when `home` is unset) waits for
+`__TIMDS_CLI__ starter migrate --accept home-landing` or `--decline
+home-landing`, a decision for whoever publishes the system. `check` warns
+until it is made.
 
 ## Offshoots and parent stock
 

@@ -177,7 +177,7 @@ async function transformDecodedOffshoot(source, {mode = 'full', systemId, name} 
       if (!bytes || bytes.mode === '120000' || sha256(bytes) !== digest) throw new Error(`The parent has customized toolkit plumbing: ${file}`);
       result.set(file, bytes);
     }
-    for (const file of ['scripts/build.mjs', 'scripts/check.mjs', 'scripts/dev.mjs', 'scripts/viewer.mjs']) if (!result.has(file)) throw new Error(`Structure offshoots require recorded ${file}`);
+    for (const file of ['scripts/build.mjs', 'scripts/check.mjs', 'scripts/dev.mjs']) if (!result.has(file)) throw new Error(`Structure offshoots require recorded ${file}`);
     for (const file of ['package.json', 'package-lock.json', '.timds/installation.json', '.timds/contract-layout.json', 'cloudflare.config.ts', 'vite.config.mjs', '.gitignore']) if (original.has(file)) result.set(file, original.get(file));
     if (original.has('.timds/installation.json')) set('.timds/installation.json', json({schemaVersion: 1, name: '@dtconcepts/timds', version: starter.version}));
     for (const file of stock?.paths || []) result.set(file, original.get(file));

@@ -85,7 +85,8 @@ test("an upgrade of a starter-adopted system opens its PR: the starter sync's wr
   for (const relative of ["src/formats.json", "scripts/brand-kit.mjs", "src/scripts/compose.js", "src/styles/canvas.css", "src/pages/digital", "src/pages/print", "src/pages/social", "src/pages/use"]) {
     await fs.rm(path.join(root, relative), {force: true, recursive: true});
   }
-  await fs.writeFile(path.join(root, STARTER_RECORD_FILE), `${JSON.stringify({...record, version: "0.1.1"}, null, 2)}\n`);
+  // An earlier release's record has no starter level.
+  await fs.writeFile(path.join(root, STARTER_RECORD_FILE), `${JSON.stringify({...record, version: "0.1.1", level: undefined, declined: undefined}, null, 2)}\n`);
   commit("Scaffold adopted under an earlier release"); git(["remote", "add", "origin", remote]); git(["push", "origin", "main"]);
   // The upgrade the workflow runs: it syncs the adopted starter on the way.
   const upgraded = await upgradeRepository(root);

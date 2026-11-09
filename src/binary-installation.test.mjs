@@ -175,25 +175,30 @@ test('stock draft recognition rejects custom scripts even when the snapshot reco
   assert.equal(await isStockWorkspace(root, await read(root, 'timds.json')), false);
 });
 
-test('stock draft recognition verifies the viewer helper but keeps older viewers compatible', async t => {
+test('stock draft recognition accepts the package renderer stubs and released copied renderers, never a changed helper', async t => {
   const root = await fixture(t);
   const manifest = await read(root, 'timds.json');
-  const helper = path.join(root, 'scripts/brand-kit.mjs');
-  const stock = await fs.readFile(helper);
-  assert.equal(await isStockWorkspace(root, manifest), true);
-  await fs.rm(helper);
-  assert.equal(await isStockWorkspace(root, manifest), false, 'a current viewer cannot run without its helper');
-  await fs.writeFile(helper, Buffer.concat([stock, Buffer.from('\nconsole.log("custom helper");\n')]));
-  const {createHash} = await import('node:crypto');
-  const record = await read(root, '.timds/starter.json');
-  record.files['scripts/brand-kit.mjs'] = createHash('sha256').update(await fs.readFile(helper)).digest('hex');
-  await fs.writeFile(path.join(root, '.timds/starter.json'), JSON.stringify(record));
-  assert.equal(await isStockWorkspace(root, manifest), false, 'a snapshot hash cannot approve executable helper changes');
-  await fs.writeFile(helper, stock);
-  assert.equal(await isStockWorkspace(root, manifest), true);
-  await fs.copyFile(path.join(packageRoot, 'src/fixtures/starter-before-formats/scripts/viewer.mjs'), path.join(root, 'scripts/viewer.mjs'));
-  await fs.rm(helper);
+  assert.equal(await isStockWorkspace(root, manifest), true, 'a fresh scaffold runs the packaged renderer through its stubs');
+  await assert.rejects(fs.access(path.join(root, 'scripts/viewer.mjs')), {code: 'ENOENT'});
+  // A system still at level 0 carries a released copied renderer beside released older scripts.
+  for (const name of ['build', 'check', 'viewer']) await fs.copyFile(path.join(packageRoot, `src/fixtures/starter-before-formats/scripts/${name}.mjs`), path.join(root, `scripts/${name}.mjs`));
   assert.equal(await isStockWorkspace(root, manifest), true, 'a recognized older viewer has no helper dependency');
+  // The last copied viewer imports its slot helper, which must be a released version too.
+  await fs.copyFile(path.join(packageRoot, 'src/fixtures/starter-renderer-0.1.496/viewer.mjs'), path.join(root, 'scripts/viewer.mjs'));
+  assert.equal(await isStockWorkspace(root, manifest), false, 'a current viewer cannot run without its helper');
+  const helper = await fs.readFile(path.join(packageRoot, 'src/brand-kit.mjs'));
+  await fs.writeFile(path.join(root, 'scripts/brand-kit.mjs'), helper);
+  assert.equal(await isStockWorkspace(root, manifest), true);
+  await fs.writeFile(path.join(root, 'scripts/brand-kit.mjs'), Buffer.concat([helper, Buffer.from('\nconsole.log("custom helper");\n')]));
+  assert.equal(await isStockWorkspace(root, manifest), false, 'a changed helper is not stock');
+  // Without the copied viewer, older scripts that import it are not runnable.
+  await fs.rm(path.join(root, 'scripts/viewer.mjs')); await fs.rm(path.join(root, 'scripts/brand-kit.mjs'));
+  assert.equal(await isStockWorkspace(root, manifest), false);
+  // Commands after the build are the system's own tools.
+  await fs.copyFile(path.join(packageRoot, 'templates/starter/scripts/build.mjs'), path.join(root, 'scripts/build.mjs'));
+  await fs.copyFile(path.join(packageRoot, 'templates/starter/scripts/check.mjs'), path.join(root, 'scripts/check.mjs'));
+  assert.equal(await isStockWorkspace(root, manifest), true);
+  assert.equal(await isStockWorkspace(root, {...manifest, workspace: {...manifest.workspace, after: {build: [['node', 'scripts/extra.mjs']]}}}), false);
 });
 
 test('binary global skill installation renders hosted instructions without npm bootstrapping', async t => {

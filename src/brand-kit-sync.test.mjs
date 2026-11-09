@@ -82,7 +82,9 @@ test('brand-kit init seeds every stock page once and records plumbing only, and 
   await fs.access(path.join(root, 'src/pages/brand/evidence.html'));
   assert.ok(!Object.hasOwn(record.files, 'src/copy.json'));
   assert.ok(!Object.keys(record.files).some(relative => relative.startsWith('src/pages/')));
-  assert.equal(await read('scripts/brand-kit.mjs'), await fs.readFile(path.join(packageRoot, 'src/brand-kit.mjs'), 'utf8'));
+  // The viewer and its slot helper are resolved from the package, not copied.
+  for (const relative of ['scripts/brand-kit.mjs', 'scripts/viewer.mjs']) await assert.rejects(fs.access(path.join(root, relative)), { code: 'ENOENT' }, relative);
+  assert.deepEqual([record.level, record.declined], [3, []]);
   for (const relative of ['src/pages/digital', 'src/designs/website', 'src/pages/print/letterheads.html']) {
     await assert.rejects(fs.access(path.join(root, relative)), { code: 'ENOENT' });
   }
@@ -96,7 +98,7 @@ test('brand-kit init seeds every stock page once and records plumbing only, and 
   assert.equal(await read('.timds/starter.json'), before);
   assert.equal(git(root, 'status', '--porcelain'), '');
   assert.throws(() => stockTemplatePath('src/pages/index.html', 'brand-kit'), /is not a starter file the toolkit writes/);
-  assert.equal(stockTemplatePath('scripts/brand-kit.mjs', 'brand-kit'), path.join(packageRoot, 'src/brand-kit.mjs'));
+  assert.throws(() => stockTemplatePath('scripts/brand-kit.mjs', 'brand-kit'), /is not a starter file the toolkit writes/);
 });
 
 test('a fresh brand kit passes check, and neither starter sync nor upgrade writes or reports a kit page', async t => {
@@ -210,7 +212,7 @@ test('kit pages and builder-owned data stay outside the dirty guard; plumbing, c
   assert.equal(await read(page), `${before}\n<!-- draft change -->\n`);
   const paths = starterPaths('brand-kit');
   assert.deepEqual(paths.filter(relative => relative.startsWith('src/pages/')), []);
-  assert.deepEqual(paths.sort(), [...starterPlumbingFiles.map(([relative]) => relative), 'src/site.json', 'src/formats.json', 'src/layout.html', '.timds/starter.json'].sort());
+  assert.deepEqual(paths.sort(), [...starterPlumbingFiles.map(([relative]) => relative), 'scripts/viewer.mjs', 'scripts/brand-kit.mjs', 'src/site.json', 'src/formats.json', 'src/layout.html', '.timds/starter.json'].sort());
   assert.ok(!paths.includes('src/copy.json'));
   await write(page, before);
   await fs.appendFile(path.join(root, 'src/layout.html'), '\n<!-- draft layout -->\n');
@@ -220,9 +222,12 @@ test('kit pages and builder-owned data stay outside the dirty guard; plumbing, c
 test('a failed brand-kit sync restores its shared modules and record together and never recreates a removed kit page', async t => {
   const { root, read, write } = await fixture(t);
   const record = JSON.parse(await read('.timds/starter.json'));
-  const oldModule = '// earlier shared slot module\n';
+  // A kit scaffolded before the renderer moved into the package: level 0, with the copied slot helper at its released bytes.
+  const oldModule = await fs.readFile(path.join(packageRoot, 'src/brand-kit.mjs'), 'utf8');
   await write('scripts/brand-kit.mjs', oldModule);
   record.files['scripts/brand-kit.mjs'] = hash(oldModule);
+  delete record.level;
+  delete record.declined;
   await write('.timds/starter.json', json(record));
   const originalRecord = await read('.timds/starter.json');
   await fs.rm(path.join(root, 'src/pages/index.html'));
@@ -232,6 +237,10 @@ test('a failed brand-kit sync restores its shared modules and record together an
   await assert.rejects(fs.access(path.join(root, 'src/pages/index.html')), { code: 'ENOENT' });
   const synced = await syncStarter({ designSystemRoot: root, version });
   assert.deepEqual(synced.written, ['scripts/brand-kit.mjs']);
+  await assert.rejects(fs.access(path.join(root, 'scripts/brand-kit.mjs')), { code: 'ENOENT' }, 'the released helper left with the renderer-package step');
+  // The ordinary starter's defaults steps do not apply to a kit: they settle without a change and the kit reads as current.
+  assert.deepEqual(synced.levels.steps.map(step => [step.step, step.outcome]), [['renderer-package', 'applied'], ['use-start-title', 'skipped'], ['home-landing', 'skipped']]);
+  assert.deepEqual([synced.status.level, synced.status.behind, synced.status.pending], [3, 0, []]);
   await assert.rejects(fs.access(path.join(root, 'src/pages/index.html')), { code: 'ENOENT' }, 'sync never recreates a removed kit page');
 });
 
@@ -248,7 +257,7 @@ test('structure shoots preserve the selected brand-kit starter and its explicitl
   await quiet(() => shootOffshoot({ destination: child, source, mode: 'structure', systemId: 'example/child', check: async target => { checked = await checkWorkspace(target); } }));
   assert.equal((await readStarterRecord(child)).starter, 'brand-kit');
   for (const relative of brandKitStockPaths) assert.equal(await fs.readFile(path.join(child, relative), 'utf8'), await read(relative), relative);
-  assert.equal(await fs.readFile(path.join(child, 'scripts/brand-kit.mjs'), 'utf8'), await read('scripts/brand-kit.mjs'));
+  await assert.rejects(fs.access(path.join(child, 'scripts/brand-kit.mjs')), { code: 'ENOENT' });
   await assert.rejects(fs.access(path.join(child, 'src/pages/brand/evidence.html')), { code: 'ENOENT' });
   await assert.rejects(fs.access(path.join(child, 'src/designs')), { code: 'ENOENT' });
   assert.deepEqual(checked.designs, { enabled: true, designCount: 0, pageCount: 0, stateCount: 0, journeyCount: 0, warnings: [] });

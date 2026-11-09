@@ -4,8 +4,8 @@
 // the site itself. A reader of the raw HTML sees the head: a comment that
 // names the entry point and a link to it. A reader of the extracted text, which
 // drops the head, sees one visible line at the end of the body. The starter
-// viewer writes the same two on every page it renders (templates/starter/
-// scripts/viewer.mjs, with the page's own Markdown mirror); the pages the
+// viewer writes the same two on every page it renders (src/viewer.mjs,
+// with the page's own Markdown mirror); the pages the
 // toolkit renders itself, the changelog and the designs directory, take theirs
 // from here. `robotsText` is the robots.txt extract writes at the site root
 // for a crawler that reads it first.

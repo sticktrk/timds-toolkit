@@ -4,7 +4,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { initializeRepository, checkWorkspace } from './core.mjs';
+import { initializeRepository, checkWorkspace, workspaceCommandEnvironment } from './core.mjs';
 import { brandKitCopySamples } from './brand-kit.mjs';
 
 const json = value => `${JSON.stringify(value, null, 2)}\n`;
@@ -18,7 +18,7 @@ async function fixture(t) {
   const write = async (file, text) => { await fs.mkdir(path.dirname(path.join(root, file)), { recursive: true }); await fs.writeFile(path.join(root, file), text); };
   const fragment = await read('src/pages/brand/color.html');
   const page = text => write('src/pages/brand/color.html', `${fragment}\n<section class="block" id="slot-fixture"><h2>Slot fixture</h2><figure>${text}</figure></section>\n`);
-  const run = () => execFileSync(process.execPath, ['scripts/build.mjs'], { cwd: root, encoding: 'utf8', stdio: 'pipe' });
+  const run = () => execFileSync(process.execPath, ['scripts/build.mjs'], { cwd: root, encoding: 'utf8', env: workspaceCommandEnvironment(), stdio: 'pipe' });
   return { root, read, write, page, run };
 }
 

@@ -5,14 +5,17 @@
 // writes were reverted while the record kept the newer hash, is otherwise
 // treated as customized for good. This walks the release tags and fails when
 // a shipped version is neither the current template nor in
-// `legacyStarterFileHashes`. It needs the tags, so CI checks out full history.
+// `legacyStarterFileHashes`. A retired file (`retiredStarterFiles`, the copied
+// renderer a starter step removes) has no current template: every version up
+// to the last release that shipped it must be listed, since the step removes
+// only those. It needs the tags, so CI checks out full history.
 //
 //   node scripts/check-starter-history.mjs           # report and fail on a gap
 //   node scripts/check-starter-history.mjs --print   # also print the missing entries
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { legacyStarterFileHashes, starterFragments, starterPlumbingFiles } from "../src/starter.mjs";
+import { legacyStarterFileHashes, retiredStarterFiles, starterFragments, starterPlumbingFiles } from "../src/starter.mjs";
 
 const git = (...args) => execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
 const sha256 = (text) => createHash("sha256").update(text).digest("hex");
@@ -30,6 +33,25 @@ for (const [relative, templateName] of [...starterPlumbingFiles, ...starterFragm
     try { text = git("show", `${tag}:${repoPath(templateName)}`); } catch { continue; }
     const hash = sha256(text);
     if (hash === current || known.has(hash)) continue;
+    const entry = missing.get(relative) ?? new Map();
+    if (!entry.has(hash)) entry.set(hash, tag);
+    missing.set(relative, entry);
+  }
+}
+
+const released = (tag, last) => {
+  const parts = (version) => version.replace(/^v/, "").split(".").map(Number);
+  const [a, b] = [parts(tag), parts(last)];
+  for (let index = 0; index < 3; index += 1) if (a[index] !== b[index]) return a[index] < b[index];
+  return true;
+};
+for (const [relative, repositoryPath, last] of retiredStarterFiles) {
+  const known = new Set(legacyStarterFileHashes.get(relative) ?? []);
+  for (const tag of tags.filter((candidate) => released(candidate, last))) {
+    let text;
+    try { text = git("show", `${tag}:${repositoryPath}`); } catch { continue; }
+    const hash = sha256(text);
+    if (known.has(hash)) continue;
     const entry = missing.get(relative) ?? new Map();
     if (!entry.has(hash)) entry.set(hash, tag);
     missing.set(relative, entry);

@@ -261,15 +261,18 @@ test("syncStarter holds the stock pages back while the renderer is this system's
     assert.match(report.note, /^held back: scripts\/viewer\.mjs is this system's own/, relative);
     await assert.rejects(fs.access(path.join(root, ...relative.split("/"))), /ENOENT/, relative);
   }
-  for (const relative of ["scripts/build.mjs", "scripts/check.mjs"]) {
+  for (const relative of ["scripts/build.mjs", "scripts/check.mjs", "scripts/dev.mjs"]) {
     const report = first.files.find((file) => file.path === relative);
     assert.equal(report.status, "skipped", relative);
     assert.match(report.note, /^held back: scripts\/viewer\.mjs is this system's own and the stock version expects the stock renderer beside it/, relative);
   }
-  assert.ok(first.written.includes("scripts/dev.mjs"), "plumbing outside the renderer is still brought in");
-  // Replacing the renderer lets the next sync bring the stock pages in.
+  assert.ok(first.written.includes("src/styles/canvas.css"), "plumbing outside the renderer is still brought in");
+  assert.deepEqual([first.levels.level, first.status.renderer, first.status.kept, first.status.conflicts], [0, "kept", ["scripts/viewer.mjs"], [{ step: "renderer-package", path: "scripts/viewer.mjs", reason: "renderer_kept" }]]);
+  // Naming the customized copy removes it: the stubs, the package renderer and the stock pages come in.
   const second = await syncStarter({ designSystemRoot: root, force: ["scripts/viewer.mjs"], version: "0.0.0" });
-  assert.equal(second.files.find((file) => file.path === "scripts/viewer.mjs").status, "updated");
+  assert.deepEqual(second.files.find((file) => file.path === "scripts/viewer.mjs"), { note: "removed with --force", path: "scripts/viewer.mjs", status: "removed" });
+  await assert.rejects(fs.access(viewer), /ENOENT/);
+  assert.deepEqual([second.levels.level, second.status.renderer], [2, "package"]);
   for (const [relative] of starterManagedFragments) {
     const report = second.files.find((file) => file.path === relative);
     assert.ok(["created", "skipped"].includes(report.status), `${relative}: ${report.status}`);

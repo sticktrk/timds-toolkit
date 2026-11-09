@@ -79,7 +79,7 @@ tokens; the rest are declared as planned and built once someone writes them.
 | `src/layout.html` | The shell every page shares |
 | `src/styles/system.css` | The system's own styles, the base styles and components a product adopts |
 | `src/assets/` | Small optimized assets such as logos, copied into the artifact |
-| `scripts/build.mjs`, `dev.mjs`, `check.mjs`, `viewer.mjs`, `brand-kit.mjs`, `src/scripts/compose.js`, `src/styles/canvas.css`, `src/styles/viewer.css` | Shared build, renderer, slot data and composer plumbing, the format preview engine, and the documentation chrome, all managed by starter sync and replaced on upgrade |
+| `scripts/build.mjs`, `dev.mjs`, `check.mjs`, `src/scripts/compose.js`, `src/styles/canvas.css`, `src/styles/viewer.css` | The build, dev and check stubs that run the TimDS renderer from the package, composer plumbing, the format preview engine, and the documentation chrome, all managed by starter sync and replaced on upgrade (an extra build step goes in `timds.json` `workspace.after.build`) |
 | `CHANGELOG.md` | Release notes, rendered at `/changelog/`; add to `## Unreleased`, leading with the area the change touches |
 | `media-local/` | Ignored full-resolution originals, staged by `assets add` |
 
@@ -130,7 +130,9 @@ the installed release (they are TimDS's in a fresh scaffold; a local change
 to them is replaced and reported) and appends new views, planned pages, and
 formats without touching what this system declares. A
 system scaffolded before the record existed opts in once with
-`__TIMDS_CLI__ starter sync`.
+`__TIMDS_CLI__ starter sync`. `__TIMDS_CLI__ starter status` reports the
+starter level; a step that changes what visitors see waits for
+`__TIMDS_CLI__ starter migrate --accept ID` or `--decline ID`.
 
 ## Offshoots
 
