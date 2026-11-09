@@ -48,8 +48,9 @@ standalone system, `design-system/` in an embedded one.
    Where the managed standalone release workflow or `scripts/release.mjs`
    runs, releases are commits titled `Release <version>` on the default
    branch; find the pinned one with `git log --grep "^Release <version>$"`.
-   A hosted system has no Git history in the session: `timds history` and
-   the published `changelog.json` are its record.
+   If you use TimDS Cloud: a hosted system has no Git history in the
+   session; `timds history` and the published `changelog.json` are its
+   record.
 
 If the product already pins the current release and nothing is unreleased,
 say so and stop.

@@ -26,16 +26,9 @@ retain their declared prerequisites. The agent runs these steps for the designer
    `timds-edit-design-system` skill holds the editing procedure. Follow both.
    Paths below are relative to the Design System root: the repository in a
    standalone system, `design-system/` in an embedded one.
-2. If `timds.json` has a hosted provider or `.timds/session.json` exists,
-   this is a hosted workspace: use `timds status` and keep the session, do
-   not run Git commands, and follow the installed hosted skill for that
-   system (`timds-<system>`, which `timds skills install` renders) to sign
-   in, start or join a session, and claim paths. Run the CLI there as
-   `npx --yes @dtconcepts/timds@latest <command>` (a session folder has no
-   package script for it) and skip step 3 and the branch below. When no session exists
-   yet, that skill's start or join step comes first.
-   For a Git checkout, run `git status --short` and keep every pre-existing
-   change. If it is on the default branch, create `design-system/<change>` named for what
+2. Run `git status --short` and keep every pre-existing
+   change (a hosted workspace has no Git; see "If you use TimDS Cloud"
+   below). If it is on the default branch, create `design-system/<change>` named for what
    the designer wants to do (`design-system/pricing-page`). If it is already
    on a `design-system/` branch, stay on it unless the designer is starting
    something unrelated.
@@ -57,6 +50,17 @@ retain their declared prerequisites. The agent runs these steps for the designer
    workspace's server. The starter server does not watch files: after every
    edit you make, rerun `npm run timds -- check` and tell the designer to
    reload. A framework dev server may reload on its own; say which applies.
+
+### If you use TimDS Cloud
+
+If `timds.json` has a hosted provider or `.timds/session.json` exists, this
+is a hosted workspace: use `timds status` and keep the session, do not run
+Git commands, and follow the installed hosted skill for that system
+(`timds-<system>`, which `timds skills install` renders) to sign in, start or
+join a session, and claim paths; when no session exists yet, that skill's
+start or join step comes first. Run the CLI there as
+`npx --yes @dtconcepts/timds@latest <command>` (a session folder has no
+package script for it), and skip step 3 and the branch in step 2.
 
 ## Tell the designer where things stand
 

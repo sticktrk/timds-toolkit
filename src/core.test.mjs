@@ -1783,7 +1783,9 @@ test("whoami prints the principal and join prints the workspace and next steps",
 
 test("the edit skill steers hosted sessions to the CLI, never MCP", async () => {
   const skill = await fs.readFile(fileURLToPath(new URL("../skills/timds-edit-design-system/SKILL.md", import.meta.url)), "utf8");
-  const hosted = skill.slice(skill.indexOf("## Hosted sessions"));
+  assert.match(skill, /## If you use TimDS Cloud[\s\S]*references\/timds-cloud\.md/);
+  const reference = await fs.readFile(fileURLToPath(new URL("../skills/timds-edit-design-system/references/timds-cloud.md", import.meta.url)), "utf8");
+  const hosted = reference.slice(reference.indexOf("## Hosted sessions"), reference.indexOf("## Publish media to the host"));
   assert.doesNotMatch(hosted, /\bMCP\b|timds_[a-z]/);
   assert.match(hosted, /npx --yes @dtconcepts\/timds@latest <command>/);
   assert.match(hosted, /`npm run timds -- <command>`/);
