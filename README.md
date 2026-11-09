@@ -441,12 +441,15 @@ opts in once with `timds starter sync`; every `upgrade` then re-syncs it.
 
 ```bash
 npm run timds -- starter sync            # adopt once, on a feature branch; in a terminal it asks about each customized stock file
-npm run timds -- starter sync --force scripts/viewer.mjs   # non-interactive: replace the named customized stock script or stylesheet (never a fragment)
+npm run timds -- starter sync --force scripts/build.mjs    # non-interactive: replace the named customized stock script or stylesheet (never a fragment)
+npm run timds -- starter status                            # starter level, pending steps, conflicts, renderer
+npm run timds -- starter migrate --accept home-landing     # decide a step that changes what visitors see (or --decline it)
 ```
 
-Inside the boundary the sync touches three kinds of things. The stock
-`scripts/build.mjs`, `check.mjs`, `dev.mjs`, `viewer.mjs`, `brand-kit.mjs`,
-`src/scripts/compose.js`, `src/styles/canvas.css`, and
+Inside the boundary the sync touches four kinds of things. The stock
+`scripts/build.mjs`, `check.mjs` and `dev.mjs` (stubs that call the renderer
+in the package, `@dtconcepts/timds/viewer`), `src/scripts/compose.js`,
+`src/styles/canvas.css`, and
 `src/styles/viewer.css` are plumbing (`starterPlumbingFiles` in
 `src/starter.mjs`), and the record's `plumbing` mode says who a local change
 to them belongs to. A system scaffolded by `init` is `"toolkit"`: every
@@ -478,7 +481,29 @@ file it wrote when that check fails, so a system is never left between two
 structures, and `upgrade` runs it before touching its own managed files so a
 failed sync aborts the upgrade cleanly. The
 report is a per-file status table (`created`, `updated`, `current`,
-`customized`, `skipped`) and the catalog changes it merged.
+`customized`, `skipped`, `removed`) and the catalog changes it merged.
+
+The fourth kind is the starter level. Defaults a system never chose (an old
+stock title, a missing front page, a copied renderer) change through numbered
+steps declared as data: `.timds/starter.json` records the `level` reached and
+the steps `declined`, `upgrade` settles every step that is not visible or has
+nothing to change, and a step that changes what visitors see waits for
+`starter migrate --accept` or `--decline`. The renderer itself is no longer
+copied: the first step removes a stock `scripts/viewer.mjs` and
+`scripts/brand-kit.mjs`, and a system that needs an extra build step declares
+it as a command in `timds.json`:
+
+```json
+"workspace": {
+  "build": ["node", "scripts/build.mjs"],
+  "after": { "build": [["node", "scripts/build-runtime.mjs"]] }
+}
+```
+
+The commands run in order from the design-system root after every stock build
+(`build`, `dev`, and the build `check` runs), and a non-zero exit fails it.
+See [upgrading in depth](docs/upgrade.md#starter-levels) for the rules and
+the status `starter status --json` reports.
 
 ### The derived layer is the contract consumers read
 

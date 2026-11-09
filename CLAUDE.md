@@ -132,8 +132,9 @@ classes, or relative references), and serializes `designs.json`. A design's
 design declares none. `check`
 always builds designs itself after the workspace build; the starter build
 calls the same function so `dev` shows them. `timds designs init` is the
-migration for systems scaffolded without them; it replaces the stock build
-and viewer scripts through the same hash check `starter sync` uses.
+migration for systems scaffolded without them; it replaces a stock build
+script with the stub through the same hash check `starter sync` uses, unless
+a copied renderer file beside it is the system's own.
 
 `changelog.mjs` owns the release history: it reads the client's
 `CHANGELOG.md`, renders `dist/changelog/` (linked from the viewer's version
@@ -241,7 +242,13 @@ lifecycle belong to the host.
   baseline in `.timds/starter.json` (the catalogs are serialized in the
   starter's one-entry-per-line style so diffs stay reviewable), managed
   overview fragments written for added or planned pages, a missing stylesheet
-  link inserted into the layout, then `check` with full rollback on failure.
+  link inserted into the layout, then the numbered starter steps above the
+  recorded `level` (`starterSteps`, data from a closed vocabulary, applied by
+  the one interpreter in `src/starter-steps.mjs` and published as
+  `describeToolkitRelease().starterSteps`), then `check` with full rollback on
+  failure. `timds starter migrate --accept|--decline ID` decides a visible
+  step; `timds starter status` reports level, pending, declined, conflicts
+  and whether the renderer is the package's, the stock copy or a kept one.
   The existing `home` selection, including absence, stays authored routing;
   sync and parent feeds never move the front page.
   `init` records a fresh scaffold as adopted. `src/fixtures/starter-before-
@@ -276,12 +283,15 @@ copy samples, stock declaration, styles, layout, pages and empty Designs
 structure. `init --starter brand-kit` records that kind; it never copies the
 ordinary starter's authored page tree or sample design into the overlay.
 `src/brand-kit.mjs` is the public pure-data slot contract, exported as
-`@dtconcepts/timds/brand-kit` with `.d.mts` declarations. Init and starter sync
-copy it to managed `scripts/brand-kit.mjs`; the viewer imports that copy, so
-stock samples and guidance work before dependencies are installed. Slot
-rules, samples, page ids and stock paths have one source. The starter
-is client-owned once copied, except the plumbing and catalogs `starter sync`
-keeps current (see above): `scripts/viewer.mjs` renders
+`@dtconcepts/timds/brand-kit` with `.d.mts` declarations; the package viewer
+imports it, so slot rules, samples, page ids and stock paths have one source.
+The starter is client-owned once copied, except the plumbing and catalogs
+`starter sync` keeps current (see above). The renderer is not copied:
+`scripts/build.mjs`, `check.mjs` and `dev.mjs` are stubs that call
+`@dtconcepts/timds/viewer` (`src/viewer.mjs`) with the system's root, falling
+back to the running CLI's renderer (`TIMDS_VIEWER_MODULE`, set for workspace
+commands) before the first install, and the build then runs
+`timds.json` `workspace.after.build` commands. `src/viewer.mjs` renders
 `src/site.json` (views and pages, authored or `planned`), `src/layout.html`,
 and the fragments under `src/pages/` into `dist/`, filling `{{tokens:GROUP}}`
 tables from `tokens.json` and `{{formats:GROUP}}` tables and `{{canvas:ID}}`

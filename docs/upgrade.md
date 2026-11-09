@@ -14,13 +14,17 @@ replace), the publishing defaults available, the designs setup state, and the
 check the upgrade ran itself. A committed customization of a starter file is
 not a failure: the file is kept, listed under `starter.customized` (and
 `starter.replaceable` when `starter sync --force` may replace it), and the
-result is still `"ok": true`. The viewer, build and check scripts are one
-renderer: while one of them is customized and kept, the others' refreshes and
-every refreshed or new stock page (the Digital, Social and Print overviews and
-the Use pages) are listed as `skipped` with a note naming the kept file, since
-a stock page the kept renderer has never seen may use placeholders it cannot
-build; `starter sync --force` on the kept file brings them in on the next
-sync. A refused or failed upgrade exits non-zero and
+result is still `"ok": true`. The `starter` object also carries the starter
+status described below (`level`, `current`, `floor`, `behind`, `renderer`,
+`kept`, `pending`, `declined`, `conflicts`), the files the sync left at stock
+as `currentFiles`, the copied renderer files it removed as `removed`, and the
+steps it ran as `levels`. While the system still has its copied renderer, the
+stub build, check and dev scripts and that copy are one renderer: while one of
+them is customized and kept, the others' refreshes and every refreshed or new
+stock page (the Digital, Social and Print overviews and the Use pages) are
+listed as `skipped` with a note naming the kept file, since a stock page the
+kept renderer has never seen may use placeholders it cannot build; `starter
+sync --force` on the kept file brings them in on the next sync. A refused or failed upgrade exits non-zero and
 still prints `{ "ok": false, "error": { "code": "...", "message": "..." } }`,
 with `error.step` naming the command a `--version` selection stopped at. The
 codes a host job can branch on:
@@ -35,7 +39,89 @@ codes a host job can branch on:
 | `check_failed` | The post-upgrade check failed: the starter sync was rolled back, or `timds check` or `check:timds-upgrade` failed after a selection. |
 | `upgrade_failed` | Anything else, including the selected release's own `upgrade` failing without a code of its own. |
 
-The prose output is unchanged without the flag.
+The prose output is unchanged without the flag, apart from the starter
+status lines it ends with.
+
+## Starter levels
+
+A system can be on the newest toolkit and behind the starter. Upgrade keeps
+code current; the starter level says how far the system's own defaults have
+moved with it. `.timds/starter.json` records `level` (absent means 0) and
+`declined` (the ids of steps settled by decision). The toolkit declares the
+level a fresh scaffold starts at and `floor`, the oldest level it still
+builds; `check` fails below the floor.
+
+Each level is one numbered step, declared as data in the release metadata
+(`describeToolkitRelease().starterSteps`, see
+[release metadata](release-metadata.md#starter-steps)) and applied by one
+interpreter (`src/starter-steps.mjs`). Steps above the recorded level are
+evaluated in order on the tree as it stands after the sync and the earlier
+steps:
+
+1. A step for another starter kind (`starters`) or layer, or one whose
+   requirements do not hold, does not apply: it settles with nothing written
+   (`skipped`). An offshoot (`.timds/parent.json`) takes `code` steps only;
+   its structure comes from its parent through `feed`.
+2. Otherwise its effective operations are a `remove-file` whose file exists
+   and a field move whose current value is in `from` (`null` meaning absent).
+   A field holding any other value is the system's own: kept and reported.
+3. A `remove-file` whose file exists with bytes no listed hash matches is a
+   conflict. The level stops there.
+4. With no effective operation the step settles (`applied`, nothing changed).
+5. With effective operations a step that is not visible applies them.
+6. With effective operations a visible step needs a decision: `timds starter
+   migrate --accept ID` applies it, `--decline ID` (declinable steps only)
+   records it in `declined` and settles it, and otherwise the level stops
+   there and the step is pending.
+
+`upgrade` and `starter sync` run the same steps and never accept, so they
+never apply a visible step; they do settle one that does not apply or has
+nothing to change. A step's writes are part of the sync, so a failed check
+rolls them back with everything else.
+
+| Level | Step | Layer | Visible | What it does |
+| --- | --- | --- | --- | --- |
+| 1 | `renderer-package` | code | no | Removes `scripts/viewer.mjs` and `scripts/brand-kit.mjs` at a released stock hash. While a renderer file (the stub scripts or the copy) is customized and kept, the system keeps its whole copied renderer and the step stops with the `renderer_kept` conflict. |
+| 2 | `use-start-title` | defaults | no | While `src/pages/use/index.html` is the stock page: the Use view's own page title and summary advance from an earlier stock value ("Using the system", "Compose"), and `layout: "landing"` is set when absent. |
+| 3 | `home-landing` | defaults | yes, declinable | When the Use view's own page is authored with the landing layout: `home: "use"` is set when `home` is absent. |
+
+```bash
+npm run timds -- starter status [--json]                       # level, pending, declined, conflicts, renderer
+npm run timds -- starter migrate --accept home-landing [--json] # apply a visible step
+npm run timds -- starter migrate --decline home-landing         # settle it by decision
+```
+
+`starter status --json`, the `starter` section of `doctor --json` and the
+upgrade report carry the same status:
+
+```json
+{
+  "starter": "starter", "plumbing": "recorded",
+  "level": 2, "current": 3, "floor": 0, "behind": 1,
+  "renderer": "package",
+  "kept": [],
+  "pending": [{ "level": 3, "id": "home-landing", "visible": true, "declinable": true }],
+  "declined": [],
+  "conflicts": []
+}
+```
+
+`renderer` is `package` (the stub scripts call `@dtconcepts/timds/viewer`),
+`copied` (the stock copied renderer is still in the tree, before
+`renderer-package` settles) or `kept` (a renderer file is customized; the
+paths are in `kept`). `pending` lists the steps above the recorded level that
+apply to this kind of system and are not declined. A conflict is `{ step,
+path, reason }`. `check` warns, without failing, on what a sync would settle,
+on a visible step waiting for a decision, on conflicts and on a kept renderer,
+and on a view labelled like an entry the viewer adds to the app bar itself
+(`Designs`).
+
+A system with a customized build script keeps building with its copied
+renderer. Move its extra steps to `workspace.after.build` in `timds.json`
+(argv arrays, run in order from the design-system root after every stock
+build, failing it on a non-zero exit), then `starter sync --force
+scripts/build.mjs` gives the build back to the package and the next sync
+settles `renderer-package`.
 
 ## One dependency selection
 

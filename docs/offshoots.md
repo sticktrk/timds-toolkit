@@ -153,7 +153,10 @@ the two bookkeeping records can change. Tokens, media, designs, Evidence and
 every file the parent does not declare are never copied.
 Plumbing follows `.timds/starter.json`'s ownership mode: `toolkit` replaces
 and reports changes; `recorded` keeps a customized file unless the terminal
-prompt approves replacement or `--force scripts/viewer.mjs` names it.
+prompt approves replacement or `--force scripts/build.mjs` names it.
+Ordinary starter sync and upgrade take only the `code` starter steps on an
+offshoot (the copied renderer's removal); `defaults` steps run on the parent
+and reach the child through `feed`, so they settle on the child as skipped.
 In full mode, customized parent plumbing that no longer matches its recorded
 hash is authored source: feed reports and skips it while merging catalogs.
 Force cannot copy it. Structure mode continues to require verified plumbing.

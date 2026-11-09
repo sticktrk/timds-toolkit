@@ -53,6 +53,9 @@ This export always describes **npm** output, including hosted skill rendering.
   and `operation`; parameterized operations also list their `parameters`.
 - `symlinks`: `.claude/skills`, target `../.agents/skills`, mode `120000`, and
   the `create-if-absent` policy shared with initialization and upgrade.
+- `starterSteps`: `{level, floor, steps}`, the starter level a fresh scaffold
+  of this release starts at, the oldest level it builds, and every starter
+  step as data. See [Starter steps](#starter-steps).
 - `generated`: version metadata records and package initialization inputs,
   separate from resource content. These are declarations, not pre-rendered
   records or an exhaustive inventory of a built scaffold.
@@ -67,7 +70,7 @@ from the same definitions that starter sync and skill installation use.
 
 | Policy | Meaning |
 | --- | --- |
-| `starter-plumbing` | Toolkit-owned when the starter record says `plumbing: "toolkit"`; otherwise replace only recognized stock hashes, subject to the existing sync policy. |
+| `starter-plumbing` | Toolkit-owned when the starter record says `plumbing: "toolkit"`; otherwise replace only recognized stock hashes, subject to the existing sync policy. The build, check and dev scripts are stubs that call `@dtconcepts/timds/viewer`; the renderer is no longer copied, so `scripts/viewer.mjs` and `scripts/brand-kit.mjs` are not rendered (the `renderer-package` step removes them). |
 | `stock-fragment` | Ordinary starter pages; refresh only while unchanged. Customized fragments are authored and are never force-replaced. |
 | `managed-skill` | The six design-system skills copied by init/upgrade. |
 | `hosted-skill` | Parameterized hosted skill; require explicit system identity before trusting any output path/hash. |
@@ -139,6 +142,43 @@ separately from seed resource changes, generated records and `toolkit.version`.
 A version-only record change must not be presented as an authored-content
 change. The selected package's npm integrity remains a separate provenance
 field in the host's artifact.
+
+## Starter steps
+
+`starterSteps.steps` lists the numbered steps from level 1 to
+`starterSteps.level` without gaps. Each is `{level, id, layer, visible,
+declinable, starters, requires, operations}`: `layer` is `code` (every
+system, offshoots included) or `defaults` (only the starter kinds in
+`starters`, never an offshoot). The vocabulary is closed:
+
+| Operation | Shape | Meaning |
+| --- | --- | --- |
+| `remove-file` | `{op, path, sha256}` | The file leaves only when the SHA-256 of its exact bytes (lowercase hex) is in `sha256`, which lists every stock version a release shipped at that path. Any other content is a conflict. |
+| `set-site-field` | `{op, field, value, from}` | A top-level `src/site.json` field moves to `value` when its current value is in `from` (`null` means absent); otherwise it is kept. Never `views`. |
+| `set-page-field` | `{op, page, field, value, from}` | The same for one field of page `page`: `view` is that view's own page (empty or missing slug), `view/slug` another page. Never `slug` or `pages`. |
+
+| Requirement | Shape | Meaning |
+| --- | --- | --- |
+| `stock-file` | `{check, path}` | The file equals this release's rendered managed bytes (`renderToolkitManagedFiles`). |
+| `authored-page` | `{check, page}` | The page is declared and not `planned`. |
+| `page-field` | `{check, page, field, equals}` | The page's field equals `equals`. |
+
+The toolkit's `starter sync`, `upgrade` and `starter migrate` apply exactly
+these definitions through one interpreter, so a host can verify a candidate
+change from the data alone: a level that crosses a step shows that step's
+effective operations (a `remove-file` whose prior bytes match, a field move
+whose prior value is in `from`), crosses a visible step only when the step had
+none, crosses a step whose requirements fail or whose `starters`/layer do not
+fit the system unchanged, and leaves `declined` as it was. A step that settles
+with nothing to change is recorded by `level` alone; `declined` is written as
+`[]` when empty. [Upgrading in depth](upgrade.md#starter-levels) describes the
+rules and the status a system reports.
+
+`package.json` `hostContract` names what a host must implement to accept this
+release's upgrades. It is `2` since the starter steps: an upgrade may now
+write the stub scripts, remove the copied renderer files listed above, and
+record `level` and `declined`. A new operation or requirement raises it, so a
+host that does not know it holds the release instead of guessing.
 
 ## Compatibility and verification
 

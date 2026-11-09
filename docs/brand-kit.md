@@ -261,8 +261,12 @@ It does not regenerate the other stock pages. `src/brand-kit.mjs`, exported as
 `@dtconcepts/timds/brand-kit`, supplies each slot's key, group, kind, source,
 assumption rule, guidance, sample, default label and owning page. It also
 exports the foundation and copy samples, views, authored/planned page ids,
-stock paths and treatment pairs. The renderer uses this same module, copied
-as managed `scripts/brand-kit.mjs`, so the pages and a pipeline read one list.
+stock paths and treatment pairs. The package renderer (`@dtconcepts/timds/viewer`) imports this same module,
+so the pages and a pipeline read one list. Kits scaffolded before the
+renderer moved into the package carry a copy as `scripts/brand-kit.mjs`; the
+`renderer-package` starter step removes it at a released stock hash. The
+ordinary starter's `defaults` steps do not apply to a kit and settle as
+skipped.
 
 ### Values and labels
 

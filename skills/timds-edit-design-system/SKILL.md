@@ -242,8 +242,8 @@ the reference the port must match, never the production site itself.
 
 ## The starter is synced by upgrade
 
-`.timds/starter.json` records the starter plumbing (`scripts/build.mjs`,
-`check.mjs`, `dev.mjs`, `viewer.mjs`, `brand-kit.mjs`,
+`.timds/starter.json` records the starter plumbing (the `scripts/build.mjs`,
+`check.mjs` and `dev.mjs` stubs that run the renderer from the package,
 `src/scripts/compose.js`, `src/styles/canvas.css`,
 `src/styles/viewer.css`), the views in `src/site.json`, the formats in
 `src/formats.json`, and the Digital, Social, and Print overview fragments and
@@ -269,7 +269,22 @@ existed opts in once with `npm run timds -- starter sync` on a feature
 branch, then reviews the diff and runs `check`. Treat planned pages that
 appear after an upgrade as primitives to author. When a change needs a stock
 script, prefer `tokens/*.json`, `system.css`, and the pages; a local script
-change leaves that file behind on every later upgrade.
+change leaves that file behind on every later upgrade. An extra build step is
+a command in `timds.json` `workspace.after.build` (argv arrays run from the
+design-system root after every stock build), never an edit to the build
+script.
+
+The record also keeps the starter `level` and the steps `declined`. Run
+`starter status` (`--json` for the machine form) to see what is pending, in
+conflict, or kept. `renderer_kept` means a renderer file was changed here and
+the system still builds with its copied renderer: move the change to
+`workspace.after.build`, then `starter sync --force <path>`. Upgrade settles
+every step that does not change what visitors see. A visible step (such as
+`home-landing`, which makes the Use landing the front page when `home` is
+unset) waits for `starter migrate --accept <id>` or `--decline <id>`: ask the
+person who publishes the system which, and run it only on their answer. In a
+hosted session, run the same command in the session workspace when the host
+asks for it.
 
 ## Offshoots and explicit parent stock
 
