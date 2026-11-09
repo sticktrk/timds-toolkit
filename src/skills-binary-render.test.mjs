@@ -39,7 +39,9 @@ test("each sentence rewrite in renderBinaryInstructions still matches the skill 
   const read = (name) => fs.readFile(path.join(skillsRoot, name, "SKILL.md"), "utf8");
   const edit = renderBinaryInstructions(await read("timds-edit-design-system"));
   assert.match(edit, /5\. Verify `timds-cli --version` matches `\.timds\/installation\.json`; the stock system needs no npm install\./, "the edit skill's install step");
-  assert.match(edit, /Hosted workspaces use the same selected executable\./, "the edit skill's hosted paragraph");
+  const cloud = renderBinaryInstructions(await fs.readFile(path.join(skillsRoot, "timds-edit-design-system", "references", "timds-cloud.md"), "utf8"));
+  assert.match(cloud, /Hosted workspaces use the same selected executable\./, "the edit skill's hosted paragraph");
+  assert.doesNotMatch(cloud, /@dtconcepts\/timds@latest/);
   assert.doesNotMatch(edit, /@dtconcepts\/timds@latest/);
   const start = renderBinaryInstructions(await read("design-start"));
   assert.match(start, /3\. Verify `timds-cli --version` matches `\.timds\/installation\.json`\. No package-manager installation is needed for stock commands\./, "design-start's install step");

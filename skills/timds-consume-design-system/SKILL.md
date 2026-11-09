@@ -25,19 +25,9 @@ may touch. Work only in the repository the user supplied.
 
 ## Designer notes
 
-When a preview is published, the designer can review it in the TimDS portal
-and leave notes. Run `npm run timds -- consumer notes` at the start and again
-after each push (it needs `TIMDS_ACCESS_TOKEN` or `npm run timds -- auth
-login`). Each note names the page, the element, and usually the source file
-and line. Treat the designer's words as the request and the element as where
-it applies. After pushing the fix, run
-`npm run timds -- consumer notes resolve <id>` for each note you addressed
-(in the designer-change workflow the workflow resolves them; see below). Never mark a note addressed that you
-did not address; say why instead (in the pull request or your report), or
-`consumer notes resolve <id> --dismiss` when the designer agreed to drop it.
-
-When no preview is published or portal access is unavailable, use the
-designer's request and pull-request comments instead.
+Take the designer's request and the pull-request comments as the request.
+When the designer reviewed a published preview, their notes live on the TimDS
+host (see "If you use TimDS Cloud" below).
 
 ## The Design System is pinned, not edited here
 
@@ -60,9 +50,8 @@ __DERIVED_LAYER__
   `v/<version>/`. Beside `llms.txt`, `brand.json` and `tokens.json` the
   prefix carries `index.json`, `formats.json`, `designs.json`,
   `changelog.json`, `bundle.json` and `llms-full.txt`.
-- When the `timds-design-system-read` MCP tools are connected, prefer them
-  (the `.mcp.json` entry reaches the portal over HTTP and needs
-  `TIMDS_ACCESS_TOKEN` in the environment): `get_consumer_guide` first, then
+- When the `timds-design-system-read` MCP tools are connected, prefer them:
+  `get_consumer_guide` first, then
   `describe_system` (or `list_design_systems` when several are shared), then
   `resolve_role` for "what is the accent color" or "what font are headings"
   (`color.accent`, `color.text`, `font.display`, `font.body`, …),
@@ -88,26 +77,51 @@ __DERIVED_LAYER__
   it, and file it with `report_gap` when the user agrees.
 - Validate newly consumed CSS tokens with `npm run timds -- consumer check
   --require-token=--focus-ring` (repeat the flag for each required token).
-  It checks the local bundle, including a draft override, for definitions and
-  resolvable aliases. After the designer fixes a reported gap in a draft,
-  integrate the draft again and run the same check; a fix that shipped as a
-  release reaches the product only when a developer moves the pin with the
-  `timds-update-design-system` skill, never inside a design change. Still
+  It checks the local bundle for definitions and resolvable aliases. A fix
+  that shipped as a release reaches the product only when a developer moves
+  the pin with the `timds-update-design-system` skill, never inside a design
+  change. Still
   verify imports, cascade, keyboard focus, and contrast in the product's
   browser preview.
 
-## Trying a designer's draft
-
-A published consumer can try a hosted draft before it is released:
-`npm run timds -- consumer update --draft NAME` replaces the ignored bundle
-under `__DESIGN_SYSTEM_PATH__/` with the draft's build and leaves the tracked
-pin alone (`consumer check` then warns that the draft overrides the pin);
-`npm run timds -- consumer sync` restores the production bundle. A product
-initialized with `consumer init --draft-preview` also answers
-`?timds_draft=NAME` in the browser, and the read MCP tools take a `draft`
-argument. Never commit while a draft is integrated.
 - Compliance guidance is binding. When requested copy conflicts with it, say
   so instead of complying silently.
+
+## If you use TimDS Cloud
+
+- **Designer notes.** When a preview is published, the designer can review it
+  in the TimDS portal and leave notes. Run `npm run timds -- consumer notes`
+  at the start and again after each push (it needs `TIMDS_ACCESS_TOKEN` or
+  `npm run timds -- auth login`). Each note names the page, the element, and
+  usually the source file and line; the designer's words are the request and
+  the element is where it applies. After pushing the fix, run
+  `npm run timds -- consumer notes resolve <id>` for each note you addressed
+  (in the designer-change workflow the workflow resolves them; see below).
+  Never mark a note addressed that you did not address; say why instead, or
+  `consumer notes resolve <id> --dismiss` when the designer agreed to drop
+  it. Without portal access, use the request and pull-request comments.
+- **Pull-request previews.** Automatic previews require the repository
+  variable `TIMDS_PREVIEWS_ENABLED=true` and the `TIMDS_ACCESS_TOKEN` secret.
+  They are off by default; without a token the workflow skips all preview
+  work. When enabled, `timds-consumer-preview` comments a preview link for
+  each app whose design surface the pull request changes (every app when it
+  moves the pin or changes the manifest) and updates it on each push; a pull
+  request that touches no surface gets no preview. Give the designer that
+  link when available.
+- **Shared imagery.** The Design System publishes registered media with
+  `assets publish`.
+- **Hosted read tools.** The `.mcp.json` entry for `timds-design-system-read`
+  reaches the portal over HTTP and needs `TIMDS_ACCESS_TOKEN` in the
+  environment.
+- **A designer's draft.** `npm run timds -- consumer update --draft NAME`
+  replaces the ignored bundle under `__DESIGN_SYSTEM_PATH__/` with the
+  draft's build and leaves the tracked pin alone (`consumer check` then warns
+  that the draft overrides the pin, and `--require-token` checks the draft);
+  `npm run timds -- consumer sync` restores the production bundle. After the
+  designer fixes a reported gap in a draft, integrate the draft again and
+  rerun the check. A product initialized with `consumer init --draft-preview`
+  also answers `?timds_draft=NAME` in the browser, and the read MCP tools
+  take a `draft` argument. Never commit while a draft is integrated.
 
 ## Make the change
 
@@ -120,9 +134,9 @@ argument. Never commit while a draft is integrated.
    and say what would need a developer.
 3. Never add dependencies or change the product's framework configuration.
 4. Never commit media masters, video, audio, or full-resolution photography.
-   Shared imagery belongs to the Design System and is published with
-   `assets add` and `assets publish` using that repository's selected toolkit;
-   reference its stable URL or media key here. Small optimized images may
+   Shared imagery belongs to the Design System and is registered there with
+   `assets add` using that repository's selected toolkit; reference its
+   stable URL or media key here. Small optimized images may
    live in the product only where its rules allow them.
 5. Keep light and dark schemes, desktop and phone widths, focus states, and
    contrast working.
@@ -157,15 +171,9 @@ npm run timds -- consumer check --base origin/__DEFAULT_BRANCH__
 3. Write the description for the designer: what changed and why in plain
    language, which pages and routes to look at, and anything left undecided.
    No code walkthrough.
-4. Automatic previews require the repository variable
-   `TIMDS_PREVIEWS_ENABLED=true` and the `TIMDS_ACCESS_TOKEN` secret. They are
-   off by default; without a token the workflow skips all preview work. When
-   enabled, `timds-consumer-preview` comments a preview link for each app
-   whose design surface the pull request changes (every app when it moves
-   the pin or changes the manifest) and updates it on each push; a pull
-   request that touches no surface gets no preview. Give the designer that
-   link when available. Otherwise provide the local review URL and
-   screenshots; do not wait for or promise a cloud preview.
+4. For the designer, provide the local review URL and
+   screenshots; do not wait for or promise a cloud preview (see **If you use
+   TimDS Cloud**).
 5. Never merge, mark ready for review, deploy, move the Design System pin, or
    change managed TimDS files (everything under
    `.agents/skills/timds-consume-design-system/`,

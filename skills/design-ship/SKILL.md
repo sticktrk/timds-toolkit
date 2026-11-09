@@ -43,10 +43,8 @@ retain their declared prerequisites. The agent runs these steps for the designer
    close that is still open.
 3. In a Git checkout, run `npm run timds -- diff` to see exactly what will
    ship, and confirm it is only this change. Unrelated files, protected
-   tooling, `dist/`, media originals, and credentials never go in. In a
-   hosted workspace (`timds.json` has a hosted provider, or
-   `.timds/session.json` exists) there is no Git: `timds status` and the
-   session's claims say what is yours.
+   tooling, `dist/`, media originals, and credentials never go in. (A
+   hosted workspace has no Git; see "If you use TimDS Cloud".)
 
 ## Look at it
 
@@ -88,15 +86,8 @@ It publishes staged media, validates, creates a `design-system/<change>`
 branch when the checkout is still on the default branch, commits, pushes,
 and opens a draft pull request; `--dry-run` prints the commands first. If it
 refuses, read the reason and fix it: changes outside the Design System scope
-come out of the branch; an unauthenticated media publish needs the
-designer's one-time `npm run timds -- auth login`. A workspace whose
-provider is `local` does not submit at all; say so.
-
-In a hosted workspace, publish any staged media first, then
-`timds submit --note "Describe the change"` (`--message` is accepted too).
-It freezes a submission with a preview for review in Studio; there is no
-branch and no pull request. Report the submission id and the Preview URL
-it prints.
+come out of the branch. A workspace whose provider is `local` does not
+submit at all; say so.
 
 ## Report, and say what happens next
 
@@ -104,18 +95,33 @@ Give the designer the pull-request link (or the submission id and preview
 URL) and a two-sentence summary of what is in it. Then explain the path to
 production once, in order:
 
-1. An operator reviews and merges the pull request, or reviews the
-   submission in Studio. In a standalone system with managed releases,
-   merging is the release decision: every accepted change becomes a dated
-   version (`2026.10.12-1`, the day and the release number that day) with its
-   notes on the changelog page, and publication to the system's public root
-   follows its Automatic updates setting (on: published and verified; off:
-   an operator publishes the candidate). An embedded system's workflow only
-   validates; its release is whatever the product's own process does. A
-   hosted system is published from Studio by someone with the right to.
+1. An operator reviews and merges the pull request. In a standalone system
+   with managed releases, merging is the release decision: every accepted
+   change becomes a dated version (`2026.10.12-1`, the day and the release
+   number that day) with its notes on the changelog page. An embedded
+   system's workflow only validates; its release is whatever the product's
+   own process does.
 2. The product site keeps using the version it pins until a developer moves
    that pin and ports what changed. The `design-handoff` skill writes the
    brief that developer needs; offer to run it once the release exists.
 
 Do not mark the pull request ready for review, merge it, or run `publish`
 unless the person asking is authorized to and says so.
+
+## If you use TimDS Cloud
+
+- `submit` publishes staged media to the TimDS host first; an
+  unauthenticated media publish needs the designer's one-time
+  `npm run timds -- auth login`.
+- In a hosted workspace (`timds.json` has a hosted provider, or
+  `.timds/session.json` exists) there is no Git: `timds status` and the
+  session's claims say what is yours. Publish any staged media first, then
+  `timds submit --note "Describe the change"` (`--message` is accepted too).
+  It freezes a submission with a preview for review in Studio; there is no
+  branch and no pull request. Report the submission id and the Preview URL
+  it prints.
+- On the path to production, an operator reviews the submission in Studio,
+  and a hosted system is published from Studio by someone with the right to.
+  For a standalone system, publication to its public root follows the
+  system's Automatic updates setting (on: published and verified; off: an
+  operator publishes the candidate).

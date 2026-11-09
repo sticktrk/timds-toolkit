@@ -19,6 +19,35 @@ resources and renders managed bytes without workspace, clock, or config input.
 Keep its policies aligned with init/upgrade/starter sync; seed-only resources
 never become overwrite permissions. See `docs/release-metadata.md`.
 
+## Public toolkit boundary
+
+This repository and its npm package are public: an open-source design-system
+toolkit. TimDS Cloud, the hosted service, is a separate product. The rule for
+what belongs here:
+
+- The toolkit may call the host's public API. `src/hosted.mjs` is the public
+  client contract (sessions, drafts, claims, publication, rollback), with the
+  thin clients beside it for login (`src/auth.mjs`, `src/oauth.mjs`), media and
+  artifact upload, consumer registration, receipts and notes.
+- The toolkit may not contain server logic, server data models beyond that
+  API, or Studio and operations documentation.
+
+Server implementation, storage, Studio internals, deployment, maintenance
+fleets, host conformance, runbooks and anything about running or
+administering a host belong in the host repository (`sticktrk/timds-host`).
+Hosted features stay documented here only as the clearly separated "TimDS
+Cloud" layer: the last section of `README.md`, the "If you use TimDS Cloud"
+asides in the skills and scaffold templates, and the
+`timds-hosted-design-system` skill. Design-system authoring, the local and
+Git paths, consumers, offshoots and video must work and read complete
+without a host.
+
+`src/merge.mjs` (the `./merge` export) is server logic: the host vendors its
+own copy, so the export is deprecated and will be removed in a later
+release. Do not add callers or features to it. `./release-metadata` stays a
+supported export: hosts preparing toolkit upgrades load it from the selected
+release to describe that package's own templates and skills.
+
 Keep package releases cohesive. A version must carry compatible CLI behavior,
 templates, workflows, and skill instructions together. Update or add tests
 whenever managed-file behavior changes.

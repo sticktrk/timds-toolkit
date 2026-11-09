@@ -97,7 +97,9 @@ test("skills install writes the filled designer skills into every agent folder a
   const record = JSON.parse(await fs.readFile(path.join(root, ".timds", "skills.json"), "utf8"));
   assert.equal(record.version, toolkitVersion);
   assert.deepEqual(record.systems.map(({ portalUrl, systemId, skill: name }) => ({ portalUrl, systemId, name })), [{ portalUrl: "https://host.example.com", systemId: "timds-example/core", name: "timds-core" }]);
-  assert.equal(Object.keys(record.managedFiles).length, SKILL_DIRECTORIES.length * (INSTALLABLE_SKILL_NAMES.length + 1) * 2);
+  const shippedFiles = async (name) => (await fs.readdir(fileURLToPath(new URL(`../skills/${name}/`, import.meta.url)), { recursive: true, withFileTypes: true })).filter(entry => entry.isFile()).length;
+  const filesPerDirectory = (await Promise.all([...INSTALLABLE_SKILL_NAMES, "timds-hosted-design-system"].map(shippedFiles))).reduce((sum, count) => sum + count, 0);
+  assert.equal(Object.keys(record.managedFiles).length, SKILL_DIRECTORIES.length * filesPerDirectory);
   assert.match(lines.join("\n"), /Hosted skill timds-core: timds-example\/core at https:\/\/host\.example\.com/);
 });
 

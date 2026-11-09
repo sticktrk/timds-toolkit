@@ -26,7 +26,7 @@ retain their declared prerequisites. The agent runs these steps for the designer
 | The designer gives you | Where it goes |
 | --- | --- |
 | A small optimized logo, icon, or UI image (SVG, or a PNG/WebP well under 1 MB) that pages render | `src/assets/`, referenced by site-absolute path such as `/assets/logo.svg`, committed to git |
-| A photo, illustration, large graphic, video, audio, or any full-resolution original | The ignored `media-local/` workspace, registered with a logical key and published to TimDS storage; only its public record enters git, in the media catalog (`media/<group>.json`, with `media.json` regenerated from the groups when `.timds/contract-layout.json` exists; `media.json` alone otherwise) |
+| A photo, illustration, large graphic, video, audio, or any full-resolution original | The ignored `media-local/` workspace, registered with a logical key; once published (see "If you use TimDS Cloud"), only its public record enters git, in the media catalog (`media/<group>.json`, with `media.json` regenerated from the groups when `.timds/contract-layout.json` exists; `media.json` alone otherwise) |
 | A font file the system licenses | `src/assets/fonts/` with an `@font-face` in a stylesheet the pages load, so the font role is usable outside the browser |
 
 A logo or font file the product's website must load itself reaches it only
@@ -39,7 +39,7 @@ Never commit a full-resolution original, a video master, or source audio.
 When a large original needs a web derivative, keep the original under one
 key and the optimized derivative under the key the pages reference.
 
-## Stage and publish
+## Stage and reference
 
 1. Choose a stable logical key: lowercase letters, digits, dots, underscores
    and hyphens, descriptive of the subject rather than the campaign
@@ -63,37 +63,38 @@ npm run timds -- assets add PATH/TO/FILE --key KEY --title "Title" --tags tag1,t
    without it the file cannot be staged at all, so tell the designer ffmpeg
    is needed and stop for that file. `assets backfill-metadata` is only for
    older catalogs published before measurement existed.
-3. Publish. The first time on a machine, `npm run timds -- auth login` opens
-   a browser sign-in only the designer can complete (add `--portal-url` with
-   the host in `timds.json` `media.portalUrl` when it is not the default;
-   `TIMDS_ACCESS_TOKEN` is the non-interactive alternative): ask them to
-   finish it, then continue. Then:
-
-```bash
-npm run timds -- assets publish
-```
-
-   In a Git checkout `submit` also publishes staged files, so a designer who
-   ships right away loses nothing if this step waits. A hosted `submit`
-   does not: publish before submitting there, and keep large files out of
-   the session's change set.
-4. Reference the file by what resolves everywhere. The starter viewer
+3. Reference the file by what resolves everywhere. The starter viewer
    resolves `{{media:KEY}}` to the record's regular path under `src/assets/`
    (a display copy such as a logo, whose record carries that `path`; in a
    brand kit the stock pages already carry the slot markup, so filling a
    slot is the record and the file, never a page rewrite); it never
    resolves a key to a remote URL, so a published-only asset is referenced
-   by the `publicUrl` in its catalog record.
+   by the `publicUrl` in its catalog record. Until it is published, a
+   staged file resolves only on this machine.
 
 ## Replacing media
 
 Replacing a key is deliberate. Before restaging, check what references the
 key (pages, designs, consumers) and compare dimensions and format. Never
-restage an older original over an optimized derivative. Publication refuses
-a stale replacement; if it does, read the message rather than forcing it:
-remove the stale entry from `.timds/local-media.json` to keep the catalog,
-restore the published asset with `assets pull KEY --force`, or restage with
-`assets add` only for a replacement the designer intends.
+restage an older original over an optimized derivative.
+
+## If you use TimDS Cloud
+
+Publishing staged media needs a TimDS host:
+
+- The first time on a machine, `npm run timds -- auth login` opens a browser
+  sign-in only the designer can complete (add `--portal-url` with the host in
+  `timds.json` `media.portalUrl` when it is not the default;
+  `TIMDS_ACCESS_TOKEN` is the non-interactive alternative): ask them to
+  finish it, then run `npm run timds -- assets publish`.
+- In a Git checkout `submit` also publishes staged files, so a designer who
+  ships right away loses nothing if this step waits. A hosted `submit` does
+  not: publish before submitting there, and keep large files out of the
+  session's change set.
+- Publication refuses a stale replacement; read the message rather than
+  forcing it: remove the stale entry from `.timds/local-media.json` to keep
+  the catalog, restore the published asset with `assets pull KEY --force`, or
+  restage with `assets add` only for a replacement the designer intends.
 
 ## Put it on the page
 

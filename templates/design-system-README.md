@@ -59,29 +59,6 @@ a brand kit has an authored Voice page and reports its assumed sample voice. `de
 repository-declared authoring server. `preview` serves the exact generated
 static artifact that TimDS will publish.
 
-## Release publication (standalone repositories)
-
-Publication needs the `artifact.publishRef` a standalone `timds.json`
-declares; an embedded manifest has none, so `publish` refuses there and the
-product consumes the committed `design-system/dist/` directly.
-
-After committing and pushing source changes, an authorized operator runs
-`__TIMDS_CLI__ publish` to build, push the declared artifact ref and request portal
-publication. Sign in with `__TIMDS_CLI__ login`, or configure an unbound
-operator `TIMDS_ACCESS_TOKEN` in CI. Designer/website and consumer tokens cannot
-promote a release.
-The artifact ref must be separate from the remote default branch. Publication
-refuses to push if it cannot resolve that branch name.
-
-The portal's **Automatic updates** setting controls promotion. When on, the
-command prints the root and pinned URLs and verifies the public release stamp.
-When off, it reports a waiting candidate and a portal link for operator
-publication. Repeating an already live identical release is a no-op.
-`extract --publish` uploads CDN files separately. Managed release workflows
-extract, push the exact artifact, then request promotion before updating a
-linked consumer. A missing operator token fails the run before the version
-advances.
-
 ## Starter viewer
 
 New contracts include a dependency-free starter viewer under `src/` and
@@ -212,9 +189,7 @@ on success.
 
 `__TIMDS_CLI__ sever` permanently removes the local parent baseline after
 confirmation; `--yes` records explicit confirmation. Source remains and the
-system becomes independent. Feed and sever run outside hosted sessions.
-A severed hosted system additionally needs its host catalog lineage updated
-before publication; this local command does not change the host catalog.
+system becomes independent.
 
 Declare framework-specific local commands as argument arrays in `timds.json`:
 
@@ -261,37 +236,11 @@ __TIMDS_CLI__ assets add __MEDIA_LOCAL__interview.mp4 \
 The starter viewer does not read the ignored original: `{{media:KEY}}`
 resolves to a small optimized copy under `src/assets/`, and only a framework
 viewer that serves staged files with `localMediaResponse` shows it locally.
-Authenticate once and upload the staged file to public TimDS object storage:
-
-```bash
-__TIMDS_CLI__ login
-__TIMDS_CLI__ assets publish
-```
-
-`submit` performs the publish step automatically before building and preparing
-the pull request. Git receives only the stable public record in the media
-catalog (`media/<group>.json`, with `media.json` regenerated from it).
-Staging remembers the catalog checksum. Publication refuses stale replacements,
-including older staging entries without a baseline, and never removes another
-logical key when storage reuses its asset ID. To keep the published asset,
-remove its stale entry from `.timds/local-media.json` or run
-`__TIMDS_CLI__ assets pull KEY --force`. Restage with `assets add FILE --key KEY`
-only after reviewing an intentional replacement; keep optimized derivatives
-under their existing keys.
+Publishing the staged file to public object storage needs a TimDS host; see
+"If you use TimDS Cloud" below.
 
 TimDS uses `ffprobe` during `assets add` to record timed-media duration and video
-dimensions. Backfill an older catalog from its stable public URLs without
-re-uploading objects:
-
-```bash
-__TIMDS_CLI__ assets backfill-metadata
-```
-
-On a fresh workstation, restore a published original with:
-
-```bash
-__TIMDS_CLI__ assets pull founder-interview
-```
+dimensions.
 
 ## Optional video production
 
@@ -451,11 +400,83 @@ Agents author key maps in `tokens/<group>.json` and `media/<group>.json`.
 `check` enforces group layout and reference integrity. Do not edit generated
 views. Token values may reference another key with `{color.brand.600}`.
 
+Product repositories remain pinned to their published version until the
+developer changes that pin.
+
+## If you use TimDS Cloud
+
+Everything above works with a local or Git checkout and no host. The rest of
+this section applies when the system publishes media or releases through a
+TimDS host, or works in hosted sessions. `media.portalUrl` in `timds.json`
+names the host used for media upload, `extract --publish`, and release
+publication.
+
+### Release publication (standalone repositories)
+
+Publication needs the `artifact.publishRef` a standalone `timds.json`
+declares; an embedded manifest has none, so `publish` refuses there and the
+product consumes the committed `design-system/dist/` directly.
+
+After committing and pushing source changes, an authorized operator runs
+`__TIMDS_CLI__ publish` to build, push the declared artifact ref and request portal
+publication. Sign in with `__TIMDS_CLI__ login`, or configure an unbound
+operator `TIMDS_ACCESS_TOKEN` in CI. Designer/website and consumer tokens cannot
+promote a release.
+The artifact ref must be separate from the remote default branch. Publication
+refuses to push if it cannot resolve that branch name.
+
+The portal's **Automatic updates** setting controls promotion. When on, the
+command prints the root and pinned URLs and verifies the public release stamp.
+When off, it reports a waiting candidate and a portal link for operator
+publication. Repeating an already live identical release is a no-op.
+`extract --publish` uploads CDN files separately. Managed release workflows
+extract, push the exact artifact, then request promotion before updating a
+linked consumer. A missing operator token fails the run before the version
+advances.
+
+### Publishing media
+
+Authenticate once and upload the staged file to public TimDS object storage:
+
+```bash
+__TIMDS_CLI__ login
+__TIMDS_CLI__ assets publish
+```
+
+`submit` performs the publish step automatically before building and preparing
+the pull request. Git receives only the stable public record in the media
+catalog (`media/<group>.json`, with `media.json` regenerated from it).
+Staging remembers the catalog checksum. Publication refuses stale replacements,
+including older staging entries without a baseline, and never removes another
+logical key when storage reuses its asset ID. To keep the published asset,
+remove its stale entry from `.timds/local-media.json` or run
+`__TIMDS_CLI__ assets pull KEY --force`. Restage with `assets add FILE --key KEY`
+only after reviewing an intentional replacement; keep optimized derivatives
+under their existing keys.
+
+Backfill an older catalog from its stable public URLs without
+re-uploading objects:
+
+```bash
+__TIMDS_CLI__ assets backfill-metadata
+```
+
+On a fresh workstation, restore a published original with:
+
+```bash
+__TIMDS_CLI__ assets pull founder-interview
+```
+
+### Offshoots and hosted sessions
+
+Feed and sever run outside hosted sessions. A severed hosted system
+additionally needs its host catalog lineage updated before publication;
+`sever` does not change the host catalog.
+
 Humans direct work, inspect status/history, publish and roll back. In hosted
 systems the agent uses `timds_*` MCP tools to claim paths, start or join a
 session, update and submit with the human intent in `note`. Claims are advisory.
 A named draft has members and no expiry; `start --draft NAME` targets it.
 Read active work before editing. Resolve exactly the returned conflict key
 with `PATH#KEY=mine|theirs`; never replace unrelated changes. Return the live
-URL and frozen submission preview to the human. Product repositories remain
-pinned to their published version until the developer changes that pin.
+URL and frozen submission preview to the human.
