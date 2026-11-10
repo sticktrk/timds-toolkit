@@ -85,7 +85,6 @@ const CONSUMER_HELP = `Usage:
   timds consumer preview --app NAME [--root PATH] [--output DIR] [--base REF] [--publish] [--pull-request N]
   timds consumer init [--root PATH] [--system ID] [--version VERSION] [--url URL] [--force] [--skip-install] [--portal-url URL]
   timds consumer scaffold emdash --root PATH --design-system GIT_URL [--stylesheet PATH]... [--site-url URL] [--portal-url URL] [--skip-install]
-  timds consumer scaffold emdash --existing --root PATH [--platform cloudflare|node] [--layout PATH] [--site-url URL] [--skip-install]
   timds consumer notes [--root PATH] [--app NAME] [--pull-request N] [--all] [--json] [--portal-url URL]
   timds consumer notes resolve ID [ID...] [--commit SHA] [--dismiss]`;
 

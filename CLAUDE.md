@@ -277,13 +277,7 @@ Public lineage appears in derived readers and publication stamps;
 session edits cannot change the parent record. See `docs/offshoots.md`.
 
 `templates/` is copied verbatim (with `__PLACEHOLDER__` substitution) by `init`
-and `video init`. `templates/emdash/` holds the EmDash scaffold's files: the
-fresh scaffold's theme, docs and deploy workflow, and the shared template set
-`consumer scaffold emdash --existing` installs (`site/` for both platforms,
-`site-cloudflare/` and `site-node/`, the printed `manual/` snippets, and
-`site.json` with the dependencies, package keys, preview routes and design
-pairs, `.gitignore` lines and manual changes; its `version` is the template
-version a site records). `templates/starter/` is the standalone repo scaffold including
+and `video init`. `templates/starter/` is the standalone repo scaffold including
 its release scripts; `templates/*.yml` are the stock workflows.
 `templates/brand-kit/` overlays only the second starter's catalogs, token and
 copy samples, stock declaration, styles, layout, pages and empty Designs
@@ -335,15 +329,9 @@ of ideas, not a mirror. Planned pages are never built, so a fresh scaffold
 keeps its two expected brand warnings. The kit instead authors its Voice page,
 reports the assumed sample voice, and reports no logo until its media is filled.
 Its template formats render in Minimal, Accent, Bold and Photo treatments.
-The ordinary starter's sample design (`website`: home, the default About,
-Contact, Privacy, Terms and 404 pages, and the article list, article and topic
-designs, 9 pages, 11 states, 2 journeys) uses the site layout
-block in `src/styles/system.css` (between its marker comments, the article's
-`prose` wrapper included), which
+The ordinary starter's sample design uses the site layout
+block in `src/styles/system.css` (between its marker comments), which
 `designs init` appends to a migrating system that kept the starter tokens.
-`/articles/example-article` and `/topics/example-topic` are fixed sample
-routes, since designs have no dynamic routes; a site that seeds an entry at
-each slug pairs the route with its design in a preview.
 `templates/design-system-AGENTS.md`, `design-system-CLAUDE.md`, and
 `design-system-README.md` are the scaffolded agent and human entry points;
 they are written once and then client-owned, so keep them accurate for a fresh
@@ -397,10 +385,7 @@ behavior.
   `consumer-register.mjs` (`register`, `updates`), `consumer-notes.mjs`
   (`notes`), `consumer-preview.mjs` with `consumer-browser.mjs` and
   `consumer-png.mjs` (`preview`), `consumer-scaffold.mjs` (`scaffold
-  emdash`; with `--existing` it installs the shared EmDash template set,
-  `templates/emdash/site/`, `site-<platform>/` and `site.json`, into an Astro
-  consumer and records `.timds/emdash.json`, which `upgrade` never touches),
-  and `consumer-draft-preview.mjs` with `draft-source.mjs` (the
+  emdash`), and `consumer-draft-preview.mjs` with `draft-source.mjs` (the
   browser module and local draft source of `init --draft-preview`).
 - Video runtime: `src/video-transport.mjs` (Zod 3 wire schemas),
   `video-runtime.mjs` and `video-component-loader.mjs` (loading a client's

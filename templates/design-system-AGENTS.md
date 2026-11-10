@@ -241,7 +241,7 @@ clean.
   numbered in visitor order), lists the journeys on `/designs/`, and warns
   when a design has several pages or a route with states that no journey
   shows. Developers read the same order from `list_designs`. The sample
-  design declares two. For a checkout:
+  design declares one. For a checkout:
 
   ```json
   "journeys": [
@@ -292,16 +292,7 @@ clean.
   crawls), and its pull-request preview then shows the design beside the
   route.
 - The ordinary starter ships one sample design, `website`, composed from the site
-  layout pieces on `web/components`: a home page, the default pages every
-  site needs (About, Contact with its sent state, Privacy, Terms, 404), and
-  the article designs (the list with its empty state, an article, a topic).
-  The article page sets its body in one `prose` wrapper of plain elements,
-  the way a site renders rich text; a table sits in a `table-scroll` wrapper
-  so a wide one scrolls without widening the page. `/articles/example-article` and
-  `/topics/example-topic` are fixed sample routes: a design has one file per
-  route, so it designs the template with one sample entry, and a site that
-  seeds an entry at each slug pairs the route with the design in its
-  preview. Replace the starter copy and add the client's pages, or
+  layout pieces on `web/components`. Replace it with the client's pages, or
   remove `src/designs/` entirely; `check` ignores a system without it. A
   system scaffolded before designs existed adopts them with
   `__TIMDS_CLI__ designs init`.
@@ -504,11 +495,10 @@ them, logos, asset formats), so what reaches the kit reaches every tool.
    template's size in `src/formats.json`; when a template page is authored,
    its formats' rows link to it. Templates ship in the three steps of the
    scale the Print overview defines.
-6. Replace the starter copy of the sample website design under
-   `src/designs/website/` with the client's, keep its default pages and
-   article designs, and add the client's pages, each state as its own file,
-   using only the system's classes. Add a layout piece or component to
-   `src/styles/system.css` and `web/components` when a page needs one.
+6. Replace the sample website design under `src/designs/website/` with the
+   client's pages, each state as its own file, using only the system's
+   classes. Add a layout piece or component to `src/styles/system.css` and
+   `web/components` when a page needs one.
 7. Run `__TIMDS_CLI__ check` until it passes without warnings and
    `__TIMDS_CLI__ brand` lists the logo and the voice guidance.
 8. Inspect `__TIMDS_CLI__ preview` at desktop and mobile widths, the designs

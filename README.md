@@ -865,9 +865,7 @@ Declared `routes` always come first and always stay.
 
 - `timds consumer scaffold emdash --root PATH --design-system GIT_URL` creates
   a new EmDash CMS site repository that consumes a Design System (see
-  **EmDash sites** below), then adopts it the way `consumer init` does. With
-  `--existing --root PATH` it installs EmDash's article section into an Astro
-  site that already has `timds.consumer.json`.
+  **EmDash sites** below), then adopts it the way `consumer init` does.
 
 The designer-change workflow (`.github/workflows/timds-designer-change.yml`)
 lets a designer start a change with no setup. An issue labeled
@@ -924,22 +922,6 @@ npx --yes @dtconcepts/timds@0.1.x consumer scaffold emdash \
   --design-system git@github.com:ORG/CLIENT-design-system.git \
   --site-url https://www.client.example
 ```
-
-An Astro site that already consumes a Design System gains an articles section
-fed through EmDash's API with `--existing`:
-
-```bash
-npx --yes @dtconcepts/timds@0.1.x consumer scaffold emdash --existing \
-  --root /path/to/client-site --site-url https://www.client.example
-```
-
-It installs the shared EmDash template set (the article routes, the seed,
-`src/live.config.ts` and the site docs), adds the dependencies and the
-article routes with their design pairs to `package.json` and
-`timds.consumer.json`, records the template version in `.timds/emdash.json`,
-and prints the `astro.config`, `wrangler.jsonc` and `.gitignore` changes for
-the developer to make. It never overwrites a path or edits an existing page,
-and `upgrade` never touches what it writes.
 
 What the scaffold writes, the hosting platforms and the deploy workflow are described in [docs/emdash.md](docs/emdash.md).
 
