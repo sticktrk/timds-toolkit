@@ -12,6 +12,8 @@
       <a class="site-header__brand" href="/">{{name}}</a>
       <nav class="site-nav" aria-label="Site">
         <a href="/">Home</a>
+        <a href="/articles">Articles</a>
+        <a href="/about">About</a>
         <a href="/contact">Contact</a>
       </nav>
     </header>
@@ -20,6 +22,12 @@
       {{content}}
     </main>
 
-    <footer class="site-footer wrap">Designed in the Design System; production is built from this reference.</footer>
+    <footer class="site-footer wrap">
+      <p>Designed in the Design System; production is built from this reference.</p>
+      <nav class="site-footer__links" aria-label="Legal">
+        <a href="/privacy">Privacy</a>
+        <a href="/terms">Terms</a>
+      </nav>
+    </footer>
   </body>
 </html>

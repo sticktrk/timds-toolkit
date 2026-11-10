@@ -1,0 +1,17 @@
+---
+/**
+ * EmDash merges a run of consecutive quote blocks into one `blockquoteGroup`
+ * node. It renders as one blockquote with a paragraph per block.
+ */
+import { PortableText } from "emdash/ui";
+
+import Block from "./Block.astro";
+
+interface Props {
+	node: { blocks?: Array<{ _type: string; _key?: string; [key: string]: unknown }> };
+}
+
+const paragraphs = (Astro.props.node?.blocks ?? []).map((block) => ({ ...block, style: "normal" }));
+---
+
+<blockquote><PortableText value={paragraphs} components={{ block: Block }} onMissingComponent={false} /></blockquote>
