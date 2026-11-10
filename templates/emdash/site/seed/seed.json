@@ -1,0 +1,383 @@
+{
+  "$schema": "https://emdashcms.com/seed.schema.json",
+  "version": "1",
+  "meta": {
+    "name": "Articles",
+    "description": "An articles collection and a topic taxonomy that external writers fill through EmDash's REST API or MCP server. See docs/content-api.md.",
+    "author": "TimDS"
+  },
+  "collections": [
+    {
+      "slug": "articles",
+      "label": "Articles",
+      "labelSingular": "Article",
+      "description": "Generated articles, rendered at /articles/<slug>/.",
+      "urlPattern": "/articles/{slug}/",
+      "supports": ["drafts", "revisions", "preview", "scheduling", "search", "seo"],
+      "fields": [
+        { "slug": "title", "label": "Title", "type": "string", "required": true, "searchable": true },
+        { "slug": "summary", "label": "Summary", "type": "text", "searchable": true },
+        { "slug": "body", "label": "Body", "type": "portableText", "searchable": true },
+        { "slug": "cover", "label": "Cover", "type": "image" }
+      ]
+    }
+  ],
+  "taxonomies": [
+    {
+      "name": "topic",
+      "label": "Topics",
+      "labelSingular": "Topic",
+      "hierarchical": false,
+      "collections": ["articles"],
+      "terms": [
+        {
+          "slug": "example-topic",
+          "label": "Example topic",
+          "description": "One line on what the articles in this topic have in common."
+        }
+      ]
+    }
+  ],
+  "bylines": [
+    { "id": "byline-author", "slug": "author-name", "displayName": "Author Name" }
+  ],
+  "content": {
+    "articles": [
+      {
+        "id": "article-no-topics",
+        "slug": "article-with-no-topics",
+        "status": "published",
+        "data": {
+          "title": "An article with no topics",
+          "summary": "Topics are optional too. An article without them leaves the topic list out.",
+          "body": [
+            {
+              "_type": "block",
+              "_key": "p1",
+              "style": "normal",
+              "markDefs": [],
+              "children": [{ "_type": "span", "_key": "p1-1", "text": "Sample content. This article is filed under no topic, so neither its card nor its header shows a topic list." }]
+            }
+          ]
+        },
+        "bylines": [{ "byline": "byline-author" }]
+      },
+      {
+        "id": "article-no-cover",
+        "slug": "article-without-a-cover",
+        "status": "published",
+        "data": {
+          "title": "An article without a cover image",
+          "summary": "The cover is optional. Without one, the card is the title, the summary, and the details below.",
+          "body": [
+            {
+              "_type": "block",
+              "_key": "p1",
+              "style": "normal",
+              "markDefs": [],
+              "children": [{ "_type": "span", "_key": "p1-1", "text": "Sample content. An article needs no cover: its header is the topics, the title, the summary, and the date and byline." }]
+            }
+          ]
+        },
+        "bylines": [{ "byline": "byline-author" }],
+        "taxonomies": { "topic": ["example-topic"] }
+      },
+      {
+        "id": "article-example",
+        "slug": "example-article",
+        "status": "published",
+        "data": {
+          "title": "What an article can hold",
+          "summary": "The summary field, one or two sentences. It sits under the title here and on every card that lists the article.",
+          "cover": {
+            "$media": {
+              "url": "https://images.unsplash.com/photo-1432821596592-e2c18b78144f?w=1600&h=900&fit=crop",
+              "alt": "Notebook and pen on a desk",
+              "filename": "example-article-cover.jpg"
+            }
+          },
+          "body": [
+            {
+              "_type": "block",
+              "_key": "intro",
+              "style": "normal",
+              "markDefs": [],
+              "children": [
+                { "_type": "span", "_key": "intro-1", "text": "Everything below the header is the article's body, written in the CMS and rendered into one wrapper. Each element here is one a body may contain, styled by the Design System, so a writer never picks a font or a color. Sample content: real articles replace it." }
+              ]
+            },
+            {
+              "_type": "block",
+              "_key": "h-headings",
+              "style": "h2",
+              "markDefs": [],
+              "children": [{ "_type": "span", "_key": "h-headings-1", "text": "Headings and paragraphs" }]
+            },
+            {
+              "_type": "block",
+              "_key": "marks",
+              "style": "normal",
+              "markDefs": [{ "_type": "link", "_key": "link-articles", "href": "/articles/" }],
+              "children": [
+                { "_type": "span", "_key": "marks-1", "text": "The title is the page's only first-level heading, so a body divides into sections under second-level headings. A paragraph may hold an " },
+                { "_type": "span", "_key": "marks-2", "text": "inline link", "marks": ["link-articles"] },
+                { "_type": "span", "_key": "marks-3", "text": ", " },
+                { "_type": "span", "_key": "marks-4", "text": "strong emphasis", "marks": ["strong"] },
+                { "_type": "span", "_key": "marks-5", "text": ", " },
+                { "_type": "span", "_key": "marks-6", "text": "emphasis", "marks": ["em"] },
+                { "_type": "span", "_key": "marks-7", "text": ", and " },
+                { "_type": "span", "_key": "marks-8", "text": "inline code", "marks": ["code"] },
+                { "_type": "span", "_key": "marks-9", "text": "." }
+              ]
+            },
+            {
+              "_type": "block",
+              "_key": "h-subsection",
+              "style": "h3",
+              "markDefs": [],
+              "children": [{ "_type": "span", "_key": "h-subsection-1", "text": "A subsection" }]
+            },
+            {
+              "_type": "block",
+              "_key": "subsection",
+              "style": "normal",
+              "markDefs": [],
+              "children": [{ "_type": "span", "_key": "subsection-1", "text": "A third-level heading divides a section. A body goes no deeper than this." }]
+            },
+            {
+              "_type": "block",
+              "_key": "h-lists",
+              "style": "h2",
+              "markDefs": [],
+              "children": [{ "_type": "span", "_key": "h-lists-1", "text": "Lists" }]
+            },
+            {
+              "_type": "block",
+              "_key": "bullets-intro",
+              "style": "normal",
+              "markDefs": [],
+              "children": [{ "_type": "span", "_key": "bullets-intro-1", "text": "An unordered list holds points in no particular order:" }]
+            },
+            {
+              "_type": "block",
+              "_key": "bullet-1",
+              "style": "normal",
+              "listItem": "bullet",
+              "level": 1,
+              "markDefs": [],
+              "children": [{ "_type": "span", "_key": "bullet-1-1", "text": "One point per item." }]
+            },
+            {
+              "_type": "block",
+              "_key": "bullet-2",
+              "style": "normal",
+              "listItem": "bullet",
+              "level": 1,
+              "markDefs": [],
+              "children": [{ "_type": "span", "_key": "bullet-2-1", "text": "Short items, each a phrase or a sentence." }]
+            },
+            {
+              "_type": "block",
+              "_key": "bullet-3",
+              "style": "normal",
+              "listItem": "bullet",
+              "level": 1,
+              "markDefs": [],
+              "children": [{ "_type": "span", "_key": "bullet-3-1", "text": "No more than a handful before the list wants headings instead." }]
+            },
+            {
+              "_type": "block",
+              "_key": "numbers-intro",
+              "style": "normal",
+              "markDefs": [],
+              "children": [{ "_type": "span", "_key": "numbers-intro-1", "text": "An ordered list holds steps a reader follows in turn:" }]
+            },
+            {
+              "_type": "block",
+              "_key": "number-1",
+              "style": "normal",
+              "listItem": "number",
+              "level": 1,
+              "markDefs": [],
+              "children": [{ "_type": "span", "_key": "number-1-1", "text": "Read the step." }]
+            },
+            {
+              "_type": "block",
+              "_key": "number-2",
+              "style": "normal",
+              "listItem": "number",
+              "level": 1,
+              "markDefs": [],
+              "children": [{ "_type": "span", "_key": "number-2-1", "text": "Do what it says." }]
+            },
+            {
+              "_type": "block",
+              "_key": "number-3",
+              "style": "normal",
+              "listItem": "number",
+              "level": 1,
+              "markDefs": [],
+              "children": [{ "_type": "span", "_key": "number-3-1", "text": "Move on to the next one." }]
+            },
+            {
+              "_type": "block",
+              "_key": "h-quotes",
+              "style": "h2",
+              "markDefs": [],
+              "children": [{ "_type": "span", "_key": "h-quotes-1", "text": "Quotes and code" }]
+            },
+            {
+              "_type": "block",
+              "_key": "quote-intro",
+              "style": "normal",
+              "markDefs": [],
+              "children": [{ "_type": "span", "_key": "quote-intro-1", "text": "A quotation is set apart from the writer's own words:" }]
+            },
+            {
+              "_type": "block",
+              "_key": "quote",
+              "style": "blockquote",
+              "markDefs": [],
+              "children": [{ "_type": "span", "_key": "quote-1", "text": "A quotation from a person or a source, with who said it in the sentence before or after." }]
+            },
+            {
+              "_type": "block",
+              "_key": "code-intro",
+              "style": "normal",
+              "markDefs": [],
+              "children": [{ "_type": "span", "_key": "code-intro-1", "text": "A code block keeps its spacing and scrolls inside its own box on a narrow screen:" }]
+            },
+            {
+              "_type": "code",
+              "_key": "code",
+              "language": "javascript",
+              "code": "const greeting = \"Hello\";\nconsole.log(greeting);"
+            },
+            {
+              "_type": "block",
+              "_key": "h-images",
+              "style": "h2",
+              "markDefs": [],
+              "children": [{ "_type": "span", "_key": "h-images-1", "text": "Images" }]
+            },
+            {
+              "_type": "block",
+              "_key": "image-intro",
+              "style": "normal",
+              "markDefs": [],
+              "children": [{ "_type": "span", "_key": "image-intro-1", "text": "An image in the body carries alt text for readers who cannot see it, and a caption when it needs one:" }]
+            },
+            {
+              "_type": "image",
+              "_key": "image",
+              "asset": {
+                "$media": {
+                  "url": "https://images.unsplash.com/photo-1513542789411-b6a5d4f31634?w=1600&h=900&fit=crop",
+                  "alt": "Pencils and design tools on a desk",
+                  "filename": "example-article-body.jpg"
+                }
+              },
+              "alt": "Pencils and design tools on a desk",
+              "caption": "A caption says what the image shows, and credits who made it."
+            },
+            {
+              "_type": "block",
+              "_key": "h-tables",
+              "style": "h2",
+              "markDefs": [],
+              "children": [{ "_type": "span", "_key": "h-tables-1", "text": "Tables" }]
+            },
+            {
+              "_type": "block",
+              "_key": "table-intro",
+              "style": "normal",
+              "markDefs": [],
+              "children": [{ "_type": "span", "_key": "table-intro-1", "text": "A table has a header row, and sits in a wrapper that scrolls when the table is wider than the screen. This one lists every element above:" }]
+            },
+            {
+              "_type": "table",
+              "_key": "table",
+              "hasHeaderRow": true,
+              "rows": [
+                {
+                  "_type": "tableRow",
+                  "_key": "r0",
+                  "cells": [
+                    { "_type": "tableCell", "_key": "r0c0", "isHeader": true, "content": [{ "_type": "span", "_key": "r0c0s", "text": "Element" }] },
+                    { "_type": "tableCell", "_key": "r0c1", "isHeader": true, "content": [{ "_type": "span", "_key": "r0c1s", "text": "Markup" }] },
+                    { "_type": "tableCell", "_key": "r0c2", "isHeader": true, "content": [{ "_type": "span", "_key": "r0c2s", "text": "Use it for" }] }
+                  ]
+                },
+                {
+                  "_type": "tableRow",
+                  "_key": "r1",
+                  "cells": [
+                    { "_type": "tableCell", "_key": "r1c0", "content": [{ "_type": "span", "_key": "r1c0s", "text": "Heading" }] },
+                    { "_type": "tableCell", "_key": "r1c1", "content": [{ "_type": "span", "_key": "r1c1a", "text": "h2", "marks": ["code"] }, { "_type": "span", "_key": "r1c1b", "text": ", " }, { "_type": "span", "_key": "r1c1c", "text": "h3", "marks": ["code"] }] },
+                    { "_type": "tableCell", "_key": "r1c2", "content": [{ "_type": "span", "_key": "r1c2s", "text": "Sections and subsections" }] }
+                  ]
+                },
+                {
+                  "_type": "tableRow",
+                  "_key": "r2",
+                  "cells": [
+                    { "_type": "tableCell", "_key": "r2c0", "content": [{ "_type": "span", "_key": "r2c0s", "text": "Paragraph" }] },
+                    { "_type": "tableCell", "_key": "r2c1", "content": [{ "_type": "span", "_key": "r2c1a", "text": "p", "marks": ["code"] }] },
+                    { "_type": "tableCell", "_key": "r2c2", "content": [{ "_type": "span", "_key": "r2c2s", "text": "Running text, with links, emphasis, and inline code" }] }
+                  ]
+                },
+                {
+                  "_type": "tableRow",
+                  "_key": "r3",
+                  "cells": [
+                    { "_type": "tableCell", "_key": "r3c0", "content": [{ "_type": "span", "_key": "r3c0s", "text": "List" }] },
+                    { "_type": "tableCell", "_key": "r3c1", "content": [{ "_type": "span", "_key": "r3c1a", "text": "ul", "marks": ["code"] }, { "_type": "span", "_key": "r3c1b", "text": ", " }, { "_type": "span", "_key": "r3c1c", "text": "ol", "marks": ["code"] }] },
+                    { "_type": "tableCell", "_key": "r3c2", "content": [{ "_type": "span", "_key": "r3c2s", "text": "Points, and steps in order" }] }
+                  ]
+                },
+                {
+                  "_type": "tableRow",
+                  "_key": "r4",
+                  "cells": [
+                    { "_type": "tableCell", "_key": "r4c0", "content": [{ "_type": "span", "_key": "r4c0s", "text": "Quotation" }] },
+                    { "_type": "tableCell", "_key": "r4c1", "content": [{ "_type": "span", "_key": "r4c1a", "text": "blockquote", "marks": ["code"] }] },
+                    { "_type": "tableCell", "_key": "r4c2", "content": [{ "_type": "span", "_key": "r4c2s", "text": "Someone else's words" }] }
+                  ]
+                },
+                {
+                  "_type": "tableRow",
+                  "_key": "r5",
+                  "cells": [
+                    { "_type": "tableCell", "_key": "r5c0", "content": [{ "_type": "span", "_key": "r5c0s", "text": "Code block" }] },
+                    { "_type": "tableCell", "_key": "r5c1", "content": [{ "_type": "span", "_key": "r5c1a", "text": "pre", "marks": ["code"] }, { "_type": "span", "_key": "r5c1b", "text": ", " }, { "_type": "span", "_key": "r5c1c", "text": "code", "marks": ["code"] }] },
+                    { "_type": "tableCell", "_key": "r5c2", "content": [{ "_type": "span", "_key": "r5c2s", "text": "Code a reader copies" }] }
+                  ]
+                },
+                {
+                  "_type": "tableRow",
+                  "_key": "r6",
+                  "cells": [
+                    { "_type": "tableCell", "_key": "r6c0", "content": [{ "_type": "span", "_key": "r6c0s", "text": "Image" }] },
+                    { "_type": "tableCell", "_key": "r6c1", "content": [{ "_type": "span", "_key": "r6c1a", "text": "figure", "marks": ["code"] }, { "_type": "span", "_key": "r6c1b", "text": ", " }, { "_type": "span", "_key": "r6c1c", "text": "img", "marks": ["code"] }, { "_type": "span", "_key": "r6c1d", "text": ", " }, { "_type": "span", "_key": "r6c1e", "text": "figcaption", "marks": ["code"] }] },
+                    { "_type": "tableCell", "_key": "r6c2", "content": [{ "_type": "span", "_key": "r6c2s", "text": "Pictures, with alt text and an optional caption" }] }
+                  ]
+                },
+                {
+                  "_type": "tableRow",
+                  "_key": "r7",
+                  "cells": [
+                    { "_type": "tableCell", "_key": "r7c0", "content": [{ "_type": "span", "_key": "r7c0s", "text": "Table" }] },
+                    { "_type": "tableCell", "_key": "r7c1", "content": [{ "_type": "span", "_key": "r7c1a", "text": "table", "marks": ["code"] }, { "_type": "span", "_key": "r7c1b", "text": ", " }, { "_type": "span", "_key": "r7c1c", "text": "th", "marks": ["code"] }, { "_type": "span", "_key": "r7c1d", "text": ", " }, { "_type": "span", "_key": "r7c1e", "text": "td", "marks": ["code"] }, { "_type": "span", "_key": "r7c1f", "text": ", in a " }, { "_type": "span", "_key": "r7c1g", "text": "table-scroll", "marks": ["code"] }, { "_type": "span", "_key": "r7c1h", "text": " wrapper" }] },
+                    { "_type": "tableCell", "_key": "r7c2", "content": [{ "_type": "span", "_key": "r7c2s", "text": "Facts compared across rows and columns" }] }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "bylines": [{ "byline": "byline-author" }],
+        "taxonomies": { "topic": ["example-topic"] }
+      }
+    ]
+  }
+}

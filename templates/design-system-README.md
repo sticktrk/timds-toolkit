@@ -120,7 +120,9 @@ system's own stylesheets, one file per route and state
 whatever runs production. `check` builds the designs to `/designs/` and
 allows JavaScript interactions and refuses inline styles,
 undeclared classes, relative references. The ordinary starter ships one sample design
-to replace; a brand kit begins with an empty Designs directory; a system scaffolded before designs existed adopts them with
+whose copy is to replace: a home page, the default pages (About, Contact, Privacy,
+Terms, 404), and the article designs (list, article, topic) at fixed sample routes
+a site can seed and preview against; a brand kit begins with an empty Designs directory; a system scaffolded before designs existed adopts them with
 `__TIMDS_CLI__ designs init`. `AGENTS.md` holds the rules.
 
 The scaffold itself stays current: `.timds/starter.json` records the starter kind and its

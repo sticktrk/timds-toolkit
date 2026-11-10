@@ -1,0 +1,28 @@
+---
+/**
+ * The date and byline under an article's title:
+ * `<div class="article-meta"><time datetime>…</time> · <span>By …</span></div>`.
+ * The byline is EmDash's byline credits, joined; an article with neither a
+ * date nor a byline renders nothing.
+ */
+import { bylineNames, formatDate, type ArticleData } from "../../lib/articles/index";
+
+interface Props {
+	data: ArticleData;
+}
+
+const { data } = Astro.props;
+const date = data.publishedAt ? formatDate(data.publishedAt) : undefined;
+const names = bylineNames(data);
+const byline = names.length > 0 ? `By ${names.join(" and ")}` : undefined;
+---
+
+{
+	(date || byline) && (
+		<div class="article-meta">
+			{date && <time datetime={date.datetime}>{date.text}</time>}
+			{date && byline && " · "}
+			{byline && <span>{byline}</span>}
+		</div>
+	)
+}
