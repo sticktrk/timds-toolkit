@@ -18,6 +18,7 @@ import { isPlumbingPath, readParentRecord, validateParentRecord, validateStockRe
 import { readBlobs } from './git-blobs.mjs';
 import { compareDesignSystemVersions } from './changelog.mjs';
 import { runtimeIdentity } from './runtime.mjs';
+import { belowFloorError, starterBelowFloor } from './starter.mjs';
 
 const exec = promisify(execFile);
 const json = value => `${JSON.stringify(value, null, 2)}\n`;
@@ -160,6 +161,8 @@ async function transformDecodedOffshoot(source, {mode = 'full', systemId, name} 
   if (name !== undefined && (typeof name !== 'string' || !name.trim() || name.length > 200)) throw new Error('Offshoot name must be between 1 and 200 characters');
   const original = decodeOffshootSource(source), manifest = parse(original, 'timds.json');
   const site = parse(original, 'src/site.json'), formats = parse(original, 'src/formats.json', false);
+  // A parent from before starter levels is regenerated first; nothing is shot from it.
+  if (starterBelowFloor(parse(original, '.timds/starter.json', false))) throw belowFloorError(`The parent release ${source.parent?.systemId} ${source.parent?.version}`);
   const baseline = {site: mode === 'structure' ? structureSite(site) : site, formats};
   const {systemId: parentId, sourceId, version, commit} = source.parent || {};
   const parent = validateParentRecord({schemaVersion: 1, systemId: parentId, sourceId, version, commit, mode, baseline});

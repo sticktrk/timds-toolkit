@@ -1,8 +1,11 @@
-// Starter levels end to end: the declared steps, the interpreter that applies
-// them, the commands (upgrade, starter sync, migrate, status), check's
-// warnings, the stub scripts in every resolution mode, and the build's
-// declared extension point.
+// Starter levels end to end. This release declares no step (level 1, floor
+// 1), so the interpreter and the command path are proven with test-only
+// steps in their published JSON form, put in effect through
+// `withStarterDefinition`, which no CLI flag or environment variable reaches.
+// Also: the stub scripts in every resolution mode, the build's declared
+// extension point, and check's warnings.
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { execFileSync, spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { promises as fs } from "node:fs";
@@ -12,15 +15,48 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { checkWorkspace, initializeRepository, runCli, runWithOutputSink, upgradeRepository, validateManifest, workspaceCommandEnvironment } from "./core.mjs";
 import { describeToolkitRelease, renderToolkitManagedFiles } from "./release-metadata.mjs";
-import { runStarterSteps } from "./starter-steps.mjs";
-import { STARTER_LEVEL, describeStarterSteps, readStarterRecord, starterSteps, syncStarter } from "./starter.mjs";
+import { runStarterSteps, validateStarterSteps } from "./starter-steps.mjs";
+import { describeStarterSteps, readStarterRecord, syncStarter, withStarterDefinition } from "./starter.mjs";
 
 const packageRoot = fileURLToPath(new URL("../", import.meta.url));
-// The copied renderer as the last release that copied it shipped it.
-const fixtureScripts = fileURLToPath(new URL("./fixtures/starter-renderer-0.1.496/", import.meta.url));
 const quiet = (task) => runWithOutputSink(() => {}, task);
 const json = (value) => `${JSON.stringify(value, null, 2)}\n`;
-const earlierSummary = "Make a post, an ad, or an email on brand in a chat, then every way in: the pages, one URL for any AI tool, the machine-readable layer, MCP, a pinned bundle, and the website designs.";
+const sha256 = (text) => createHash("sha256").update(text).digest("hex");
+const legacyScript = "// a script an earlier release shipped\n";
+
+/**
+ * Three test steps above the floor, in the release metadata's JSON shape,
+ * covering every operation and every requirement: a code step that retires a
+ * file, a defaults step that moves two Use page fields while the Use page is
+ * stock, and a visible, declinable defaults step that sets `home`.
+ */
+const definition = Object.freeze({
+  level: 4,
+  floor: 1,
+  steps: [
+    { level: 2, id: "retire-legacy-script", layer: "code", visible: false, declinable: false,
+      starters: ["starter", "brand-kit"],
+      requires: [],
+      operations: [{ op: "remove-file", path: "src/scripts/legacy.js", sha256: [sha256(legacyScript)] }] },
+    { level: 3, id: "retitle-use", layer: "defaults", visible: false, declinable: false,
+      starters: ["starter"],
+      requires: [{ check: "stock-file", path: "src/pages/use/index.html" }],
+      operations: [
+        { op: "set-page-field", page: "use", field: "title", value: "Begin", from: ["Start"] },
+        { op: "set-page-field", page: "use", field: "group", value: "Front", from: [null] },
+      ] },
+    { level: 4, id: "home-landing", layer: "defaults", visible: true, declinable: true,
+      starters: ["starter"],
+      requires: [
+        { check: "authored-page", page: "use" },
+        { check: "page-field", page: "use", field: "layout", equals: "landing" },
+      ],
+      operations: [{ op: "set-site-field", field: "home", value: "use", from: [null] }] },
+  ],
+});
+const steps = JSON.parse(JSON.stringify(definition.steps));
+const levels = (definitionToUse = definition) => (task) => withStarterDefinition(definitionToUse, task);
+const withSteps = levels();
 
 async function scaffold(t, options = {}) {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "timds-levels-")));
@@ -31,163 +67,197 @@ async function scaffold(t, options = {}) {
   await quiet(() => initializeRepository(root, { standalone: true, ...options }));
   const read = (relative) => fs.readFile(path.join(root, relative), "utf8");
   const write = async (relative, text) => { await fs.mkdir(path.dirname(path.join(root, relative)), { recursive: true }); await fs.writeFile(path.join(root, relative), text); };
-  const commit = (message) => { execFileSync("git", ["add", "--all"], { cwd: root }); execFileSync("git", ["commit", "-qm", message], { cwd: root }); };
+  const commit = (message) => { execFileSync("git", ["add", "--all"], { cwd: root }); execFileSync("git", ["commit", "-q", "--allow-empty", "-m", message], { cwd: root }); };
   const exists = (relative) => fs.access(path.join(root, relative)).then(() => true, () => false);
-  return { root, read, write, commit, exists };
+  const site = async () => JSON.parse(await read("src/site.json"));
+  const editSite = async (edit) => { const value = await site(); edit(value); await write("src/site.json", json(value)); };
+  commit("Scaffold");
+  return { root, read, write, commit, exists, site, editSite };
 }
 
-/**
- * Rewind a fresh scaffold to a system a release before starter levels left:
- * no level in its record, its copied renderer at released bytes, and the Use
- * view's own page still titled "Compose" without the landing layout or home.
- */
-async function rewindToLevelZero(system, { home = undefined, title = "Compose", summary = earlierSummary } = {}) {
-  const record = JSON.parse(await system.read(".timds/starter.json"));
-  delete record.level;
-  delete record.declined;
-  record.plumbing = "recorded";
-  await system.write(".timds/starter.json", json(record));
-  for (const name of ["build", "check", "dev", "viewer", "brand-kit"]) await fs.copyFile(path.join(fixtureScripts, `${name}.mjs`), path.join(system.root, "scripts", `${name}.mjs`));
-  const site = JSON.parse(await system.read("src/site.json"));
-  if (home === undefined) delete site.home; else site.home = home;
-  const use = site.views.find((view) => view.id === "use").pages.find((page) => !page.slug);
-  use.title = title;
-  use.summary = summary;
-  delete use.layout;
-  // The starter's own serializer, so the sync's merge has nothing to reformat.
-  const { formatSiteJson } = await import("./starter.mjs");
-  await system.write("src/site.json", formatSiteJson(site));
-  system.commit("A system from before starter levels");
+/** A fresh level-1 scaffold the test steps have work on: the retired script at its listed bytes and, optionally, no home. */
+async function behind(t, { home = true, options = {} } = {}) {
+  const system = await scaffold(t, options);
+  await system.write("src/scripts/legacy.js", legacyScript);
+  if (!home) await system.editSite((value) => { delete value.home; });
+  system.commit("A system the test steps are ahead of");
+  return system;
 }
 
-const usePage = (site) => site.views.find((view) => view.id === "use").pages.find((page) => !page.slug);
+const usePage = (value) => value.views.find((view) => view.id === "use").pages.find((page) => !page.slug);
+const outcomes = (run) => run.results.map((result) => [result.step, result.outcome]);
+async function captureJson(argv) {
+  const lines = [];
+  await runWithOutputSink((line) => lines.push(line), () => runCli(argv));
+  return JSON.parse(lines.join("\n"));
+}
 
-test("the release metadata publishes exactly the steps the toolkit applies, in the contract's shape", async () => {
+/** An interpreter state over a fresh scaffold's tree, with this release's rendered managed bytes as stock. */
+async function interpreterState(system, kind = "starter") {
+  const rendered = await renderToolkitManagedFiles({ starter: kind });
+  const stock = new Map(rendered.files.map((file) => [file.path, Buffer.from(file.content)]));
+  return {
+    site: await system.site(),
+    read: (relative) => { try { return readFileSync(path.join(system.root, relative)); } catch { return null; } },
+    stock: (relative) => stock.get(relative) ?? null,
+  };
+}
+
+test("this release is level 1 and floor 1 with no steps, published in the contract's shape", async () => {
   for (const starter of ["starter", "brand-kit"]) {
     const release = await describeToolkitRelease({ starter });
     assert.equal(release.starter, starter, "the starter field keeps naming the selected kind");
-    assert.deepEqual(release.starterSteps, JSON.parse(JSON.stringify({ level: STARTER_LEVEL, floor: 0, steps: starterSteps })));
-    assert.equal(release.starterSteps.steps.length, release.starterSteps.level);
-    release.starterSteps.steps.forEach((step, index) => {
-      assert.equal(step.level, index + 1);
-      assert.deepEqual(Object.keys(step), ["level", "id", "layer", "visible", "declinable", "starters", "requires", "operations"]);
-    });
+    assert.deepEqual(release.starterSteps, { level: 1, floor: 1, steps: [] });
   }
-  const steps = describeStarterSteps().steps;
-  assert.deepEqual(steps.map((step) => [step.id, step.layer, step.visible, step.declinable]), [["renderer-package", "code", false, false], ["use-start-title", "defaults", false, false], ["home-landing", "defaults", true, true]]);
-  // Step 2 moves the Use page to the values the stock site model has now.
-  const stock = usePage(JSON.parse(readFileSync(path.join(packageRoot, "templates/starter/src/site.json"), "utf8")));
-  for (const operation of steps[1].operations) assert.equal(operation.value, stock[operation.field], operation.field);
-  // Every released copy of the retired renderer is removable, the last one included.
-  const removals = Object.fromEntries(steps[0].operations.map((operation) => [operation.path, operation.sha256]));
-  assert.ok(removals["scripts/viewer.mjs"].includes("f9e15c77e9593279402ae2554c1ece963af8688f944cada74c5144a701b04737"));
-  assert.ok(removals["scripts/brand-kit.mjs"].includes("89b43dd0a1dc5e2a6c8ef598b9ae0581ceb37bd554754aeff942b048e0b12965"));
-  // The host vouches stock-file from the rendered managed set.
   const rendered = await renderToolkitManagedFiles();
   for (const relative of ["scripts/build.mjs", "scripts/check.mjs", "scripts/dev.mjs"]) assert.equal(rendered.files.find((file) => file.path === relative).policy, "starter-plumbing", relative);
   assert.equal(rendered.files.find((file) => file.path === "src/pages/use/index.html").policy, "stock-fragment");
-  // An offshoot takes code steps only; a kit takes no defaults step. Both settle them as skipped.
-  const empty = { site: { views: [] }, read: () => null, stock: () => null };
-  for (const options of [{ offshoot: true }, { starter: "brand-kit" }]) {
-    const run = runStarterSteps(steps, empty, { accept: new Set(["home-landing"]), ...options });
-    assert.deepEqual([run.level, run.results.map((result) => result.outcome)], [3, ["applied", "skipped", "skipped"]], JSON.stringify(options));
-  }
+  assert.ok(!rendered.files.some((file) => ["scripts/viewer.mjs", "scripts/brand-kit.mjs"].includes(file.path)));
   const pkg = JSON.parse(readFileSync(path.join(packageRoot, "package.json"), "utf8"));
   assert.equal(pkg.hostContract, 2);
   assert.equal(pkg.exports["./viewer"], "./src/viewer.mjs");
+  // The test definition is published the same way while it is in effect, and only then.
+  assert.deepEqual(await withSteps(() => describeToolkitRelease()).then((release) => release.starterSteps), JSON.parse(JSON.stringify(definition)));
+  assert.deepEqual(describeStarterSteps(), { level: 1, floor: 1, steps: [] });
+  // Declared steps cover floor + 1 through level, with exactly the contract's keys.
+  assert.throws(() => validateStarterSteps(steps.slice(1), { floor: 1, level: 4 }), /2 steps from 2 to 4|3 steps from 2 to 4/);
+  assert.throws(() => validateStarterSteps(steps, { floor: 2, level: 5 }), /must have level 3/);
+  assert.throws(() => validateStarterSteps([{ ...steps[0], extra: true }, ...steps.slice(1)], { floor: 1, level: 4 }), /must have exactly level, id, layer/);
+  assert.throws(() => validateStarterSteps([{ ...steps[0], operations: [{ op: "move-file", path: "x" }] }, ...steps.slice(1)], { floor: 1, level: 4 }), /exactly|unknown operation/);
+  assert.throws(() => validateStarterSteps([steps[0], { ...steps[1], operations: [{ op: "set-page-field", page: "use", field: "slug", value: "x", from: [null] }] }, steps[2]], { floor: 1, level: 4 }), /may not set a page's slug/);
+  assert.throws(() => validateStarterSteps([steps[0], steps[1], { ...steps[2], operations: [{ op: "set-site-field", field: "home", value: null, from: [null] }] }], { floor: 1, level: 4 }), /never clears a field/);
 });
 
-test("every declared step, run from its published JSON by the interpreter, gives what the command path writes", async (t) => {
-  const system = await scaffold(t, { name: "Interpreter" });
-  await rewindToLevelZero(system);
-  const release = JSON.parse(JSON.stringify(await describeToolkitRelease()));
-  const rendered = await renderToolkitManagedFiles();
-  const stockBytes = new Map(rendered.files.map((file) => [file.path, Buffer.from(file.content)]));
-  const state = {
-    site: JSON.parse(await system.read("src/site.json")),
-    read: (relative) => { try { return readFileSync(path.join(system.root, relative)); } catch { return null; } },
-    stock: (relative) => stockBytes.get(relative) ?? null,
-  };
-  const expected = runStarterSteps(release.starterSteps.steps, state, { accept: new Set(["home-landing"]) });
-  assert.deepEqual(expected.results.map((result) => [result.step, result.outcome]), [["renderer-package", "applied"], ["use-start-title", "applied"], ["home-landing", "applied"]]);
-  assert.deepEqual(expected.remove, ["scripts/viewer.mjs", "scripts/brand-kit.mjs"]);
+test("the interpreter, from the steps' JSON, follows the six outcome rules for every operation and requirement", async (t) => {
+  const system = await behind(t, { home: false });
+  const state = await interpreterState(system);
 
-  const lines = [];
-  await runWithOutputSink((line) => lines.push(line), () => runCli(["starter", "migrate", "--accept", "home-landing", "--root", system.root, "--json"]));
-  const report = JSON.parse(lines.join("\n"));
-  assert.equal(report.ok, true);
-  assert.deepEqual(JSON.parse(await system.read("src/site.json")), expected.site, "the command wrote the interpreter's site");
-  for (const relative of expected.remove) assert.equal(await system.exists(relative), false, relative);
-  assert.deepEqual([report.levels.level, (await readStarterRecord(system.root)).level], [expected.level, expected.level]);
-  assert.deepEqual([report.starter.level, report.starter.behind, report.starter.renderer, report.starter.pending], [3, 0, "package", []]);
-  assert.deepEqual(usePage(expected.site), { ...usePage(state.site), title: "Start", summary: release.starterSteps.steps[1].operations[1].value, layout: "landing" });
-  assert.equal(expected.site.home, "use");
+  // Rules 2 and 5: effective operations of a step that is not visible apply; rule 6: a visible one stops, pending.
+  const upgrade = runStarterSteps(steps, state, { level: 1 });
+  assert.deepEqual(outcomes(upgrade), [["retire-legacy-script", "applied"], ["retitle-use", "applied"], ["home-landing", "pending"]]);
+  assert.deepEqual([upgrade.level, upgrade.stopped, upgrade.remove], [3, { step: "home-landing", reason: "visible" }, ["src/scripts/legacy.js"]]);
+  assert.deepEqual([usePage(upgrade.site).title, usePage(upgrade.site).group, upgrade.site.home], ["Begin", "Front", undefined]);
+  assert.deepEqual(upgrade.results[1].changes, [{ op: "set-page-field", field: "use.title", from: "Start", to: "Begin" }, { op: "set-page-field", field: "use.group", from: null, to: "Front" }]);
+  // Rule 6: accepted, it applies; declined, it settles as declined with nothing written.
+  const accepted = runStarterSteps(steps, state, { level: 1, accept: new Set(["home-landing"]) });
+  assert.deepEqual([accepted.level, outcomes(accepted).at(-1), accepted.site.home], [4, ["home-landing", "applied"], "use"]);
+  const declined = runStarterSteps(steps, state, { level: 1, declined: ["home-landing"] });
+  assert.deepEqual([declined.level, outcomes(declined).at(-1), declined.site.home], [4, ["home-landing", "declined"], undefined]);
+  // Rule 4: a visible step with nothing to change settles without a decision, and so does a removal of an absent file.
+  const settled = runStarterSteps(steps, { ...state, site: { ...state.site, home: "brand" }, read: (relative) => (relative === "src/scripts/legacy.js" ? null : state.read(relative)) }, { level: 1 });
+  assert.deepEqual([settled.level, outcomes(settled), settled.results[0].changes, settled.results[2].kept], [4, [["retire-legacy-script", "applied"], ["retitle-use", "applied"], ["home-landing", "applied"]], [], [{ op: "set-site-field", field: "home", current: "brand", value: "use" }]]);
+  // Rule 2: a field holding another value is kept and reported, and the step still settles.
+  const own = structuredClone(state.site);
+  usePage(own).title = "Our front door";
+  const kept = runStarterSteps(steps, { ...state, site: own }, { level: 1, accept: new Set(["home-landing"]) });
+  assert.deepEqual([kept.level, usePage(kept.site).title, usePage(kept.site).group, kept.results[1].kept.map((entry) => entry.field)], [4, "Our front door", "Front", ["use.title"]]);
+  // Rule 3: a file to remove holding other bytes is the only conflict; the level stops below it.
+  const customized = runStarterSteps(steps, { ...state, read: (relative) => (relative === "src/scripts/legacy.js" ? Buffer.from("// ours\n") : state.read(relative)) }, { level: 1, accept: new Set(["home-landing"]) });
+  assert.deepEqual([customized.level, customized.stopped, customized.conflicts, customized.remove], [1, { step: "retire-legacy-script", reason: "conflict" }, [{ step: "retire-legacy-script", path: "src/scripts/legacy.js", reason: "customized" }], []]);
+  const forced = runStarterSteps(steps, { ...state, read: (relative) => (relative === "src/scripts/legacy.js" ? Buffer.from("// ours\n") : state.read(relative)) }, { level: 1, force: new Set(["src/scripts/legacy.js"]) });
+  assert.deepEqual([forced.remove, forced.results[0].changes], [["src/scripts/legacy.js"], [{ op: "remove-file", path: "src/scripts/legacy.js", forced: true }]]);
+  // Rule 1, each requirement: a page that is not the stock bytes, a planned page, and a field that differs each skip their step unchanged.
+  const notStock = runStarterSteps(steps, { ...state, read: (relative) => (relative === "src/pages/use/index.html" ? Buffer.from("<h1>Our own</h1>\n") : state.read(relative)) }, { level: 2 });
+  assert.deepEqual([outcomes(notStock)[0], notStock.results[0].requirement, usePage(notStock.site).title], [["retitle-use", "skipped"], { check: "stock-file", path: "src/pages/use/index.html" }, "Start"]);
+  const plannedSite = structuredClone(state.site);
+  usePage(plannedSite).planned = true;
+  const planned = runStarterSteps(steps, { ...state, site: plannedSite }, { level: 3 });
+  assert.deepEqual([planned.level, outcomes(planned), planned.results[0].requirement.check, planned.site.home], [4, [["home-landing", "skipped"]], "authored-page", undefined]);
+  const pageLayout = structuredClone(state.site);
+  usePage(pageLayout).layout = "page";
+  const otherLayout = runStarterSteps(steps, { ...state, site: pageLayout }, { level: 3 });
+  assert.deepEqual([otherLayout.level, otherLayout.results[0].requirement.check, otherLayout.site.home], [4, "page-field", undefined]);
+  // Rule 1, layers and kinds: an offshoot takes code steps only; a brand kit takes no ordinary-starter defaults step.
+  for (const options of [{ offshoot: true }, { starter: "brand-kit" }]) {
+    const run = runStarterSteps(steps, state, { level: 1, accept: new Set(["home-landing"]), ...options });
+    assert.deepEqual([run.level, outcomes(run), run.remove, run.site.home], [4, [["retire-legacy-script", "applied"], ["retitle-use", "skipped"], ["home-landing", "skipped"]], ["src/scripts/legacy.js"], undefined], JSON.stringify(options));
+  }
 });
 
-test("upgrade retitles a stock Use page, removes the stock copied renderer with the same output, and stops at home-landing", async (t) => {
-  const system = await scaffold(t);
-  await rewindToLevelZero(system);
-  const before = await quiet(() => checkWorkspace(system.root));
-  const builtBefore = await system.read("dist/brand/color/index.html");
-  const statusBefore = JSON.parse(await captureJson(["starter", "status", "--root", system.root, "--json"]));
-  assert.deepEqual([statusBefore.level, statusBefore.behind, statusBefore.renderer, statusBefore.pending.map((step) => step.id)], [0, 3, "copied", ["renderer-package", "use-start-title", "home-landing"]]);
-  assert.ok(before.machine.warnings.some((warning) => /timds upgrade or timds starter sync settles renderer-package, use-start-title/.test(warning)), before.machine.warnings.join("\n"));
-
-  const upgraded = await quiet(() => upgradeRepository(system.root));
-  assert.deepEqual(upgraded.starter.levels.steps.map((step) => [step.step, step.outcome]), [["renderer-package", "applied"], ["use-start-title", "applied"], ["home-landing", "pending"]]);
-  const site = JSON.parse(await system.read("src/site.json"));
-  assert.deepEqual([usePage(site).title, usePage(site).layout, site.home], ["Start", "landing", undefined], "upgrade never sets home");
-  assert.equal(await system.exists("scripts/viewer.mjs"), false);
-  assert.equal(await system.read("dist/brand/color/index.html"), builtBefore, "the package renderer builds the page the copied one did");
-  const status = JSON.parse(await captureJson(["starter", "status", "--root", system.root, "--json"]));
-  assert.deepEqual(status, { starter: "starter", plumbing: "recorded", level: 2, current: 3, floor: 0, behind: 1, renderer: "package", kept: [], pending: [{ level: 3, id: "home-landing", visible: true, declinable: true }], declined: [], conflicts: [] });
-  const doctor = JSON.parse(await captureJson(["doctor", "--root", system.root, "--json"]));
+test("upgrade, starter sync and starter migrate apply the steps the interpreter computes from their JSON", async (t) => {
+  const system = await behind(t, { home: false });
+  const expected = runStarterSteps(steps, await interpreterState(system), { level: 1, accept: new Set(["home-landing"]) });
+  // upgrade applies everything that is not visible and stops at the visible step.
+  const upgraded = await withSteps(() => quiet(() => upgradeRepository(system.root)));
+  assert.deepEqual(upgraded.starter.levels.steps.map((step) => [step.step, step.outcome]), [["retire-legacy-script", "applied"], ["retitle-use", "applied"], ["home-landing", "pending"]]);
+  assert.equal(await system.exists("src/scripts/legacy.js"), false);
+  assert.deepEqual([usePage(await system.site()).title, (await system.site()).home], ["Begin", undefined], "upgrade never applies a visible step with something to change");
+  const status = await withSteps(() => captureJson(["starter", "status", "--root", system.root, "--json"]));
+  assert.deepEqual(status, { starter: "starter", plumbing: "toolkit", level: 3, current: 4, floor: 1, belowFloor: false, behind: 1, pending: [{ level: 4, id: "home-landing", visible: true, declinable: true }], declined: [], conflicts: [] });
+  const doctor = await withSteps(() => captureJson(["doctor", "--root", system.root, "--json"]));
   assert.deepEqual({ ...doctor.starter, state: undefined, version: undefined }, { ...status, state: undefined, version: undefined }, "doctor --json carries the same starter section");
   system.commit("Upgrade");
-  const checked = await quiet(() => checkWorkspace(system.root));
-  assert.ok(checked.machine.warnings.some((warning) => /home-landing \(level 3\) changes what visitors see and waits for a decision/.test(warning)));
+  const checked = await withSteps(() => quiet(() => checkWorkspace(system.root)));
+  assert.ok(checked.machine.warnings.some((warning) => /home-landing \(level 4\) changes what visitors see and waits for a decision/.test(warning)), checked.machine.warnings.join("\n"));
+  // starter sync, like upgrade, never accepts.
+  const synced = await withSteps(() => quiet(() => runCli(["starter", "sync", "--root", system.root])));
+  assert.deepEqual([synced.levels.level, synced.levels.stopped], [3, { step: "home-landing", reason: "visible" }]);
+  // migrate --accept applies it; the result is the interpreter's, byte for byte in the site model.
+  const migrated = await withSteps(() => captureJson(["starter", "migrate", "--accept", "home-landing", "--root", system.root, "--json"]));
+  assert.deepEqual([migrated.ok, migrated.levels.level, migrated.starter.behind, migrated.starter.pending], [true, 4, 0, []]);
+  assert.deepEqual(await system.site(), expected.site);
+  assert.deepEqual((await readStarterRecord(system.root)).level, expected.level);
+});
 
-  // Declining records the decision and the system reads as current.
-  const declined = JSON.parse(await captureJson(["starter", "migrate", "--decline", "home-landing", "--root", system.root, "--json"]));
-  assert.deepEqual([declined.starter.level, declined.starter.behind, declined.starter.declined, declined.starter.pending], [3, 0, ["home-landing"], []]);
-  assert.equal(JSON.parse(await system.read("src/site.json")).home, undefined);
+test("migrate --decline records the decision, and a declined or settled step reads as current", async (t) => {
+  const system = await behind(t, { home: false });
+  await withSteps(() => quiet(() => upgradeRepository(system.root)));
+  system.commit("Upgrade");
+  await assert.rejects(withSteps(() => quiet(() => runCli(["starter", "migrate", "--decline", "retitle-use", "--root", system.root]))), /cannot be declined/);
+  await assert.rejects(withSteps(() => quiet(() => runCli(["starter", "migrate", "--accept", "no-such-step", "--root", system.root]))), /Unknown starter step "no-such-step"/);
+  await assert.rejects(withSteps(() => quiet(() => runCli(["starter", "migrate", "--accept", "home-landing", "--decline", "home-landing", "--root", system.root]))), /both accepted and declined/);
+  const declined = await withSteps(() => captureJson(["starter", "migrate", "--decline", "home-landing", "--root", system.root, "--json"]));
+  assert.deepEqual([declined.starter.level, declined.starter.behind, declined.starter.declined, declined.starter.pending], [4, 0, ["home-landing"], []]);
+  assert.equal((await system.site()).home, undefined);
   assert.deepEqual((await readStarterRecord(system.root)).declined, ["home-landing"]);
-  system.commit("Decline the landing as home");
-  await assert.rejects(quiet(() => runCli(["starter", "migrate", "--decline", "use-start-title", "--root", system.root])), /cannot be declined/);
-  await assert.rejects(quiet(() => runCli(["starter", "migrate", "--accept", "no-such-step", "--root", system.root])), /Unknown starter step "no-such-step"/);
+  system.commit("Decline");
+  await assert.rejects(withSteps(() => quiet(() => runCli(["starter", "migrate", "--accept", "home-landing", "--root", system.root]))), /was declined/);
+
+  // A system that already has home settles the visible step on upgrade with nothing changed and nothing to decide.
+  const own = await behind(t);
+  const upgraded = await withSteps(() => quiet(() => upgradeRepository(own.root)));
+  assert.deepEqual([upgraded.starter.levels.level, upgraded.starter.levels.steps.at(-1).outcome, (await own.site()).home, upgraded.starter.status.declined], [4, "applied", "use", []]);
 });
 
-test("a system's own Use title and its own home settle their steps unchanged", async (t) => {
-  const system = await scaffold(t);
-  await rewindToLevelZero(system, { home: "brand", title: "Our front door", summary: "Ours." });
-  const synced = await quiet(() => syncStarter({ designSystemRoot: system.root, version: "0.0.0" }));
-  assert.deepEqual(synced.levels.steps.map((step) => [step.step, step.outcome]), [["renderer-package", "applied"], ["use-start-title", "applied"], ["home-landing", "applied"]]);
-  assert.deepEqual(synced.levels.steps[1].kept.map((kept) => kept.field), ["use.title", "use.summary"], "the authored title and summary are kept and reported");
-  const site = JSON.parse(await system.read("src/site.json"));
-  assert.deepEqual([usePage(site).title, usePage(site).layout, site.home], ["Our front door", "landing", "brand"]);
-  assert.deepEqual([synced.status.level, synced.status.behind, synced.status.pending], [3, 0, []], "a visible step with nothing to change needs no decision");
-});
-
-test("a Use page that is the system's own skips use-start-title; a customized build keeps the renderer at level 0", async (t) => {
-  const system = await scaffold(t);
-  await rewindToLevelZero(system);
+test("a conflict stops the level below its step; the brand kit and a customized Use page skip the defaults steps", async (t) => {
+  const system = await behind(t);
+  await system.write("src/scripts/legacy.js", "// our own\n");
   await system.write("src/pages/use/index.html", `${await system.read("src/pages/use/index.html")}\n<p>Our own words.</p>\n`);
-  await system.write("scripts/build.mjs", `${await system.read("scripts/build.mjs")}\n// one extra step\n`);
-  system.commit("Own page and build");
-  const kept = await quiet(() => syncStarter({ designSystemRoot: system.root, version: "0.0.0", check: () => checkWorkspace(system.root) }));
-  assert.deepEqual(kept.written, [".timds/starter.json"].filter(() => false), "nothing of the kept renderer moves");
-  const checkedKept = await quiet(() => checkWorkspace(system.root));
-  assert.equal(await system.exists("scripts/viewer.mjs"), true);
-  assert.match(await system.read("scripts/build.mjs"), /one extra step/);
-  const status = JSON.parse(await captureJson(["starter", "status", "--root", system.root, "--json"]));
-  assert.deepEqual([status.level, status.renderer, status.kept, status.conflicts], [0, "kept", ["scripts/build.mjs"], [{ step: "renderer-package", path: "scripts/build.mjs", reason: "renderer_kept" }]]);
-  assert.ok(checkedKept.machine.warnings.some((warning) => /The copied renderer is kept \(scripts\/build\.mjs\)/.test(warning)), "the kept renderer still builds and checks, with a warning");
-  // Once the extra step is a declared command, --force gives the build back to the package.
-  system.commit("Kept");
-  const forced = await quiet(() => runCli(["starter", "sync", "--force", "scripts/build.mjs", "--root", system.root]));
-  assert.deepEqual(forced.levels.steps.map((step) => [step.step, step.outcome]), [["renderer-package", "applied"], ["use-start-title", "skipped"], ["home-landing", "skipped"]], "the Use page is its own, so neither defaults step applies");
-  assert.equal(JSON.parse(await system.read("src/site.json")).home, undefined);
-  assert.deepEqual([forced.status.level, forced.status.renderer], [3, "package"]);
+  system.commit("Own script and Use page");
+  const kept = await withSteps(() => quiet(() => upgradeRepository(system.root)));
+  assert.deepEqual([kept.starter.levels.level, kept.starter.status.conflicts], [1, [{ step: "retire-legacy-script", path: "src/scripts/legacy.js", reason: "customized" }]]);
+  assert.equal(await system.read("src/scripts/legacy.js"), "// our own\n");
+  system.commit("Upgrade");
+  const checked = await withSteps(() => quiet(() => checkWorkspace(system.root)));
+  assert.ok(checked.machine.warnings.some((warning) => /Starter step retire-legacy-script cannot settle: src\/scripts\/legacy\.js is customized/.test(warning)), checked.machine.warnings.join("\n"));
+  // Resolved by hand (the file removed), the next upgrade settles every step; the Use page is the system's own, so its step is skipped.
+  await fs.rm(path.join(system.root, "src/scripts/legacy.js"));
+  system.commit("Resolve the conflict");
+  const resolved = await withSteps(() => quiet(() => upgradeRepository(system.root)));
+  assert.deepEqual(resolved.starter.levels.steps.map((step) => [step.step, step.outcome]), [["retire-legacy-script", "applied"], ["retitle-use", "skipped"], ["home-landing", "applied"]]);
+  assert.deepEqual([resolved.starter.levels.level, usePage(await system.site()).title], [4, "Start"]);
+
+  const kit = await behind(t, { options: { starter: "brand-kit" } });
+  const synced = await withSteps(() => quiet(() => syncStarter({ designSystemRoot: kit.root, version: "0.0.0" })));
+  assert.deepEqual([synced.levels.level, synced.levels.steps.map((step) => step.outcome)], [4, ["applied", "skipped", "skipped"]]);
+  assert.equal(await kit.exists("src/scripts/legacy.js"), false);
+});
+
+test("a fresh scaffold records the level in effect, and init under this release records level 1", async (t) => {
+  const system = await scaffold(t);
+  assert.deepEqual([(await readStarterRecord(system.root)).level, (await readStarterRecord(system.root)).declined], [1, []]);
+  const ahead = await withSteps(async () => scaffold(t));
+  assert.equal((await readStarterRecord(ahead.root)).level, 4);
+});
+
+test("starter migrate and status run inside a hosted session workspace", async (t) => {
+  const system = await behind(t, { home: false, options: { provider: "hosted", portalUrl: "https://host.example.com" } });
+  await system.write(".timds/session.json", json({ sessionId: "00000000-0000-4000-8000-000000000000" }));
+  const status = await withSteps(() => captureJson(["starter", "status", "--root", system.root, "--json"]));
+  assert.deepEqual([status.level, status.behind], [1, 3]);
+  const migrated = await withSteps(() => captureJson(["starter", "migrate", "--accept", "home-landing", "--root", system.root, "--json"]));
+  assert.deepEqual([migrated.ok, migrated.starter.level, migrated.starter.behind], [true, 4, 0]);
+  assert.equal((await system.site()).home, "use");
 });
 
 test("workspace.after.build runs after the stock build in build, check and dev, and a failing command fails the build", async (t) => {
@@ -238,19 +308,3 @@ test("check warns when a view is labelled like the viewer's own Designs link", a
   assert.ok(checked.machine.warnings.some((warning) => /labels the view web "Designs", the same as the viewer's own Designs link/.test(warning)), checked.machine.warnings.join("\n"));
 });
 
-test("starter migrate and status run inside a hosted session workspace", async (t) => {
-  const system = await scaffold(t, { provider: "hosted", portalUrl: "https://host.example.com" });
-  await rewindToLevelZero(system);
-  await system.write(".timds/session.json", json({ sessionId: "00000000-0000-4000-8000-000000000000" }));
-  const status = JSON.parse(await captureJson(["starter", "status", "--root", system.root, "--json"]));
-  assert.equal(status.level, 0);
-  const migrated = JSON.parse(await captureJson(["starter", "migrate", "--accept", "home-landing", "--root", system.root, "--json"]));
-  assert.deepEqual([migrated.ok, migrated.starter.level, migrated.starter.behind], [true, 3, 0]);
-  assert.equal(JSON.parse(await system.read("src/site.json")).home, "use");
-});
-
-async function captureJson(argv) {
-  const lines = [];
-  await runWithOutputSink((line) => lines.push(line), () => runCli(argv));
-  return lines.join("\n");
-}

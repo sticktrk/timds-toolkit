@@ -128,10 +128,8 @@ scripts, viewer stylesheets, views, and asset formats TimDS wrote, and every
 `__TIMDS_CLI__ upgrade` brings the stock scripts and viewer stylesheets to
 the installed release (they are TimDS's in a fresh scaffold; a local change
 to them is replaced and reported) and appends new views, planned pages, and
-formats without touching what this system declares. A
-system scaffolded before the record existed opts in once with
-`__TIMDS_CLI__ starter sync`. `__TIMDS_CLI__ starter status` reports the
-starter level; a step that changes what visitors see waits for
+formats without touching what this system declares.
+`__TIMDS_CLI__ starter status` reports the starter level; a step that changes what visitors see waits for
 `__TIMDS_CLI__ starter migrate --accept ID` or `--decline ID`.
 
 ## Offshoots
@@ -175,14 +173,13 @@ the hash of each declared stock file the parent last wrote. It is
 protected ancestry, preserved by starter sync and upgrade. For an offshoot,
 those commands update toolkit plumbing while leaving catalogs and declared
 stock to the parent feed and every other page to this system. Layout maintenance remains limited
-to missing stock stylesheet links and the changelog version-chip link.
+to missing stock stylesheet links.
 
 `__TIMDS_CLI__ feed [--version RELEASE]` advances unchanged catalog fields,
 appends missing entries with pages planned, and keeps local edits as grafts.
 Use `--from ../parent` for a local committed parent tree with the saved source
 UUID. A reported graft shading a parent change can be kept or edited to let
-the parent through. Plumbing follows its ownership record; `--force PATH`
-reaches only named plumbing. A declared stock file is refreshed while this
+the parent through. Feed never writes plumbing; only upgrade does. A declared stock file is refreshed while this
 system's copy is unmodified; a changed or removed copy is a graft and stays,
 and tokens, media, designs and undeclared files are never replaced. Feed
 requires clean files where it writes, checks the

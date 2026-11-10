@@ -33,7 +33,7 @@ async function fixture(t, { plumbing = "toolkit", mode = "full", git = false, st
   const parent = { schemaVersion: 1, ...identity, mode, baseline: { site: baselineSite, formats }, ...(stockFiles ? { files: stockFiles } : {}) };
   const texts = {
     ".timds/parent.json": json(parent),
-    ".timds/starter.json": json({ schemaVersion: 1, version: "0.1.0", plumbing, baseline: { site: { views: [] }, formats: {} }, files: { "scripts/build.mjs": hash(script), "src/pages/web/index.html": hash("<h1>Child</h1>\n") } }),
+    ".timds/starter.json": json({ schemaVersion: 1, version: "0.1.0", plumbing, level: 1, declined: [], baseline: { site: { views: [] }, formats: {} }, files: { "scripts/build.mjs": hash(script), "src/pages/web/index.html": hash("<h1>Child</h1>\n") } }),
     "src/site.json": json(baselineSite), "src/formats.json": json(formats),
     "scripts/build.mjs": script, "src/pages/web/index.html": "<h1>Child</h1>\n",
     "src/layout.html": "<main>{{content}}</main>\n", "src/styles/system.css": ".child {}\n",
@@ -58,7 +58,7 @@ function nextSource({ version = "1.1.0", commit = "2".repeat(40), build = nextSc
   Object.assign(nextFormats.web.formats.screen, { name: "Interface screen", width: 1200 });
   return { parent: { ...identity, version, commit }, files: [
     sourceFile("timds.json", json({ systemId: identity.systemId, version })), sourceFile("src/site.json", json(nextSite)), sourceFile("src/formats.json", json(nextFormats)),
-    sourceFile(".timds/starter.json", json({ schemaVersion: 1, plumbing: "toolkit", version: "0.1.1", files: { "scripts/build.mjs": hash(build), "src/pages/web/index.html": hash("<h1>Parent</h1>\n") } })),
+    sourceFile(".timds/starter.json", json({ schemaVersion: 1, plumbing: "toolkit", version: "0.1.1", level: 1, declined: [], files: { "scripts/build.mjs": hash(build), "src/pages/web/index.html": hash("<h1>Parent</h1>\n") } })),
     sourceFile("scripts/build.mjs", build), sourceFile("src/pages/web/index.html", "<h1>Parent</h1>\n"),
     sourceFile("src/pages/web/buttons.html", "<h1>Parent button</h1>\n"),
     sourceFile("src/styles/system.css", ".parent {}\n"), sourceFile("src/layout.html", "<body>Parent</body>\n"),
@@ -123,15 +123,16 @@ test("feed advances unchanged fields, preserves grafts and authored source, and 
   assert.deepEqual((await readJson(root, "src/site.json")).views[0], { id: "web", label: "Our web", blurb: "Interfaces and email", pages: [{ slug: "", title: "Web overview" }, { slug: "buttons", title: "Buttons", summary: "Parent copy", planned: true }] });
   assert.equal((await readJson(root, "src/formats.json")).web.formats.screen.width, 1200);
   assert.equal((await readJson(root, "src/formats.json")).web.formats.screen.name, "Our screen");
-  assert.equal(await read(root, "scripts/build.mjs"), nextScript);
+  assert.equal(await read(root, "scripts/build.mjs"), script, "feed carries no code: the child keeps its own plumbing");
+  assert.ok(!report.files.some((file) => file.path === "scripts/build.mjs"));
   assert.equal((await readJson(root, ".timds/parent.json")).version, "1.1.0");
-  for (const file of ["src/pages/web/index.html", "src/layout.html", "src/styles/system.css", "tokens.json", "media.json"]) assert.equal(await read(root, file), texts[file], file);
+  for (const file of [".timds/starter.json", "src/pages/web/index.html", "src/layout.html", "src/styles/system.css", "tokens.json", "media.json"]) assert.equal(await read(root, file), texts[file], file);
   await assert.rejects(fs.access(path.join(root, "src/pages/web/buttons.html")), { code: "ENOENT" });
   assert.deepEqual((await readJson(root, ".timds/starter.json")).baseline, { site: { views: [] }, formats: {} }, "the seed baseline stays separate");
   assert.match(describeFeed(report).join("\n"), /Your graft shades the parent's change at web.label/);
   const again = await feedOffshoot({ designSystemRoot: root, source, check: async () => { throw new Error("must not check an unchanged feed"); } });
   assert.deepEqual(again.written, []);
-  assert.deepEqual(again.files.filter((file) => [".timds/starter.json", ".timds/parent.json"].includes(file.path)).map((file) => [file.path, file.status]), [[".timds/starter.json", "current"], [".timds/parent.json", "current"]]);
+  assert.deepEqual(again.files.filter((file) => file.path.startsWith(".timds/")).map((file) => [file.path, file.status]), [[".timds/parent.json", "current"]]);
   assert.ok(again.files.every((file) => file.status === "current"));
   assert.doesNotMatch(describeFeed(again).join("\n"), /\bupdated\b/);
   assert.deepEqual(again.site.kept, []);
@@ -172,7 +173,7 @@ test("no-op feed --json reports unchanged bookkeeping records as current", async
   assert.equal(report.recordWritten, false);
   assert.equal(report.check, null);
   assert.ok(report.files.every((file) => file.status === "current"));
-  assert.deepEqual(report.files.filter((file) => file.path.startsWith(".timds/")).map((file) => [file.path, file.status]), [[".timds/starter.json", "current"], [".timds/parent.json", "current"]]);
+  assert.deepEqual(report.files.filter((file) => file.path.startsWith(".timds/")).map((file) => [file.path, file.status]), [[".timds/parent.json", "current"]]);
 });
 
 test("structure feed retains neutral structure catalogs without parent prose or bodies", async (t) => {
@@ -184,65 +185,40 @@ test("structure feed retains neutral structure catalogs without parent prose or 
   assert.equal(report.parent.mode, "structure");
 });
 
-test("feed preserves recorded plumbing grafts unless explicitly named, while toolkit plumbing advances", async (t) => {
-  const { root } = await fixture(t, { plumbing: "recorded" });
-  await write(root, "scripts/build.mjs", "// child's engine change\n");
-  const source = nextSource();
-  const kept = await feedOffshoot({ designSystemRoot: root, source });
-  assert.equal(kept.files.find((file) => file.path === "scripts/build.mjs").status, "customized");
-  assert.equal(await read(root, "scripts/build.mjs"), "// child's engine change\n");
-  await assert.rejects(feedOffshoot({ designSystemRoot: root, source, force: ["src/pages/web/index.html"] }), /authored content is never replaced/);
-  await feedOffshoot({ designSystemRoot: root, source, force: ["scripts/build.mjs"] });
-  assert.equal(await read(root, "scripts/build.mjs"), nextScript);
-  const { root: owned } = await fixture(t);
-  await write(owned, "scripts/build.mjs", "// local toolkit change\n");
-  const updated = await feedOffshoot({ designSystemRoot: owned, source });
-  assert.match(updated.files.find((file) => file.path === "scripts/build.mjs").note, /local change was replaced/);
-  assert.equal(await read(owned, "scripts/build.mjs"), nextScript);
+test("feed writes no plumbing: a child keeps its own whatever the parent recorded, in either plumbing mode", async (t) => {
+  for (const plumbing of ["toolkit", "recorded"]) {
+    const { root, texts } = await fixture(t, { plumbing });
+    const source = nextSource();
+    source.files.push(sourceFile("src/scripts/compose.js", "// parent composer\n"), sourceFile("src/styles/viewer.css", "/* parent chrome */\n"));
+    const report = await feedOffshoot({ designSystemRoot: root, source });
+    assert.equal(await read(root, "scripts/build.mjs"), texts["scripts/build.mjs"], plumbing);
+    for (const file of ["src/scripts/compose.js", "src/styles/viewer.css"]) await assert.rejects(fs.access(path.join(root, file)), { code: "ENOENT" }, file);
+    assert.equal(await read(root, ".timds/starter.json"), texts[".timds/starter.json"], "the starter record is the toolkit's, not the parent's");
+    assert.ok(report.files.every((file) => ![...["scripts/", "src/scripts/", "src/styles/viewer.css", "src/styles/canvas.css"]].some((prefix) => file.path.startsWith(prefix))), JSON.stringify(report.files));
+  }
 });
 
-test("full feed keeps unverified parent plumbing authored while feeding catalogs, even with force", async (t) => {
-  const { root } = await fixture(t);
-  const authored = "// full child's authored engine\n";
-  await write(root, "scripts/build.mjs", authored);
-  const source = nextSource();
-  source.files.find((file) => file.path === "scripts/build.mjs").content = Buffer.from("// parent's authored engine\n").toString("base64");
-  const report = await feedOffshoot({ designSystemRoot: root, source });
-  assert.equal(await read(root, "scripts/build.mjs"), authored);
-  assert.equal((await readJson(root, "src/formats.json")).web.formats.screen.width, 1200);
-  assert.equal((await readJson(root, ".timds/parent.json")).version, "1.1.0");
-  assert.match(report.files.find((file) => file.path === "scripts/build.mjs").note, /parent's authored plumbing; never copied/);
-  const before = await read(root, ".timds/parent.json");
-  await assert.rejects(feedOffshoot({ designSystemRoot: root, source, force: ["scripts/build.mjs"] }), /--force cannot replace authored parent plumbing/);
-  assert.equal(await read(root, "scripts/build.mjs"), authored);
-  assert.equal(await read(root, ".timds/parent.json"), before);
+test("feed refuses a child or a parent release below the starter floor before writing anything", async (t) => {
+  const { root, texts } = await fixture(t);
+  const record = JSON.parse(texts[".timds/starter.json"]);
+  delete record.level;
+  await write(root, ".timds/starter.json", json(record));
+  await assert.rejects(feedOffshoot({ designSystemRoot: root, source: nextSource() }), (error) => error.failureCode === "below_floor" && /This offshoot predates starter levels/.test(error.message));
+  for (const [file, text] of Object.entries(texts)) if (file !== ".timds/starter.json") assert.equal(await read(root, file), text, file);
+  await write(root, ".timds/starter.json", texts[".timds/starter.json"]);
+  const old = nextSource();
+  const stock = old.files.find((file) => file.path === ".timds/starter.json");
+  const parentRecord = JSON.parse(Buffer.from(stock.content, "base64").toString());
+  delete parentRecord.level;
+  stock.content = Buffer.from(json(parentRecord)).toString("base64");
+  await assert.rejects(feedOffshoot({ designSystemRoot: root, source: old }), (error) => error.failureCode === "below_floor" && /The parent release example\/core 1\.1\.0 predates starter levels/.test(error.message));
+  for (const [file, text] of Object.entries(texts)) assert.equal(await read(root, file), text, file);
 });
 
 test("failed feed restores all source files and both records", async (t) => {
   const { root, texts } = await fixture(t);
   await assert.rejects(feedOffshoot({ designSystemRoot: root, source: nextSource(), check: async () => { throw new Error("fixture build failed"); } }), /Feed was rolled back.*fixture build failed/);
   for (const [file, text] of Object.entries(texts)) assert.equal(await read(root, file), text, file);
-});
-
-test("feed preserves source plumbing executable modes and rolls mode changes back with the check", async (t) => {
-  const { root, texts } = await fixture(t);
-  const source = nextSource();
-  source.files.find((file) => file.path === "scripts/build.mjs").mode = "100755";
-  const stock = source.files.find((file) => file.path === ".timds/starter.json");
-  const record = JSON.parse(Buffer.from(stock.content, "base64").toString());
-  record.files["scripts/task.mjs"] = hash("#!/usr/bin/env node\n");
-  stock.content = Buffer.from(json(record)).toString("base64");
-  source.files.push(sourceFile("scripts/task.mjs", "#!/usr/bin/env node\n", "100755"));
-  await assert.rejects(feedOffshoot({ designSystemRoot: root, source, check: async () => { throw new Error("failed mode check"); } }), /rolled back.*failed mode check/);
-  assert.equal((await fs.stat(path.join(root, "scripts/build.mjs"))).mode & 0o777, 0o644);
-  assert.equal(await read(root, "scripts/build.mjs"), texts["scripts/build.mjs"]);
-  await assert.rejects(fs.access(path.join(root, "scripts/task.mjs")), { code: "ENOENT" });
-  await feedOffshoot({ designSystemRoot: root, source });
-  for (const file of ["scripts/build.mjs", "scripts/task.mjs"]) assert.equal((await fs.stat(path.join(root, file))).mode & 0o777, 0o755, file);
-  const next = nextSource({ version: "1.2.0", commit: "3".repeat(40) });
-  // The script bytes are unchanged; a regular/executable transition still feeds.
-  await feedOffshoot({ designSystemRoot: root, source: next });
-  assert.equal((await fs.stat(path.join(root, "scripts/build.mjs"))).mode & 0o777, 0o644);
 });
 
 test("feed refuses an older parent release before changing files or the baseline", async (t) => {
@@ -255,7 +231,7 @@ test("feed refuses an older parent release before changing files or the baseline
   assert.equal(await read(root, ".timds/parent.json"), baseline);
 });
 
-test("feed refuses dirty writes, mismatched identity, corrupt parent plumbing and symlink targets", async (t) => {
+test("feed refuses dirty writes, mismatched identity and symlink targets", async (t) => {
   const { root, texts } = await fixture(t, { git: true, mode: "structure" });
   await write(root, "src/site.json", `${texts["src/site.json"]}\n`);
   await assert.rejects(feedOffshoot({ designSystemRoot: root, source: nextSource() }), /Feed refuses to run over uncommitted changes/);
@@ -263,47 +239,10 @@ test("feed refuses dirty writes, mismatched identity, corrupt parent plumbing an
   await write(root, "src/site.json", texts["src/site.json"]);
   const mismatch = nextSource(); mismatch.parent.sourceId = "00000000-0000-4000-8000-000000000002";
   await assert.rejects(feedOffshoot({ designSystemRoot: root, source: mismatch }), /different parent system or source/);
-  const corrupt = nextSource(); corrupt.files.find((file) => file.path === "scripts/build.mjs").content = Buffer.from("unrecorded engine").toString("base64");
-  await assert.rejects(feedOffshoot({ designSystemRoot: root, source: corrupt }), /customized recorded plumbing/);
-  await fs.rm(path.join(root, "scripts/build.mjs"));
-  await fs.symlink("../tokens.json", path.join(root, "scripts/build.mjs"));
+  await fs.rm(path.join(root, "src/formats.json"));
+  await fs.symlink("../tokens.json", path.join(root, "src/formats.json"));
   await assert.rejects(feedOffshoot({ designSystemRoot: root, source: nextSource() }), /regular file without symbolic links/);
   assert.equal(await read(root, "tokens.json"), texts["tokens.json"]);
-});
-
-test("feed checks prospective dirty writes before customization prompts and ignores unrelated authored edits", async (t) => {
-  const { root, texts } = await fixture(t, { git: true, plumbing: "recorded" });
-  await write(root, "scripts/build.mjs", "// committed child engine\n");
-  execFileSync("git", ["add", "scripts/build.mjs"], { cwd: root });
-  execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-qm", "Customize engine"], { cwd: root });
-  await write(root, "src/site.json", `${texts["src/site.json"]}\n`);
-  let prompts = 0;
-  const decideCustomized = async () => { prompts++; return "replace"; };
-  await assert.rejects(feedOffshoot({ designSystemRoot: root, source: nextSource(), decideCustomized }), /Feed refuses to run over uncommitted changes/);
-  assert.equal(prompts, 0);
-  assert.equal(await read(root, "scripts/build.mjs"), "// committed child engine\n");
-  assert.equal(await read(root, ".timds/parent.json"), texts[".timds/parent.json"]);
-  await write(root, "src/site.json", texts["src/site.json"]);
-  await write(root, "src/pages/web/index.html", "<h1>Uncommitted authored page</h1>\n");
-  const report = await feedOffshoot({ designSystemRoot: root, source: nextSource(), decideCustomized });
-  assert.equal(prompts, 1);
-  assert.equal(await read(root, "scripts/build.mjs"), nextScript);
-  assert.equal(await read(root, "src/pages/web/index.html"), "<h1>Uncommitted authored page</h1>\n");
-  assert.equal((await readJson(root, ".timds/starter.json")).files["scripts/build.mjs"], hash(nextScript));
-  assert.equal(report.files.filter((file) => file.path === "scripts/build.mjs").length, 1);
-});
-
-test("feed rechecks dirty writes after a customization decision", async (t) => {
-  const { root, texts } = await fixture(t, { git: true, plumbing: "recorded" });
-  await write(root, "scripts/build.mjs", "// committed child engine\n");
-  execFileSync("git", ["add", "scripts/build.mjs"], { cwd: root });
-  execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-qm", "Customize engine"], { cwd: root });
-  await assert.rejects(feedOffshoot({ designSystemRoot: root, source: nextSource(), decideCustomized: async () => {
-    await write(root, "src/site.json", `${texts["src/site.json"]}\n`);
-    return "replace";
-  } }), /Feed refuses to run over uncommitted changes/);
-  assert.equal(await read(root, "scripts/build.mjs"), "// committed child engine\n");
-  assert.equal(await read(root, ".timds/parent.json"), texts[".timds/parent.json"]);
 });
 
 test("ordinary starter sync updates only plumbing in an offshoot and preserves parent and structural baselines", async (t) => {
@@ -318,7 +257,7 @@ test("ordinary starter sync updates only plumbing in an offshoot and preserves p
   await assert.rejects(fs.access(path.join(root, "src/pages/use/index.html")), { code: "ENOENT" });
 });
 
-test("offshoot starter sync maintains layout plumbing links and version chip with full rollback", async (t) => {
+test("offshoot starter sync maintains layout stylesheet links with full rollback", async (t) => {
   const { root, texts } = await fixture(t);
   const layout = '<!doctype html>\n<head>\n<link rel="stylesheet" href="/styles/viewer.css">\n</head>\n<body><header>Child shell</header><span class="appbar__version">v{{version}}</span><main>{{content}}</main></body>\n';
   await write(root, "src/layout.html", layout);
@@ -328,7 +267,6 @@ test("offshoot starter sync maintains layout plumbing links and version chip wit
   const report = await syncStarter({ designSystemRoot: root, version: "0.1.999" });
   const updated = await read(root, "src/layout.html");
   assert.match(updated, /<link rel="stylesheet" href="\/styles\/canvas\.css">/);
-  assert.match(updated, /<a class="appbar__version" href="\/changelog\/" title="Changelog">v\{\{version\}\}<\/a>/);
   assert.match(updated, /<header>Child shell<\/header>/);
   assert.ok(report.written.includes("src/layout.html"));
   for (const file of [".timds/parent.json", "src/site.json", "src/formats.json", "src/pages/web/index.html"]) assert.equal(await read(root, file), texts[file], file);
@@ -424,14 +362,6 @@ test("a failed check rolls back refreshed and created stock with both records", 
   for (const [file, text] of Object.entries(texts)) assert.equal(await read(root, file), text, file);
   await assert.rejects(fs.access(path.join(root, page("buttons"))), { code: "ENOENT" });
   await assert.rejects(fs.access(path.join(root, page("gone"))), { code: "ENOENT" });
-});
-
-test("feed --force never reaches declared stock", async (t) => {
-  const { root, texts } = await stockFixture(t);
-  for (const forced of [page("graft"), page("plain")]) {
-    await assert.rejects(feedOffshoot({ designSystemRoot: root, source: nextSource({ stock: releaseTwo }), force: [forced] }), /--force replaces only named plumbing files; .* is the parent's declared stock/);
-  }
-  for (const [file, text] of Object.entries(texts)) assert.equal(await read(root, file), text, file);
 });
 
 test("a structure offshoot un-plans the catalog page of a stock fragment the feed creates", async (t) => {
@@ -568,4 +498,45 @@ test("feed --from reads the recorded release from the local parent to adopt stoc
   assert.equal(report.adopted, true);
   assert.equal(await read(child, "src/pages/brand/color.html"), color);
   assert.deepEqual(report.stock.map((entry) => entry.status), ["updated", "current"]);
+});
+
+test("a child fed from a parent whose recorded plumbing differs keeps its own byte for byte, runs its after-build commands, and reports its level", async (t) => {
+  const { parentRoot, child } = await runnerFixture(t);
+  await fs.rm(path.join(child, ".timds/session.json"));
+  // The child declares an extra build step; the parent moves its own plumbing
+  // (as a release on another toolkit would) and records it.
+  const manifest = await readJson(child, "timds.json");
+  await write(child, "timds.json", json({ ...manifest, workspace: { ...manifest.workspace, after: { build: [["node", "-e", "require('fs').appendFileSync('after.log', 'ran\\n')"]] } } }));
+  gitIn(child, "add", "--all"); gitIn(child, "commit", "-qm", "Child build step");
+  const plumbing = ["scripts/build.mjs", "scripts/check.mjs", "scripts/dev.mjs", "src/scripts/compose.js", "src/styles/canvas.css", "src/styles/viewer.css"];
+  const before = Object.fromEntries(await Promise.all(plumbing.map(async (file) => [file, await fs.readFile(path.join(child, file))])));
+  const parentRecord = await readJson(parentRoot, ".timds/starter.json");
+  for (const file of ["scripts/build.mjs", "src/scripts/compose.js", "src/styles/viewer.css"]) {
+    const moved = `${await read(parentRoot, file)}\n// the parent's toolkit release\n`;
+    await write(parentRoot, file, moved);
+    parentRecord.files[file] = hash(moved);
+  }
+  await write(parentRoot, ".timds/starter.json", json(parentRecord));
+  gitIn(parentRoot, "add", "--all"); gitIn(parentRoot, "commit", "-qm", "Parent on another toolkit release");
+  const report = await runFeed(["--root", child, "--from", parentRoot, "--source-id", runnerSourceId, "--json"]);
+  for (const file of plumbing) assert.ok((await fs.readFile(path.join(child, file))).equals(before[file]), file);
+  assert.ok(!report.files.some((file) => plumbing.includes(file.path)), JSON.stringify(report.files));
+  assert.ok(report.check, "the feed's own check ran the child's build");
+  assert.match(await read(child, "after.log"), /ran/, "the child's workspace.after.build ran");
+  const output = [];
+  await runWithOutputSink((line) => output.push(line), () => runCli(["starter", "status", "--root", child, "--json"]));
+  assert.deepEqual(JSON.parse(output.join("\n")), { starter: "starter", plumbing: "toolkit", level: 1, current: 1, floor: 1, belowFloor: false, behind: 0, pending: [], declined: [], conflicts: [] });
+  await assert.rejects(runWithOutputSink(() => {}, () => runCli(["feed", "--root", child, "--from", parentRoot, "--force", "scripts/build.mjs"])), /Feed carries no code/);
+});
+
+test("shoot refuses a parent below the starter floor", async (t) => {
+  const { parentRoot, directory } = await (async () => { const fixture = await runnerFixture(t); return { ...fixture, directory: path.dirname(fixture.parentRoot) }; })();
+  const record = await readJson(parentRoot, ".timds/starter.json");
+  delete record.level;
+  await write(parentRoot, ".timds/starter.json", json(record));
+  gitIn(parentRoot, "add", "--all"); gitIn(parentRoot, "commit", "-qm", "A parent from before starter levels");
+  const source = await loadOffshootSource(parentRoot, { sourceId: runnerSourceId });
+  const destination = path.join(directory, "too-old-child");
+  await assert.rejects(shootOffshoot({ destination, source, systemId: "example/too-old" }), (error) => error.failureCode === "below_floor");
+  await assert.rejects(fs.access(destination), { code: "ENOENT" });
 });

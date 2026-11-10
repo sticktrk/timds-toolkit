@@ -66,9 +66,15 @@ export function sitePageFile(id) {
   return `src/pages/${view}/${rest.length ? rest.join("/") : "index"}.html`;
 }
 
-/** Validate a declared step list: ascending levels, known vocabulary, nothing a host could misread. */
-export function validateStarterSteps(steps) {
-  let previous = 0;
+/**
+ * Validate a declared step list against its floor and level: steps[i].level is
+ * floor + 1 + i, so there are level - floor of them; known vocabulary only,
+ * exactly the contract's keys, nothing a host could misread.
+ */
+export function validateStarterSteps(steps, { floor, level }) {
+  if (!Number.isInteger(floor) || floor < 0 || !Number.isInteger(level) || level < floor) throw new Error(`A starter definition needs a whole-number floor and a level at or above it (floor ${JSON.stringify(floor)}, level ${JSON.stringify(level)})`);
+  if (steps.length !== level - floor) throw new Error(`Starter steps cover the levels above the floor: ${level - floor} step${level - floor === 1 ? "" : "s"} from ${floor + 1} to ${level}, not ${steps.length}`);
+  let previous = floor;
   const ids = new Set();
   const keys = { step: ["level", "id", "layer", "visible", "declinable", "starters", "requires", "operations"], "remove-file": ["op", "path", "sha256"], "set-site-field": ["op", "field", "value", "from"], "set-page-field": ["op", "page", "field", "value", "from"], "stock-file": ["check", "path"], "authored-page": ["check", "page"], "page-field": ["check", "page", "field", "equals"] };
   const exact = (object, expected, label) => {
@@ -132,7 +138,7 @@ export function failedStarterRequirement(step, state) {
  * the parsed src/site.json, the system's current bytes, and this release's
  * managed bytes. `force` names files a remove-file may remove whatever their
  * content (an explicit `starter sync --force PATH`); `reason`, when given,
- * names every conflict (such as renderer_kept). Returns `skipped` when a
+ * names every conflict. Returns `skipped` when a
  * requirement fails, `conflict`, or the effective operations as `effective`
  * with the site they produce, the files they remove, and the fields kept.
  */

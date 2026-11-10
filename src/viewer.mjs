@@ -3,8 +3,6 @@
 // copied into it (`@dtconcepts/timds/viewer`). The design system's
 // scripts/build.mjs, check.mjs and dev.mjs are stubs that call `build`,
 // `check` and `dev` here with their own root; every function takes that root.
-// A system whose copied renderer (an earlier scripts/viewer.mjs) is still its
-// own keeps it, and keeps building exactly as it did.
 //
 // src/site.json declares the views and their pages, src/layout.html is the
 // shell every page shares, and src/pages/ holds one content fragment per

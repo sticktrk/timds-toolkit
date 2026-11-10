@@ -10,8 +10,6 @@ import {
   formatFormatsJson,
   formatSiteJson,
   insertStylesheetLinks,
-  legacyStarterFileHashes,
-  linkVersionChip,
   mergeFormatCatalog,
   mergeSiteModel,
   planStockFile,
@@ -20,12 +18,12 @@ import {
   syncStarter,
   template,
 } from "./starter.mjs";
+import { initializeRepository, runWithOutputSink } from "./core.mjs";
 
-const fixtureRoot = fileURLToPath(new URL("./fixtures/starter-before-formats/", import.meta.url));
 const sha256 = (text) => createHash("sha256").update(text).digest("hex");
 
 test("the catalog serializers reproduce the starter's own formatting byte for byte", async () => {
-  for (const name of ["starter/src/site.json", "starter-history/site-1.json", "starter-history/site-2.json"]) {
+  for (const name of ["starter/src/site.json"]) {
     const text = await template(name);
     assert.equal(formatSiteJson(JSON.parse(text)), text, name);
   }
@@ -36,12 +34,7 @@ test("the catalog serializers reproduce the starter's own formatting byte for by
     '{\n  "title": "Docs",\n  "views": [\n    {\n      "id": "a",\n      "label": "A",\n      "icon": { "set": "x", "name": "y" },\n      "pages": [\n        { "slug": "", "title": "Home", "tags": ["one", "two"] }\n      ]\n    }\n  ]\n}\n');
 });
 
-test("the pre-format-catalog fixture is byte-identical to stock files earlier releases scaffolded", async () => {
-  for (const relative of ["scripts/build.mjs", "scripts/check.mjs", "scripts/viewer.mjs"]) {
-    const hash = sha256(await fs.readFile(path.join(fixtureRoot, relative), "utf8"));
-    assert.ok(legacyStarterFileHashes.get(relative).includes(hash), `${relative} is a recognized stock version`);
-  }
-  // Every file the sync manages has a stock template to compare against.
+test("every file the sync manages has a stock template to compare against", async () => {
   for (const [relative, templateName] of [...starterPlumbingFiles, ...starterManagedFragments]) {
     assert.ok((await template(templateName)).length > 0, relative);
   }
@@ -213,20 +206,6 @@ test("insertStylesheetLinks adds a missing stock link beside its neighbours and 
   assert.equal(insertStylesheetLinks(bustedOnly, stock).html, "<head>\n<link rel=\"stylesheet\" href=\"/styles/canvas.css\">\n<link rel=\"stylesheet\" href=\"/styles/viewer.css?v=3\">\n</head>");
 });
 
-test("linkVersionChip turns the plain version chip into the changelog link and leaves any other chip alone", async () => {
-  const stock = await template("starter/src/layout.html");
-  const plain = stock.replace('<a class="appbar__version" href="/changelog/" title="Changelog">v{{version}}</a>', '<span class="appbar__version">v{{version}}</span>');
-  assert.notEqual(plain, stock);
-  assert.deepEqual(linkVersionChip(plain), { html: stock, linked: true });
-  assert.deepEqual(linkVersionChip(stock), { html: stock, linked: false });
-  const spaced = '<span class="appbar__version"> {{ version }} </span>';
-  assert.equal(linkVersionChip(spaced).html, '<a class="appbar__version" href="/changelog/" title="Changelog"> {{ version }} </a>');
-  // A chip the client rewrote (its own text, another class) is theirs.
-  for (const own of ['<span class="appbar__version">Release {{version}}</span>', '<span class="version">v{{version}}</span>', ""]) {
-    assert.deepEqual(linkVersionChip(own), { html: own, linked: false });
-  }
-});
-
 test("planStockFile recognizes stock files by hash and replaces a customized one only with force", async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "timds-starter-"));
   t.after(() => fs.rm(directory, { force: true, recursive: true }));
@@ -240,81 +219,17 @@ test("planStockFile recognizes stock files by hash and replaces a customized one
   assert.deepEqual(await planStockFile(target, "new\n"), { current: "new\n", status: "current", write: false });
 });
 
-test("syncStarter holds the stock pages back while the renderer is this system's own, and writes them once it is stock again", async (t) => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "timds-starter-"));
-  t.after(() => fs.rm(root, { force: true, recursive: true }));
-  await fs.cp(fixtureRoot, root, { recursive: true });
-  const viewer = path.join(root, "scripts", "viewer.mjs");
-  const customized = `${await fs.readFile(viewer, "utf8")}\n// this system's own renderer\n`;
-  await fs.writeFile(viewer, customized, "utf8");
-  const usePage = path.join(root, "src", "pages", "use", "index.html");
-  // The check sees the files as written: a stock page the kept viewer cannot
-  // render would fail it, so the sync must not have written one.
-  const first = await syncStarter({ check: async () => { await assert.rejects(fs.access(usePage), /ENOENT/); return "ok"; }, designSystemRoot: root, version: "0.0.0" });
-  assert.equal(first.check, "ok");
-  const viewerReport = first.files.find((file) => file.path === "scripts/viewer.mjs");
-  assert.equal(viewerReport.status, "customized");
-  assert.equal(await fs.readFile(viewer, "utf8"), customized, "the kept renderer is untouched");
-  for (const [relative] of starterManagedFragments) {
-    const report = first.files.find((file) => file.path === relative);
-    assert.equal(report.status, "skipped", relative);
-    assert.match(report.note, /^held back: scripts\/viewer\.mjs is this system's own/, relative);
-    await assert.rejects(fs.access(path.join(root, ...relative.split("/"))), /ENOENT/, relative);
-  }
-  for (const relative of ["scripts/build.mjs", "scripts/check.mjs", "scripts/dev.mjs"]) {
-    const report = first.files.find((file) => file.path === relative);
-    assert.equal(report.status, "skipped", relative);
-    assert.match(report.note, /^held back: scripts\/viewer\.mjs is this system's own and the stock version expects the stock renderer beside it/, relative);
-  }
-  assert.ok(first.written.includes("src/styles/canvas.css"), "plumbing outside the renderer is still brought in");
-  assert.deepEqual([first.levels.level, first.status.renderer, first.status.kept, first.status.conflicts], [0, "kept", ["scripts/viewer.mjs"], [{ step: "renderer-package", path: "scripts/viewer.mjs", reason: "renderer_kept" }]]);
-  // Naming the customized copy removes it: the stubs, the package renderer and the stock pages come in.
-  const second = await syncStarter({ designSystemRoot: root, force: ["scripts/viewer.mjs"], version: "0.0.0" });
-  assert.deepEqual(second.files.find((file) => file.path === "scripts/viewer.mjs"), { note: "removed with --force", path: "scripts/viewer.mjs", status: "removed" });
-  await assert.rejects(fs.access(viewer), /ENOENT/);
-  assert.deepEqual([second.levels.level, second.status.renderer], [2, "package"]);
-  for (const [relative] of starterManagedFragments) {
-    const report = second.files.find((file) => file.path === relative);
-    assert.ok(["created", "skipped"].includes(report.status), `${relative}: ${report.status}`);
-    if (report.status === "skipped") assert.doesNotMatch(report.note, /^held back/, relative);
-  }
-  assert.ok(await fs.readFile(usePage, "utf8"), "the Use page is written once the stock viewer renders it");
-});
-
-test("syncStarter refreshes a Use page still at an earlier release's stock bytes even when the record names a newer hash", async (t) => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "timds-starter-"));
-  t.after(() => fs.rm(root, { force: true, recursive: true }));
-  await fs.cp(fixtureRoot, root, { recursive: true });
-  await syncStarter({ designSystemRoot: root, version: "0.0.0" });
-  // A hosted repair reverted the page writes and kept the record: the files are
-  // 0.1.481's stock pages while the record names the current stock hashes.
-  const released = fileURLToPath(new URL("./fixtures/starter-use-0.1.481/", import.meta.url));
-  const pages = [["src/pages/use/index.html", "index.html"], ["src/pages/use/install.html", "install.html"]];
-  for (const [relative, name] of pages) await fs.copyFile(path.join(released, name), path.join(root, ...relative.split("/")));
-  const report = await syncStarter({ designSystemRoot: root, version: "0.0.0" });
-  for (const [relative] of pages) {
-    assert.equal(report.files.find((file) => file.path === relative).status, "updated", relative);
-    assert.equal(await fs.readFile(path.join(root, ...relative.split("/")), "utf8"), await template(`starter/${relative}`), relative);
-  }
-  assert.match(await fs.readFile(path.join(root, "src", "pages", "use", "index.html"), "utf8"), /class="portal-hero"/, "the refreshed Use page is the portal landing");
-  assert.ok(["created", "current"].includes(report.files.find((file) => file.path === "src/pages/use/compose.html").status), "the composer sits beside it as a managed fragment");
-  assert.match(await fs.readFile(path.join(root, "src", "pages", "use", "compose.html"), "utf8"), /data-compose/, "the composer page carries the composer");
-  // One changed byte makes it this system's own page again.
-  const usePage = path.join(root, "src", "pages", "use", "index.html");
-  await fs.writeFile(usePage, `${await fs.readFile(path.join(released, "index.html"), "utf8")}\n`, "utf8");
-  const kept = await syncStarter({ designSystemRoot: root, version: "0.0.0" });
-  assert.equal(kept.files.find((file) => file.path === "src/pages/use/index.html").status, "customized");
-});
-
 test("syncStarter restores every file and the record when the check fails afterwards", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "timds-starter-"));
   t.after(() => fs.rm(root, { force: true, recursive: true }));
-  await fs.cp(fixtureRoot, root, { recursive: true });
+  await runWithOutputSink(() => {}, () => initializeRepository(root, { standalone: true }));
+  // A system an upgrade has work to do on: plumbing to bring back.
+  for (const relative of ["src/scripts/compose.js", "src/styles/canvas.css"]) await fs.rm(path.join(root, relative));
   const walk = async (directory, into = new Map()) => {
     for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
       const file = path.join(directory, entry.name);
       if (entry.isDirectory()) await walk(file, into);
-      else into.set(path.relative(root, file), await fs.readFile(file, "utf8"));
+      else if (entry.isFile()) into.set(path.relative(root, file), await fs.readFile(file, "utf8"));
     }
     return into;
   };
@@ -326,12 +241,11 @@ test("syncStarter restores every file and the record when the check fails afterw
   const after = await walk(root);
   assert.deepEqual([...after.keys()].sort(), [...before.keys()].sort(), "no created file survives the rollback");
   for (const [relative, text] of before) assert.equal(after.get(relative), text, relative);
-  await assert.rejects(fs.access(path.join(root, ".timds", "starter.json")), /ENOENT/);
   // Without a check the same sync lands, and a second sync has nothing to write.
   const first = await syncStarter({ designSystemRoot: root, version: "0.0.0" });
-  assert.ok(first.adopted && first.written.length > 0 && first.recordWritten && first.check === null);
+  assert.ok(first.written.length > 0 && first.recordWritten && first.check === null);
   const second = await syncStarter({ designSystemRoot: root, version: "0.0.0" });
-  assert.deepEqual([second.adopted, second.written, second.recordWritten, second.check], [false, [], false, null]);
+  assert.deepEqual([second.written, second.recordWritten, second.check], [[], false, null]);
   assert.ok(second.files.every((file) => file.status === "current"), JSON.stringify(second.files));
   await assert.rejects(syncStarter({ designSystemRoot: path.join(root, "src"), version: "0.0.0" }), /not a starter-based Design System/);
 });

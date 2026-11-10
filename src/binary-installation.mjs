@@ -62,28 +62,13 @@ export async function isStockWorkspace(root, manifest) {
     const command = manifest.workspace?.[name];
     if (JSON.stringify(command) !== JSON.stringify(['node', `scripts/${name}.mjs`]) && JSON.stringify(command) !== JSON.stringify(stockWorkspaceCommands[name])) return false;
   }
-  const read = async relative => { try { return await fs.readFile(path.join(root, relative)); } catch (error) { if (error.code === 'ENOENT') return null; throw error; } };
-  const digest = bytes => createHash('sha256').update(bytes).digest('hex');
-  const viewer = await read('scripts/viewer.mjs');
-  // The stub scripts run the packaged renderer. A system still at level 0
-  // runs its copied renderer, which must be a released stock version too.
-  let current = true;
-  for (const relative of ['scripts/build.mjs', 'scripts/check.mjs', 'scripts/dev.mjs', ...(viewer ? ['scripts/viewer.mjs'] : [])]) {
-    const contents = await read(relative);
-    if (!contents) return false;
-    const hash = digest(contents);
-    const stockPath = relative === 'scripts/viewer.mjs' ? null : path.join(packageRoot, 'templates/starter', relative);
-    const stock = stockPath ? digest(await fs.readFile(stockPath)) : null;
-    if (hash !== stock) current = false;
+  // The stub scripts run the packaged renderer: each must be a released stock version.
+  for (const relative of ['scripts/build.mjs', 'scripts/check.mjs', 'scripts/dev.mjs']) {
+    let contents;
+    try { contents = await fs.readFile(path.join(root, relative)); } catch (error) { if (error.code === 'ENOENT') return false; throw error; }
+    const hash = createHash('sha256').update(contents).digest('hex');
+    const stock = createHash('sha256').update(await fs.readFile(path.join(packageRoot, 'templates/starter', relative))).digest('hex');
     if (hash !== stock && !(legacyStarterFileHashes.get(relative) || []).includes(hash)) return false;
-  }
-  // Older stock scripts import the copied viewer beside them.
-  if (!viewer) return current;
-  // The verified viewer executes its shared helper before rendering. Require
-  // a released helper too, while retaining older viewers without that import.
-  if (/\bfrom\s+["']\.\/brand-kit\.mjs["']/.test(viewer.toString('utf8'))) {
-    const helper = await read('scripts/brand-kit.mjs');
-    if (!helper || !(legacyStarterFileHashes.get('scripts/brand-kit.mjs') || []).includes(digest(helper))) return false;
   }
   return true;
 }

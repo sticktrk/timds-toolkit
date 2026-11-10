@@ -50,7 +50,7 @@ const templatesRoot = fileURLToPath(new URL("../templates/", import.meta.url));
 // A scaffold in a temporary folder has no node_modules: the stub scripts find
 // the renderer the way they do under timds check before the first install.
 const viewerEnv = workspaceCommandEnvironment();
-const starterFixtureRoot = fileURLToPath(new URL("./fixtures/starter-before-formats/", import.meta.url));
+
 
 function gitInit(repoRoot) {
   execFileSync("git", ["init", "-q", "-b", "main"], { cwd: repoRoot });
@@ -70,12 +70,31 @@ async function jsonFailure(argv, expected) {
   return JSON.parse(lines.join("\n"));
 }
 
-/** Rewind a fresh standalone scaffold to the shape `init` produced before the asset views and format catalog existed. */
+/**
+ * Rewind a fresh standalone scaffold to a system recorded at the current
+ * starter level under a release whose scaffold had only the Brand and Web
+ * views: no Digital, Social, Print or Use views, no format catalog, composer
+ * or canvas stylesheet, and a record whose baseline and files say so. This is
+ * the shape every system has when a later release adds managed views.
+ */
 async function rewindStarter(repoRoot) {
-  await fs.cp(starterFixtureRoot, repoRoot, { force: true, recursive: true });
-  for (const relative of ["src/formats.json", "scripts/brand-kit.mjs", "src/scripts/compose.js", "src/styles/canvas.css", "src/pages/digital", "src/pages/print", "src/pages/social", "src/pages/use", ".timds/starter.json"]) {
+  const added = ["digital", "social", "print", "use"];
+  const read = (relative) => fs.readFile(path.join(repoRoot, relative), "utf8");
+  const site = JSON.parse(await read("src/site.json"));
+  const earlier = { views: site.views.filter((view) => !added.includes(view.id)) };
+  await writeJson(path.join(repoRoot, "src/site.json"), earlier);
+  for (const relative of ["src/formats.json", "src/scripts/compose.js", "src/styles/canvas.css", ...added.map((view) => `src/pages/${view}`)]) {
     await fs.rm(path.join(repoRoot, relative), { force: true, recursive: true });
   }
+  // The overview of that release linked only its own pages.
+  await fs.writeFile(path.join(repoRoot, "src/pages/index.html"), '<span class="eyebrow">Overview</span>\n<h1 class="page-title">{{name}}</h1>\n<section class="block" id="map"><h2 class="h2">Every page</h2>{{sitemap}}</section>\n');
+  await fs.writeFile(path.join(repoRoot, "src/layout.html"), (await read("src/layout.html")).replace(/\n\s*<link rel="stylesheet" href="\/styles\/canvas\.css">/, ""));
+  const record = JSON.parse(await read(".timds/starter.json"));
+  record.baseline = { site: earlier, formats: {} };
+  record.files = Object.fromEntries(Object.entries(record.files).filter(([relative]) => !["src/scripts/compose.js", "src/styles/canvas.css"].includes(relative) && !added.some((view) => relative.startsWith(`src/pages/${view}/`))));
+  delete record.plumbing;
+  record.version = "0.1.0";
+  await writeJson(path.join(repoRoot, ".timds/starter.json"), record);
 }
 
 async function temporaryDirectory(t) {
@@ -865,7 +884,7 @@ test("initializes the reusable standalone repository shape", async (t) => {
   await fs.access(path.join(repoRoot, "scripts", "build.mjs"));
   await assert.rejects(fs.access(path.join(repoRoot, "scripts", "viewer.mjs")), { code: "ENOENT" }, "the renderer is resolved from the package, not copied");
   assert.match(await fs.readFile(path.join(repoRoot, "scripts", "build.mjs"), "utf8"), /@dtconcepts\/timds\/viewer/);
-  assert.deepEqual(Object.entries(JSON.parse(await fs.readFile(path.join(repoRoot, ".timds", "starter.json"), "utf8"))).filter(([key]) => ["level", "declined"].includes(key)), [["declined", []], ["level", 3]], "init records the current starter level");
+  assert.deepEqual(Object.entries(JSON.parse(await fs.readFile(path.join(repoRoot, ".timds", "starter.json"), "utf8"))).filter(([key]) => ["level", "declined"].includes(key)), [["declined", []], ["level", 1]], "init records the current starter level");
   await fs.access(path.join(repoRoot, "scripts", "check-versions.mjs"));
   await fs.access(path.join(repoRoot, "scripts", "prepare-merge-release.mjs"));
   await fs.access(path.join(repoRoot, "scripts", "prepare-merge-release.test.mjs"));
@@ -1215,11 +1234,10 @@ test("designs init adopts website designs in a system scaffolded without them", 
 
   const result = await initializeDesigns(repoRoot);
   await fs.access(path.join(repoRoot, "src/designs/website/pages/contact.sent.html"));
-  assert.deepEqual(result.scripts, [{ path: "scripts/build.mjs", status: "customized" }]);
   assert.equal(result.stylesheet, "appended", "the stock token names let the layout block be restored");
   assert.deepEqual(result.missingClasses, []);
   assert.match(await read("src/styles/system.css"), /\/\* ---- site layout ---- \*\/[\s\S]*\.site-footer/);
-  assert.match(await read("scripts/build.mjs"), /client change/, "a customized script is never replaced");
+  assert.match(await read("scripts/build.mjs"), /client change/, "designs init never touches a script");
   const checked = await checkWorkspace(repoRoot);
   assert.equal(checked.designs.pageCount, 2);
   await assert.rejects(initializeDesigns(repoRoot), /src\/designs\/ already exists/);
@@ -1236,15 +1254,10 @@ test("designs init adopts website designs in a system scaffolded without them", 
   assert.deepEqual(renamed.missingClasses, ["form", "hero", "notice", "section", "site-footer", "site-header", "site-header__brand", "site-nav", "wrap"]);
   assert.equal(await read("src/styles/system.css"), stripped);
 
-  // --force rewrites the sample and the customized script, and the starter record learns the hash it wrote.
-  const staleRecord = JSON.parse(await read(".timds/starter.json"));
-  staleRecord.files["scripts/build.mjs"] = "stale";
-  await writeJson(path.join(repoRoot, ".timds/starter.json"), staleRecord);
+  // --force rewrites the sample and nothing else.
   const forced = await initializeDesigns(repoRoot, { force: true });
-  assert.deepEqual(forced.scripts.map((script) => script.status), ["updated"]);
-  assert.doesNotMatch(await read("scripts/build.mjs"), /client change/);
-  const stockBuild = await fs.readFile(path.join(templatesRoot, "starter/scripts/build.mjs"), "utf8");
-  assert.equal(JSON.parse(await read(".timds/starter.json")).files["scripts/build.mjs"], createHash("sha256").update(stockBuild).digest("hex"));
+  assert.equal(forced.destination, renamed.destination);
+  assert.match(await read("scripts/build.mjs"), /client change/);
 });
 
 test("standalone init accepts explicit immutable identity and JSON-safe text", async (t) => {
@@ -1328,14 +1341,13 @@ test("upgrade preserves pre-home routes and customized Install links", async (t)
   assert.equal(await read("src/pages/use/install.html"), authoredInstall);
 });
 
-test("starter sync adopts a scaffold from before the asset views, and upgrade keeps it current afterwards", async (t) => {
+test("starter sync and upgrade bring a system to a later scaffold, refuse dirty starter files, and roll back a failed sync", async (t) => {
   const repoRoot = await temporaryDirectory(t);
   gitInit(repoRoot);
   await initializeRepository(repoRoot, { standalone: true, name: "Client & Co" });
   await rewindStarter(repoRoot);
-  commitAll(repoRoot, "Scaffold before asset views");
+  commitAll(repoRoot, "A system from a release with only Brand and Web");
   const read = (relative) => fs.readFile(path.join(repoRoot, relative), "utf8");
-  // The rewound scaffold is a working system of the earlier shape.
   const before = await checkWorkspace(repoRoot);
   assert.deepEqual(before.machine.pages.map((page) => page.id), ["brand/color", "brand/typography", "index", "web/components", "web/spacing"]);
 
@@ -1345,14 +1357,9 @@ test("starter sync adopts a scaffold from before the asset views, and upgrade ke
   execFileSync("git", ["checkout", "--", "src/layout.html"], { cwd: repoRoot, stdio: "ignore" });
 
   const result = await syncStarterWorkspace(repoRoot);
-  assert.equal(result.adopted, true);
-  assert.deepEqual(result.files.map((file) => [file.path, file.status]), [
-    ["scripts/build.mjs", "updated"],
-    ["scripts/check.mjs", "updated"],
-    ["scripts/dev.mjs", "current"],
+  assert.deepEqual(result.files.filter((file) => file.status !== "current").map((file) => [file.path, file.status]), [
     ["src/scripts/compose.js", "created"],
     ["src/styles/canvas.css", "created"],
-    ["src/styles/viewer.css", "current"],
     ["src/site.json", "updated"],
     ["src/formats.json", "created"],
     ["src/pages/digital/index.html", "created"],
@@ -1361,13 +1368,9 @@ test("starter sync adopts a scaffold from before the asset views, and upgrade ke
     ["src/pages/use/index.html", "created"],
     ["src/pages/use/compose.html", "created"],
     ["src/pages/use/install.html", "created"],
-    ["scripts/viewer.mjs", "removed"],
     ["src/layout.html", "updated"],
   ]);
-  // The stock scripts became the stubs, so the copied viewer at its released bytes left with the renderer-package step; the
-  // Use view the sync added is already the Start landing, and the visible home-landing step waits for a decision.
-  assert.deepEqual([result.levels.previous, result.levels.level, result.levels.steps.map((step) => [step.step, step.outcome]), result.levels.stopped], [0, 2, [["renderer-package", "applied"], ["use-start-title", "applied"], ["home-landing", "pending"]], { step: "home-landing", reason: "visible" }]);
-  assert.deepEqual(result.site, { addedPages: ["web/email", "web/email-templates"], addedViews: ["digital", "social", "print", "use"], advanced: ["web.label", "web.blurb"], kept: [] });
+  assert.deepEqual([result.site.addedViews, result.site.kept], [["digital", "social", "print", "use"], []]);
   assert.deepEqual([result.formats.addedGroups, result.formats.addedFormats.length, result.formats.kept, result.formats.skipped], [["print", "digital", "social"], 48, [], []]);
   // Structure and plumbing advance to stock while the original front page stays.
   const stockSite = JSON.parse(await fs.readFile(path.join(templatesRoot, "starter/src/site.json"), "utf8"));
@@ -1376,29 +1379,26 @@ test("starter sync adopts a scaffold from before the asset views, and upgrade ke
   for (const relative of ["src/formats.json", "src/layout.html", "scripts/build.mjs", "scripts/check.mjs", "src/styles/canvas.css", "src/pages/print/index.html", "src/pages/use/index.html"]) {
     assert.equal(await read(relative), await fs.readFile(path.join(templatesRoot, "starter", relative), "utf8"), relative);
   }
-  await assert.rejects(fs.access(path.join(repoRoot, "scripts/viewer.mjs")), { code: "ENOENT" });
-  assert.doesNotMatch(await read("src/pages/index.html"), /Digital DS/, "the client's own overview fragment is never rewritten");
-  assert.deepEqual(result.check.machine.warnings.map((warning) => warning.split(":")[0]), ["guidance group voice is empty", 'no asset is annotated data-timds-role="logo"; the brand kit has no logo', "Starter step home-landing (level 3) changes what visitors see and waits for a decision"]);
+  assert.deepEqual(result.check.machine.warnings.map((warning) => warning.split(":")[0]), ["guidance group voice is empty", 'no asset is annotated data-timds-role="logo"; the brand kit has no logo']);
   const record = JSON.parse(await read(".timds/starter.json"));
-  assert.equal(record.version, toolkitVersion);
-  assert.deepEqual([record.level, record.declined], [2, []]);
+  assert.deepEqual([record.version, record.level, record.declined], [toolkitVersion, 1, []]);
   assert.deepEqual(Object.keys(record.files).sort(), [...starterPlumbingFiles, ...starterManagedFragments].map(([relative]) => relative).sort());
   assert.deepEqual(record.baseline.site, JSON.parse(await fs.readFile(path.join(templatesRoot, "starter/src/site.json"), "utf8")));
 
   // A second sync has nothing to do and runs no check.
-  commitAll(repoRoot, "Adopt the starter sync");
+  commitAll(repoRoot, "Sync the starter");
   const again = await syncStarterWorkspace(repoRoot);
-  assert.deepEqual([again.adopted, again.written, again.check], [false, [], null]);
+  assert.deepEqual([again.written, again.check], [[], null]);
   assert.ok(again.files.every((file) => file.status === "current"), JSON.stringify(again.files));
 
-  // From now on every upgrade syncs the starter, under the same clean-tree rule; a system without the record is only told how to opt in.
+  // Every upgrade syncs the starter, under the same clean-tree rule.
   await fs.appendFile(path.join(repoRoot, "src/site.json"), "\n");
   await assert.rejects(upgradeRepository(repoRoot), /Starter sync refuses to run over uncommitted changes to the files it writes:\n\s*M src\/site\.json/);
   const dirtyReceipt = await jsonFailure(["upgrade", "--root", repoRoot, "--json"], /uncommitted changes/);
   assert.deepEqual([dirtyReceipt.ok, dirtyReceipt.error.code], [false, "dirty_worktree"]);
   execFileSync("git", ["checkout", "--", "src/site.json"], { cwd: repoRoot, stdio: "ignore" });
   const upgraded = await upgradeRepository(repoRoot);
-  assert.deepEqual([upgraded.starterAvailable, upgraded.starter.written], [false, []]);
+  assert.deepEqual(upgraded.starter.written, []);
 
   // upgrade --force stays with the managed boundary: a customized starter file is reported and kept, never replaced by upgrade.
   await fs.appendFile(path.join(repoRoot, "scripts/dev.mjs"), "\n// client change\n");
@@ -1408,17 +1408,16 @@ test("starter sync adopts a scaffold from before the asset views, and upgrade ke
   assert.deepEqual(forceReplaceable(forcedUpgrade.starter), ["scripts/dev.mjs"]);
   assert.match(await read("scripts/dev.mjs"), /client change/);
 
-  // upgrade --json reports the sync the same way: the customized file is listed as kept and replaceable, and nothing else moved.
+  // upgrade --json reports the sync the same way, with the starter status.
   const jsonLines = [];
   await runWithOutputSink((line) => jsonLines.push(line), () => runCli(["upgrade", "--root", repoRoot, "--json"]));
   const jsonReport = JSON.parse(jsonLines.join("\n"));
   assert.equal(jsonReport.ok, true);
-  assert.deepEqual([jsonReport.starter.state, jsonReport.starter.adopted, jsonReport.starter.plumbing, jsonReport.starter.version], ["current", false, "recorded", toolkitVersion]);
+  assert.deepEqual([jsonReport.starter.state, jsonReport.starter.plumbing, jsonReport.starter.version], ["current", "recorded", toolkitVersion]);
   assert.deepEqual([jsonReport.starter.written, jsonReport.starter.customized, jsonReport.starter.replaceable], [[], ["scripts/dev.mjs"], ["scripts/dev.mjs"]]);
   assert.equal(jsonReport.starter.currentFiles.length, forcedUpgrade.starter.files.length - 1);
-  assert.deepEqual([jsonReport.starter.level, jsonReport.starter.current, jsonReport.starter.behind, jsonReport.starter.renderer, jsonReport.starter.kept, jsonReport.starter.pending.map((step) => step.id)], [2, 3, 1, "kept", ["scripts/dev.mjs"], ["home-landing"]]);
+  assert.deepEqual([jsonReport.starter.level, jsonReport.starter.current, jsonReport.starter.floor, jsonReport.starter.belowFloor, jsonReport.starter.behind, jsonReport.starter.pending], [1, 1, 1, false, 0, []]);
   assert.deepEqual(jsonReport.starter.site, { addedPages: [], addedViews: [], advanced: [], kept: [] });
-  assert.deepEqual(jsonReport.starter.formats.skipped, []);
   assert.deepEqual([jsonReport.starter.check, jsonReport.check], [null, null]);
   assert.deepEqual(jsonReport.designs, { setUp: true, designs: 1, pages: 2 });
 
@@ -1427,10 +1426,9 @@ test("starter sync adopts a scaffold from before the asset views, and upgrade ke
   await writeJson(path.join(repoRoot, "timds.json"), { ...manifest, workspace: { ...manifest.workspace, after: { build: [["node", "-e", "console.error('client change broke the build'); process.exit(1)"]] } } });
   await fs.rm(path.join(repoRoot, "src/styles/canvas.css"));
   await fs.rm(path.join(repoRoot, ".agents/skills/timds-edit-design-system"), { recursive: true });
-  commitAll(repoRoot, "Break the viewer and drop the managed skill");
+  commitAll(repoRoot, "Break the build and drop the managed skill");
   for (const attempt of [1, 2]) {
     if (attempt === 2) {
-      // The JSON receipt of the same failure classifies it as a failed check, not a refusal.
       const receipt = await jsonFailure(["upgrade", "--root", repoRoot, "--json"], /Starter sync was rolled back/);
       assert.deepEqual([receipt.ok, receipt.error.code], [false, "check_failed"]);
       assert.match(receipt.error.message, /client change broke the build/);
@@ -1440,12 +1438,42 @@ test("starter sync adopts a scaffold from before the asset views, and upgrade ke
     await assert.rejects(fs.access(path.join(repoRoot, "src/styles/canvas.css")), /ENOENT/);
     assert.equal(execFileSync("git", ["status", "--porcelain", "--untracked-files=all"], { cwd: repoRoot, encoding: "utf8" }).trim(), "", "nothing is left behind");
   }
-  execFileSync("git", ["checkout", "HEAD~1", "--", "timds.json", "src/styles/canvas.css", ".agents/skills/timds-edit-design-system"], { cwd: repoRoot, stdio: "ignore" });
-  commitAll(repoRoot, "Restore the viewer");
-  await fs.rm(path.join(repoRoot, ".timds/starter.json"));
-  commitAll(repoRoot, "Drop the record");
-  const unadopted = await upgradeRepository(repoRoot);
-  assert.deepEqual([unadopted.starter, unadopted.starterAvailable], [null, true]);
+});
+
+test("a starter-based system below the floor is refused before any write, and check, doctor and status only report it", async (t) => {
+  for (const shape of ["no level", "no record"]) {
+    const repoRoot = await temporaryDirectory(t);
+    gitInit(repoRoot);
+    await initializeRepository(repoRoot, { standalone: true });
+    const recordPath = path.join(repoRoot, ".timds/starter.json");
+    if (shape === "no record") await fs.rm(recordPath);
+    else {
+      const record = JSON.parse(await fs.readFile(recordPath, "utf8"));
+      delete record.level;
+      delete record.declined;
+      await writeJson(recordPath, record);
+    }
+    commitAll(repoRoot, `A system with ${shape}`);
+    const belowFloor = (error) => error.failureCode === "below_floor" && /predates starter levels/.test(error.message) && /Regenerate it from the current starter/.test(error.message);
+    await assert.rejects(upgradeRepository(repoRoot), belowFloor);
+    await assert.rejects(syncStarterWorkspace(repoRoot), belowFloor);
+    await assert.rejects(runWithOutputSink(() => {}, () => runCli(["starter", "migrate", "--root", repoRoot])), belowFloor);
+    for (const argv of [["upgrade", "--json"], ["upgrade", "--version", "0.1.999", "--json"], ["starter", "migrate", "--json"]]) {
+      const receipt = await jsonFailure([...argv, "--root", repoRoot], /predates starter levels/);
+      assert.deepEqual([receipt.ok, receipt.error.code], [false, "below_floor"], argv.join(" "));
+    }
+    assert.equal(execFileSync("git", ["status", "--porcelain", "--untracked-files=all"], { cwd: repoRoot, encoding: "utf8" }).trim(), "", `${shape}: nothing was written`);
+    // It still builds and stays editable until it is regenerated: check and doctor warn.
+    const checked = await runWithOutputSink(() => {}, () => checkWorkspace(repoRoot));
+    assert.ok(checked.machine.warnings.some((warning) => /predates starter levels/.test(warning)), checked.machine.warnings.join("\n"));
+    const doctorLines = [];
+    await runWithOutputSink((line) => doctorLines.push(line), () => runCli(["doctor", "--root", repoRoot, "--json"]));
+    const doctor = JSON.parse(doctorLines.join("\n"));
+    assert.deepEqual([doctor.ok, doctor.starter.belowFloor, doctor.starter.level, doctor.starter.floor], [true, true, 0, 1]);
+    const statusLines = [];
+    await runWithOutputSink((line) => statusLines.push(line), () => runCli(["starter", "status", "--root", repoRoot, "--json"]));
+    assert.deepEqual(JSON.parse(statusLines.join("\n")), { starter: "starter", plumbing: shape === "no record" ? null : "toolkit", level: 0, current: 1, floor: 1, belowFloor: true, behind: 1, pending: [], declined: [], conflicts: [] });
+  }
 });
 
 test("starter sync adds a view a newer scaffold declares to a system adopted under an earlier release", async (t) => {
@@ -1475,7 +1503,6 @@ test("starter sync adds a view a newer scaffold declares to a system adopted und
   commitAll(repoRoot, "Adopted before the Use view");
 
   const result = await syncStarterWorkspace(repoRoot);
-  assert.equal(result.adopted, false, "the record was present, so this is a re-sync, not an adoption");
   assert.deepEqual(result.site, { addedPages: [], addedViews: ["use"], advanced: [], kept: [] }, "a new view is reported as the view; its pages come with it");
   assert.deepEqual(result.files.filter((file) => file.status !== "current").map((file) => [file.path, file.status]), [
     ["src/site.json", "updated"],
@@ -1512,7 +1539,7 @@ test("starter sync reports customized files, rolls back when they break the chec
   const read = (relative) => fs.readFile(path.join(repoRoot, relative), "utf8");
   // A fresh scaffold is recorded as adopted, so its first sync is a no-op.
   const fresh = await syncStarterWorkspace(repoRoot);
-  assert.deepEqual([fresh.adopted, fresh.written, fresh.recordWritten, fresh.plumbing], [false, [], false, "toolkit"]);
+  assert.deepEqual([fresh.written, fresh.recordWritten, fresh.plumbing], [[], false, "toolkit"]);
   // A fresh scaffold's plumbing is the toolkit's outright: a local change is brought back to stock, reported, and nothing halts or needs --force.
   assert.equal(JSON.parse(await read(".timds/starter.json")).plumbing, "toolkit");
   await fs.appendFile(path.join(repoRoot, "scripts/dev.mjs"), "\n// client change\n");
@@ -1523,97 +1550,47 @@ test("starter sync reports customized files, rolls back when they break the chec
   assert.equal(JSON.parse(await read(".timds/starter.json")).plumbing, "toolkit", "the mode survives a sync");
   await writeJson(path.join(repoRoot, ".timds/starter.json"), { ...JSON.parse(await read(".timds/starter.json")), plumbing: "mine" });
   await assert.rejects(syncStarterWorkspace(repoRoot), /plumbing "mine"; it must be "toolkit" or "recorded"/);
-  // A scaffold already at stock but without the record is adopted by writing the record alone, and says so; an adopted system's plumbing is recorded, not owned.
+  // A system without the record predates starter levels; the sync refuses it rather than adopting it.
   await fs.rm(path.join(repoRoot, ".timds/starter.json"));
-  const recordOnly = await syncStarterWorkspace(repoRoot);
-  assert.deepEqual([recordOnly.adopted, recordOnly.written, recordOnly.recordWritten, recordOnly.check, recordOnly.plumbing], [true, [], true, null, "recorded"]);
-  assert.equal(JSON.parse(await read(".timds/starter.json")).plumbing, undefined);
+  await assert.rejects(syncStarterWorkspace(repoRoot), (error) => error.failureCode === "below_floor");
+  await initializeRepository(repoRoot, { standalone: true }).catch(() => {});
 
-  // A customized stub script keeps the whole copied renderer of a system that
-  // still has one: the other scripts and the stock pages wait, the copied
-  // viewer stays, and the renderer-package step reports renderer_kept.
-  await rewindStarter(repoRoot);
-  await fs.appendFile(path.join(repoRoot, "scripts/dev.mjs"), "\n// client change\n");
-  const devOnly = await syncStarterWorkspace(repoRoot);
-  assert.deepEqual(devOnly.files.find((file) => file.path === "scripts/dev.mjs"), { path: "scripts/dev.mjs", status: "customized" });
-  assert.match(await read("scripts/dev.mjs"), /client change/, "a customized script is reported and kept");
-  assert.equal(await read("scripts/viewer.mjs"), await fs.readFile(path.join(starterFixtureRoot, "scripts/viewer.mjs"), "utf8"), "the copied viewer stays while the renderer is kept");
-  for (const relative of ["scripts/build.mjs", "scripts/check.mjs"]) assert.equal(devOnly.files.find((file) => file.path === relative).status, "skipped", relative);
-  assert.deepEqual([devOnly.levels.level, devOnly.status.renderer, devOnly.status.kept, [...new Set(devOnly.status.conflicts.map((conflict) => `${conflict.step}:${conflict.reason}`))]], [0, "kept", ["scripts/dev.mjs"], ["renderer-package:renderer_kept"]]);
-  assert.deepEqual(devOnly.check.machine.warnings.map((warning) => warning.split(" (")[0]), ["guidance group voice is empty: no brand/voice page; declare it in timds.json brand.guidance.voice", 'no asset is annotated data-timds-role="logo"; the brand kit has no logo', "The copied renderer is kept"]);
-  const record = JSON.parse(await read(".timds/starter.json"));
-  assert.equal(record.files["scripts/dev.mjs"], undefined, "a customized file is not recorded as toolkit-written");
-  assert.equal(record.level, 0, "the level stays below the step that did not settle");
-
-  // A customized viewer cannot render the new overviews, and the stock check
-  // expects the stock viewer beside it: the renderer and the stock pages wait,
-  // named, while the rest of the sync lands and the check still passes.
-  await rewindStarter(repoRoot);
-  const customizedViewer = `${await read("scripts/viewer.mjs")}\n// client change\n`;
-  await fs.writeFile(path.join(repoRoot, "scripts/viewer.mjs"), customizedViewer);
-  const held = await syncStarterWorkspace(repoRoot);
-  assert.equal(held.files.find((file) => file.path === "scripts/viewer.mjs").status, "customized");
-  for (const relative of ["scripts/build.mjs", "scripts/check.mjs"]) {
-    const file = held.files.find((entry) => entry.path === relative);
-    assert.equal(file.status, "skipped", relative);
-    assert.match(file.note, /^held back: scripts\/dev\.mjs and scripts\/viewer\.mjs are this system's own and the stock version expects the stock renderer beside it; port the renderer, or run timds starter sync --force scripts\/dev\.mjs scripts\/viewer\.mjs to replace it$/, relative);
-    assert.equal(await read(relative), await fs.readFile(path.join(starterFixtureRoot, relative), "utf8"), `${relative} stays at the version the kept viewer works with`);
-  }
-  for (const [relative] of starterManagedFragments) {
-    const file = held.files.find((entry) => entry.path === relative);
-    assert.equal(file.status, "skipped", relative);
-    assert.match(file.note, /^held back: scripts\/dev\.mjs and scripts\/viewer\.mjs are this system's own and may not render the stock page;/, relative);
-    await assert.rejects(fs.access(path.join(repoRoot, relative)), /ENOENT/, relative);
-  }
-  assert.ok(!held.written.some((relative) => relative.startsWith("src/pages/") || ["scripts/viewer.mjs", "scripts/build.mjs", "scripts/check.mjs"].includes(relative)), JSON.stringify(held.written));
-  assert.ok(held.written.includes("src/styles/canvas.css") && held.written.includes("src/formats.json"), "plumbing outside the renderer and the catalogs still land");
-  assert.equal(held.check.machine.warnings.length, 3, "the kept renderer still passes the check, with a warning that names it");
-  assert.equal(await read("scripts/viewer.mjs"), customizedViewer);
-  assert.deepEqual(forceReplaceable(held), ["scripts/dev.mjs", "scripts/viewer.mjs"]);
-  const heldRecord = JSON.parse(await read(".timds/starter.json"));
-  assert.equal(heldRecord.files["scripts/viewer.mjs"], undefined, "a kept renderer is not recorded as toolkit-written");
-  assert.equal(heldRecord.files["scripts/build.mjs"], undefined, "a held-back script keeps no stock hash it does not have");
+  // In the recorded mode a customized stub is reported and kept; the prompt and --force decide it.
+  const owner = await temporaryDirectory(t);
+  await initializeRepository(owner, { standalone: true });
+  const readOwner = (relative) => fs.readFile(path.join(owner, relative), "utf8");
+  const record = JSON.parse(await readOwner(".timds/starter.json"));
+  delete record.plumbing;
+  await writeJson(path.join(owner, ".timds/starter.json"), record);
+  await fs.appendFile(path.join(owner, "scripts/dev.mjs"), "\n// client change\n");
+  const kept = await syncStarterWorkspace(owner);
+  assert.deepEqual(kept.files.find((file) => file.path === "scripts/dev.mjs"), { path: "scripts/dev.mjs", status: "customized" });
+  assert.match(await readOwner("scripts/dev.mjs"), /client change/, "a customized script is reported and kept");
+  assert.equal(JSON.parse(await readOwner(".timds/starter.json")).files["scripts/dev.mjs"], record.files["scripts/dev.mjs"], "a customized file keeps the hash the toolkit last wrote");
 
   // --force names each customized plumbing file it replaces and nothing else; an overview fragment this system wrote itself is its own page and survives.
   const ownOverview = '<span class="eyebrow">Print</span>\n<h1 class="page-title">Our print</h1>\n<section class="block" id="rules"><h2 class="h2">Rules</h2><p>Paper first.</p></section>\n';
-  await fs.mkdir(path.join(repoRoot, "src/pages/print"), { recursive: true });
-  await fs.writeFile(path.join(repoRoot, "src/pages/print/index.html"), ownOverview);
-  await assert.rejects(syncStarterWorkspace(repoRoot, { force: ["src/pages/print/index.html"] }), /--force replaces only the starter's stock scripts and stylesheets, and removes the copied renderer, named one by one: scripts\/build\.mjs, .*\. Not src\/pages\/print\/index\.html;/);
-  await assert.rejects(syncStarterWorkspace(repoRoot, { force: ["scripts/viewer.mjs", "scripts/nope.mjs"] }), /Not scripts\/nope\.mjs;/);
-  // In a terminal the sync asks about each customized stub instead; the answers decide, and a diff can be shown first.
+  await fs.writeFile(path.join(owner, "src/pages/print/index.html"), ownOverview);
+  await assert.rejects(syncStarterWorkspace(owner, { force: ["src/pages/print/index.html"] }), /--force replaces only the starter's stock scripts and stylesheets, named one by one: scripts\/build\.mjs, .*\. Not src\/pages\/print\/index\.html;/);
+  await assert.rejects(syncStarterWorkspace(owner, { force: ["scripts/viewer.mjs"] }), /Not scripts\/viewer\.mjs;/);
+  // In a terminal the sync asks about each customized file instead; the answers decide, and a diff can be shown first.
   const asked = [];
   const diffed = [];
   const prompt = createPlumbingPrompt({
     ask: async (question) => { asked.push(question); return asked.length === 1 ? "d" : asked.length === 2 ? "nonsense" : "k"; },
     showDiff: async (file) => { diffed.push([file.path, file.templatePath.endsWith("templates/starter/scripts/dev.mjs")]); },
   });
-  const decisions = [];
-  const answered = await syncStarterWorkspace(repoRoot, { decideCustomized: async (file) => {
-    decisions.push(file.path);
-    return prompt(file);
-  } });
-  assert.deepEqual(decisions, ["scripts/dev.mjs"], "the copied viewer is removed only by name, never at a prompt");
+  const answered = await syncStarterWorkspace(owner, { decideCustomized: prompt });
   assert.deepEqual([asked.length, diffed], [3, [["scripts/dev.mjs", true]]], "the diff was shown once and an unknown answer was asked again");
   assert.deepEqual(answered.files.find((file) => file.path === "scripts/dev.mjs"), { note: "kept at the prompt", path: "scripts/dev.mjs", status: "customized" });
-  assert.equal(answered.files.find((file) => file.path === "scripts/viewer.mjs").status, "customized");
-  // Naming only the viewer is not enough while the customized dev script may still use it: nothing of the renderer moves.
-  const viewerOnly = await syncStarterWorkspace(repoRoot, { force: ["scripts/viewer.mjs"] });
-  assert.equal(await read("scripts/viewer.mjs"), customizedViewer);
-  assert.deepEqual([viewerOnly.levels.level, viewerOnly.status.kept], [0, ["scripts/dev.mjs"]]);
-  const forced = await syncStarterWorkspace(repoRoot, { force: ["scripts/dev.mjs", "scripts/viewer.mjs"] });
-  assert.deepEqual(forced.files.find((file) => file.path === "scripts/viewer.mjs"), { note: "removed with --force", path: "scripts/viewer.mjs", status: "removed" });
+  const forced = await syncStarterWorkspace(owner, { force: ["scripts/dev.mjs"] });
   assert.deepEqual(forced.files.find((file) => file.path === "scripts/dev.mjs"), { note: "replaced with --force", path: "scripts/dev.mjs", status: "updated" });
-  await assert.rejects(fs.access(path.join(repoRoot, "scripts/viewer.mjs")), { code: "ENOENT" });
   assert.deepEqual(forceReplaceable(forced), []);
-  for (const relative of ["scripts/build.mjs", "scripts/check.mjs", "scripts/dev.mjs"]) assert.equal(await read(relative), await fs.readFile(path.join(templatesRoot, "starter", relative), "utf8"), relative);
-  assert.deepEqual([forced.levels.level, forced.status.renderer, forced.status.pending.map((step) => step.id)], [2, "package", ["home-landing"]]);
+  assert.equal(await readOwner("scripts/dev.mjs"), await fs.readFile(path.join(templatesRoot, "starter/scripts/dev.mjs"), "utf8"));
   assert.deepEqual(forced.files.find((file) => file.path === "src/pages/print/index.html"), { note: "this system's own page; never replaced, --force included", path: "src/pages/print/index.html", status: "customized" });
-  assert.equal(await read("src/pages/print/index.html"), ownOverview);
-  assert.ok(!forceReplaceable(forced).includes("src/pages/print/index.html"), "a kept fragment is not something --force would replace");
-  const printView = JSON.parse(await read("src/site.json")).views.find((view) => view.id === "print");
-  assert.equal(printView.pages[0].planned, undefined, "the overview is authored because its fragment exists");
-  assert.match(await read("dist/print/index.html"), /Paper first/);
-  assert.equal(forced.check.machine.warnings.length, 3, "the two scaffold warnings and the visible step that waits");
+  assert.equal(await readOwner("src/pages/print/index.html"), ownOverview);
+  assert.match(await readOwner("dist/print/index.html"), /Paper first/);
+  assert.equal(forced.check.machine.warnings.length, 2);
 });
 
 test("starter sync merges around a view the client already declared", async (t) => {
@@ -1653,13 +1630,13 @@ test("starter sync merges around a view the client already declared", async (t) 
   assert.deepEqual([quiet.written, quiet.site.kept, quiet.formats.kept], [[], [], []]);
   assert.equal(result.files.find((file) => file.path === "src/pages/print/index.html").status, "created", "the overview fragment is written because the sync added its page");
   assert.deepEqual(result.formats.skipped, []);
-  assert.equal(result.check.machine.warnings.length, 3, "the two scaffold warnings and the visible home-landing step that waits for a decision");
+  assert.equal(result.check.machine.warnings.length, 2, "the two scaffold warnings");
   assert.match(await read("dist/print/index.html"), /Letterhead · US Letter/);
   assert.match(await read("dist/print/letterheads/index.html"), /Lead with the answer/);
 
   // A planned overview the client declared has nothing to lose: it receives the stock fragment and becomes authored under the client's title.
   await rewindStarter(repoRoot);
-  const declaredOverview = JSON.parse(await fs.readFile(path.join(starterFixtureRoot, "src/site.json"), "utf8"));
+  const declaredOverview = JSON.parse(await read("src/site.json"));
   declaredOverview.views.push({ id: "social", label: "Social", pages: [{ slug: "", title: "Social", planned: true }] });
   await writeJson(path.join(repoRoot, "src/site.json"), declaredOverview);
   const plannedOverview = await syncStarterWorkspace(repoRoot);
@@ -1669,7 +1646,7 @@ test("starter sync merges around a view the client already declared", async (t) 
   assert.ok(plannedOverview.site.advanced.includes("social.planned"));
   assert.deepEqual(plannedOverview.site.kept.map((kept) => kept.path), ["social.label", "social.blurb", "social.title", "social.group", "social.summary"]);
   assert.match(await read("dist/social/index.html"), /<h1 class="page-title">/);
-  assert.equal(plannedOverview.check.machine.warnings.length, 3, "with the visible home-landing step that waits");
+  assert.equal(plannedOverview.check.machine.warnings.length, 2);
 });
 
 test("a later scaffold advances starter fields the client never changed and keeps the ones they did", async (t) => {
