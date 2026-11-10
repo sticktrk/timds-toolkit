@@ -867,16 +867,20 @@ export async function applyWritesWithRollback(root, writes, { writeFile: write =
 
 /**
  * The website designs of the pinned system as `[{ id, routes }]`: for a
- * published pin from the derived layer at its published prefix (the current
- * release's designs.json), for a submodule pin from the checkout. Throws when
- * they cannot be read; the caller then pairs nothing.
+ * published pin the designs summary of that exact version's bundle (the same
+ * record `consumer sync` keeps and `consumer check` reads), for a submodule
+ * pin the checkout. The current release never stands in for the pinned one:
+ * a pair it added would name a design the pin does not have, and `consumer
+ * check` would refuse it. Throws when the designs cannot be read; the caller
+ * then pairs nothing.
  */
 export async function readPinnedDesigns({ repoRoot, manifest, fetchImpl = fetch }) {
   if (consumerPinMode(manifest.designSystem) === "published") {
-    const { fetchDerivedLayer } = await import("./derived.mjs");
-    const layer = await fetchDerivedLayer(publishedBaseUrl(manifest.designSystem), { fetchImpl });
-    if (!Array.isArray(layer.designs?.designs)) throw new Error(`${publishedBaseUrl(manifest.designSystem)} publishes no designs.json`);
-    return layer.designs.designs.map((design) => ({ id: design.id, routes: (design.pages ?? []).map((page) => page.route) }));
+    const { resolvePublishedBundle } = await import("./consumer-sync.mjs");
+    const { version } = manifest.designSystem;
+    const bundle = await resolvePublishedBundle({ url: publishedBaseUrl(manifest.designSystem), version, fetchImpl, withDesigns: true });
+    if (!bundle.designs) throw new Error(`the bundle of the pinned version ${bundle.version} records no website designs`);
+    return bundle.designs.map((design) => ({ id: design.id, routes: Array.isArray(design.routes) ? design.routes : [] }));
   }
   const checkout = path.join(repoRoot, manifest.designSystem.path);
   if (!existsSync(path.join(checkout, "timds.json"))) throw new Error(`${manifest.designSystem.path} is not checked out`);
@@ -1101,12 +1105,6 @@ export async function scaffoldExistingEmdashSite(rootInput, {
   output(`Installing the EmDash template set (version ${plan.set.version}, ${platform}) into ${appCwd === "." ? repoRoot : `${repoRoot}/${appCwd}`}...`);
   const written = await applyWritesWithRollback(repoRoot, writes, { writeFile: write });
 
-  if (!skipInstall) {
-    output("Running npm install...");
-    const installed = await runInstall(appRoot);
-    if (installed.code !== 0) throw new Error(`npm install failed in ${appRoot}:\n${tail(installed)}\nFix the error and run npm install; the EmDash files are already in place.`);
-  }
-
   const handover = plan.files.some((file) => file.path === EMDASH_HANDOVER_DOC);
   const todos = [
     ...(handover ? [`The handover checklist (first deploy and setup, the writer's token, the encryption key backup, deploy on push) is in ${inApp(EMDASH_HANDOVER_DOC)}`] : []),
@@ -1118,11 +1116,13 @@ export async function scaffoldExistingEmdashSite(rootInput, {
     ...(!previewPlan.crawl ? [`App "${appName}" previews a static build, and the article routes are rendered on request; give its preview serve, port and routes, then add ${plan.set.preview.routes.join(", ")} to them`] : []),
     ...(previewPlan.crawl && previewPlan.ready === "unchanged" ? [`preview.ready stays ${manifest.apps[appName].preview.ready}; the article routes need the seed loaded, so make sure the preview opens ${plan.set.preview.ready} before it captures them`] : []),
     ...(previewPlan.crawl && designsError ? [`The Design System's designs could not be read (${designsError}), so no preview.designs pairs were added; pair ${Object.keys(plan.set.preview.designs).join(", ")} with their designs by hand once they can be`] : []),
-    ...previewPlan.unpaired.map((route) => `${route} has no design yet: author it in the Design System, then pair it in preview.designs`),
+    ...previewPlan.unpaired.map((route) => `${route} has no design yet in the pinned Design System version: move the pin to a release that has it, or author it in the Design System, then pair it in preview.designs`),
     ...(previewPlan.crawl ? [`Rerun timds consumer init so the consumer skill and the launch entries match the edited ${CONSUMER_MANIFEST_FILE}`] : []),
     `Review the diff, commit it, and run npm run timds -- consumer check`,
   ];
 
+  // The files are in place from here on, so the changes only this run prints
+  // go out before npm install: a failed install must not take them with it.
   output(`Installed the EmDash template set into app ${appName}:`);
   for (const file of written) output(`  ${file}`);
   if (dependencies.added.length) {
@@ -1145,6 +1145,15 @@ export async function scaffoldExistingEmdashSite(rootInput, {
     output("Add to .gitignore:");
     for (const line of plan.gitignore) output(`  ${line}`);
   }
+  if (!skipInstall) {
+    output("");
+    output("Running npm install...");
+    const installed = await runInstall(appRoot);
+    if (installed.code !== 0) {
+      throw new Error(`npm install failed in ${appRoot}:\n${tail(installed)}\nThe EmDash files are already in place and the configuration changes printed above still apply. Fix the error and run npm install; do not rerun the scaffold, which refuses paths that exist. The same changes are listed in ${inApp(EMDASH_HANDOVER_DOC)}.`);
+    }
+  }
+
   output("");
   output("For the developer to confirm:");
   for (const item of todos) output(`- ${item}`);

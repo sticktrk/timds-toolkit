@@ -8,7 +8,10 @@ helpers under `src/lib/articles/`, and `src/live.config.ts`. Writers target
 the contract in [content-api.md](content-api.md).
 
 Work through this list from top to bottom. The scaffold printed the same
-configuration changes; the snippets it named show each file in full.
+configuration changes, with a snippet that shows each file in full. If that
+output is gone, the snippets are in the TimDS package the site installs,
+under `node_modules/@dtconcepts/timds/templates/emdash/manual/`; there the
+site's name and origin still read `__SITE_NAME__` and `__SITE_URL__`.
 
 ## What the site needs
 
@@ -52,8 +55,12 @@ pages, or the head carries two.
       stay static. Do not add it to the article or topic routes.
 - [ ] If the site has a sitemap, add the URLs from
       `getArticleSitemapEntries()` in `src/lib/articles/sitemap.ts` and serve
-      the sitemap on request. EmDash also serves its own
-      `/sitemap-articles.xml`, which a sitemap index can link instead.
+      the sitemap on request, with the cache header the snippet sets: for a
+      signed-in editor the entries can include a draft revision's unpublished
+      slug, so that response must stay out of shared caches. EmDash also
+      serves its own `/sitemap-articles.xml`, which a sitemap index can link
+      instead. A site with no `src/pages/sitemap.xml.*` of its own gets
+      EmDash's `/sitemap.xml`, decided when the server starts.
 - [ ] If the site already had `src/live.config.ts`, add the `_emdash`
       collection to it.
 - [ ] `tsconfig.json` includes `emdash-env.d.ts` (and on Cloudflare
@@ -134,6 +141,29 @@ they write a configuration of their own.
       applications API (a self-hosted application whose domain is
       `<host>/_emdash`). The last one shows the application's audience tag,
       the value of `CF_ACCESS_AUDIENCE`.
+- [ ] With Cloudflare Access, keep uploaded media public. Covers and body
+      images are served from `/_emdash/api/media/file/<key>`, inside the
+      application above, so without one of these two changes visitors and
+      social crawlers get the Access login instead of the image:
+
+      - a second, more specific Access application for
+        `<host>/_emdash/api/media/file` with a bypass policy for everyone.
+        EmDash itself treats that path as public, so nothing new is exposed:
+
+        ```bash
+        cf zero-trust access applications create --body @access-media.json
+        cf zero-trust access policies create --name "Public media" --decision bypass --include @everyone.json
+        ```
+
+      - or a public origin for the bucket, such as a custom domain on it,
+        named in `astro.config.mjs` as
+        `storage: r2({ binding: "MEDIA", publicUrl: "https://media.example.com" })`,
+        so media URLs leave `/_emdash/` altogether.
+
+      **Unconfirmed** on a deployed site: open an article's cover image in a
+      private window after the first deploy. A site that uses EmDash's public
+      search or comments needs the same for `/_emdash/api/search` and
+      `/_emdash/api/comments/`.
 - [ ] With Cloudflare Access, the content writer needs to pass it too. Its
       REST and MCP requests go to `/_emdash/api/`, inside the application.
       EmDash accepts the writer's bearer token without an Access login, but

@@ -758,7 +758,7 @@ for (const platform of ["cloudflare", "node"]) {
       ...Object.fromEntries(pairs.slice(0, -1).map(([route, designRoute]) => [route, `website:${designRoute}`])),
     });
     assert.deepEqual(result.preview.unpaired, [pairs.at(-1)[0]]);
-    assert.ok(result.todos.includes(`${pairs.at(-1)[0]} has no design yet: author it in the Design System, then pair it in preview.designs`));
+    assert.ok(result.todos.includes(`${pairs.at(-1)[0]} has no design yet in the pinned Design System version: move the pin to a release that has it, or author it in the Design System, then pair it in preview.designs`));
     assert.deepEqual(preview.discover.exclude, set.preview.discoverExclude);
     assert.equal(preview.ready, set.preview.ready);
     assert.equal(raw.apps["acme-site"].preview.viewports, undefined, "no defaults are written out");
@@ -866,29 +866,53 @@ test("--existing leaves a preview.ready the site chose and an existing pair alon
   assert.equal(preview.routes.filter((entry) => entry === route).length, 1);
 });
 
-test("--existing reads a published pin's designs through the derived layer, and pairs nothing offline", async (t) => {
+test("--existing pairs designs from the pinned release's bundle, never the current release, and pairs nothing offline", async (t) => {
   const root = await temporaryDirectory(t);
   const set = await templateSet();
   const designRoutes = Object.values(set.preview.designs);
-  const requests = [];
-  const fetchImpl = async (url) => {
-    requests.push(url);
-    const respond = (body) => ({ ok: true, status: 200, text: async () => JSON.stringify(body) });
-    if (url.endsWith("/.timds-artifact.json")) return respond({ version: "2026.11.01-1", entry: "index.html" });
-    if (url.endsWith("/designs.json")) return respond({ designs: [{ id: "website", pages: designRoutes.map((route) => ({ route })) }] });
-    return { ok: false, status: 404, text: async () => "" };
+  const pinned = existingManifest().designSystem.version;
+  // The current release has the article designs; what the pin names decides.
+  const serve = (pinnedDesigns) => {
+    const requests = [];
+    const fetchImpl = async (url) => {
+      requests.push(url);
+      const respond = (body) => ({ ok: true, status: 200, text: async () => JSON.stringify(body), json: async () => body });
+      if (url.endsWith(`/v/${encodeURIComponent(pinned)}/bundle.json`)) {
+        return respond({ system: { id: "acme/core", version: pinned }, base: null, files: [], ...(pinnedDesigns ? { designs: pinnedDesigns } : {}) });
+      }
+      if (url.endsWith("/designs.json")) return respond({ designs: [{ id: "website", pages: designRoutes.map((route) => ({ route })) }] });
+      if (url.endsWith("/.timds-artifact.json")) return respond({ version: "2099.01.01-1", entry: "index.html" });
+      return { ok: false, status: 404, text: async () => "", json: async () => ({}) };
+    };
+    return { requests, fetchImpl };
   };
-  const site = await existingSite(root);
-  const result = await scaffoldExistingEmdashSite(site, { skipInstall: true, templatesRoot: TEMPLATES, fetchImpl, output: quiet });
-  assert.ok(requests.every((url) => url.startsWith("https://design-systems.timds.com/acme/core/artifact/")));
+
+  const current = serve([{ id: "website", routes: ["/", ...designRoutes] }]);
+  const result = await scaffoldExistingEmdashSite(await existingSite(root), { skipInstall: true, templatesRoot: TEMPLATES, fetchImpl: current.fetchImpl, output: quiet });
+  assert.deepEqual(current.requests, [`https://design-systems.timds.com/acme/core/artifact/v/${encodeURIComponent(pinned)}/bundle.json`], "only the pinned version's bundle is read");
   assert.deepEqual(result.preview.designsAdded, Object.fromEntries(Object.entries(set.preview.designs).map(([route, designRoute]) => [route, `website:${designRoute}`])));
   assert.deepEqual(result.preview.unpaired, []);
+
+  // A pin from before the article designs: the current release has them, the pinned bundle does not.
+  const older = serve([{ id: "website", routes: ["/", "/contact"] }]);
+  const behind = await scaffoldExistingEmdashSite(await existingSite(path.join(root, "older")), { skipInstall: true, templatesRoot: TEMPLATES, fetchImpl: older.fetchImpl, output: quiet });
+  assert.deepEqual(behind.preview.designsAdded, {}, "no pair names a design the pin lacks");
+  assert.deepEqual(behind.preview.unpaired, Object.keys(set.preview.designs));
+  const pairedAfter = Object.keys(behind.manifest.apps["acme-site"].preview.designs ?? {});
+  assert.ok(Object.keys(set.preview.designs).every((route) => !pairedAfter.includes(route)), "the manifest gains no article pair");
+  assert.ok(behind.todos.some((item) => /has no design yet in the pinned Design System version: move the pin/.test(item)));
+
+  // A bundle from before design summaries pairs nothing and says why.
+  const unrecorded = serve(null);
+  const silent = await scaffoldExistingEmdashSite(await existingSite(path.join(root, "unrecorded")), { skipInstall: true, templatesRoot: TEMPLATES, fetchImpl: unrecorded.fetchImpl, output: quiet });
+  assert.deepEqual(silent.preview.designsAdded, {});
+  assert.match(silent.preview.designsError, /records no website designs/);
 
   const offline = await existingSite(path.join(root, "offline"));
   const unreachable = await scaffoldExistingEmdashSite(offline, { skipInstall: true, templatesRoot: TEMPLATES, fetchImpl: async () => { throw new Error("getaddrinfo ENOTFOUND"); }, output: quiet });
   assert.deepEqual(unreachable.preview.designsAdded, {});
   assert.match(unreachable.preview.designsError, /ENOTFOUND/);
-  assert.ok(unreachable.todos.some((item) => item.startsWith("The Design System's designs could not be read (getaddrinfo ENOTFOUND)")));
+  assert.ok(unreachable.todos.some((item) => item.startsWith("The Design System's designs could not be read (")));
 });
 
 test("--existing refuses, with the site untouched, when it cannot install", async (t) => {
@@ -990,12 +1014,25 @@ test("--existing runs npm install in the site unless skipped", async (t) => {
   assert.deepEqual(installs, [path.join(site, "web")]);
   assert.ok(!result.todos.some((item) => item.startsWith("Run npm install")));
 
+  // A failed install comes after everything the developer has to do by hand
+  // is printed: the files are written by then, and a rerun would refuse them.
   const failing = await existingSite(path.join(root, "failing"));
+  const printed = [];
+  let printedBeforeInstall = null;
   await assert.rejects(
-    scaffoldExistingEmdashSite(failing, { templatesRoot: TEMPLATES, readDesigns: async () => [], runInstall: async () => ({ code: 1, stdout: "", stderr: "ERESOLVE" }), output: quiet }),
-    /npm install failed[\s\S]*ERESOLVE[\s\S]*the EmDash files are already in place/,
+    scaffoldExistingEmdashSite(failing, {
+      templatesRoot: TEMPLATES,
+      readDesigns: async () => [],
+      runInstall: async () => { printedBeforeInstall = printed.join("\n"); return { code: 1, stdout: "", stderr: "connect ENETUNREACH" }; },
+      output: (line = "") => printed.push(line),
+    }),
+    /npm install failed[\s\S]*ENETUNREACH[\s\S]*The EmDash files are already in place and the configuration changes printed above still apply[\s\S]*do not rerun the scaffold[\s\S]*docs\/emdash-handover\.md/,
   );
   assert.ok(existsSync(path.join(failing, EMDASH_RECORD_PATH)));
+  const set = await templateSet();
+  for (const entry of set.manual.cloudflare) assert.ok(printedBeforeInstall.includes(`Change ${entry.file} by hand: ${entry.summary}`), `${entry.file} is printed before the install`);
+  for (const line of [...set.gitignore.all, ...set.gitignore.cloudflare]) assert.ok(printedBeforeInstall.includes(`  ${line}`), `.gitignore ${line} is printed before the install`);
+  assert.match(printedBeforeInstall, /Dependencies added:/);
 });
 
 test("the recorded template version survives timds upgrade and consumer init", async (t) => {

@@ -6,11 +6,12 @@
 // EmDash's own /sitemap-articles.xml from the site's sitemap index instead.
 import type { APIRoute } from "astro";
 
+import { cacheControl } from "../lib/articles/index"; // NEW
 import { getArticleSitemapEntries } from "../lib/articles/sitemap"; // NEW
 
 export const prerender = false; // NEW: articles appear without a rebuild
 
-export const GET: APIRoute = async ({ url, site }) => {
+export const GET: APIRoute = async ({ url, site, locals }) => {
 	const origin = site?.origin ?? url.origin;
 	const pages: Array<{ url: string; lastmod?: string }> = [
 		{ url: `${origin}/` }, // ...the site's existing pages
@@ -24,7 +25,13 @@ export const GET: APIRoute = async ({ url, site }) => {
 		"</urlset>",
 		"",
 	].join("\n");
+	// NEW: an editor's request can list a draft revision's unpublished slug,
+	// so a signed-in or preview response is never stored by a shared cache.
+	const cacheHeader = cacheControl(locals, url);
 	return new Response(body, {
-		headers: { "Content-Type": "application/xml; charset=utf-8", "Cache-Control": "public, max-age=3600" },
+		headers: {
+			"Content-Type": "application/xml; charset=utf-8",
+			"Cache-Control": cacheHeader === "private, no-store" ? cacheHeader : "public, max-age=3600",
+		},
 	});
 };

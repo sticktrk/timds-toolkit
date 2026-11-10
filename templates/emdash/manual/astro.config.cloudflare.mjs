@@ -41,6 +41,9 @@ export default defineConfig({
 			// `siteUrl` here: it is built into every preview deployment too.
 			// NEW, only with Cloudflare Access in front of /_emdash: Access
 			// replaces passkeys, and only people Access lets in reach the admin.
+			// Uploaded media is served under /_emdash/api/media/file/ and must
+			// stay public: give that path an Access bypass, or give the bucket a
+			// public origin with r2({ binding: "MEDIA", publicUrl: "https://…" }).
 			// Set the audience with `npx wrangler secret put CF_ACCESS_AUDIENCE`.
 			// auth: access({
 			// 	teamDomain: "<team>.cloudflareaccess.com",

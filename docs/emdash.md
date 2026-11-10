@@ -115,10 +115,13 @@ declines sample content starts empty. The routes render the starter's article
 designs: plain elements inside one `prose` wrapper, a table inside
 `table-scroll`, and no CSS of their own.
 
-The design pairs come from the pinned system's designs: the derived layer at
-a published pin's prefix (the current release's `designs.json`), or the
-submodule checkout. When they cannot be read the mode pairs nothing and says
-so. A route whose design the system lacks is listed as having no design yet:
+The design pairs come from the pinned system's designs: the designs summary
+in the bundle of the exact version a published pin names (the record
+`consumer sync` keeps and `consumer check` reads), or the submodule checkout.
+The current release never stands in for the pinned one, so a site pinned to a
+version from before the article designs gets no pairs until it moves the pin.
+When they cannot be read the mode pairs nothing and says so. A route whose
+design the pinned version lacks is listed as having no design yet:
 the article designs arrive with the starter, and a system with its own
 website design authors them.
 
@@ -136,10 +139,11 @@ live collection EmDash reads entries through. A different `emdash.seed` in
 removes the files the run created and restores `package.json` and the
 manifest. A second run refuses, because the paths exist.
 
-Then, unless `--skip-install`, it runs `npm install` in the site, and prints
-the files written, the dependencies added and kept, the changes to
+It prints the files written, the dependencies added and kept, the changes to
 `astro.config` (and, on Cloudflare, `wrangler.jsonc`) with the snippet for
-each, and the `.gitignore` lines to add. It does not make those changes
+each, and the `.gitignore` lines to add, and only then, unless
+`--skip-install`, runs `npm install` in the site, so a failed install does not
+take the instructions with it. It does not make those changes
 itself: an existing site's adapter, `output: "server"`, bindings and
 prerendered pages are its own choices, and an edit the mode cannot verify
 would break a build silently. The handover checklist is in the site's
