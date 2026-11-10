@@ -150,7 +150,11 @@ const starterLayoutStylesheets = Object.freeze(["/styles/canvas.css", "/styles/v
  * walks the release tags from the first one that carries starter levels,
  * fails on a gap, and `--print` lists the entries. Empty at the floor.
  */
-export const legacyStarterFileHashes = new Map();
+export const legacyStarterFileHashes = new Map([
+  ["src/styles/viewer.css", [
+    "0df3b332bd6cd5c92312ab14727bf484e3171dddbc94416dd37c55719bbb9bb7", // v0.1.497
+  ]],
+]);
 
 /**
  * The starter level a fresh scaffold of this release starts at, and the
