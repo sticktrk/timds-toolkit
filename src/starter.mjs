@@ -153,6 +153,7 @@ const starterLayoutStylesheets = Object.freeze(["/styles/canvas.css", "/styles/v
 export const legacyStarterFileHashes = new Map([
   ["src/styles/viewer.css", [
     "0df3b332bd6cd5c92312ab14727bf484e3171dddbc94416dd37c55719bbb9bb7", // v0.1.497
+    "c130004906cac7b7849fb73eec1d13a5988c8de693c14da93c39ea5b3662297b", // v0.1.498
   ]],
 ]);
 
