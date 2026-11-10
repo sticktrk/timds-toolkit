@@ -254,7 +254,8 @@ function readSiteModel(site) {
     Object.assign(home, { href: "/overview/", output: "overview/index.html" });
   }
 
-  return { home, pages, views };
+  // The view whose own page is the front page is reached by the brand link, not listed in the row again.
+  return { front: site.home ?? null, home, pages, views };
 }
 
 const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -484,7 +485,10 @@ function firstAuthored(view) {
 export const viewerAppBarEntries = Object.freeze([{ label: "Designs", href: "/designs/" }]);
 
 function renderViews(model, current, designs, hasDesigns = designs.length > 0) {
-  const views = model.views.map((view) => {
+  // The front view's own page is where the brand link leads, so the row lists
+  // the other views; its pages keep their side navigation and the promoted
+  // call to action, so nothing in it is out of reach.
+  const views = model.views.filter((view) => view.id !== model.front).map((view) => {
     const target = firstAuthored(view);
     const label = `<b>${escapeHtml(view.label)}</b>${view.blurb ? `<small>${escapeHtml(view.blurb)}</small>` : ""}`;
     if (!target) return `<span class="appbar__view is-planned">${label}</span>`;
@@ -495,7 +499,10 @@ function renderViews(model, current, designs, hasDesigns = designs.length > 0) {
     if (page.promote && !page.planned) views.push(`<a class="appbar__cta" href="${page.href}"${page.id === current.id ? ' aria-current="page"' : ""}>${escapeHtml(page.promote)}</a>`);
   }
   // On a phone the row scrolls sideways, so the current view is brought into view rather than left past the edge.
-  views.push('<script>document.querySelector(".appbar__view[aria-current]")?.scrollIntoView({ block: "nearest", inline: "center" });</script>');
+  // On the front page the brand link is the current one, so it reads as active.
+  views.push(current.href === "/"
+    ? '<script>document.querySelector(".appbar__brand")?.setAttribute("aria-current", "page");</script>'
+    : '<script>document.querySelector(".appbar__view[aria-current]")?.scrollIntoView({ block: "nearest", inline: "center" });</script>');
   return views.join("\n        ");
 }
 

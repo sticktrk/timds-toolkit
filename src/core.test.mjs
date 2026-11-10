@@ -1091,7 +1091,9 @@ test("the starter viewer renders its site model, and its build guards pages, pla
   assert.match(front, /<h1 class="portal-hero__title lines"><span class="line"><span>Every asset,<\/span><\/span> <span class="line"><span>already <em>on brand\.<\/em><\/span><\/span><\/h1>/);
   assert.match(front, /<div class="stat"><b>48<\/b><span>ready-sized formats<\/span><\/div>\s*<div class="stat"><b>6<\/b><span>views, one brand<\/span><\/div>/, "{{count:formats}} and {{count:views}} come from the catalogs");
   assert.match(front, /<a class="asset-card" href="\/use\/compose\/\?format=business-card" data-reveal><span class="asset-card__thumb" style="--cw:3\.5;--ch:2;--safe:0\.125;/, "a rail card opens the composer on its format and draws its proportion from the catalog");
-  assert.match(front, /<a class="appbar__view" href="\/" aria-current="true"><b>Use<\/b>/, "the Use view's app bar link is the front page");
+  assert.doesNotMatch(front, /<b>Use<\/b>/, "the front view is reached by the brand link, not listed in the row");
+  assert.match(front, /<script>document\.querySelector\("\.appbar__brand"\)\?\.setAttribute\("aria-current", "page"\);<\/script>/, "the brand link reads as current on the front page");
+  assert.doesNotMatch(await read("dist/use/compose/index.html"), /<b>Use<\/b>/, "no page lists the front view in the row");
   assert.match(front, /<a class="appbar__cta" href="\/use\/compose\/">Start making<\/a>/, "the promoted page is the composer");
   assert.match(front, /<a class="pill" href="\/use\/compose\/">Start making<\/a>\s*<a class="pill pill--glass" href="\/brand\/typography\/">Explore the brand<\/a>/, "{{nearest:brand/foundation}} falls back to the view's first authored page while foundation is planned");
   await assert.rejects(fs.access(path.join(repoRoot, "dist/use/index.html")));
