@@ -1055,6 +1055,12 @@ test("the starter viewer resolves Use links with and without a home view and rej
   assert.match(await fs.readFile(path.join(repoRoot, "dist/use/index.html"), "utf8"), /<a class="pill" href="\/use\/compose\/">Start making<\/a>/, "the landing links the composer wherever the Use view is served");
   assert.match(await fs.readFile(path.join(repoRoot, "dist/use/install/index.html"), "utf8"), /<a href="\/use\/compose\/#mcp">Compose<\/a>/);
   await assert.rejects(fs.access(path.join(repoRoot, "dist/overview/index.html")), { code: "ENOENT" });
+  // Without home the overview is the front page: every view keeps its tab and the brand link is not marked current.
+  for (const built of ["dist/index.html", "dist/use/install/index.html"]) {
+    const html = await fs.readFile(path.join(repoRoot, built), "utf8");
+    assert.match(html, /<a class="appbar__view" href="\/use\/"[^>]*><b>Use<\/b>/, `${built} lists the Use view`);
+    assert.match(html, /<a class="appbar__brand" href="\/">/, `${built} leaves the brand link unmarked`);
+  }
   for (const home of ["missing", "brand", "use/install"]) {
     site.home = home;
     await writeJson(sitePath, site);
@@ -1091,7 +1097,15 @@ test("the starter viewer renders its site model, and its build guards pages, pla
   assert.match(front, /<h1 class="portal-hero__title lines"><span class="line"><span>Every asset,<\/span><\/span> <span class="line"><span>already <em>on brand\.<\/em><\/span><\/span><\/h1>/);
   assert.match(front, /<div class="stat"><b>48<\/b><span>ready-sized formats<\/span><\/div>\s*<div class="stat"><b>6<\/b><span>views, one brand<\/span><\/div>/, "{{count:formats}} and {{count:views}} come from the catalogs");
   assert.match(front, /<a class="asset-card" href="\/use\/compose\/\?format=business-card" data-reveal><span class="asset-card__thumb" style="--cw:3\.5;--ch:2;--safe:0\.125;/, "a rail card opens the composer on its format and draws its proportion from the catalog");
-  assert.match(front, /<a class="appbar__view" href="\/" aria-current="true"><b>Use<\/b>/, "the Use view's app bar link is the front page");
+  assert.doesNotMatch(front, /<b>Use<\/b>/, "the front view is reached by the brand link, not listed in the row");
+  // Every page of the front view leaves it out of the row and marks the brand link, which stands in for its tab.
+  for (const built of ["dist/index.html", "dist/use/compose/index.html", "dist/use/install/index.html"]) {
+    const html = await read(built);
+    assert.doesNotMatch(html, /<b>Use<\/b>/, `${built} does not list the front view in the row`);
+    assert.match(html, /<a aria-current="page" class="appbar__brand" href="\/">/, `${built} marks the brand link current`);
+  }
+  assert.match(await read("dist/use/install/index.html"), /<nav class="sidenav" aria-label="Pages">[\s\S]*href="\/use\/compose\/"/, "the front view's other pages keep its side navigation");
+  assert.match(await read("dist/brand/color/index.html"), /<a class="appbar__brand" href="\/">/, "a page outside the front view leaves the brand link unmarked");
   assert.match(front, /<a class="appbar__cta" href="\/use\/compose\/">Start making<\/a>/, "the promoted page is the composer");
   assert.match(front, /<a class="pill" href="\/use\/compose\/">Start making<\/a>\s*<a class="pill pill--glass" href="\/brand\/typography\/">Explore the brand<\/a>/, "{{nearest:brand/foundation}} falls back to the view's first authored page while foundation is planned");
   await assert.rejects(fs.access(path.join(repoRoot, "dist/use/index.html")));

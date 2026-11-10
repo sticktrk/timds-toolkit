@@ -483,8 +483,17 @@ function firstAuthored(view) {
 /** The entries the viewer adds to the app bar itself; a view labelled the same reads as a second tab of that name. */
 export const viewerAppBarEntries = Object.freeze([{ label: "Designs", href: "/designs/" }]);
 
+/** The view whose own page is served at / (site.json `home`), or null when the overview is the front page. */
+function frontView(model) {
+  return model.views.find((view) => view.pages.some((page) => page.id === view.id && page.href === "/"))?.id ?? null;
+}
+
 function renderViews(model, current, designs, hasDesigns = designs.length > 0) {
-  const views = model.views.map((view) => {
+  // The front view's own page is where the brand link leads, so the row lists
+  // the other views; its pages keep their side navigation and the promoted
+  // call to action, and the brand link reads as current on all of them.
+  const front = frontView(model);
+  const views = model.views.filter((view) => view.id !== front).map((view) => {
     const target = firstAuthored(view);
     const label = `<b>${escapeHtml(view.label)}</b>${view.blurb ? `<small>${escapeHtml(view.blurb)}</small>` : ""}`;
     if (!target) return `<span class="appbar__view is-planned">${label}</span>`;
@@ -497,6 +506,15 @@ function renderViews(model, current, designs, hasDesigns = designs.length > 0) {
   // On a phone the row scrolls sideways, so the current view is brought into view rather than left past the edge.
   views.push('<script>document.querySelector(".appbar__view[aria-current]")?.scrollIntoView({ block: "nearest", inline: "center" });</script>');
   return views.join("\n        ");
+}
+
+/**
+ * The layout with aria-current="page" on its first app bar brand link
+ * (`<a class="appbar__brand">`), wherever the layout places it. A layout
+ * without one, or one that already marks it, is returned unchanged.
+ */
+function markBrandCurrent(layout) {
+  return layout.replace(/<a\b(?=[^>]*\bclass="[^"]*\bappbar__brand\b)[^>]*>/, (tag) => /\saria-current=/.test(tag) ? tag : tag.replace(/^<a\b/, '<a aria-current="page"'));
 }
 
 function renderSidenav(model, current) {
@@ -774,7 +792,9 @@ export async function renderSite(designSystemRoot) {
     // previous/next links are left out, and the content is wrapped so the
     // chrome's stylesheet can widen the content column for it.
     const landing = page.layout === "landing";
-    rendered.set(page.output, withAgentPointers(fill(layout, "src/layout.html", {
+    // On the front view's pages the brand link stands in for the view's tab, so it carries the current state.
+    const chrome = page.view && page.view === frontView(model) ? markBrandCurrent(layout) : layout;
+    rendered.set(page.output, withAgentPointers(fill(chrome, "src/layout.html", {
       ...shared,
       title: escapeHtml(page.title),
       views: renderViews(model, page, designs, hasDesigns),
