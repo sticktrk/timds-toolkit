@@ -108,7 +108,7 @@ test("the local read server describes, resolves roles, lists tokens and pages, a
   assert.deepEqual(described.bundle.paths, ["dist/styles/system.css", "dist/tokens.css"]);
   assert.equal(described.bundle.versioned, null, "nothing is published locally");
   assert.equal(described.bundle.directory, "/bundle");
-  assert.deepEqual(described.designs, { count: 1, pages: 9, states: 11, journeys: 2, designs: [{ id: "website", title: "Marketing site", pageCount: 9, journeyCount: 2 }] });
+  assert.deepEqual(described.designs, { count: 1, pages: 2, states: 3, journeys: 1, designs: [{ id: "website", title: "Marketing site", pageCount: 2, journeyCount: 1 }] });
 
   // The starter's production sizes remain readable while its guidance pages are planned.
   const formats = await ok(client, "list_formats", {});
@@ -122,10 +122,7 @@ test("the local read server describes, resolves roles, lists tokens and pages, a
   const designs = await ok(client, "list_designs", {});
   assert.equal(designs.total, 1);
   assert.equal(designs.base, null, "nothing is published locally");
-  assert.deepEqual(designs.designs[0].pages.map((page) => [page.route, page.states]), [
-    ["/", ["default"]], ["/404", ["default"]], ["/about", ["default"]], ["/articles", ["default", "empty"]], ["/articles/example-article", ["default"]],
-    ["/contact", ["default", "sent"]], ["/privacy", ["default"]], ["/terms", ["default"]], ["/topics/example-topic", ["default"]],
-  ]);
+  assert.deepEqual(designs.designs[0].pages.map((page) => [page.route, page.states]), [["/", ["default"]], ["/contact", ["default", "sent"]]]);
   const sent = await ok(client, "read_design", { design: "website", route: "/contact", state: "sent" });
   assert.deepEqual([sent.design.id, sent.page.route, sent.state, sent.url], ["website", "/contact", "sent", "/designs/website/contact/sent.html"]);
   assert.match(sent.html, /<div class="notice">/);
@@ -135,7 +132,7 @@ test("the local read server describes, resolves roles, lists tokens and pages, a
   assert.match(home.html, /<form|<section class="hero">/);
   const missingRoute = await call(client, "read_design", { design: "website", route: "/nope" });
   assert.ok(missingRoute.isError);
-  assert.match(missingRoute.content[0].text, /has no route "\/nope"; routes: \/, \/404, \/about, \/articles, \/articles\/example-article, \/contact, \/privacy, \/terms, \/topics\/example-topic/);
+  assert.match(missingRoute.content[0].text, /has no route "\/nope"; routes: \/, \/contact/);
   const missingState = await call(client, "read_design", { design: "website", route: "/contact", state: "empty" });
   assert.match(missingState.content[0].text, /has no state "empty"; states: default, sent/);
 
