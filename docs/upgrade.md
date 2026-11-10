@@ -15,22 +15,17 @@ check the upgrade ran itself. A committed customization of a starter file is
 not a failure: the file is kept, listed under `starter.customized` (and
 `starter.replaceable` when `starter sync --force` may replace it), and the
 result is still `"ok": true`. The `starter` object also carries the starter
-status described below (`level`, `current`, `floor`, `behind`, `renderer`,
-`kept`, `pending`, `declined`, `conflicts`), the files the sync left at stock
-as `currentFiles`, the copied renderer files it removed as `removed`, and the
-steps it ran as `levels`. While the system still has its copied renderer, the
-stub build, check and dev scripts and that copy are one renderer: while one of
-them is customized and kept, the others' refreshes and every refreshed or new
-stock page (the Digital, Social and Print overviews and the Use pages) are
-listed as `skipped` with a note naming the kept file, since a stock page the
-kept renderer has never seen may use placeholders it cannot build; `starter
-sync --force` on the kept file brings them in on the next sync. A refused or failed upgrade exits non-zero and
+status described below (`level`, `current`, `floor`, `belowFloor`, `behind`,
+`pending`, `declined`, `conflicts`), the files the sync left at stock as
+`currentFiles`, files a starter step removed as `removed`, and the steps it ran
+as `levels`. A refused or failed upgrade exits non-zero and
 still prints `{ "ok": false, "error": { "code": "...", "message": "..." } }`,
 with `error.step` naming the command a `--version` selection stopped at. The
 codes a host job can branch on:
 
 | `error.code` | Meaning |
 | --- | --- |
+| `below_floor` | The system is starter-based and predates starter levels (no `.timds/starter.json`, or one without `level` or below the floor). Nothing was written; regenerate it from the current starter. |
 | `managed_file_conflict` | A managed file (skill, installation record, starter record) is locally modified; commit or restore it, or rerun with `--force`. |
 | `dirty_worktree` | Uncommitted changes to files the starter sync writes, or (for a selection) any uncommitted change. |
 | `unsupported_requirement` | The `@dtconcepts/timds` requirement, `scripts.timds`, the requested version, or the lockfile is not in the form a selection needs. |
@@ -46,13 +41,22 @@ status lines it ends with.
 
 A system can be on the newest toolkit and behind the starter. Upgrade keeps
 code current; the starter level says how far the system's own defaults have
-moved with it. `.timds/starter.json` records `level` (absent means 0) and
-`declined` (the ids of steps settled by decision). The toolkit declares the
-level a fresh scaffold starts at and `floor`, the oldest level it still
-builds; `check` fails below the floor.
+moved with it. `.timds/starter.json` records `level` and `declined` (the ids
+of steps settled by decision). The toolkit declares the level a fresh
+scaffold starts at and `floor`, the oldest level it supports. This release is
+level 1, floor 1, with no steps.
 
-Each level is one numbered step, declared as data in the release metadata
-(`describeToolkitRelease().starterSteps`, see
+A starter-based system whose record is missing, has no `level`, or has one
+below the floor predates starter levels. `upgrade` (including `--version`),
+`starter sync`, `starter migrate` and `feed` (child or parent) refuse it with
+`below_floor` before writing anything, and `shoot` refuses such a parent.
+`check`, `doctor` and `starter status` only report it (`belowFloor: true`): it
+still builds with what it has and stays editable until it is regenerated from
+the current starter. Nothing in the toolkit migrates or recognizes an earlier
+shape.
+
+Each level above the floor is one numbered step, declared as data in the
+release metadata (`describeToolkitRelease().starterSteps`, see
 [release metadata](release-metadata.md#starter-steps)) and applied by one
 interpreter (`src/starter-steps.mjs`). Steps above the recorded level are
 evaluated in order on the tree as it stands after the sync and the earlier
@@ -75,53 +79,41 @@ steps:
    there and the step is pending.
 
 `upgrade` and `starter sync` run the same steps and never accept, so they
-never apply a visible step; they do settle one that does not apply or has
-nothing to change. A step's writes are part of the sync, so a failed check
-rolls them back with everything else.
-
-| Level | Step | Layer | Visible | What it does |
-| --- | --- | --- | --- | --- |
-| 1 | `renderer-package` | code | no | Removes `scripts/viewer.mjs` and `scripts/brand-kit.mjs` at a released stock hash. While a renderer file (the stub scripts or the copy) is customized and kept, the system keeps its whole copied renderer and the step stops with the `renderer_kept` conflict. |
-| 2 | `use-start-title` | defaults | no | While `src/pages/use/index.html` is the stock page: the Use view's own page title and summary advance from an earlier stock value ("Using the system", "Compose"), and `layout: "landing"` is set when absent. |
-| 3 | `home-landing` | defaults | yes, declinable | When the Use view's own page is authored with the landing layout: `home: "use"` is set when `home` is absent. |
+never apply a visible step with something to change; they do settle one that
+does not apply or has nothing to change. A step's writes are part of the
+sync, so a failed check rolls them back with everything else.
 
 ```bash
-npm run timds -- starter status [--json]                       # level, pending, declined, conflicts, renderer
-npm run timds -- starter migrate --accept home-landing [--json] # apply a visible step
-npm run timds -- starter migrate --decline home-landing         # settle it by decision
+npm run timds -- starter status [--json]                 # level, floor, pending, declined, conflicts
+npm run timds -- starter migrate --accept ID [--json]    # apply a visible step
+npm run timds -- starter migrate --decline ID            # settle it by decision
 ```
 
 `starter status --json`, the `starter` section of `doctor --json` and the
-upgrade report carry the same status:
+upgrade report carry the same status, here for a system one visible step
+behind a later release:
 
 ```json
 {
-  "starter": "starter", "plumbing": "recorded",
-  "level": 2, "current": 3, "floor": 0, "behind": 1,
-  "renderer": "package",
-  "kept": [],
-  "pending": [{ "level": 3, "id": "home-landing", "visible": true, "declinable": true }],
+  "starter": "starter", "plumbing": "toolkit",
+  "level": 1, "current": 2, "floor": 1, "belowFloor": false, "behind": 1,
+  "pending": [{ "level": 2, "id": "example-step", "visible": true, "declinable": true }],
   "declined": [],
   "conflicts": []
 }
 ```
 
-`renderer` is `package` (the stub scripts call `@dtconcepts/timds/viewer`),
-`copied` (the stock copied renderer is still in the tree, before
-`renderer-package` settles) or `kept` (a renderer file is customized; the
-paths are in `kept`). `pending` lists the steps above the recorded level that
-apply to this kind of system and are not declined. A conflict is `{ step,
-path, reason }`. `check` warns, without failing, on what a sync would settle,
-on a visible step waiting for a decision, on conflicts and on a kept renderer,
-and on a view labelled like an entry the viewer adds to the app bar itself
-(`Designs`).
+`pending` lists the steps above the recorded level that apply to this kind of
+system and are not declined. A conflict is `{ step, path, reason }`. `check`
+warns, without failing, below the floor, on what a sync would settle, on a
+visible step waiting for a decision, on conflicts, and on a view labelled like
+an entry the viewer adds to the app bar itself (`Designs`).
 
-A system with a customized build script keeps building with its copied
-renderer. Move its extra steps to `workspace.after.build` in `timds.json`
-(argv arrays, run in order from the design-system root after every stock
-build, failing it on a non-zero exit), then `starter sync --force
-scripts/build.mjs` gives the build back to the package and the next sync
-settles `renderer-package`.
+The renderer is the package's: `scripts/build.mjs`, `check.mjs` and `dev.mjs`
+are stubs that call `@dtconcepts/timds/viewer`. A system that needs an extra
+build step declares it in `timds.json` as `workspace.after.build` (argv
+arrays, run in order from the design-system root after every stock build,
+failing it on a non-zero exit) rather than editing the build stub.
 
 ## One dependency selection
 
