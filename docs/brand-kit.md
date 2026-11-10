@@ -216,6 +216,19 @@ The Use landing at `/` by default is a portal into the kit’s six format channe
 Its cards open `/use/compose/?format=ID`; Compose is the promoted “Start
 making” action and reads all seven catalog groups (including print event
 formats). `/use/install/` links to the composer’s tool and product guidance.
+Each format card is a small preview of its format built from the shared canvas
+pieces and filled from the kit’s slots at build time: the mark (`media.logo`
+when filled, otherwise `copy.name`), one of `copy.headlines.0`–`2` cycled
+along each rail, and a `copy.ctas.0`–`1` button. Social, ads, the email header and the deck use the
+Accent and Bold grounds; the one-message email, print and the print event
+pieces use Minimal (print on paper); the leaderboard, mobile banner and signature banner show only
+the mark and `copy.ctas.0`. Cards are type-only (no photo), decorative
+(`aria-hidden`) and keep their `{{canvas:ID}}` proportions; unfilled slots
+show the stock samples and are reported like any other page’s. The sizing
+rules (`.asset-card__thumb--canvas`, `.asset-card__preview`) are viewer
+plumbing; the ordinary starter’s landing keeps its blank
+`.asset-card__shape` thumbnails because a stock system has no slot data.
+Existing kits keep their authored landing until their parent republishes it.
 No upgrade changes the authored `home` choice; existing kits with it unset
 keep the overview at `/` and Landing at `/use/`.
 Foundation and channel pages lead with previews and keep slot evidence and

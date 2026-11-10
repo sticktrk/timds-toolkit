@@ -126,6 +126,11 @@ test('the built kit quotes every slot key and its exported guidance without a pr
   assert.match(landing, /<nav class="sidenav" aria-label="Pages">\s*<\/nav>/);
   assert.doesNotMatch(landing, /class="pagenav"|data-compose /);
   assert.match(landing, /<a class="appbar__cta" href="\/use\/compose\/">Start making<\/a>/);
+  // Every format card previews its format from the kit's slots, not a blank shape.
+  const cards = [...landing.matchAll(/<a class="asset-card" href="\/use\/compose\/\?format=[^"]+"[^>]*>([\s\S]*?)<\/a>/g)].map(match => match[1]);
+  assert.equal(cards.length, 24);
+  for (const card of cards) assert.match(card, /aria-hidden="true"><span class="canvas [^"]*asset-card__preview[\s\S]*<span class="canvas-mark">[^<]+<\/span>[\s\S]*<span class="canvas-button">[^<]+<\/span>/);
+  assert.doesNotMatch(landing, /asset-card__shape/);
   assert.match(landing, /<b>24<\/b><span>catalog formats<\/span>/);
   assert.match(landing, /<b>9<\/b><span>views, one brand<\/span>/);
   assert.match(compose, /data-compose /);

@@ -391,6 +391,23 @@ pre { margin: var(--space-6) 0 0; padding: var(--space-4) var(--space-6); overfl
 .asset-card__shape--paper { background: var(--color-surface); box-shadow: 0 10px 24px -14px color-mix(in srgb, var(--color-ink) 45%, transparent), inset 0 0 0 1px var(--color-line); }
 .asset-card__shape--paper::before { background: var(--color-accent); }
 .asset-card__shape--paper::after { background: color-mix(in srgb, var(--color-ink) 30%, transparent); }
+/* A brand kit's format card is a small preview of the format, built from the
+   canvas pieces and filled from the kit's slots. The thumb is a size
+   container, so the frame fits its proportion inside it; type follows the
+   frame and long lines are clamped, so a short or a long headline never
+   leaves the thumb. A thin banner shows the mark and one call to action. */
+.asset-card__thumb--canvas { container-type: size; }
+.asset-card__thumb > .asset-card__canvas { width: min(84cqw, 80cqh * var(--cw) / var(--ch)); }
+.canvas.asset-card__preview { --kit-type: calc(var(--u) * min(var(--cw) / 6.5, var(--ch) / 7)); display: block; border-radius: 4px; box-shadow: 0 16px 32px -18px color-mix(in srgb, var(--color-ink) 55%, transparent); }
+.canvas--minimal.asset-card__preview { box-shadow: 0 10px 24px -14px color-mix(in srgb, var(--color-ink) 45%, transparent), inset 0 0 0 1px var(--color-line); }
+.asset-card__preview .canvas-safe { gap: calc(var(--kit-type) * 0.3); }
+.asset-card__preview .canvas-display { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; font-size: var(--kit-type); line-height: 1.08; white-space: normal; }
+.asset-card__preview .canvas-mark { min-width: 0; font-size: calc(var(--kit-type) * 0.6); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.canvas.asset-card__preview .canvas-logo { height: calc(var(--kit-type) * 0.9); }
+.asset-card__preview .canvas-button { padding: 0.3em 0.75em; font-size: calc(var(--kit-type) * 0.5); white-space: nowrap; }
+.canvas.asset-card__preview--banner { --kit-type: calc(var(--u) * var(--ch) * 0.34); }
+.asset-card__preview--banner .canvas-mark { font-size: var(--kit-type); }
+.asset-card__preview--banner .canvas-button { font-size: calc(var(--kit-type) * 0.8); }
 .asset-card__body { display: flex; flex-direction: column; gap: 0.125rem; padding: 0 var(--space-2) var(--space-2); }
 .asset-card__body b { font-weight: 700; }
 .asset-card__body small { color: var(--color-muted); font-size: var(--type-small); font-variant-numeric: tabular-nums; }
