@@ -143,26 +143,29 @@ they write a configuration of their own.
       the value of `CF_ACCESS_AUDIENCE`.
 - [ ] With Cloudflare Access, keep uploaded media public. Covers and body
       images are served from `/_emdash/api/media/file/<key>`, inside the
-      application above, so without one of these two changes visitors and
-      social crawlers get the Access login instead of the image:
+      application above, so without this step visitors and social crawlers
+      get the Access login instead of the image. Create a second, more
+      specific Access application for `<host>/_emdash/api/media/file` with a
+      bypass policy for everyone. EmDash itself treats that path as public,
+      and its media route refuses the private objects in the bucket, so
+      nothing new is exposed:
 
-      - a second, more specific Access application for
-        `<host>/_emdash/api/media/file` with a bypass policy for everyone.
-        EmDash itself treats that path as public, so nothing new is exposed:
+      ```bash
+      cf zero-trust access applications create --body @access-media.json
+      cf zero-trust access policies create --name "Public media" --decision bypass --include @everyone.json
+      ```
 
-        ```bash
-        cf zero-trust access applications create --body @access-media.json
-        cf zero-trust access policies create --name "Public media" --decision bypass --include @everyone.json
-        ```
-
-      - or a public origin for the bucket, such as a custom domain on it,
-        named in `astro.config.mjs` as
-        `storage: r2({ binding: "MEDIA", publicUrl: "https://media.example.com" })`,
-        so media URLs leave `/_emdash/` altogether.
+      Keep the bucket private. Do not give `MEDIA` a public origin (a custom
+      domain with `publicUrl` in `r2({ … })`) to solve this: EmDash stores
+      backup archives and transfer staging objects in the same bucket, under
+      `backups/` and `transfers/`, and backups hold drafts, scheduled and
+      trashed content and revisions. A public origin serves them by URL,
+      past the guard in EmDash's media route. EmDash's storage guide gives
+      the same warning.
 
       **Unconfirmed** on a deployed site: open an article's cover image in a
       private window after the first deploy. A site that uses EmDash's public
-      search or comments needs the same for `/_emdash/api/search` and
+      search or comments needs the same bypass for `/_emdash/api/search` and
       `/_emdash/api/comments/`.
 - [ ] With Cloudflare Access, the content writer needs to pass it too. Its
       REST and MCP requests go to `/_emdash/api/`, inside the application.
