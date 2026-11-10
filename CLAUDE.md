@@ -329,9 +329,15 @@ of ideas, not a mirror. Planned pages are never built, so a fresh scaffold
 keeps its two expected brand warnings. The kit instead authors its Voice page,
 reports the assumed sample voice, and reports no logo until its media is filled.
 Its template formats render in Minimal, Accent, Bold and Photo treatments.
-The ordinary starter's sample design uses the site layout
-block in `src/styles/system.css` (between its marker comments), which
+The ordinary starter's sample design (`website`: home, the default About,
+Contact, Privacy, Terms and 404 pages, and the article list, article and topic
+designs, 9 pages, 11 states, 2 journeys) uses the site layout
+block in `src/styles/system.css` (between its marker comments, the article's
+`prose` wrapper included), which
 `designs init` appends to a migrating system that kept the starter tokens.
+`/articles/example-article` and `/topics/example-topic` are fixed sample
+routes, since designs have no dynamic routes; a site that seeds an entry at
+each slug pairs the route with its design in a preview.
 `templates/design-system-AGENTS.md`, `design-system-CLAUDE.md`, and
 `design-system-README.md` are the scaffolded agent and human entry points;
 they are written once and then client-owned, so keep them accurate for a fresh

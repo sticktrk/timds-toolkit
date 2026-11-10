@@ -509,7 +509,7 @@ test("inspects a Design System and renders the theme from its roles alone", asyn
   assert.match(renderThemeCss({ stylesheets: [], roles: { "color.text": "--ink" } }), /border-bottom: 1px solid color-mix\(in srgb, var\(--ink\) 14%, transparent\);/);
   assert.equal(emdashConsumerManifest({ appName: "site", systemId: "acme/core" }).apps.site.protected.length, 0);
   // The starter's website design has a home page, so the site's home route is paired with it from the first preview on.
-  assert.deepEqual(system.designs, [{ id: "website", routes: ["/", "/contact"] }]);
+  assert.deepEqual(system.designs, [{ id: "website", routes: ["/", "/404", "/about", "/articles", "/articles/example-article", "/contact", "/privacy", "/terms", "/topics/example-topic"] }]);
   assert.deepEqual(emdashConsumerManifest({ appName: "site", systemId: "acme/core", designs: system.designs }).apps.site.preview.designs, { "/": "website:/" });
   assert.equal(emdashConsumerManifest({ appName: "site", systemId: "acme/core", designs: [{ id: "app", routes: ["/dashboard"] }] }).apps.site.preview.designs, undefined);
 });
