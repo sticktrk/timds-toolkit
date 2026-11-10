@@ -111,10 +111,25 @@ Ordinary designer checks continue to reject pin moves. Keep registration, the sh
 its CLI help and the developer update skill compatible in one release.
 
 `consumer scaffold emdash` creates a new EmDash site repository that consumes
-a Design System. It runs EmDash's own generator, never a vendored template;
+a Design System. It runs EmDash's own generator, never a vendored copy of
+EmDash's template;
 everything it writes beyond the consumer-managed boundary above (the theme,
 the token module, public asset symlinks, `timds.consumer.json`,
 `DESIGN_SYSTEM.md`) is product source from then on, so no upgrade may touch it.
+`consumer scaffold emdash --existing` installs the toolkit's own article
+templates (`templates/emdash/site*`, described by `templates/emdash/site.json`:
+the seed's content model, the article routes, the serializer, the writer's
+contract) into an Astro consumer that already has `timds.consumer.json`. Those
+templates are TimDS's port of the starter's article designs, not EmDash's
+template; keep their markup in step with
+`templates/starter/src/designs/website/`. The mode never overwrites a path or
+edits an existing page: it changes only `package.json` and
+`timds.consumer.json`, prints every configuration change it cannot make
+safely, and records the template version in `.timds/emdash.json`. What it
+writes is product source too; a template fix reaches an installed site by
+hand, and the recorded version says how far behind it is. The collection,
+field and taxonomy slugs in the seed are a contract external writers target:
+renaming one is a breaking change.
 The site reads the pinned submodule at build time: never copy stylesheets,
 tokens, or media out of it. The token module mirrors the starter build's
 `--group-name` rule in

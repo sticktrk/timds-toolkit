@@ -1,0 +1,24 @@
+---
+// An article's topics as `ul.topic-list`; nothing when it has none.
+import type { TaxonomyTerm } from "emdash";
+
+import { topicPath } from "../../lib/articles/index";
+
+interface Props {
+	topics: TaxonomyTerm[];
+}
+
+const { topics } = Astro.props;
+---
+
+{
+	topics.length > 0 && (
+		<ul class="topic-list" aria-label="Topics">
+			{topics.map((topic) => (
+				<li>
+					<a href={topicPath(topic.slug)}>{topic.label}</a>
+				</li>
+			))}
+		</ul>
+	)
+}

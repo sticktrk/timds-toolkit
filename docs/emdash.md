@@ -59,3 +59,104 @@ own OAuth with their EmDash role. Nothing is copied out of the Design System,
 nothing is committed, and a failure before the site is adopted removes what
 was created. The scaffold writes product source: `upgrade` later refreshes
 only the consumer-managed files, never the theme.
+
+## Adding EmDash to an existing site
+
+```bash
+npx --yes @dtconcepts/timds@0.1.x consumer scaffold emdash --existing \
+  --root /path/to/site [--platform cloudflare|node] [--layout PATH] \
+  [--site-url URL] [--skip-install]
+```
+
+`--existing` is for an Astro site that already consumes a Design System
+through `timds.consumer.json` (adopt it with `timds consumer init` first). It
+installs the shared EmDash template set, so the site gains an articles
+section whose entries arrive through EmDash's REST API or MCP server. It
+writes no default pages: an existing site already ports its own from its
+system. The fresh scaffold will move onto the same template set, so a fix
+found on one site lands in one place.
+
+The files install at the site root: the folder of the manifest's only app, or
+of its root app (`"cwd": "."`) when it declares several. It writes:
+
+- Every file under `templates/emdash/site/`, and under `site-cloudflare/` or
+  `site-node/` for the chosen platform (`cloudflare` by default), at the same
+  path in the site: the article and topic routes, the Portable Text
+  serializer, the seed, `src/live.config.ts`, `docs/content-api.md` and
+  `docs/emdash-handover.md`. The placeholders are filled: the layout import,
+  relative from each file to the layout component (`--layout PATH`, an
+  `.astro` file relative to the site root, else `src/layouts/Base.astro`), the
+  origin of `--site-url` (`https://example.com` without it, listed for the
+  developer to replace), and the `package.json` name.
+- In `package.json`, each dependency the templates need that the site does
+  not declare yet, and the `emdash.seed` key. A dependency the site already
+  declares, in either block, is kept exactly as it is and reported with the
+  version the templates were written for. The file keeps its indentation and
+  final newline.
+- In `timds.consumer.json`, for the app's crawl preview: the article routes
+  not yet listed, a `preview.designs` pair for each article route whose
+  design the pinned system has (never replacing a pair the site declared),
+  `/_emdash/**` in `preview.discover.exclude` when the app discovers routes,
+  and EmDash's seed route as `preview.ready` when the app's is absent or `/`.
+  The result is validated before it is written.
+- `.timds/emdash.json`, the template version and platform the site came from
+  (`{ "template": 1, "platform": "cloudflare" }`).
+
+The seed defines the content model external writers target: an `articles`
+collection (`title`, `summary`, `body` as Portable Text, and `cover`; the
+slug, status, published date and bylines are EmDash's own system fields) and
+a flat `topic` taxonomy, named in the singular as EmDash names taxonomies and
+served at `/topics/<slug>/`. `docs/content-api.md` in the site is that
+contract, and renaming any slug in it is a breaking change for writers. The
+seed's three sample articles load only through EmDash's development seed
+route, so a preview has `/articles/example-article` and
+`/topics/example-topic` to show beside their designs; a production setup that
+declines sample content starts empty. The routes render the starter's article
+designs: plain elements inside one `prose` wrapper, a table inside
+`table-scroll`, and no CSS of their own.
+
+The design pairs come from the pinned system's designs: the derived layer at
+a published pin's prefix (the current release's `designs.json`), or the
+submodule checkout. When they cannot be read the mode pairs nothing and says
+so. A route whose design the system lacks is listed as having no design yet:
+the article designs arrive with the starter, and a system with its own
+website design authors them.
+
+It refuses, before writing anything, when `--root` is not a directory, when
+there is no `timds.consumer.json` or it is invalid, when the site's
+`package.json` is missing or does not depend on `astro`, when the manifest
+declares several apps and none at the root, when the layout cannot be found,
+when `--platform` or `--site-url` is not one it accepts, and when any path it
+would write already exists, file or directory alike. Every colliding path is
+listed in one error: the mode never overwrites a file and never edits an
+existing page. A site with its own `src/live.config.ts` moves it aside, reruns,
+and adds its collections to the installed file, which defines the `_emdash`
+live collection EmDash reads entries through. A different `emdash.seed` in
+`package.json` is refused the same way. A failure part-way through the writes
+removes the files the run created and restores `package.json` and the
+manifest. A second run refuses, because the paths exist.
+
+Then, unless `--skip-install`, it runs `npm install` in the site, and prints
+the files written, the dependencies added and kept, the changes to
+`astro.config` (and, on Cloudflare, `wrangler.jsonc`) with the snippet for
+each, and the `.gitignore` lines to add. It does not make those changes
+itself: an existing site's adapter, `output: "server"`, bindings and
+prerendered pages are its own choices, and an edit the mode cannot verify
+would break a build silently. The handover checklist is in the site's
+`docs/emdash-handover.md`; the printed list adds what only this run knows:
+kept dependencies, routes with no design, a `preview.ready` it left alone,
+and the install it skipped. Rerun `timds consumer init` afterwards so the
+consumer skill and the launch entries match the edited manifest.
+
+On Cloudflare the site builds with Astro and deploys with Wrangler. The
+handover names Cloudflare's `cf` CLI for the account and resource tasks beside
+that (the D1 database, the R2 bucket, the Access application for `/_emdash/*`
+and the writer's Access service token), and says why deploy stays on
+Wrangler: `cf build` and `cf deploy` need a build output the Astro Cloudflare
+adapter does not write yet, and `cf` cannot set a single secret.
+
+Everything written is product source. `upgrade` never touches it, and neither
+`upgrade` nor `consumer init` reads or rewrites `.timds/emdash.json`; a
+`consumer init --force` regenerates the manifest, so the article routes and
+pairs are then added back by hand. Template fixes reach an existing site by
+hand, and the recorded template version says how far behind it is.

@@ -277,7 +277,13 @@ Public lineage appears in derived readers and publication stamps;
 session edits cannot change the parent record. See `docs/offshoots.md`.
 
 `templates/` is copied verbatim (with `__PLACEHOLDER__` substitution) by `init`
-and `video init`. `templates/starter/` is the standalone repo scaffold including
+and `video init`. `templates/emdash/` holds the EmDash scaffold's files: the
+fresh scaffold's theme, docs and deploy workflow, and the shared template set
+`consumer scaffold emdash --existing` installs (`site/` for both platforms,
+`site-cloudflare/` and `site-node/`, the printed `manual/` snippets, and
+`site.json` with the dependencies, package keys, preview routes and design
+pairs, `.gitignore` lines and manual changes; its `version` is the template
+version a site records). `templates/starter/` is the standalone repo scaffold including
 its release scripts; `templates/*.yml` are the stock workflows.
 `templates/brand-kit/` overlays only the second starter's catalogs, token and
 copy samples, stock declaration, styles, layout, pages and empty Designs
@@ -391,7 +397,10 @@ behavior.
   `consumer-register.mjs` (`register`, `updates`), `consumer-notes.mjs`
   (`notes`), `consumer-preview.mjs` with `consumer-browser.mjs` and
   `consumer-png.mjs` (`preview`), `consumer-scaffold.mjs` (`scaffold
-  emdash`), and `consumer-draft-preview.mjs` with `draft-source.mjs` (the
+  emdash`; with `--existing` it installs the shared EmDash template set,
+  `templates/emdash/site/`, `site-<platform>/` and `site.json`, into an Astro
+  consumer and records `.timds/emdash.json`, which `upgrade` never touches),
+  and `consumer-draft-preview.mjs` with `draft-source.mjs` (the
   browser module and local draft source of `init --draft-preview`).
 - Video runtime: `src/video-transport.mjs` (Zod 3 wire schemas),
   `video-runtime.mjs` and `video-component-loader.mjs` (loading a client's
