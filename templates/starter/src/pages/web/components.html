@@ -59,7 +59,7 @@
 <section class="block" id="layout">
   <div class="block__head">
     <h2 class="h2">Site layout</h2>
-    <p>The pieces a whole page is composed from: a header with the brand and the navigation, a hero that opens the page, a section for each further band, a form and a notice where a page needs them, and a footer. The website design under <a href="/designs/">Designs</a> shows them assembled and uses nothing else, so a page needs only these and the components above.</p>
+    <p>The pieces a whole page is composed from: a header with the brand and the navigation, a hero that opens the page, a section for each further band, a form and a notice where a page needs them, the article list and the body of an article, and a footer. The website design under <a href="/designs/">Designs</a> shows them assembled and uses nothing else, so a page needs only these and the components above.</p>
   </div>
   <details class="spec-drawer">
     <summary>Spec</summary>
@@ -72,7 +72,11 @@
         <tr><td>Section</td><td><code>.section</code></td><td>Each further band of a page, with a heading and short copy; give it an <code>id</code> so the page can link to it</td></tr>
         <tr><td>Form</td><td><code>.form</code></td><td>Stacks fields and their submit button</td></tr>
         <tr><td>Notice</td><td><code>.notice</code></td><td>A confirmation or status message in its own panel</td></tr>
-        <tr><td>Site footer</td><td><code>.site-footer</code></td><td>The closing line of every page</td></tr>
+        <tr><td>Article list</td><td><code>.article-list</code>, <code>.article-card</code></td><td>The list of articles, one card per article with its optional cover image, title link, summary, details, and topics</td></tr>
+        <tr><td>Article meta</td><td><code>.article-meta</code></td><td>The date and byline line of an article or a card</td></tr>
+        <tr><td>Topic list</td><td><code>.topic-list</code></td><td>The topics an article is filed under, each a link to its topic page</td></tr>
+        <tr><td>Prose</td><td><code>.prose</code>, <code>.table-scroll</code></td><td>Wraps an article's body; headings, paragraphs, links, lists, quotes, code, figures, and tables inside it carry no classes, so rendered rich text needs only this one, plus the wrapper that lets a wide table scroll</td></tr>
+        <tr><td>Site footer</td><td><code>.site-footer</code>, <code>.site-footer__links</code></td><td>The closing line of every page, with the links to the legal pages</td></tr>
       </tbody>
     </table>
     <div class="note"><b>Stylesheet.</b> Every class above is styled in <code>/styles/system.css</code>, the one stylesheet a product loads.</div>

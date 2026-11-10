@@ -293,7 +293,7 @@ test("preview.designs shows the pinned system's design beside each paired route,
   assert.equal(contact.design.route, "/contact", "a trailing slash in the pairing still matches the route");
   assert.equal(contact.design.captures.length, 4);
   assert.deepEqual([missing.design.id, missing.design.captures.length], ["website", 0]);
-  assert.match(missing.design.error, /design website has no route \/nope \(routes: \/, \/contact\)/);
+  assert.match(missing.design.error, /design website has no route \/nope \(routes: \/, \/404, \/about, \/articles, \/articles\/example-article, \/contact, \/privacy, \/terms, \/topics\/example-topic\)/);
   assert.ok(lines.some((line) => line.includes("Warning: /missing: design website has no route /nope")));
   for (const route of [home, contact]) {
     for (const capture of route.design.captures) assert.ok(existsSync(path.join(outputDir, capture.file)), capture.file);
