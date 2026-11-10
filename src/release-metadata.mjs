@@ -8,7 +8,7 @@ import { packageRoot, packageIdentity } from './executable.mjs';
 import { CLAUDE_SKILLS_LINK, CLAUDE_SKILLS_TARGET } from './agent-skills.mjs';
 import { designSystemSkillNames } from './skill-names.mjs';
 import { HOSTED_SKILL_TEMPLATE, hostedSkillPlaceholders, hostedSkillSystem, renderHostedSkillFiles } from './skills-install.mjs';
-import { STARTER_FORMATS_FILE, STARTER_LAYOUT_FILE, STARTER_SITE_FILE, starterFragments, starterKind, starterPlumbingFiles } from './starter.mjs';
+import { STARTER_FORMATS_FILE, STARTER_LAYOUT_FILE, STARTER_SITE_FILE, describeStarterSteps, starterFragments, starterKind, starterPlumbingFiles } from './starter.mjs';
 import { dependencyAutomationFiles, packageResourcePaths, standaloneReleaseAutomationFiles, starterTemplateFiles } from './release-resources.mjs';
 
 export const RELEASE_METADATA_SCHEMA_VERSION = 1;
@@ -97,6 +97,11 @@ export async function describeToolkitRelease(options = {}) {
   return {
     ...selected,
     toolkit: toolkitIdentity(),
+    // The starter level this release scaffolds at, the oldest level it
+    // builds, and every starter step as data: the same definitions starter
+    // sync, upgrade and starter migrate apply, so a host can verify a
+    // candidate change against them (docs/release-metadata.md).
+    starterSteps: describeStarterSteps(),
     resources,
     files,
     symlinks: [{ path: CLAUDE_SKILLS_LINK, target: CLAUDE_SKILLS_TARGET, mode: '120000', policy: 'create-if-absent' }],

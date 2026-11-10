@@ -436,23 +436,25 @@ existed adopts them with `timds designs init`.
 A starter-based system is upgradeable the way a CMS is: the scaffold's
 plumbing and structure are TimDS's to refresh, the client's content is not,
 and the line between them is recorded in `.timds/starter.json` rather than
-guessed. `init` writes the record for a fresh scaffold; an existing system
-opts in once with `timds starter sync`; every `upgrade` then re-syncs it.
+guessed. `init` writes the record for a fresh scaffold and every `upgrade`
+re-syncs it.
 
 ```bash
-npm run timds -- starter sync            # adopt once, on a feature branch; in a terminal it asks about each customized stock file
-npm run timds -- starter sync --force scripts/viewer.mjs   # non-interactive: replace the named customized stock script or stylesheet (never a fragment)
+npm run timds -- starter sync            # sync by hand; in a terminal it asks about each customized stock file
+npm run timds -- starter sync --force scripts/build.mjs    # non-interactive: replace the named customized stock script or stylesheet (never a fragment)
+npm run timds -- starter status                            # starter level, floor, pending steps, declines, conflicts
+npm run timds -- starter migrate --accept ID               # decide a step that changes what visitors see (or --decline ID)
 ```
 
-Inside the boundary the sync touches three kinds of things. The stock
-`scripts/build.mjs`, `check.mjs`, `dev.mjs`, `viewer.mjs`, `brand-kit.mjs`,
-`src/scripts/compose.js`, `src/styles/canvas.css`, and
+Inside the boundary the sync touches four kinds of things. The stock
+`scripts/build.mjs`, `check.mjs` and `dev.mjs` (stubs that call the renderer
+in the package, `@dtconcepts/timds/viewer`), `src/scripts/compose.js`,
+`src/styles/canvas.css`, and
 `src/styles/viewer.css` are plumbing (`starterPlumbingFiles` in
 `src/starter.mjs`), and the record's `plumbing` mode says who a local change
 to them belongs to. A system scaffolded by `init` is `"toolkit"`: every
 upgrade brings those files to stock, replacing a local change and saying so, without halting and
-without naming files. A system adopted later with `starter sync` is
-`"recorded"`: a file is replaced while it still matches a hash the toolkit
+without naming files. In `"recorded"` mode a file is replaced while it still matches a hash the toolkit
 wrote, and a customized one is kept unless the person running the sync in a
 terminal chooses to replace it when asked (keep, replace, or diff first,
 file by file). Edit the field to switch. `src/site.json` and `src/formats.json`
@@ -466,8 +468,7 @@ is skipped. The Digital, Social, and Print overview fragments and the Use
 pages (the landing, the composer, and Install) are written
 when the sync adds or authors their page and refreshed while unmodified; one
 that differs is the system's own page and is never replaced. `src/layout.html`
-only gains a missing stock stylesheet link and the changelog link on its
-version chip. Everything else, other fragments,
+only gains a missing stock stylesheet link. Everything else, other fragments,
 `tokens.json`, `system.css`, `timds.json`, stays the client's. In the
 recorded mode, customized scripts and stylesheets are asked about in a
 terminal and otherwise reported and replaced only by `starter sync --force`
@@ -478,7 +479,32 @@ file it wrote when that check fails, so a system is never left between two
 structures, and `upgrade` runs it before touching its own managed files so a
 failed sync aborts the upgrade cleanly. The
 report is a per-file status table (`created`, `updated`, `current`,
-`customized`, `skipped`) and the catalog changes it merged.
+`customized`, `skipped`, `removed`) and the catalog changes it merged.
+
+The fourth kind is the starter level. Defaults a system never chose change
+through numbered steps declared as data: `.timds/starter.json` records the
+`level` reached and the steps `declined`, `upgrade` settles every step that is
+not visible or has nothing to change, and a step that changes what visitors
+see waits for `starter migrate --accept` or `--decline`. This release is
+level 1 with floor 1 and no steps. A starter-based system from before starter
+levels (a record without `level`, or none) is below the floor: `upgrade`,
+`starter sync`, `starter migrate` and `feed` refuse it with `below_floor`, and
+it is regenerated from the current starter rather than carried forward.
+
+The renderer is never copied: the stub scripts call the package, and a system
+that needs an extra build step declares it as a command in `timds.json`:
+
+```json
+"workspace": {
+  "build": ["node", "scripts/build.mjs"],
+  "after": { "build": [["node", "scripts/build-runtime.mjs"]] }
+}
+```
+
+The commands run in order from the design-system root after every stock build
+(`build`, `dev`, and the build `check` runs), and a non-zero exit fails it.
+See [upgrading in depth](docs/upgrade.md#starter-levels) for the rules and
+the status `starter status --json` reports.
 
 ### The derived layer is the contract consumers read
 
@@ -511,7 +537,8 @@ only the base URL. `timds doctor` reports the kit's readiness in one line and
 the kit itself. `timds doctor --json` prints the whole report as one JSON
 object: the repository and design system roots, the system id, name and
 version, the toolkit selected and running (binary or npm), the starter record
-(synced version and plumbing mode, not adopted, or not a starter system), the
+(synced version, plumbing mode and starter status, including `belowFloor`, or
+not a starter system), the
 media asset count, designs, video, consumer, branch, brand kit, and bundle.
 
 Extraction keys on HTML semantics — `main`, `section`, `h1`/`h2`, `table`,
@@ -916,7 +943,7 @@ other authored file is never replaced; failed checks roll back the feed.
 `--source-file EXPORT --json` feeds from a materialised source export instead
 of a checkout (see [TimDS Cloud](#timds-cloud)). Ordinary upgrades
 keep plumbing current and leave the parent's structure alone, while
-maintaining the layout's stock stylesheet and version-chip links.
+maintaining the layout's stock stylesheet links.
 `timds sever` confirms before removing the parent baseline. See
 [offshoots](docs/offshoots.md) for local Git parents, stock declarations,
 lineage readers and the hosted catalog boundary.
@@ -1030,9 +1057,9 @@ npm run timds -- check
 
 `upgrade` removes the legacy `.timds/cli` tree when present, synchronizes
 the managed skills (the editing and video procedures and the four designer
-skills), and re-syncs the starter of an adopted system (see "The
-starter stays current through upgrade"); a system that has not adopted it is
-told to run `timds starter sync`. It refuses locally modified managed files
+skills), and re-syncs the starter of a starter-based system (see "The
+starter stays current through upgrade"); one below the starter floor is
+refused before anything is written. It refuses locally modified managed files
 unless `--force` is explicitly supplied (that flag never extends to starter
 files; `starter sync --force <path>` is the only way to replace those) and never
 rewrites `timds.json`,

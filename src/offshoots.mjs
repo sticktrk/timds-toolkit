@@ -18,6 +18,7 @@ import { isPlumbingPath, readParentRecord, validateParentRecord, validateStockRe
 import { readBlobs } from './git-blobs.mjs';
 import { compareDesignSystemVersions } from './changelog.mjs';
 import { runtimeIdentity } from './runtime.mjs';
+import { belowFloorError, starterBelowFloor } from './starter.mjs';
 
 const exec = promisify(execFile);
 const json = value => `${JSON.stringify(value, null, 2)}\n`;
@@ -101,9 +102,13 @@ export async function declaredStock(files) {
   return stock;
 }
 
-/** SHA-256 of each declared stock file's source bytes; `{}` when none is declared. */
+/**
+ * SHA-256 of each declared stock file's source bytes; `{}` when none is
+ * declared. A declared path that is toolkit plumbing is never fed stock, so it
+ * has no stock hash.
+ */
 export function stockHashes(files, stock) {
-  return Object.fromEntries((stock?.paths || []).map(file => [file, sha256(files.get(file))]));
+  return Object.fromEntries((stock?.paths || []).filter(file => !isPlumbingPath(file)).map(file => [file, sha256(files.get(file))]));
 }
 
 function toolkitVersionFrom(lockText, installationText, label) {
@@ -160,6 +165,8 @@ async function transformDecodedOffshoot(source, {mode = 'full', systemId, name} 
   if (name !== undefined && (typeof name !== 'string' || !name.trim() || name.length > 200)) throw new Error('Offshoot name must be between 1 and 200 characters');
   const original = decodeOffshootSource(source), manifest = parse(original, 'timds.json');
   const site = parse(original, 'src/site.json'), formats = parse(original, 'src/formats.json', false);
+  // A parent from before starter levels is regenerated first; nothing is shot from it.
+  if (starterBelowFloor(parse(original, '.timds/starter.json', false))) throw belowFloorError(`The parent release ${source.parent?.systemId} ${source.parent?.version}`);
   const baseline = {site: mode === 'structure' ? structureSite(site) : site, formats};
   const {systemId: parentId, sourceId, version, commit} = source.parent || {};
   const parent = validateParentRecord({schemaVersion: 1, systemId: parentId, sourceId, version, commit, mode, baseline});
@@ -177,7 +184,7 @@ async function transformDecodedOffshoot(source, {mode = 'full', systemId, name} 
       if (!bytes || bytes.mode === '120000' || sha256(bytes) !== digest) throw new Error(`The parent has customized toolkit plumbing: ${file}`);
       result.set(file, bytes);
     }
-    for (const file of ['scripts/build.mjs', 'scripts/check.mjs', 'scripts/dev.mjs', 'scripts/viewer.mjs']) if (!result.has(file)) throw new Error(`Structure offshoots require recorded ${file}`);
+    for (const file of ['scripts/build.mjs', 'scripts/check.mjs', 'scripts/dev.mjs']) if (!result.has(file)) throw new Error(`Structure offshoots require recorded ${file}`);
     for (const file of ['package.json', 'package-lock.json', '.timds/installation.json', '.timds/contract-layout.json', 'cloudflare.config.ts', 'vite.config.mjs', '.gitignore']) if (original.has(file)) result.set(file, original.get(file));
     if (original.has('.timds/installation.json')) set('.timds/installation.json', json({schemaVersion: 1, name: '@dtconcepts/timds', version: starter.version}));
     for (const file of stock?.paths || []) result.set(file, original.get(file));

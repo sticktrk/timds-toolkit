@@ -57,7 +57,7 @@ import {
   validateConsumerManifest,
 } from "./consumer.mjs";
 import { syncConsumerBundle } from "./consumer-sync.mjs";
-import { createPreviewServer, execute, loadWorkspace } from "./core.mjs";
+import { createPreviewServer, execute, loadWorkspace, workspaceCommandEnvironment } from "./core.mjs";
 import { buildDesigns } from "./designs.mjs";
 import { escapeHtml } from "./html.mjs";
 import { portalEndpoint } from "./media.mjs";
@@ -784,7 +784,7 @@ async function prepareDesignReference(consumer, { commandEnv, install, output })
       }
       if (manifest.workspace.build) {
         output(`Building the Design System at ${designSystem.path}: ${manifest.workspace.build.join(" ")}`);
-        await execute(manifest.workspace.build, { cwd: designSystemRoot, env: commandEnv });
+        await execute(manifest.workspace.build, { cwd: designSystemRoot, env: workspaceCommandEnvironment(commandEnv) });
       }
     }
     const built = await buildDesigns(designSystemRoot, { manifest });

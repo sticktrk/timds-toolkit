@@ -56,25 +56,19 @@ export function binaryWorkspaceCommand(command) {
 }
 export async function isStockWorkspace(root, manifest) {
   if (manifest.workspace?.install) return false;
+  // Commands after the build are the system's own tools, with their own requirements.
+  if (Array.isArray(manifest.workspace?.after?.build) && manifest.workspace.after.build.length) return false;
   for (const name of ['build', 'check', 'dev']) {
     const command = manifest.workspace?.[name];
     if (JSON.stringify(command) !== JSON.stringify(['node', `scripts/${name}.mjs`]) && JSON.stringify(command) !== JSON.stringify(stockWorkspaceCommands[name])) return false;
   }
-  let needsBrandKit = false;
-  for (const relative of ['scripts/build.mjs', 'scripts/check.mjs', 'scripts/dev.mjs', 'scripts/viewer.mjs']) {
+  // The stub scripts run the packaged renderer: each must be a released stock version.
+  for (const relative of ['scripts/build.mjs', 'scripts/check.mjs', 'scripts/dev.mjs']) {
     let contents;
     try { contents = await fs.readFile(path.join(root, relative)); } catch (error) { if (error.code === 'ENOENT') return false; throw error; }
     const hash = createHash('sha256').update(contents).digest('hex');
     const stock = createHash('sha256').update(await fs.readFile(path.join(packageRoot, 'templates/starter', relative))).digest('hex');
     if (hash !== stock && !(legacyStarterFileHashes.get(relative) || []).includes(hash)) return false;
-    if (relative === 'scripts/viewer.mjs') needsBrandKit = /\bfrom\s+["']\.\/brand-kit\.mjs["']/.test(contents.toString('utf8'));
-  }
-  // The verified viewer executes its shared helper before rendering. Require
-  // package-owned bytes too, while retaining older viewers without that import.
-  if (needsBrandKit) {
-    let helper;
-    try { helper = await fs.readFile(path.join(root, 'scripts/brand-kit.mjs')); } catch (error) { if (error.code === 'ENOENT') return false; throw error; }
-    if (!helper.equals(await fs.readFile(path.join(packageRoot, 'src/brand-kit.mjs')))) return false;
   }
   return true;
 }

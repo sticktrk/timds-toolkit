@@ -10,7 +10,6 @@ import {STARTER_RECORD_FILE} from "./starter.mjs";
 
 const packageRoot = fileURLToPath(new URL("../", import.meta.url)).replace(/\/$/u, "");
 const toolkitVersion = JSON.parse(await fs.readFile(path.join(packageRoot, "package.json"), "utf8")).version;
-const starterFixtureRoot = fileURLToPath(new URL("./fixtures/starter-before-formats/", import.meta.url));
 
 // The workflow's "Open or refresh the review PR" step, as bash, with a gh stub
 // that logs its calls. The repository's node_modules carries this package, the
@@ -77,26 +76,31 @@ test("opt-in automation opens and refreshes a reviewable dependency PR", async (
 
 test("an upgrade of a starter-adopted system opens its PR: the starter sync's writes are inside the allowlist", async (t) => {
   const {root, remote, git, run, log, commit, branchFiles} = await scaffold(t);
-  // A system scaffolded and adopted under an earlier release: its files are the
-  // earlier starter's stock (scripts, catalogs, layout, no format catalog or
-  // asset views), while its record says the toolkit owns the plumbing.
+  // A system recorded under an earlier release whose scaffold had only the
+  // Brand and Web views: no format catalog, asset views or composer, and a
+  // record whose baseline says so.
   const record = JSON.parse(await fs.readFile(path.join(root, STARTER_RECORD_FILE), "utf8"));
-  await fs.cp(starterFixtureRoot, root, {force: true, recursive: true});
-  for (const relative of ["src/formats.json", "scripts/brand-kit.mjs", "src/scripts/compose.js", "src/styles/canvas.css", "src/pages/digital", "src/pages/print", "src/pages/social", "src/pages/use"]) {
+  const site = JSON.parse(await fs.readFile(path.join(root, "src/site.json"), "utf8"));
+  const added = ["digital", "social", "print", "use"];
+  const earlier = {views: site.views.filter((view) => !added.includes(view.id))};
+  await fs.writeFile(path.join(root, "src/site.json"), `${JSON.stringify(earlier, null, 2)}\n`);
+  await fs.writeFile(path.join(root, "src/pages/index.html"), '<h1 class="page-title">{{name}}</h1>\n{{sitemap}}\n');
+  for (const relative of ["src/formats.json", "src/scripts/compose.js", ...added.map((view) => `src/pages/${view}`)]) {
     await fs.rm(path.join(root, relative), {force: true, recursive: true});
   }
-  await fs.writeFile(path.join(root, STARTER_RECORD_FILE), `${JSON.stringify({...record, version: "0.1.1"}, null, 2)}\n`);
+  const recordedFiles = Object.fromEntries(Object.entries(record.files).filter(([relative]) => relative !== "src/scripts/compose.js" && !added.some((view) => relative.startsWith(`src/pages/${view}/`))));
+  await fs.writeFile(path.join(root, STARTER_RECORD_FILE), `${JSON.stringify({...record, files: recordedFiles, baseline: {site: earlier, formats: {}}, version: "0.1.1"}, null, 2)}\n`);
   commit("Scaffold adopted under an earlier release"); git(["remote", "add", "origin", remote]); git(["push", "origin", "main"]);
   // The upgrade the workflow runs: it syncs the adopted starter on the way.
   const upgraded = await upgradeRepository(root);
   const written = upgraded.starter.files.filter((file) => file.status !== "current").map((file) => file.path);
-  assert.ok(written.includes("src/formats.json") && written.includes("src/pages/use/compose.html") && written.includes("scripts/viewer.mjs"), written.join(", "));
+  assert.ok(written.includes("src/formats.json") && written.includes("src/pages/use/compose.html") && written.includes("src/scripts/compose.js"), written.join(", "));
   const changed = git(["status", "--porcelain", "--untracked-files=all"]).toString().trimEnd().split("\n").filter(Boolean).map((line) => line.slice(3));
-  assert.ok(changed.includes(STARTER_RECORD_FILE) && changed.includes("src/site.json") && changed.includes("src/layout.html"), changed.join(", "));
+  assert.ok(changed.includes(STARTER_RECORD_FILE) && changed.includes("src/site.json"), changed.join(", "));
   // Every path the sync wrote is one the workflow allows, so the PR opens.
   run("");
   assert.match(await fs.readFile(log, "utf8"), /pr create --draft/u);
   const files = branchFiles();
-  for (const file of [STARTER_RECORD_FILE, "src/site.json", "src/formats.json", "src/layout.html", "src/pages/use/compose.html", "scripts/viewer.mjs"]) assert.ok(files.includes(file), file);
+  for (const file of [STARTER_RECORD_FILE, "src/site.json", "src/formats.json", "src/pages/use/compose.html", "src/scripts/compose.js"]) assert.ok(files.includes(file), file);
   assert.ok(!files.some((file) => file.startsWith("src/pages/brand/") || file === "src/index.html"), files.join(", "));
 });

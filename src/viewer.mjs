@@ -1,4 +1,8 @@
-// Starter viewer renderer shared by build.mjs and check.mjs.
+// The TimDS starter renderer: the viewer, build, check and dev logic every
+// starter-based Design System runs, resolved from the package rather than
+// copied into it (`@dtconcepts/timds/viewer`). The design system's
+// scripts/build.mjs, check.mjs and dev.mjs are stubs that call `build`,
+// `check` and `dev` here with their own root; every function takes that root.
 //
 // src/site.json declares the views and their pages, src/layout.html is the
 // shell every page shares, and src/pages/ holds one content fragment per
@@ -27,15 +31,19 @@
 // Website designs under src/designs/ are whole pages on the system's own
 // stylesheets, rendered by TimDS (see build.mjs). The viewer only lists them:
 // the app bar links /designs/ and the overview's sitemap names each one.
-import { existsSync } from "node:fs";
-import { cp, lstat, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
+import { spawn } from "node:child_process";
+import { createReadStream, existsSync } from "node:fs";
+import { access, cp, lstat, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import path from "node:path";
 import { brandKitCopySamples, brandKitMediaSamples, brandKitSlots, brandKitLabels } from "./brand-kit.mjs";
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const source = path.join(root, "src");
-const destination = path.join(root, "dist");
+/** The design system's own folders, from the root a stub passes. */
+function folders(root) {
+  if (typeof root !== "string" || !root) throw new Error("The TimDS viewer needs the design system root");
+  const resolved = path.resolve(root);
+  return { root: resolved, source: path.join(resolved, "src"), destination: path.join(resolved, "dist") };
+}
 const copiedDirectories = ["assets", "scripts", "styles"];
 const placeholder = /\{\{\s*([a-z]+)(?::([a-z0-9.-]+(?:\/[a-z0-9.-]+)*))?\s*\}\}/g;
 const colorValue = /^(?:#|rgba?\(|hsla?\(|oklch\(|oklab\(|color\()/i;
@@ -54,7 +62,7 @@ function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
-async function readJson(file) {
+async function readRootJson(root, file) {
   try {
     return JSON.parse(await readFile(path.join(root, file), "utf8"));
   } catch (error) {
@@ -64,8 +72,8 @@ async function readJson(file) {
 
 /** Copy stays a string map. Media keys resolve only to regular local assets,
  * never remote URLs or paths outside the published source asset directory. */
-async function readSlotData() {
-  const copy = existsSync(path.join(source, "copy.json")) ? await readJson("src/copy.json") : {};
+async function readSlotData({ root, source }) {
+  const copy = existsSync(path.join(source, "copy.json")) ? await readRootJson(root, "src/copy.json") : {};
   if (!copy || typeof copy !== "object" || Array.isArray(copy) || Object.values(copy).some(value => typeof value !== "string")) {
     throw new Error("src/copy.json must be an object of string values");
   }
@@ -79,7 +87,7 @@ async function readSlotData() {
       for (const entry of await readdir(path.join(root, directory), { withFileTypes: true })) {
         if (entry.isDirectory()) await groups(`${directory}/${entry.name}`);
         else if (entry.isFile() && entry.name.endsWith(".json")) {
-          const values = await readJson(`${directory}/${entry.name}`);
+          const values = await readRootJson(root, `${directory}/${entry.name}`);
           if (!values || typeof values !== "object" || Array.isArray(values)) throw new Error("Media groups must be key maps");
           for (const [key, asset] of Object.entries(values)) add(asset, key);
         } else throw new Error(`Invalid media group file ${entry.name}`);
@@ -87,7 +95,7 @@ async function readSlotData() {
     };
     await groups("media");
   } else if (existsSync(path.join(root, "media.json"))) {
-    for (const asset of (await readJson("media.json")).assets || []) add(asset);
+    for (const asset of (await readRootJson(root, "media.json")).assets || []) add(asset);
   }
   const paths = new Map();
   for (const [key, asset] of media) {
@@ -296,13 +304,13 @@ function readFormats(catalog, model) {
 }
 
 /** The website designs declared under src/designs/, for the app bar and the sitemap; TimDS renders them. */
-async function designList() {
+async function designList({ root, source }) {
   const directory = path.join(source, "designs");
   if (!existsSync(directory)) return [];
   const designs = [];
   for (const entry of (await readdir(directory, { withFileTypes: true })).sort((left, right) => left.name.localeCompare(right.name))) {
     if (!entry.isDirectory() || !existsSync(path.join(directory, entry.name, "design.json"))) continue;
-    const design = await readJson(`src/designs/${entry.name}/design.json`);
+    const design = await readRootJson(root, `src/designs/${entry.name}/design.json`);
     const pages = existsSync(path.join(directory, entry.name, "pages")) ? await pageFiles(path.join(directory, entry.name, "pages")) : [];
     designs.push({
       id: entry.name,
@@ -316,7 +324,7 @@ async function designList() {
   return designs;
 }
 
-async function pageFiles(directory = path.join(source, "pages"), prefix = "") {
+async function pageFiles(directory, prefix = "") {
   const found = [];
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
@@ -472,6 +480,9 @@ function firstAuthored(view) {
   return view.pages.find((page) => !page.planned) || null;
 }
 
+/** The entries the viewer adds to the app bar itself; a view labelled the same reads as a second tab of that name. */
+export const viewerAppBarEntries = Object.freeze([{ label: "Designs", href: "/designs/" }]);
+
 function renderViews(model, current, designs, hasDesigns = designs.length > 0) {
   const views = model.views.map((view) => {
     const target = firstAuthored(view);
@@ -479,7 +490,7 @@ function renderViews(model, current, designs, hasDesigns = designs.length > 0) {
     if (!target) return `<span class="appbar__view is-planned">${label}</span>`;
     return `<a class="appbar__view" href="${target.href}"${view.id === current.view ? ' aria-current="true"' : ""}>${label}</a>`;
   });
-  if (hasDesigns) views.push('<a class="appbar__view" href="/designs/"><b>Designs</b><small>Whole pages</small></a>');
+  if (hasDesigns) views.push(`<a class="appbar__view" href="${viewerAppBarEntries[0].href}"><b>${viewerAppBarEntries[0].label}</b><small>Whole pages</small></a>`);
   for (const page of model.pages) {
     if (page.promote && !page.planned) views.push(`<a class="appbar__cta" href="${page.href}"${page.id === current.id ? ' aria-current="page"' : ""}>${escapeHtml(page.promote)}</a>`);
   }
@@ -681,7 +692,9 @@ function fill(template, file, values) {
  * does not declare, an unknown placeholder, a format without its page, or a
  * fragment without one <h1>.
  */
-export async function renderSite() {
+export async function renderSite(designSystemRoot) {
+  const { root, source } = folders(designSystemRoot);
+  const readJson = (file) => readRootJson(root, file);
   const manifest = await readJson("timds.json");
   // Group maps are canonical on upgraded systems. Whole-file views remain
   // available to custom builds and are generated by the toolkit boundary.
@@ -704,8 +717,8 @@ export async function renderSite() {
   const compiled = compileTokens(tokens);
   const model = readSiteModel(await readJson("src/site.json"));
   const formats = readFormats(existsSync(path.join(source, "formats.json")) ? await readJson("src/formats.json") : null, model);
-  const designs = await designList();
-  const data = await readSlotData();
+  const designs = await designList({ root, source });
+  const data = await readSlotData({ root, source });
   const fallbacks = new Set();
   const slotValues = slotRenderers(data, tokens, fallbacks);
   const warnings = [];
@@ -719,7 +732,7 @@ export async function renderSite() {
   const layout = await readFile(path.join(source, "layout.html"), "utf8");
   if (!/\{\{\s*content\s*\}\}/.test(layout)) throw new Error("src/layout.html must contain {{content}}");
 
-  const files = await pageFiles();
+  const files = await pageFiles(path.join(source, "pages"));
   for (const page of model.pages) {
     const exists = files.includes(page.file);
     if (page.planned && exists) throw new Error(`src/pages/${page.file} exists, so remove "planned": true from ${page.id} in src/site.json`);
@@ -788,8 +801,8 @@ export async function renderSite() {
 }
 
 /** Colors live in tokens.json; a literal in a stylesheet would escape every retheme. */
-export async function colorLiterals() {
-  const directory = path.join(source, "styles");
+export async function colorLiterals(designSystemRoot) {
+  const directory = path.join(folders(designSystemRoot).source, "styles");
   const found = [];
   if (!existsSync(directory)) return found;
   for (const name of (await readdir(directory)).filter((entry) => entry.endsWith(".css")).sort()) {
@@ -804,8 +817,13 @@ export async function colorLiterals() {
   return found;
 }
 
-export async function build() {
-  const site = await renderSite();
+/**
+ * Render the viewer into dist/: every authored page, the copied source
+ * folders, tokens.css and tokens.json. The first step of the stock build.
+ */
+export async function buildViewer(designSystemRoot) {
+  const { root, source, destination } = folders(designSystemRoot);
+  const site = await renderSite(root);
 
   await rm(destination, { recursive: true, force: true });
   await mkdir(destination, { recursive: true });
@@ -823,4 +841,149 @@ export async function build() {
   console.log(`Built starter viewer with ${site.pages} pages and ${site.tokenCount} tokens`);
   if (site.fallbacks.length) console.log(`Stock samples used for unfilled slots: ${site.fallbacks.join(", ")}`);
   for (const warning of site.warnings) console.warn(`Warning: ${warning}`);
+  return site;
+}
+
+/**
+ * `workspace.after` in timds.json: the system's own steps after the stock
+ * build, as `{ build: [argv, ...] }`. Commands only, never a module the
+ * build imports, so a system's extra step never couples it to renderer
+ * internals. Returns `{ build: [] }` when absent; throws on any other shape.
+ */
+export function normalizeWorkspaceAfter(value) {
+  if (value === undefined || value === null) return { build: [] };
+  if (typeof value !== "object" || Array.isArray(value)) throw new Error("timds.json workspace.after must be an object such as { \"build\": [[\"node\", \"scripts/extra.mjs\"]] }");
+  const unknown = Object.keys(value).filter((key) => key !== "build");
+  if (unknown.length) throw new Error(`timds.json workspace.after supports only build; remove ${unknown.join(", ")}`);
+  const commands = value.build ?? [];
+  if (!Array.isArray(commands) || commands.some((command) => !Array.isArray(command) || !command.length || command.some((part) => typeof part !== "string" || !part.trim()))) {
+    throw new Error("timds.json workspace.after.build must be a list of commands, each a non-empty string array such as [\"node\", \"scripts/extra.mjs\"]");
+  }
+  return { build: commands.map((command) => command.map((part) => part.trim())) };
+}
+
+// `timds-cli run FILE` runs FILE on the executable's own Node, the way the
+// stock workspace commands do in binary mode; anything else runs as written.
+async function afterCommand(command) {
+  if (command[0] !== "timds-cli" || command[1] !== "run") return command;
+  const { javascriptCommand } = await import("./executable.mjs");
+  return javascriptCommand(command.slice(2));
+}
+
+/** Run timds.json workspace.after.build in order from the root; a non-zero exit fails the build. */
+export async function runAfterBuild(designSystemRoot) {
+  const { root } = folders(designSystemRoot);
+  const manifest = await readRootJson(root, "timds.json");
+  const { build: commands } = normalizeWorkspaceAfter(manifest.workspace?.after);
+  for (const command of commands) {
+    console.log(`Running after build: ${command.join(" ")}`);
+    const [file, ...args] = await afterCommand(command);
+    const code = await new Promise((resolve, reject) => {
+      const child = spawn(file, args, { cwd: root, env: process.env, shell: false, stdio: "inherit" });
+      child.on("error", (error) => reject(error.code === "ENOENT" ? new Error(`timds.json workspace.after.build names ${JSON.stringify(file)}, which is not available`) : error));
+      child.on("close", (exit, signal) => resolve(signal ? signal : exit));
+    });
+    if (code !== 0) throw new Error(`timds.json workspace.after.build command ${JSON.stringify(command.join(" "))} failed with ${typeof code === "string" ? code : `exit code ${code}`}`);
+  }
+  return commands.length;
+}
+
+/**
+ * The stock build: the viewer, then the website designs under src/designs/
+ * and the changelog page, then the system's own `workspace.after.build`
+ * commands. `timds check` builds the designs and changelog again itself.
+ */
+export async function build(designSystemRoot) {
+  const { root } = folders(designSystemRoot);
+  await buildViewer(root);
+  const { buildDesigns } = await import("./designs.mjs");
+  const { pageCount, stateCount } = await buildDesigns(root);
+  if (pageCount) console.log(`Built ${pageCount} design page${pageCount === 1 ? "" : "s"} (${stateCount} state${stateCount === 1 ? "" : "s"}) under dist/designs/`);
+  const { buildChangelog } = await import("./changelog.mjs");
+  const { releaseCount } = await buildChangelog(root);
+  if (releaseCount) console.log(`Built the changelog with ${releaseCount} release${releaseCount === 1 ? "" : "s"} under dist/changelog/`);
+  await runAfterBuild(root);
+}
+
+/** The stock check: render every page in memory and refuse color literals outside tokens. */
+export async function check(designSystemRoot) {
+  const { root } = folders(designSystemRoot);
+  const site = await renderSite(root);
+
+  const literals = await colorLiterals(root);
+  if (literals.length) {
+    throw new Error(`Color literals belong in tokens.json; add a token and use its custom property instead (${literals.join(", ")})`);
+  }
+
+  console.log(`Validated ${site.tokenGroups} token groups, ${site.formatCount} formats, and ${site.pages} authored pages`);
+  if (site.fallbacks.length) console.log(`Stock samples used for unfilled slots: ${site.fallbacks.join(", ")}`);
+  for (const warning of site.warnings) console.warn(`Warning: ${warning}`);
+  if (site.planned.length) console.log(`Planned pages not yet authored: ${site.planned.join(", ")}`);
+  return site;
+}
+
+const contentTypes = {
+  ".avif": "image/avif",
+  ".css": "text/css; charset=utf-8",
+  ".gif": "image/gif",
+  ".html": "text/html; charset=utf-8",
+  ".ico": "image/x-icon",
+  ".jpeg": "image/jpeg",
+  ".jpg": "image/jpeg",
+  ".js": "text/javascript; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".md": "text/markdown; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
+  ".png": "image/png",
+  ".svg": "image/svg+xml",
+  ".txt": "text/plain; charset=utf-8",
+  ".webp": "image/webp",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2"
+};
+
+/**
+ * The stock dev server: build once, then serve dist/ on 127.0.0.1 (PORT, else
+ * 4321). It does not watch files; rerun it after a change. Resolves with the
+ * listening server.
+ */
+export async function dev(designSystemRoot, { port = Number(process.env.PORT || 4321) } = {}) {
+  const { root, destination } = folders(designSystemRoot);
+  await build(root);
+  const server = createServer(async (request, response) => {
+    try {
+      const url = new URL(request.url || "/", "http://localhost");
+      const pathname = decodeURIComponent(url.pathname);
+      // Pages are directories: /brand/color and /brand/color/ both serve its index.html.
+      const requested = pathname.endsWith("/") ? `${pathname}index.html` : path.extname(pathname) ? pathname : `${pathname}/index.html`;
+      const filePath = path.resolve(destination, `.${requested}`);
+
+      if (!filePath.startsWith(`${destination}${path.sep}`)) {
+        response.writeHead(403).end("Forbidden");
+        return;
+      }
+
+      await access(filePath);
+      const details = await stat(filePath);
+      if (!details.isFile()) throw new Error("Not a file");
+      response.writeHead(200, {
+        "Cache-Control": "no-store",
+        "Content-Type": contentTypes[path.extname(filePath)] || "application/octet-stream"
+      });
+      createReadStream(filePath).pipe(response);
+    } catch {
+      response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" }).end("Not found");
+    }
+  });
+
+  server.on("error", (error) => {
+    if (error.code !== "EADDRINUSE") throw error;
+    console.error(`Starter viewer port ${port} is already in use. Run timds dev --port ${port < 65535 ? port + 1 : 4321}.`);
+    process.exitCode = 1;
+  });
+
+  server.listen(port, "127.0.0.1", () => {
+    console.log(`Starter viewer: http://127.0.0.1:${port}`);
+  });
+  return server;
 }

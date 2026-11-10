@@ -261,8 +261,9 @@ It does not regenerate the other stock pages. `src/brand-kit.mjs`, exported as
 `@dtconcepts/timds/brand-kit`, supplies each slot's key, group, kind, source,
 assumption rule, guidance, sample, default label and owning page. It also
 exports the foundation and copy samples, views, authored/planned page ids,
-stock paths and treatment pairs. The renderer uses this same module, copied
-as managed `scripts/brand-kit.mjs`, so the pages and a pipeline read one list.
+stock paths and treatment pairs. The package renderer (`@dtconcepts/timds/viewer`) imports this same module,
+so the pages and a pipeline read one list. The ordinary starter's `defaults`
+starter steps do not apply to a kit and settle as skipped.
 
 ### Values and labels
 
@@ -331,13 +332,11 @@ pages, plus an empty Designs directory. Shared renderer, canvas, composer and
 build scripts come from the ordinary starter; the slot data module comes from
 `src/brand-kit.mjs`. No shared plumbing is duplicated in the overlay.
 
-Starter sync selects the stock catalogs, template paths and history by that
-record. Histories live under `templates/starter-history/<kind>/`. A fresh
-kit's first sync is a no-op. The kit's pages are seed-only: init writes them
+Starter sync selects the stock catalogs and template paths by that record. A
+fresh kit's first sync is a no-op. The kit's pages are seed-only: init writes them
 once from `templates/brand-kit/`, and no later sync or upgrade refreshes,
 records, guards or reports them. The kit's `.timds/starter.json` `files` lists
-plumbing only; page hashes an older release recorded drop out on the next
-sync. The toolkit keeps code, the parent keeps design: the kit's pages, system
+plumbing only. The toolkit keeps code, the parent keeps design: the kit's pages, system
 stylesheet, layout and copy samples are authored on the published parent, and
 `templates/brand-kit/` is only the seed for a new one. Catalogs merge against
 the kit baseline, and a page the kit catalog gains is appended as planned with

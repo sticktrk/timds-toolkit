@@ -17,7 +17,7 @@ node --test src/core.test.mjs # one test file
 node --test --test-name-pattern="upgrade" src/core.test.mjs   # one test by name
 tsx --test video/remotion.test.tsx                            # the React component test
 node bin/timds.mjs <command> --root /path/to/client-design-system   # run the CLI from source
-node bin/timds.mjs starter sync --root /path/to/client-design-system  # adopt or re-sync a starter-based system (then every upgrade does it)
+node bin/timds.mjs starter sync --root /path/to/client-design-system  # re-sync a starter-based system (every upgrade does it too)
 ```
 
 CI (`.github/workflows/ci.yml`) runs `npm ci && npm test && npm run pack:check`
@@ -36,7 +36,9 @@ its running checks. Run tests and the pack check before committing.
 
 The starter-history check fails when a starter plumbing file or managed
 fragment changes after a release without its shipped hash in
-`legacyStarterFileHashes` (`src/starter.mjs`): after changing one, run
+`legacyStarterFileHashes` (`src/starter.mjs`, empty at the starter floor; the
+check walks the releases from the first that carries starter levels): after
+changing one, run
 `node scripts/check-starter-history.mjs --print` and add the entries it lists.
 
 Releases: `npm run release` (or `-- 0.2.0`, `-- --dry-run`; `release.sh`
@@ -132,8 +134,8 @@ classes, or relative references), and serializes `designs.json`. A design's
 design declares none. `check`
 always builds designs itself after the workspace build; the starter build
 calls the same function so `dev` shows them. `timds designs init` is the
-migration for systems scaffolded without them; it replaces the stock build
-and viewer scripts through the same hash check `starter sync` uses.
+way to add them back to a system that removed them; it writes the sample and
+never touches a script, since the stock build stub builds the designs.
 
 `changelog.mjs` owns the release history: it reads the client's
 `CHANGELOG.md`, renders `dist/changelog/` (linked from the viewer's version
@@ -236,24 +238,29 @@ lifecycle belong to the host.
   `.timds/defaults.json` baseline with sticky overrides. See `AGENTS.md` for
   the test matrix this migration must keep.
 - `src/starter.mjs` implements `timds starter sync`, the recurring starter
-  migration `upgrade` runs on every adopted system: stock plumbing replaced
+  migration `upgrade` runs on every starter-based system at or above the
+  starter floor (one below it, from before starter levels, is refused with
+  `below_floor` and regenerated): stock plumbing replaced
   by recorded hash, `src/site.json` and `src/formats.json` merged against the
   baseline in `.timds/starter.json` (the catalogs are serialized in the
   starter's one-entry-per-line style so diffs stay reviewable), managed
   overview fragments written for added or planned pages, a missing stylesheet
-  link inserted into the layout, then `check` with full rollback on failure.
+  link inserted into the layout, then the numbered starter steps above the
+  recorded `level` (`starterSteps`, data from a closed vocabulary, applied by
+  the one interpreter in `src/starter-steps.mjs` and published as
+  `describeToolkitRelease().starterSteps`), then `check` with full rollback on
+  failure. `timds starter migrate --accept|--decline ID` decides a visible
+  step; `timds starter status` reports level, floor, `belowFloor`, pending,
+  declined and conflicts. `withStarterDefinition` puts test-only steps in
+  effect for one async call; no CLI flag or environment variable reaches it.
   The existing `home` selection, including absence, stays authored routing;
   sync and parent feeds never move the front page.
-  `init` records a fresh scaffold as adopted. `src/fixtures/starter-before-
-  formats/` is the pre-format-catalog scaffold the tests adopt from, and
-  `templates/starter-history/<kind>/` holds the stock `site.json` versions
-  the bootstrap compares against (the root-level `site-1.json` and
-  `site-2.json` there are the ordinary starter's copies that
-  `src/starter.test.mjs` reads). The `starter` field selects the stock
-  catalogs and managed fragments; absent means the ordinary `starter`.
-  `legacyStarterFileHashes` in `src/starter.mjs` lists every stock version a
-  release shipped of each plumbing file and managed fragment, so a system at
-  an older release's bytes is still refreshed; `scripts/check-starter-history.mjs`
+  `init` records a fresh scaffold at the current level. The `starter` field
+  selects the stock catalogs and managed fragments; absent means the ordinary
+  `starter`. `legacyStarterFileHashes` in `src/starter.mjs` lists every stock
+  version a release at or above the floor shipped of each plumbing file and
+  managed fragment, so a system at an older release's bytes is still
+  refreshed; `scripts/check-starter-history.mjs`
   (run in CI) fails when a shipped version is missing from it. See `AGENTS.md` for the boundary.
 
 ### Templates and managed files
@@ -261,10 +268,11 @@ lifecycle belong to the host.
 `src/offshoot-contract.mjs` validates `.timds/parent.json` and the designer's
 exact-file `.timds/stock.json` declarations. `src/offshoots.mjs` implements
 local `shoot` from immutable hosted or Git source and confirmed `sever`;
-`src/feed.mjs` reuses the starter's catalog merges with parent stock, verified
-plumbing, dirty-file guards and rollback. While a parent record exists,
-ordinary starter sync updates plumbing only and preserves its structural
-baselines, while maintaining the narrow layout link/version-chip boundary.
+`src/feed.mjs` reuses the starter's catalog merges with parent stock,
+dirty-file guards and rollback; it carries no code and never writes plumbing.
+While a parent record exists, ordinary starter sync updates plumbing only and
+preserves its structural baselines, while maintaining the narrow layout
+stylesheet-link boundary.
 Public lineage appears in derived readers and publication stamps;
 session edits cannot change the parent record. See `docs/offshoots.md`.
 
@@ -276,12 +284,15 @@ copy samples, stock declaration, styles, layout, pages and empty Designs
 structure. `init --starter brand-kit` records that kind; it never copies the
 ordinary starter's authored page tree or sample design into the overlay.
 `src/brand-kit.mjs` is the public pure-data slot contract, exported as
-`@dtconcepts/timds/brand-kit` with `.d.mts` declarations. Init and starter sync
-copy it to managed `scripts/brand-kit.mjs`; the viewer imports that copy, so
-stock samples and guidance work before dependencies are installed. Slot
-rules, samples, page ids and stock paths have one source. The starter
-is client-owned once copied, except the plumbing and catalogs `starter sync`
-keeps current (see above): `scripts/viewer.mjs` renders
+`@dtconcepts/timds/brand-kit` with `.d.mts` declarations; the package viewer
+imports it, so slot rules, samples, page ids and stock paths have one source.
+The starter is client-owned once copied, except the plumbing and catalogs
+`starter sync` keeps current (see above). The renderer is not copied:
+`scripts/build.mjs`, `check.mjs` and `dev.mjs` are stubs that call
+`@dtconcepts/timds/viewer` (`src/viewer.mjs`) with the system's root, falling
+back to the running CLI's renderer (`TIMDS_VIEWER_MODULE`, set for workspace
+commands) before the first install, and the build then runs
+`timds.json` `workspace.after.build` commands. `src/viewer.mjs` renders
 `src/site.json` (views and pages, authored or `planned`), `src/layout.html`,
 and the fragments under `src/pages/` into `dist/`, filling `{{tokens:GROUP}}`
 tables from `tokens.json` and `{{formats:GROUP}}` tables and `{{canvas:ID}}`

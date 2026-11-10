@@ -79,7 +79,7 @@ tokens; the rest are declared as planned and built once someone writes them.
 | `src/layout.html` | The shell every page shares |
 | `src/styles/system.css` | The system's own styles, the base styles and components a product adopts |
 | `src/assets/` | Small optimized assets such as logos, copied into the artifact |
-| `scripts/build.mjs`, `dev.mjs`, `check.mjs`, `viewer.mjs`, `brand-kit.mjs`, `src/scripts/compose.js`, `src/styles/canvas.css`, `src/styles/viewer.css` | Shared build, renderer, slot data and composer plumbing, the format preview engine, and the documentation chrome, all managed by starter sync and replaced on upgrade |
+| `scripts/build.mjs`, `dev.mjs`, `check.mjs`, `src/scripts/compose.js`, `src/styles/canvas.css`, `src/styles/viewer.css` | The build, dev and check stubs that run the TimDS renderer from the package, composer plumbing, the format preview engine, and the documentation chrome, all managed by starter sync and replaced on upgrade (an extra build step goes in `timds.json` `workspace.after.build`) |
 | `CHANGELOG.md` | Release notes, rendered at `/changelog/`; add to `## Unreleased`, leading with the area the change touches |
 | `media-local/` | Ignored full-resolution originals, staged by `assets add` |
 
@@ -128,9 +128,9 @@ scripts, viewer stylesheets, views, and asset formats TimDS wrote, and every
 `__TIMDS_CLI__ upgrade` brings the stock scripts and viewer stylesheets to
 the installed release (they are TimDS's in a fresh scaffold; a local change
 to them is replaced and reported) and appends new views, planned pages, and
-formats without touching what this system declares. A
-system scaffolded before the record existed opts in once with
-`__TIMDS_CLI__ starter sync`.
+formats without touching what this system declares.
+`__TIMDS_CLI__ starter status` reports the starter level; a step that changes what visitors see waits for
+`__TIMDS_CLI__ starter migrate --accept ID` or `--decline ID`.
 
 ## Offshoots
 
@@ -173,14 +173,13 @@ the hash of each declared stock file the parent last wrote. It is
 protected ancestry, preserved by starter sync and upgrade. For an offshoot,
 those commands update toolkit plumbing while leaving catalogs and declared
 stock to the parent feed and every other page to this system. Layout maintenance remains limited
-to missing stock stylesheet links and the changelog version-chip link.
+to missing stock stylesheet links.
 
 `__TIMDS_CLI__ feed [--version RELEASE]` advances unchanged catalog fields,
 appends missing entries with pages planned, and keeps local edits as grafts.
 Use `--from ../parent` for a local committed parent tree with the saved source
 UUID. A reported graft shading a parent change can be kept or edited to let
-the parent through. Plumbing follows its ownership record; `--force PATH`
-reaches only named plumbing. A declared stock file is refreshed while this
+the parent through. Feed never writes plumbing; only upgrade does. A declared stock file is refreshed while this
 system's copy is unmodified; a changed or removed copy is a graft and stays,
 and tokens, media, designs and undeclared files are never replaced. Feed
 requires clean files where it writes, checks the

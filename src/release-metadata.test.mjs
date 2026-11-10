@@ -26,7 +26,8 @@ test('release metadata preserves both starter ownership boundaries and template 
     const metadata = await describeToolkitRelease({ schemaVersion: 1, starter });
     assert.deepEqual(metadata.toolkit, { name: '@dtconcepts/timds', version: packageIdentity().version });
     assert.deepEqual(metadata, await describeToolkitRelease({ starter }));
-    assert.equal(metadata.files.filter(file => file.policy === 'starter-plumbing').length, 8);
+    assert.equal(metadata.files.filter(file => file.policy === 'starter-plumbing').length, 6, 'three stub scripts and three browser files; the renderer is no longer copied');
+    for (const retired of ['scripts/viewer.mjs', 'scripts/brand-kit.mjs']) assert.ok(!metadata.files.some(file => file.path === retired), retired);
     assert.equal(metadata.files.filter(file => file.policy === 'stock-fragment').length, starter === 'starter' ? 6 : 0);
     for (const file of metadata.files.filter(file => file.path.startsWith('src/pages/'))) {
       if (starter === 'brand-kit') assert.equal(file.policy, 'seed-only', file.path);

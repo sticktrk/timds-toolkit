@@ -234,42 +234,53 @@ the reference the port must match, never the production site itself.
   page, and each journey's storyboard at `/designs/<design>/journeys/<id>/`.
   Consumers read them through `list_designs` and `read_design`, journeys
   included.
-- A system scaffolded before designs existed adopts them with
-  `npm run timds -- designs init`, which writes the sample, updates stock
-  starter scripts, and appends the starter's layout pieces to the system
+- A system without `src/designs/` gets it back with
+  `npm run timds -- designs init`, which writes the sample and appends the starter's layout pieces to the system
   stylesheet when the system still uses the starter's token names; otherwise
   it names the classes the sample needs.
 
 ## The starter is synced by upgrade
 
-`.timds/starter.json` records the starter plumbing (`scripts/build.mjs`,
-`check.mjs`, `dev.mjs`, `viewer.mjs`, `brand-kit.mjs`,
+`.timds/starter.json` records the starter plumbing (the `scripts/build.mjs`,
+`check.mjs` and `dev.mjs` stubs that run the renderer from the package,
 `src/scripts/compose.js`, `src/styles/canvas.css`,
 `src/styles/viewer.css`), the views in `src/site.json`, the formats in
 `src/formats.json`, and the Digital, Social, and Print overview fragments and
 the Use pages (Start, the front page; Compose; and Install) the toolkit wrote. Its `starter` field
-selects the stock catalogs, history and fragments; absent means `starter`.
-Brand-kit stock pages use the same unmodified-fragment boundary. Every `upgrade` re-syncs an adopted system: the plumbing is
+selects the stock catalogs and fragments; absent means `starter`.
+Brand-kit pages are seed-only. Every `upgrade` re-syncs the system: the plumbing is
 brought to stock, new views, planned pages, and formats are appended
 without removing, reordering, or retitling anything the system declares,
-and a missing stock stylesheet link and the changelog link on the version
-chip are added to `src/layout.html`. In a
+and a missing stock stylesheet link is added to `src/layout.html`. In a
 system scaffolded by `init` (`"plumbing": "toolkit"` in the record) a local
 change to a stock script or stylesheet is replaced on the next upgrade and
-reported, so never make one there. In an adopted system (`"recorded"`) a
+reported, so never make one there. In the `"recorded"` mode a
 file changed locally is reported as customized and kept; a person running
 the sync in a terminal is asked about each such file, and non-interactively
 `starter sync --force <path>` replaces the named stock script or stylesheet
 only with explicit authorization. `upgrade --force` never reaches starter
 files. An overview
 fragment this system wrote itself is never replaced. Commit before syncing:
-the sync refuses to run over uncommitted changes to the files it writes. A
-system scaffolded before the record
-existed opts in once with `npm run timds -- starter sync` on a feature
-branch, then reviews the diff and runs `check`. Treat planned pages that
+the sync refuses to run over uncommitted changes to the files it writes.
+Treat planned pages that
 appear after an upgrade as primitives to author. When a change needs a stock
 script, prefer `tokens/*.json`, `system.css`, and the pages; a local script
-change leaves that file behind on every later upgrade.
+change leaves that file behind on every later upgrade. An extra build step is
+a command in `timds.json` `workspace.after.build` (argv arrays run from the
+design-system root after every stock build), never an edit to the build
+script.
+
+The record also keeps the starter `level` and the steps `declined`. Run
+`starter status` (`--json` for the machine form) to see the level, the floor,
+what is pending, declined or in conflict. Upgrade settles every step that does
+not change what visitors see. A visible step waits for `starter migrate
+--accept <id>` or `--decline <id>`: ask the person who publishes the system
+which, and run it only on their answer. In a hosted session, run the same
+command in the session workspace when the host asks for it. A system whose
+record has no `level` (or none at all) predates starter levels: upgrade,
+starter sync, starter migrate and feed refuse it with `below_floor`. Do not
+work around that; tell the person it must be regenerated from the current
+starter, which is a separate, reviewed piece of work.
 
 ## Offshoots and explicit parent stock
 
@@ -311,8 +322,7 @@ source UUID `sourceId`, release `version`, source `commit`, `mode`, and
 `baseline: {site, formats}`. Never hand-edit it or remove it through a session.
 Starter sync and upgrade preserve it and update toolkit plumbing without
 merging the toolkit's catalogs or fragments into an offshoot. Layout
-maintenance remains limited to missing stock stylesheet links and the
-changelog link on its version chip.
+maintenance remains limited to missing stock stylesheet links.
 
 For a requested parent update, commit current changes and run `timds feed`
 with an optional `--version RELEASE`. `--from ../parent` uses a local committed
@@ -322,8 +332,8 @@ files the parent's `.timds/stock.json` declares while this system's copy is
 unmodified. The child's edits, in a catalog field or a stock file, are grafts
 and stay. Explain each newly reported graft shading a parent change, then
 keep it or edit that field or file according to the designer's choice.
-Plumbing follows the ownership record. `--force PATH` reaches only named
-plumbing and never replaces grafts, tokens, media or designs.
+Feed carries no code: it never writes plumbing or the starter record (only
+upgrade does), and it never replaces grafts, tokens, media or designs.
 Feed refuses uncommitted changes to files it writes, checks the workspace and
 restores its writes on failure; success advances the parent baseline.
 
@@ -366,7 +376,7 @@ npm run timds -- defaults
    lockfile, the six managed skills under `.agents/skills/` and the
    `.claude/skills` link, `.timds/installation.json`, the TimDS workflows
    when intentionally updated, removal of any legacy `.timds/cli` tree, the
-   starter sync's files in an adopted system (`.timds/starter.json`, stock
+   starter sync's files (`.timds/starter.json`, stock
    plumbing, `src/site.json`, `src/formats.json`, managed overview and Use
    fragments, the layout links, as its report lists them), and the one-time
    contract-group migration (`tokens/`, `media/`,

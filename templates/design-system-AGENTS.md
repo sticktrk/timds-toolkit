@@ -80,13 +80,13 @@ repository root, so each one is also a slash command.
 | `src/designs/` | Website designs: whole pages in HTML with JavaScript on the system's stylesheets, one directory per design | Edit |
 | `src/layout.html` | The shell every page shares: app bar, page navigation, content slot | Edit |
 | `src/styles/system.css`, `src/assets/` | The system's own styles and small optimized assets | Edit |
-| `scripts/build.mjs`, `dev.mjs`, `check.mjs`, `viewer.mjs`, `brand-kit.mjs`, `src/scripts/compose.js`, `src/styles/canvas.css`, `src/styles/viewer.css` | Shared build, viewer, slot data and composer plumbing, the format preview engine, and the documentation chrome | Managed by starter sync, which replaces them on upgrade; use authored tokens, pages and `system.css` for design changes |
+| `scripts/build.mjs`, `dev.mjs`, `check.mjs`, `src/scripts/compose.js`, `src/styles/canvas.css`, `src/styles/viewer.css` | The build, dev and check stubs that run the TimDS renderer from the package (`@dtconcepts/timds/viewer`), composer plumbing, the format preview engine, and the documentation chrome | Managed by starter sync, which replaces them on upgrade; use authored tokens, pages and `system.css` for design changes, and `workspace.after.build` in `timds.json` for an extra build step |
 | `CHANGELOG.md` | Designer-facing release notes, rendered at `/changelog/` in the built system | Add to `## Unreleased`, leading with the area the change touches |
 | `README.md`, `AGENTS.md`, `CLAUDE.md` | This system's own documentation (`CLAUDE.md` imports `AGENTS.md` for Claude Code) | Keep accurate as the system changes |
 | `timds.json` | Manifest: identity, version, artifact entry, workspace commands, the `bundle` globs naming what a website loads | Only `brand` and `machine` mappings; the rest is protected |
 | `media-local/` | Ignored full-resolution originals | Stage files here |
 | `dist/` | Generated artifact and derived layer | Never edit by hand; an embedded system commits the rebuilt `dist/` with each change (see "Source and artifact boundary") |
-| `.timds/starter.json` | The starter kind and what the toolkit last wrote (see "The starter stays current through upgrade") | Protected; written by `init`, `starter sync`, and `upgrade` |
+| `.timds/starter.json` | The starter kind, its starter level and declined steps, and what the toolkit last wrote (see "The starter stays current through upgrade") | Protected; written by `init`, `starter sync`, and `upgrade` |
 | `.timds/stock.json` | Explicit reusable source for structure offshoots | Declare reviewed exact source paths; see Offshoots |
 | `.timds/parent.json` | Parent release identity and feed baseline, when this system is an offshoot | Protected; changed only by shoot, feed, or confirmed sever |
 | Other `.timds/` files, release scripts, and the repository root's `.agents/skills/` and `.github/workflows/` | Managed tooling | Protected; see the last section |
@@ -301,15 +301,14 @@ clean.
 
 The scaffold's plumbing and structure are kept current by TimDS, the way its
 skills are: `.timds/starter.json` records the selected starter kind and what the toolkit wrote, and every
-`__TIMDS_CLI__ upgrade` re-syncs it (a system scaffolded before the record
-existed opts in once with `__TIMDS_CLI__ starter sync`). The sync brings
-the stock `scripts/build.mjs`, `check.mjs`, `dev.mjs`, `viewer.mjs`,
-`brand-kit.mjs`, `src/scripts/compose.js`,
+`__TIMDS_CLI__ upgrade` re-syncs it. The sync brings
+the stock `scripts/build.mjs`, `check.mjs` and `dev.mjs` (stubs that run the
+renderer from the package), `src/scripts/compose.js`,
 `src/styles/canvas.css`, and `src/styles/viewer.css` to the installed
 release: in a system scaffolded by `init` they are the toolkit's outright
 (`"plumbing": "toolkit"` in the record), so a local change to them is
-replaced on the next upgrade and reported, never kept; a system adopted
-later keeps a changed file as customized (`"recorded"`). It appends views, planned pages, and asset formats a newer scaffold
+replaced on the next upgrade and reported, never kept; in the
+`"recorded"` mode a changed file is kept as customized. It appends views, planned pages, and asset formats a newer scaffold
 declares to `src/site.json` and `src/formats.json` without removing,
 reordering, or retitling anything declared here; writes the Digital, Social,
 and Print overview fragments and the Use pages (`use`, the front page, a
@@ -330,9 +329,21 @@ an overview fragment); the
 sync refuses to run over uncommitted changes to the files it writes, and one
 that would fail `check` is rolled back. So: edit
 `system.css` and the pages freely, but leave the stock scripts
-and `viewer.css` alone unless the change is meant to stay local, and expect
-new planned pages after an upgrade, which are primitives to author, not
-mistakes to delete.
+and `viewer.css` alone unless the change is meant to stay local (an extra
+build step is a command in `timds.json` `workspace.after.build`, run after
+every stock build), and expect new planned pages after an upgrade, which are
+primitives to author, not mistakes to delete.
+
+Defaults this system never chose move through numbered starter steps, and
+the record keeps the `level` reached and the steps `declined`.
+`__TIMDS_CLI__ starter status` says how far behind the starter this system
+is, the floor, and what is pending, declined or in conflict. Upgrade applies
+every step that does not change what visitors see; a step that does waits for
+`__TIMDS_CLI__ starter migrate --accept ID` or `--decline ID`, a decision for
+whoever publishes the system. `check` warns until it is made. A system whose
+record has no `level` predates starter levels and is below the floor:
+upgrade, starter sync, starter migrate and feed refuse it, and it is
+regenerated from the current starter.
 
 ## Offshoots and parent stock
 
@@ -349,8 +360,8 @@ ancestry in `.timds/parent.json`. The schema-1 record holds the parent's
 feeds. Do not edit or delete it as design work.
 Ordinary starter sync and upgrade preserve it and update toolkit plumbing
 without importing the toolkit's catalogs or fragments into an offshoot. It
-still maintains missing stock stylesheet links and the changelog version-chip
-link within the narrow layout boundary.
+still maintains missing stock stylesheet links within the narrow layout
+boundary.
 
 The designer's agent creates a new local offshoot with
 `__TIMDS_CLI__ shoot example/core --system-id example/child --root ../child --mode structure --version RELEASE`.
@@ -379,11 +390,12 @@ to choose one or `--from ../parent` to read a local committed tree using the
 saved source UUID. Unchanged catalog fields advance, missing entries are
 appended with pages planned, and the child's edits remain as grafts. A graft
 covering a new parent change is reported so the designer can keep it or edit
-that field to let the parent through. Plumbing follows its recorded ownership.
+that field to let the parent through.
 The files the parent's `.timds/stock.json` declares follow the parent while
 this system's copy is unmodified; a changed or removed copy is a graft and
-stays. `--force PATH` applies only to named plumbing; grafts, tokens, media,
-designs and undeclared files are never replaced. Commit changes first: feed refuses
+stays. Feed carries no code: plumbing and the starter record are never
+written by it (only by upgrade), and grafts, tokens, media, designs and
+undeclared files are never replaced. Commit changes first: feed refuses
 uncommitted changes to files it writes, runs the workspace check and restores
 its writes if checking fails. Only success advances the parent baseline.
 

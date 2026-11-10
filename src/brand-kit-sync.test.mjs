@@ -82,7 +82,9 @@ test('brand-kit init seeds every stock page once and records plumbing only, and 
   await fs.access(path.join(root, 'src/pages/brand/evidence.html'));
   assert.ok(!Object.hasOwn(record.files, 'src/copy.json'));
   assert.ok(!Object.keys(record.files).some(relative => relative.startsWith('src/pages/')));
-  assert.equal(await read('scripts/brand-kit.mjs'), await fs.readFile(path.join(packageRoot, 'src/brand-kit.mjs'), 'utf8'));
+  // The viewer and its slot helper are resolved from the package, not copied.
+  for (const relative of ['scripts/brand-kit.mjs', 'scripts/viewer.mjs']) await assert.rejects(fs.access(path.join(root, relative)), { code: 'ENOENT' }, relative);
+  assert.deepEqual([record.level, record.declined], [1, []]);
   for (const relative of ['src/pages/digital', 'src/designs/website', 'src/pages/print/letterheads.html']) {
     await assert.rejects(fs.access(path.join(root, relative)), { code: 'ENOENT' });
   }
@@ -96,7 +98,7 @@ test('brand-kit init seeds every stock page once and records plumbing only, and 
   assert.equal(await read('.timds/starter.json'), before);
   assert.equal(git(root, 'status', '--porcelain'), '');
   assert.throws(() => stockTemplatePath('src/pages/index.html', 'brand-kit'), /is not a starter file the toolkit writes/);
-  assert.equal(stockTemplatePath('scripts/brand-kit.mjs', 'brand-kit'), path.join(packageRoot, 'src/brand-kit.mjs'));
+  assert.throws(() => stockTemplatePath('scripts/brand-kit.mjs', 'brand-kit'), /is not a starter file the toolkit writes/);
 });
 
 test('a fresh brand kit passes check, and neither starter sync nor upgrade writes or reports a kit page', async t => {
@@ -126,7 +128,8 @@ test('a fresh brand kit passes check, and neither starter sync nor upgrade write
 
 test('brand-kit sync merges its own catalog history, appends added pages as planned, and never touches a kit page', async t => {
   const { root, read, write } = await fixture(t);
-  const historical = JSON.parse(await fs.readFile(path.join(packageRoot, 'templates/starter-history/brand-kit/site-1.json'), 'utf8'));
+  // An earlier kit scaffold, recorded at the current level: no Decks view, and another ads blurb.
+  const historical = structuredClone(JSON.parse(await read('.timds/starter.json')).baseline.site);
   const current = structuredClone(historical);
   current.views = current.views.filter(view => view.id !== 'decks');
   historical.views.find(view => view.id === 'ads').blurb = 'Earlier ad catalog';
@@ -217,21 +220,25 @@ test('kit pages and builder-owned data stay outside the dirty guard; plumbing, c
   await assert.rejects(quiet(() => syncStarterWorkspace(root)), /Starter sync refuses[\s\S]*src\/layout\.html/);
 });
 
-test('a failed brand-kit sync restores its shared modules and record together and never recreates a removed kit page', async t => {
+test('a failed brand-kit sync restores its plumbing and record together and never recreates a removed kit page', async t => {
   const { root, read, write } = await fixture(t);
   const record = JSON.parse(await read('.timds/starter.json'));
-  const oldModule = '// earlier shared slot module\n';
-  await write('scripts/brand-kit.mjs', oldModule);
-  record.files['scripts/brand-kit.mjs'] = hash(oldModule);
+  // A stub the toolkit wrote in an earlier release: the record names its hash.
+  const oldStub = '// an earlier stock build stub\n';
+  await write('scripts/build.mjs', oldStub);
+  record.files['scripts/build.mjs'] = hash(oldStub);
+  record.plumbing = 'recorded';
   await write('.timds/starter.json', json(record));
   const originalRecord = await read('.timds/starter.json');
   await fs.rm(path.join(root, 'src/pages/index.html'));
   await assert.rejects(syncStarter({ designSystemRoot: root, version, check: async () => { throw new Error('fixture check failed'); } }), /rolled back.*fixture check failed/);
-  assert.equal(await read('scripts/brand-kit.mjs'), oldModule);
+  assert.equal(await read('scripts/build.mjs'), oldStub);
   assert.equal(await read('.timds/starter.json'), originalRecord);
   await assert.rejects(fs.access(path.join(root, 'src/pages/index.html')), { code: 'ENOENT' });
   const synced = await syncStarter({ designSystemRoot: root, version });
-  assert.deepEqual(synced.written, ['scripts/brand-kit.mjs']);
+  assert.deepEqual(synced.written, ['scripts/build.mjs']);
+  assert.equal(await read('scripts/build.mjs'), await fs.readFile(path.join(packageRoot, 'templates/starter/scripts/build.mjs'), 'utf8'));
+  assert.deepEqual([synced.status.level, synced.status.behind, synced.status.pending], [1, 0, []]);
   await assert.rejects(fs.access(path.join(root, 'src/pages/index.html')), { code: 'ENOENT' }, 'sync never recreates a removed kit page');
 });
 
@@ -248,7 +255,7 @@ test('structure shoots preserve the selected brand-kit starter and its explicitl
   await quiet(() => shootOffshoot({ destination: child, source, mode: 'structure', systemId: 'example/child', check: async target => { checked = await checkWorkspace(target); } }));
   assert.equal((await readStarterRecord(child)).starter, 'brand-kit');
   for (const relative of brandKitStockPaths) assert.equal(await fs.readFile(path.join(child, relative), 'utf8'), await read(relative), relative);
-  assert.equal(await fs.readFile(path.join(child, 'scripts/brand-kit.mjs'), 'utf8'), await read('scripts/brand-kit.mjs'));
+  await assert.rejects(fs.access(path.join(child, 'scripts/brand-kit.mjs')), { code: 'ENOENT' });
   await assert.rejects(fs.access(path.join(child, 'src/pages/brand/evidence.html')), { code: 'ENOENT' });
   await assert.rejects(fs.access(path.join(child, 'src/designs')), { code: 'ENOENT' });
   assert.deepEqual(checked.designs, { enabled: true, designCount: 0, pageCount: 0, stateCount: 0, journeyCount: 0, warnings: [] });
@@ -257,9 +264,7 @@ test('structure shoots preserve the selected brand-kit starter and its explicitl
   await assert.rejects(fs.access(path.join(child, 'dist/designs/parent-only')), { code: 'ENOENT' });
   const childRecordFile = path.join(child, '.timds/starter.json');
   const childRecord = JSON.parse(await fs.readFile(childRecordFile, 'utf8'));
-  childRecord.files['src/pages/social/posts.html'] = hash('an earlier stock page\n');
-  childRecord.files['src/pages/index.html'] = hash(await read('src/pages/index.html'));
-  await fs.writeFile(childRecordFile, json(childRecord));
+  assert.equal(childRecord.level, 1, "the child carries the parent's starter level");
   const childPage = await fs.readFile(path.join(child, 'src/pages/social/posts.html'), 'utf8');
   const childSync = await syncStarter({ designSystemRoot: child, version });
   assert.deepEqual(childSync.files.filter(file => file.path.startsWith('src/pages/')), []);

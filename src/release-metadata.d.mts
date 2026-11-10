@@ -6,10 +6,30 @@ export interface ToolkitIdentity { name: '@dtconcepts/timds'; version: string }
 export interface ResourceMetadata { packagePath: string; mode: Exclude<FileMode, '120000'>; sha256: string; bytes: number }
 export interface ResourceFile extends ResourceMetadata { content: string }
 export interface FileDefinition { path: string; resource: string; policy: ResourcePolicy; operation: string; parameters?: string[] }
+export type StarterStepOperation =
+  | { op: 'remove-file'; path: string; sha256: string[] }
+  | { op: 'set-site-field'; field: string; value: unknown; from: unknown[] }
+  | { op: 'set-page-field'; page: string; field: string; value: unknown; from: unknown[] };
+export type StarterStepRequirement =
+  | { check: 'stock-file'; path: string }
+  | { check: 'authored-page'; page: string }
+  | { check: 'page-field'; page: string; field: string; equals: unknown };
+export interface StarterStep {
+  level: number;
+  id: string;
+  layer: 'code' | 'defaults';
+  visible: boolean;
+  declinable: boolean;
+  starters: StarterKind[];
+  requires: StarterStepRequirement[];
+  operations: StarterStepOperation[];
+}
+export interface StarterLevels { level: number; floor: number; steps: StarterStep[] }
 export interface ToolkitRelease {
   schemaVersion: 1;
   toolkit: ToolkitIdentity;
   starter: StarterKind;
+  starterSteps: StarterLevels;
   resources: ResourceMetadata[];
   files: FileDefinition[];
   symlinks: { path: string; target: string; mode: '120000'; policy: 'create-if-absent' }[];

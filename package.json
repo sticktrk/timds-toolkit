@@ -3,6 +3,7 @@
   "version": "0.1.496",
   "description": "Versioned CLI, contracts, templates, and AI skill for repository-owned TimDS design systems.",
   "type": "module",
+  "hostContract": 2,
   "bin": {
     "timds": "bin/timds.mjs",
     "timds-publish-artifact": "scripts/publish-artifact.mjs"
@@ -45,6 +46,7 @@
     "./merge": "./src/merge.mjs",
     "./publication-snapshot": "./src/publication-snapshot.mjs",
     "./brand-kit": "./src/brand-kit.mjs",
+    "./viewer": "./src/viewer.mjs",
     "./release-metadata": "./src/release-metadata.mjs"
   },
   "scripts": {
@@ -138,6 +140,8 @@
     "src/video-runtime.mjs",
     "src/brand-kit.mjs",
     "src/brand-kit.d.mts",
+    "src/viewer.mjs",
+    "src/starter-steps.mjs",
     "src/release-resources.mjs",
     "src/release-metadata.mjs",
     "src/release-metadata.d.mts",

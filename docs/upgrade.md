@@ -14,19 +14,18 @@ replace), the publishing defaults available, the designs setup state, and the
 check the upgrade ran itself. A committed customization of a starter file is
 not a failure: the file is kept, listed under `starter.customized` (and
 `starter.replaceable` when `starter sync --force` may replace it), and the
-result is still `"ok": true`. The viewer, build and check scripts are one
-renderer: while one of them is customized and kept, the others' refreshes and
-every refreshed or new stock page (the Digital, Social and Print overviews and
-the Use pages) are listed as `skipped` with a note naming the kept file, since
-a stock page the kept renderer has never seen may use placeholders it cannot
-build; `starter sync --force` on the kept file brings them in on the next
-sync. A refused or failed upgrade exits non-zero and
+result is still `"ok": true`. The `starter` object also carries the starter
+status described below (`level`, `current`, `floor`, `belowFloor`, `behind`,
+`pending`, `declined`, `conflicts`), the files the sync left at stock as
+`currentFiles`, files a starter step removed as `removed`, and the steps it ran
+as `levels`. A refused or failed upgrade exits non-zero and
 still prints `{ "ok": false, "error": { "code": "...", "message": "..." } }`,
 with `error.step` naming the command a `--version` selection stopped at. The
 codes a host job can branch on:
 
 | `error.code` | Meaning |
 | --- | --- |
+| `below_floor` | The system is starter-based and predates starter levels (no `.timds/starter.json`, or one without `level` or below the floor). Nothing was written; regenerate it from the current starter. |
 | `managed_file_conflict` | A managed file (skill, installation record, starter record) is locally modified; commit or restore it, or rerun with `--force`. |
 | `dirty_worktree` | Uncommitted changes to files the starter sync writes, or (for a selection) any uncommitted change. |
 | `unsupported_requirement` | The `@dtconcepts/timds` requirement, `scripts.timds`, the requested version, or the lockfile is not in the form a selection needs. |
@@ -35,7 +34,86 @@ codes a host job can branch on:
 | `check_failed` | The post-upgrade check failed: the starter sync was rolled back, or `timds check` or `check:timds-upgrade` failed after a selection. |
 | `upgrade_failed` | Anything else, including the selected release's own `upgrade` failing without a code of its own. |
 
-The prose output is unchanged without the flag.
+The prose output is unchanged without the flag, apart from the starter
+status lines it ends with.
+
+## Starter levels
+
+A system can be on the newest toolkit and behind the starter. Upgrade keeps
+code current; the starter level says how far the system's own defaults have
+moved with it. `.timds/starter.json` records `level` and `declined` (the ids
+of steps settled by decision). The toolkit declares the level a fresh
+scaffold starts at and `floor`, the oldest level it supports. This release is
+level 1, floor 1, with no steps.
+
+A starter-based system whose record is missing, has no `level`, or has one
+below the floor predates starter levels. `upgrade` (including `--version`),
+`starter sync`, `starter migrate` and `feed` (child or parent) refuse it with
+`below_floor` before writing anything, and `shoot` refuses such a parent.
+`check`, `doctor` and `starter status` only report it (`belowFloor: true`): it
+still builds with what it has and stays editable until it is regenerated from
+the current starter. Nothing in the toolkit migrates or recognizes an earlier
+shape.
+
+Each level above the floor is one numbered step, declared as data in the
+release metadata (`describeToolkitRelease().starterSteps`, see
+[release metadata](release-metadata.md#starter-steps)) and applied by one
+interpreter (`src/starter-steps.mjs`). Steps above the recorded level are
+evaluated in order on the tree as it stands after the sync and the earlier
+steps:
+
+1. A step for another starter kind (`starters`) or layer, or one whose
+   requirements do not hold, does not apply: it settles with nothing written
+   (`skipped`). An offshoot (`.timds/parent.json`) takes `code` steps only;
+   its structure comes from its parent through `feed`.
+2. Otherwise its effective operations are a `remove-file` whose file exists
+   and a field move whose current value is in `from` (`null` meaning absent).
+   A field holding any other value is the system's own: kept and reported.
+3. A `remove-file` whose file exists with bytes no listed hash matches is a
+   conflict. The level stops there.
+4. With no effective operation the step settles (`applied`, nothing changed).
+5. With effective operations a step that is not visible applies them.
+6. With effective operations a visible step needs a decision: `timds starter
+   migrate --accept ID` applies it, `--decline ID` (declinable steps only)
+   records it in `declined` and settles it, and otherwise the level stops
+   there and the step is pending.
+
+`upgrade` and `starter sync` run the same steps and never accept, so they
+never apply a visible step with something to change; they do settle one that
+does not apply or has nothing to change. A step's writes are part of the
+sync, so a failed check rolls them back with everything else.
+
+```bash
+npm run timds -- starter status [--json]                 # level, floor, pending, declined, conflicts
+npm run timds -- starter migrate --accept ID [--json]    # apply a visible step
+npm run timds -- starter migrate --decline ID            # settle it by decision
+```
+
+`starter status --json`, the `starter` section of `doctor --json` and the
+upgrade report carry the same status, here for a system one visible step
+behind a later release:
+
+```json
+{
+  "starter": "starter", "plumbing": "toolkit",
+  "level": 1, "current": 2, "floor": 1, "belowFloor": false, "behind": 1,
+  "pending": [{ "level": 2, "id": "example-step", "visible": true, "declinable": true }],
+  "declined": [],
+  "conflicts": []
+}
+```
+
+`pending` lists the steps above the recorded level that apply to this kind of
+system and are not declined. A conflict is `{ step, path, reason }`. `check`
+warns, without failing, below the floor, on what a sync would settle, on a
+visible step waiting for a decision, on conflicts, and on a view labelled like
+an entry the viewer adds to the app bar itself (`Designs`).
+
+The renderer is the package's: `scripts/build.mjs`, `check.mjs` and `dev.mjs`
+are stubs that call `@dtconcepts/timds/viewer`. A system that needs an extra
+build step declares it in `timds.json` as `workspace.after.build` (argv
+arrays, run in order from the design-system root after every stock build,
+failing it on a non-zero exit) rather than editing the build stub.
 
 ## One dependency selection
 

@@ -53,6 +53,9 @@ This export always describes **npm** output, including hosted skill rendering.
   and `operation`; parameterized operations also list their `parameters`.
 - `symlinks`: `.claude/skills`, target `../.agents/skills`, mode `120000`, and
   the `create-if-absent` policy shared with initialization and upgrade.
+- `starterSteps`: `{level, floor, steps}`, the starter level a fresh scaffold
+  of this release starts at, the oldest level it supports, and every starter
+  step above the floor as data. See [Starter steps](#starter-steps).
 - `generated`: version metadata records and package initialization inputs,
   separate from resource content. These are declarations, not pre-rendered
   records or an exhaustive inventory of a built scaffold.
@@ -67,14 +70,14 @@ from the same definitions that starter sync and skill installation use.
 
 | Policy | Meaning |
 | --- | --- |
-| `starter-plumbing` | Toolkit-owned when the starter record says `plumbing: "toolkit"`; otherwise replace only recognized stock hashes, subject to the existing sync policy. |
+| `starter-plumbing` | Toolkit-owned when the starter record says `plumbing: "toolkit"`; otherwise replace only recognized stock hashes, subject to the existing sync policy. The build, check and dev scripts are stubs that call `@dtconcepts/timds/viewer`; the renderer is never copied. |
 | `stock-fragment` | Ordinary starter pages; refresh only while unchanged. Customized fragments are authored and are never force-replaced. |
 | `managed-skill` | The six design-system skills copied by init/upgrade. |
 | `hosted-skill` | Parameterized hosted skill; require explicit system identity before trusting any output path/hash. |
 | `release-automation` | Standalone release files; require standalone initialization or explicit auto-release adoption. |
 | `dependency-automation` | Dependency PR workflow; require explicit dependency-PR adoption. |
 | `catalog-merge` | Site/format catalogs use their recorded three-way merge; a raw template hash is never replacement permission. |
-| `layout-patch` | Only missing stock stylesheet/changelog links may be added to the authored layout. |
+| `layout-patch` | Only missing stock stylesheet links may be added to the authored layout. |
 | `seed-only` | Initial content owned by its author thereafter. All brand-kit pages are seed-only, including its Use pages. |
 | `version-metadata` | Generated installation/starter records, distinct from authored content and from managed-file changes. |
 | `create-if-absent` | Create the declared link only when nothing exists at its destination. |
@@ -139,6 +142,49 @@ separately from seed resource changes, generated records and `toolkit.version`.
 A version-only record change must not be presented as an authored-content
 change. The selected package's npm integrity remains a separate provenance
 field in the host's artifact.
+
+## Starter steps
+
+This release publishes `{ "level": 1, "floor": 1, "steps": [] }`.
+`starterSteps.steps` lists the numbered steps above the floor:
+`steps[i].level` is `floor + 1 + i`, so there are `level - floor` of them.
+Raising the floor prunes the steps at or below it. Each step is exactly
+`{level, id, layer, visible, declinable, starters, requires, operations}`:
+`layer` is `code` (every system, offshoots included) or `defaults` (only the
+starter kinds in `starters`, never an offshoot). The vocabulary is closed:
+
+| Operation | Shape | Meaning |
+| --- | --- | --- |
+| `remove-file` | `{op, path, sha256}` | The file leaves only when the SHA-256 of its exact bytes (lowercase hex) is in `sha256`, which lists every stock version a release shipped at that path. Any other content is a conflict. |
+| `set-site-field` | `{op, field, value, from}` | A top-level `src/site.json` field moves to `value` when its current value is in `from` (`null` means absent); otherwise it is kept. Never `views`; `value` is never `null`. |
+| `set-page-field` | `{op, page, field, value, from}` | The same for one field of page `page`: `view` is that view's own page (empty or missing slug), `view/slug` another page. Never `slug` or `pages`. |
+
+| Requirement | Shape | Meaning |
+| --- | --- | --- |
+| `stock-file` | `{check, path}` | The file equals this release's rendered managed bytes (`renderToolkitManagedFiles`). |
+| `authored-page` | `{check, page}` | The page is declared and not `planned`. |
+| `page-field` | `{check, page, field, equals}` | The page's field equals `equals`. |
+
+Requirements are checked first; when one fails, the step does not apply to
+that system and settles unchanged. The toolkit's `starter sync`, `upgrade`
+and `starter migrate` apply exactly these definitions through one
+interpreter, so a host can verify a candidate change from the data alone: a
+level that crosses a step shows that step's effective operations (a
+`remove-file` whose prior bytes match, a field move whose prior value is in
+`from`), crosses a visible step only when the step had none, crosses a step
+whose requirements fail or whose `starters` or layer do not fit the system
+unchanged, and leaves `declined` as it was. A step that settles with nothing
+to change is recorded by `level` alone; `declined` is written as `[]` when
+empty. A record without `level` predates starter levels and is below the
+floor. [Upgrading in depth](upgrade.md#starter-levels) describes the rules
+and the status a system reports.
+
+`package.json` `hostContract` names what a host must implement to accept this
+release's upgrades. It is `2` from the first release with starter levels: an
+upgrade writes the stub scripts and records `level` and `declined`, steps may
+remove files and move catalog fields, and a system below the floor is refused
+rather than upgraded. A new operation or requirement raises it, so a host that
+does not know it holds the release instead of guessing.
 
 ## Compatibility and verification
 

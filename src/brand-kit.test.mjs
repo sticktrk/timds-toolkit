@@ -97,8 +97,9 @@ test('the built kit quotes every slot key and its exported guidance without a pr
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'timds-kit-contract-'));
   t.after(() => fs.rm(directory, {recursive: true, force: true}));
   await runWithOutputSink(() => {}, () => initializeRepository(directory, {standalone: true, starter: 'brand-kit', name: 'Brand Kit'}));
-  const {renderSite, colorLiterals} = await import(pathToFileURL(path.join(directory, 'scripts/viewer.mjs')).href);
-  const site = await renderSite();
+  const {renderSite, colorLiterals} = await import('./viewer.mjs');
+  await assert.rejects(fs.access(path.join(directory, 'scripts/viewer.mjs')), {code: 'ENOENT'}, 'the kit renders with the package viewer');
+  const site = await renderSite(directory);
   assert.equal(site.pages, brandKitPages.authored.length);
   assert.deepEqual(site.planned, brandKitPages.planned);
   assert.equal(site.designs.length, 0);
@@ -140,7 +141,7 @@ test('the built kit quotes every slot key and its exported guidance without a pr
     const page = site.files.get(`${id}/index.html`);
     assert.match(page, /<figure[\s\S]*<details class="spec-drawer">\s*<summary>Spec<\/summary>/, id);
   }
-  assert.deepEqual(await colorLiterals(), []);
+  assert.deepEqual(await colorLiterals(directory), []);
   // Voice guidance is authored, but its neutral sample is not brand evidence.
   // Keep the two readiness gaps explicit instead of claiming the page is absent.
   assert.deepEqual(site.warnings, ['Brand kit voice is assumed; replace copy.voice with evidence-backed guidance before publishing.']);
@@ -153,5 +154,5 @@ test('the built kit quotes every slot key and its exported guidance without a pr
   const copy = JSON.parse(await fs.readFile(path.join(directory, 'src/copy.json'), 'utf8'));
   copy.voice = 'Lead with one useful fact. Show an example before a claim.';
   await fs.writeFile(path.join(directory, 'src/copy.json'), JSON.stringify(copy));
-  assert.deepEqual((await renderSite()).warnings, []);
+  assert.deepEqual((await renderSite(directory)).warnings, []);
 });

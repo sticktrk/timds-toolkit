@@ -175,25 +175,17 @@ test('stock draft recognition rejects custom scripts even when the snapshot reco
   assert.equal(await isStockWorkspace(root, await read(root, 'timds.json')), false);
 });
 
-test('stock draft recognition verifies the viewer helper but keeps older viewers compatible', async t => {
+test('stock draft recognition accepts the stock stub scripts only', async t => {
   const root = await fixture(t);
   const manifest = await read(root, 'timds.json');
-  const helper = path.join(root, 'scripts/brand-kit.mjs');
-  const stock = await fs.readFile(helper);
+  assert.equal(await isStockWorkspace(root, manifest), true, 'a fresh scaffold runs the packaged renderer through its stubs');
+  await assert.rejects(fs.access(path.join(root, 'scripts/viewer.mjs')), {code: 'ENOENT'});
+  await fs.rm(path.join(root, 'scripts/dev.mjs'));
+  assert.equal(await isStockWorkspace(root, manifest), false, 'every stub is required');
+  await fs.copyFile(path.join(packageRoot, 'templates/starter/scripts/dev.mjs'), path.join(root, 'scripts/dev.mjs'));
   assert.equal(await isStockWorkspace(root, manifest), true);
-  await fs.rm(helper);
-  assert.equal(await isStockWorkspace(root, manifest), false, 'a current viewer cannot run without its helper');
-  await fs.writeFile(helper, Buffer.concat([stock, Buffer.from('\nconsole.log("custom helper");\n')]));
-  const {createHash} = await import('node:crypto');
-  const record = await read(root, '.timds/starter.json');
-  record.files['scripts/brand-kit.mjs'] = createHash('sha256').update(await fs.readFile(helper)).digest('hex');
-  await fs.writeFile(path.join(root, '.timds/starter.json'), JSON.stringify(record));
-  assert.equal(await isStockWorkspace(root, manifest), false, 'a snapshot hash cannot approve executable helper changes');
-  await fs.writeFile(helper, stock);
-  assert.equal(await isStockWorkspace(root, manifest), true);
-  await fs.copyFile(path.join(packageRoot, 'src/fixtures/starter-before-formats/scripts/viewer.mjs'), path.join(root, 'scripts/viewer.mjs'));
-  await fs.rm(helper);
-  assert.equal(await isStockWorkspace(root, manifest), true, 'a recognized older viewer has no helper dependency');
+  // Commands after the build are the system's own tools.
+  assert.equal(await isStockWorkspace(root, {...manifest, workspace: {...manifest.workspace, after: {build: [['node', 'scripts/extra.mjs']]}}}), false);
 });
 
 test('binary global skill installation renders hosted instructions without npm bootstrapping', async t => {
@@ -226,4 +218,21 @@ test('every executable download names the one public download host', async () =>
     }
   }
   assert.ok(downloads >= 7, `expected the stock workflows and install docs to download executables, found ${downloads}`);
+});
+
+test('binary upgrade refuses a system below the starter floor before any write, stale aggregates included', async t => {
+  const root = await fixture(t);
+  const record = await read(root, '.timds/starter.json');
+  delete record.level;
+  await fs.writeFile(path.join(root, '.timds/starter.json'), `${JSON.stringify(record, null, 2)}\n`);
+  const group = await read(root, 'tokens/space.json');
+  group['1'].value = '0.3rem';
+  await fs.writeFile(path.join(root, 'tokens/space.json'), `${JSON.stringify(group, null, 2)}\n`);
+  git(root, 'add', '.'); git(root, 'commit', '-qm', 'Below the floor, with a stale aggregate');
+  for (const args of [['upgrade', '--json'], ['upgrade', '--version', runtimeIdentity.version, '--json']]) {
+    const result = run(root, args, {fail: true});
+    assert.equal(result.status, 1, args.join(' '));
+    assert.equal(JSON.parse(result.stdout).error.code, 'below_floor', args.join(' '));
+    assert.equal(git(root, 'status', '--porcelain', '--untracked-files=all').trim(), '', `${args.join(' ')} wrote nothing`);
+  }
 });

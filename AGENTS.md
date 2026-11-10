@@ -118,7 +118,7 @@ the token module, public asset symlinks, `timds.consumer.json`,
 The site reads the pinned submodule at build time: never copy stylesheets,
 tokens, or media out of it. The token module mirrors the starter build's
 `--group-name` rule in
-`templates/starter/scripts/viewer.mjs`; change the two together.
+`src/viewer.mjs`; change the two together.
 Public assets stay in the pin and are exposed through relative symlinks in
 the site's `public/`; the links and their descendants are protected paths.
 Refuse collisions with generated public files instead of replacing them.
@@ -137,16 +137,22 @@ framework configuration, documentation, or generated artifacts without an
 explicit contract change and migration plan.
 
 The starter scaffold has its own recorded boundary, kept by `src/starter.mjs`
-and `.timds/starter.json` in the client repository. A fresh `init` records it;
-an existing starter-based system opts in once with `timds starter sync`, and
-every `upgrade` syncs an adopted system from then on. Inside that boundary the
-toolkit may touch exactly three kinds of things: the starter plumbing
-(`scripts/build.mjs`, `check.mjs`, `dev.mjs`, `viewer.mjs`,
-`brand-kit.mjs`, `src/scripts/compose.js`, `src/styles/canvas.css`, `src/styles/viewer.css`),
+and `.timds/starter.json` in the client repository. A fresh `init` records it,
+and every `upgrade` syncs it from then on. The toolkit supports only systems
+at or above the starter floor: a starter-based system whose record is missing
+or has no `level` (or one below the floor) predates starter levels, and
+`upgrade`, `starter sync`, `starter migrate`, `feed` and `shoot` refuse it with
+`below_floor` before writing anything, while `check` and `doctor` only warn.
+It is regenerated from the current starter. Never add code that recognizes,
+migrates or keeps building a shape from before the floor. Inside that boundary the
+toolkit may touch exactly four kinds of things: the starter plumbing
+(the stub `scripts/build.mjs`, `check.mjs` and `dev.mjs`, which call the
+renderer in the package, `@dtconcepts/timds/viewer` in `src/viewer.mjs`, and
+`src/scripts/compose.js`, `src/styles/canvas.css`, `src/styles/viewer.css`),
 which a fresh `init`
 records as the toolkit's outright (`plumbing: "toolkit"`: every sync brings
-it to stock, replacing a local change and reporting it, never halting) and an
-adopted system records by hash (`"recorded"`: replaced only while the file
+it to stock, replacing a local change and reporting it, never halting) and
+the `"recorded"` mode keeps by hash (replaced only while the file
 matches a hash the toolkit wrote); the structure catalogs `src/site.json`
 and `src/formats.json`, merged three ways against the recorded stock baseline
 so entries the client lacks are appended (pages as `planned`), fields still
@@ -156,10 +162,17 @@ removed, reordered, or retitled; and the authored overview
 fragments the starter ships
 (`starterManagedFragments`), written when the sync adds or authors their page
 and refreshed only while unmodified. `src/layout.html` only gains a missing
-stock stylesheet link and the changelog link on its version chip. Every other fragment, `tokens.json`, `system.css`, and
-the rest of authored source stay outside the boundary. The site's `home`
-selection, including its absence, is authored routing: sync and parent feeds
-preserve it so existing links and guidance routes remain stable. Recorded plumbing
+stock stylesheet link; and the numbered starter steps (`starterSteps` in `src/starter.mjs`, applied by
+`src/starter-steps.mjs` and published as `describeToolkitRelease().starterSteps`),
+which change defaults a system never chose through a closed vocabulary
+(`remove-file`, `set-site-field`, `set-page-field`) and record the level reached
+in `.timds/starter.json` (`level`, `declined`). Every other fragment,
+`tokens.json`, `system.css`, and the rest of authored source stay outside the
+boundary. The site's `home`
+selection, including its absence, is authored routing: the merge and parent
+feeds preserve it so existing links and guidance routes remain stable; only a
+declared visible step may set it, and only through an explicit
+`timds starter migrate --accept`. Recorded plumbing
 that was customized is asked about file by file when the sync or upgrade runs
 in a terminal, and otherwise reported and replaced only by an explicit
 `timds starter sync --force <path>` that names each file; `upgrade --force` covers the managed boundary
@@ -170,7 +183,19 @@ whole, and `upgrade` runs
 it before touching managed files so a failed sync aborts the upgrade with the
 repository as it was. A structural change to `templates/starter` therefore
 reaches existing systems through this sync; do not add another one-shot
-migration for it.
+migration for it. A change to a default a system may already hold (a moved
+stock title, a field the merge cannot advance, a file to retire) is a new
+starter step: raise `STARTER_LEVEL`, add the step to `starterSteps` as data
+from the closed vocabulary (steps cover `STARTER_FLOOR + 1` through
+`STARTER_LEVEL`), keep `starter-levels.test.mjs` proving the steps' JSON gives
+what the commands write, and mark it `visible` when it changes what visitors
+see (upgrade and sync never apply a visible step with something to change).
+Raising the floor prunes the steps at or below it. A new operation or
+requirement raises `hostContract` in `package.json`. The viewer, build,
+check and dev logic live in `src/viewer.mjs`; the starter's scripts are stubs
+that call it, and a system's extra build steps are `timds.json`
+`workspace.after.build` commands, never a module the build imports. `feed`
+carries no code: it never writes plumbing into an offshoot.
 
 `timds defaults --apply` is the explicit migration for shared publishing defaults.
 It updates only `publishing.targets` and `publishing.targetDefaults` and records
@@ -264,9 +289,11 @@ When adding a view, a page, or a catalog:
    `CLAUDE.md` describing the new structure.
 3. A changed plumbing file or managed fragment needs its hash bookkeeping:
    starter sync refreshes a file only while its bytes match a stock version
-   the toolkit shipped, and an adopted system's `.timds/starter.json` can
-   sit behind its files, so `legacyStarterFileHashes` in `src/starter.mjs`
-   must list every version a release shipped. After changing a template
+   the toolkit shipped, and a system's `.timds/starter.json` can sit behind
+   its files, so `legacyStarterFileHashes` in `src/starter.mjs` must list
+   every version a release at or above the floor shipped (it starts empty at
+   the floor; the history check walks the releases from the first one that
+   carries starter levels). After changing a template
    that a release already shipped, run
    `node scripts/check-starter-history.mjs --print` and add the entries it
    lists; CI runs the check and fails on a gap. A new authored page under a
@@ -283,12 +310,11 @@ When adding a view, a page, or a catalog:
 content. It mirrors the slots, samples, views, page ids and exact stock paths
 exported by `src/brand-kit.mjs`. Change the overlay, export, declarations,
 rendering tests, docs and skills together in one release. Shared plumbing
-stays in the ordinary starter; its managed `scripts/brand-kit.mjs` is copied
-from that pure source module so the viewer and integrations use one contract.
+stays in the ordinary starter; the package viewer (`src/viewer.mjs`) imports
+that pure source module, so the viewer and integrations use one contract.
 
 `.timds/starter.json` records `starter` (`starter` when absent). Starter sync
-selects catalogs, managed fragments, stock template paths and
-`templates/starter-history/<kind>/` from it. The kit manages no fragment: its
+selects catalogs, managed fragments and stock template paths from it. The kit manages no fragment: its
 pages are seed-only, written once by `init --starter brand-kit` and authored
 from then on on the published kit parent (the toolkit keeps code, the parent
 keeps design), so no sync or upgrade writes, refreshes, records or reports
@@ -346,7 +372,7 @@ is adopted from the release it names. Parent baselines and hashes advance only
 after a successful check, with rollback on failure. Ordinary
 starter sync/upgrade keeps offshoot plumbing current and preserves its parent
 record and catalog baselines; it still maintains missing stock stylesheet links
-and the changelog version-chip link within the narrow layout boundary.
+within the narrow layout boundary.
 `sever` requires confirmation and removes only
 the local parent record; hosted catalog severing remains a host operation.
 Public derived readers and provenance expose lineage or null, never baselines

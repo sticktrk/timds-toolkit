@@ -4,8 +4,8 @@ An offshoot starts from one immutable parent release and keeps a structural
 feed baseline. A starter is a seed: its structure comes from the toolkit.
 An offshoot's structure comes from its parent; ordinary toolkit upgrades keep
 its plumbing current without adding the starter's pages or changing ancestry.
-They also maintain the layout's missing stock stylesheet links and changelog
-version-chip link, within the starter's existing narrow layout boundary.
+They also maintain the layout's missing stock stylesheet links, within the
+starter's existing narrow layout boundary.
 Uncommitted catalogs and authored fragments do not block this plumbing sync;
 its cleanliness check covers only the plumbing, layout and starter record it
 may write. Feed checks its own catalog and plumbing write paths separately.
@@ -126,11 +126,13 @@ creation, and in both modes it names the files feed keeps following the parent
 while the child leaves them unmodified (see below). Ordinary upgrades never
 touch them. Included pages must be self-contained: a link to an omitted design
 or asset fails the resulting workspace check. A declared path that is also
-plumbing (`src/styles/viewer.css`, `canvas.css`) stays the toolkit's and the
-stock pass skips it. A declared `src/layout.html` must carry the stylesheet
-links and changelog version chip that starter sync maintains on the parent
-too: a later local insertion changes the child's bytes and makes the layout a
-graft.
+plumbing (`src/styles/viewer.css`, `canvas.css`) stays the toolkit's: the
+source is accepted, shoot and feed record no stock hash for it, feed never
+writes it, and its report lists it in `stock` and `files` as `{ path, status:
+"skipped", note: "toolkit plumbing: the parent declares it as stock, but feed
+never writes plumbing (only upgrade does), so it was not fed" }`. A declared `src/layout.html` must carry the stylesheet
+links that starter sync maintains on the parent too: a later local insertion
+changes the child's bytes and makes the layout a graft.
 
 ## Feed and grafts
 
@@ -148,17 +150,18 @@ shades a new parent change; keeping it is the default. To accept that parent
 value, edit the named catalog field and review the result. Reports do not
 repeat a conflict after its baseline has advanced.
 
-Only catalogs, verified recorded plumbing, the parent's declared stock and
-the two bookkeeping records can change. Tokens, media, designs, Evidence and
-every file the parent does not declare are never copied.
-Plumbing follows `.timds/starter.json`'s ownership mode: `toolkit` replaces
-and reports changes; `recorded` keeps a customized file unless the terminal
-prompt approves replacement or `--force scripts/viewer.mjs` names it.
-In full mode, customized parent plumbing that no longer matches its recorded
-hash is authored source: feed reports and skips it while merging catalogs.
-Force cannot copy it. Structure mode continues to require verified plumbing.
-`--force` never reaches authored content and refuses a stock path. Commit or
-stash uncommitted changes to any file feed will write first.
+Only catalogs, the parent's declared stock and `.timds/parent.json` can
+change. Feed carries no code: it never writes plumbing (the stub scripts, the
+composer script, the viewer and canvas stylesheets) or the child's
+`.timds/starter.json`, whatever the parent recorded, because a system's code
+is its own toolkit selection and only `upgrade` writes it. Tokens, media,
+designs, Evidence and every file the parent does not declare are never
+copied. Ordinary starter sync and upgrade take only the `code` starter steps
+on an offshoot; `defaults` steps run on the parent and reach the child
+through `feed`, so they settle on the child as skipped. A parent release or a
+child from before starter levels is refused (`below_floor`), and `shoot`
+refuses such a parent. Commit or stash uncommitted changes to any file feed
+will write first.
 
 Declared stock follows the parent by hash. For each path the new release's
 `.timds/stock.json` declares, feed compares the child's file with the hash
