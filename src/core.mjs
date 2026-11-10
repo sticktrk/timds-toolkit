@@ -69,7 +69,7 @@ import { normalizeProvider, runHostedCommand, sessionReference, workspaceProvide
 import { buildBundle, describeBundle, normalizeBundleConfig } from "./bundle.mjs";
 import { DESIGNS_SOURCE_DIRECTORY, buildDesigns, checkDesigns, declaredClasses, readDesignCatalog, renderDesigns } from "./designs.mjs";
 import { CHANGELOG_FILE, CHANGELOG_OUTPUT_DIRECTORY, buildChangelog, readUnreleasedNotes, renderChangelog, versionDate } from "./changelog.mjs";
-import { STARTER_KINDS, STARTER_LAYOUT_FILE, STARTER_RECORD_FILE, STARTER_SITE_FILE, describeStarterSteps, describeStarterSync, forceReplaceable, isStarterSystem, readStarterRecord, recordFreshStarter, requireStarterFloor, starterKind, starterPaths, starterPlumbingFiles, starterStatus, starterStatusPlan, syncStarter } from "./starter.mjs";
+import { STARTER_KINDS, STARTER_LAYOUT_FILE, STARTER_RECORD_FILE, STARTER_SITE_FILE, describeStarterSteps, starterRemovalPaths, describeStarterSync, forceReplaceable, isStarterSystem, readStarterRecord, recordFreshStarter, requireStarterFloor, starterKind, starterPaths, starterPlumbingFiles, starterStatus, starterStatusPlan, syncStarter } from "./starter.mjs";
 import { extractArtifact, normalizeMachineConfig } from "./extract.mjs";
 import { normalizeWorkspaceAfter, viewerAppBarEntries } from "./viewer.mjs";
 import { readFormatCatalog } from "./formats.mjs";
@@ -858,7 +858,7 @@ async function preflightBinarySkills(workspace, previous, force) {
 async function binaryRollbackPaths(workspace) {
   const record = await readStarterRecord(workspace.designSystemRoot);
   const syncPaths = workspace.parentRecord
-    ? [...starterPlumbingFiles.map(([relative]) => relative), STARTER_LAYOUT_FILE, STARTER_RECORD_FILE]
+    ? [...starterPlumbingFiles.map(([relative]) => relative), STARTER_LAYOUT_FILE, STARTER_RECORD_FILE, ...starterRemovalPaths()]
     : starterPaths(record?.starter);
   return [workspace.manifestPath, ...['.timds/contract-layout.json', 'tokens', 'media', 'tokens.json', 'media.json', 'dist'].map(file => path.join(workspace.designSystemRoot, file)), ...syncPaths.map(file => path.join(workspace.designSystemRoot, file)),
     path.join(workspace.designSystemRoot, '.timds/installation.json'), path.join(workspace.designSystemRoot, '.timds/cli'), path.join(workspace.repoRoot, '.claude/skills'),
@@ -1406,10 +1406,21 @@ export async function initializeRepository(repoRootInput, {
   return { consumer, created, designSystemRoot, initializedArtifact, repoRoot, starter: selectedStarter, manifest: JSON.parse(await fs.readFile(manifestPath, "utf8")), layout: standalone ? "standalone" : "embedded", ...installed };
 }
 
+/**
+ * The read-only starter floor preflight every command that refuses a system
+ * below the floor runs first: it locates the design system without loading
+ * the workspace (whose default load regenerates the tokens and media
+ * aggregates) and throws `below_floor` before anything can be written.
+ */
+async function preflightStarterFloor(repoRootInput, options) {
+  const { designSystemRoot } = resolveDesignSystemRoot(await findRepositoryRoot(repoRootInput));
+  return requireStarterFloor(designSystemRoot, options);
+}
+
 export async function upgradeRepository(repoRootInput, { autoRelease = false, decideCustomized = null, dependencyPrs = false, force = false } = {}) {
-  const workspace = await loadWorkspace(repoRootInput);
   // A starter-based system from before starter levels is regenerated, never upgraded.
-  await requireStarterFloor(workspace.designSystemRoot);
+  await preflightStarterFloor(repoRootInput);
+  const workspace = await loadWorkspace(repoRootInput);
   const identity = await toolkitPackageIdentity();
   if (!await readBinaryInstallation(workspace.designSystemRoot)) await requirePinnedToolkitDependency(workspace.repoRoot, identity);
   if (autoRelease && workspace.layout !== "standalone") {
@@ -1472,7 +1483,7 @@ async function requireCleanStarterFiles(workspace) {
   const record = await readStarterRecord(workspace.designSystemRoot);
   if ((await workspaceProvider(workspace.repoRoot))?.kind === "hosted") return;
   const syncPaths = workspace.parentRecord
-    ? [...starterPlumbingFiles.map(([relative]) => relative), STARTER_LAYOUT_FILE, STARTER_RECORD_FILE]
+    ? [...starterPlumbingFiles.map(([relative]) => relative), STARTER_LAYOUT_FILE, STARTER_RECORD_FILE, ...starterRemovalPaths()]
     : starterPaths(record?.starter);
   await requireCleanPaths(workspace.designSystemRoot, syncPaths, {
     message: 'Starter sync refuses to run over uncommitted changes to the files it writes',
@@ -1536,9 +1547,9 @@ function terminalPlumbingPrompt() {
  * layers it touches and the ones it never does.
  */
 export async function syncStarterWorkspace(repoRootInput, { decideCustomized = null, force = [] } = {}) {
+  const record = await preflightStarterFloor(repoRootInput);
   const workspace = await loadWorkspace(repoRootInput);
   const identity = await toolkitPackageIdentity();
-  const record = await requireStarterFloor(workspace.designSystemRoot);
   const plumbing = starterPlumbingFiles.map(([relative]) => relative);
   const unknown = force.filter((relative) => !plumbing.includes(relative));
   if (unknown.length) {
@@ -1557,9 +1568,9 @@ export async function syncStarterWorkspace(repoRootInput, { decideCustomized = n
  * where the host reviews the result.
  */
 export async function migrateStarterWorkspace(repoRootInput, { accept = [], decline = [] } = {}) {
+  const record = await preflightStarterFloor(repoRootInput);
   const workspace = await loadWorkspace(repoRootInput);
   const identity = await toolkitPackageIdentity();
-  const record = await requireStarterFloor(workspace.designSystemRoot);
   await requireCleanStarterFiles(workspace);
   return syncStarter({ accept, check: () => checkWorkspace(workspace.repoRoot), decline, designSystemRoot: workspace.designSystemRoot, record: record ?? undefined, parent: workspace.parentRecord, version: identity.version });
 }
@@ -1933,7 +1944,7 @@ async function runUpgradeCommand(root, options) {
   }
   const designSystemRoot = resolveDesignSystemRoot(await findRepositoryRoot(root)).designSystemRoot;
   // A starter-based system from before starter levels is refused before any
-  // selection, install or write: it is regenerated, never upgraded.
+  // selection, workspace load, install or write: it is regenerated, never upgraded.
   await requireStarterFloor(designSystemRoot);
   if (await readBinaryInstallation(designSystemRoot)) {
     const result = await upgradeBinaryRepository(root, options);
@@ -2107,7 +2118,12 @@ export async function runCli(argv) {
     if (options.sourceFile && ['from', 'version', 'ref', 'sourceId', 'portalUrl'].some(name => options[name] !== undefined)) throw new Error(`Usage: ${feedUsage}\n--source-file reads a published source export and cannot be combined with --from, --version, --ref, --source-id or --portal-url`);
     if (options.baselineFile && !options.sourceFile) throw new Error(`Usage: ${feedUsage}\n--baseline-file requires --source-file`);
     const feed = async () => {
-      const workspace = await loadWorkspace(root);
+      // Feed refuses a child below the starter floor before anything else,
+      // and loads the workspace read-only (no aggregate regeneration) until
+      // feedOffshoot has also checked the parent's release; its own writes,
+      // and the check that regenerates the aggregates, come only after that.
+      await preflightStarterFloor(root, { what: 'This offshoot' });
+      const workspace = await loadWorkspace(root, { editing: true });
       const parent = workspace.parentRecord;
       if (!parent) throw Object.assign(new Error('This system has no parent to feed'), {failureCode: 'not_offshoot'});
       // A record shot before stock hashes needs the release it names to adopt

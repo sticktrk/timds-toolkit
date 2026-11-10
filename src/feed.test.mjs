@@ -198,6 +198,21 @@ test("feed writes no plumbing: a child keeps its own whatever the parent recorde
   }
 });
 
+test("a parent's declared stock that is toolkit plumbing is accepted, reported, never written and never recorded", async (t) => {
+  const { root, texts } = await fixture(t, { stockFiles: { "src/styles/viewer.css": hash("/* recorded by an earlier shoot */\n") } });
+  await write(root, "src/styles/viewer.css", "/* the child's chrome */\n");
+  const source = nextSource({ stock: { "src/styles/viewer.css": "/* the parent's chrome */\n", [page("buttons")]: "<h1>Parent button</h1>\n" } });
+  const report = await feedOffshoot({ designSystemRoot: root, source });
+  const expected = { path: "src/styles/viewer.css", status: "skipped", note: "toolkit plumbing: the parent declares it as stock, but feed never writes plumbing (only upgrade does), so it was not fed" };
+  assert.deepEqual(report.stock.find((entry) => entry.path === "src/styles/viewer.css"), expected);
+  assert.deepEqual(report.files.find((entry) => entry.path === "src/styles/viewer.css"), expected);
+  assert.ok(!report.written.includes("src/styles/viewer.css"));
+  assert.equal(await read(root, "src/styles/viewer.css"), "/* the child's chrome */\n");
+  assert.deepEqual((await readJson(root, ".timds/parent.json")).files, { [page("buttons")]: hash("<h1>Parent button</h1>\n") }, "no stock hash is recorded for plumbing, and an earlier one is dropped");
+  assert.match(describeFeed(report).join("\n"), /Not fed: src\/styles\/viewer\.css is toolkit plumbing/);
+  assert.equal(await read(root, ".timds/starter.json"), texts[".timds/starter.json"]);
+});
+
 test("feed refuses a child or a parent release below the starter floor before writing anything", async (t) => {
   const { root, texts } = await fixture(t);
   const record = JSON.parse(texts[".timds/starter.json"]);
@@ -529,12 +544,72 @@ test("a child fed from a parent whose recorded plumbing differs keeps its own by
   await assert.rejects(runWithOutputSink(() => {}, () => runCli(["feed", "--root", child, "--from", parentRoot, "--force", "scripts/build.mjs"])), /Feed carries no code/);
 });
 
-test("shoot refuses a parent below the starter floor", async (t) => {
+/** Leave a committed tokens.json aggregate stale, so any default workspace load would rewrite it. */
+async function staleAggregates(root) {
+  const group = await readJson(root, "tokens/space.json");
+  group["1"].value = "0.3rem";
+  await write(root, "tokens/space.json", json(group));
+}
+const cleanTree = (root, label) => assert.equal(gitIn(root, "status", "--porcelain", "--untracked-files=all"), "", `${label} wrote nothing`);
+const belowFloor = (error) => error.failureCode === "below_floor" && /predates starter levels/.test(error.message);
+
+test("feed refuses a child or a parent below the floor without touching either tree, stale aggregates included", async (t) => {
+  const { parentRoot, child } = await runnerFixture(t);
+  await fs.rm(path.join(child, ".timds/session.json"));
+  await staleAggregates(child);
+  gitIn(child, "add", "--all"); gitIn(child, "commit", "-qm", "A stale aggregate");
+  // The parent's release predates starter levels.
+  const parentRecord = await readJson(parentRoot, ".timds/starter.json");
+  delete parentRecord.level;
+  await write(parentRoot, ".timds/starter.json", json(parentRecord));
+  gitIn(parentRoot, "add", "--all"); gitIn(parentRoot, "commit", "-qm", "A parent from before starter levels");
+  await assert.rejects(runWithOutputSink(() => {}, () => runCli(["feed", "--root", child, "--from", parentRoot, "--source-id", runnerSourceId])), belowFloor);
+  cleanTree(child, "feed from a below-floor parent");
+  cleanTree(parentRoot, "feed from a below-floor parent (parent)");
+  assert.equal(await feedFailure(["--root", child, "--from", parentRoot, "--source-id", runnerSourceId, "--json"], /predates starter levels/), "below_floor");
+  cleanTree(child, "feed --json from a below-floor parent");
+  // The child predates starter levels.
+  const childRecord = await readJson(child, ".timds/starter.json");
+  delete childRecord.level;
+  await write(child, ".timds/starter.json", json(childRecord));
+  gitIn(child, "add", "--all"); gitIn(child, "commit", "-qm", "A child from before starter levels");
+  await assert.rejects(runWithOutputSink(() => {}, () => runCli(["feed", "--root", child, "--from", parentRoot, "--source-id", runnerSourceId])), (error) => belowFloor(error) && /This offshoot predates/.test(error.message));
+  cleanTree(child, "feed into a below-floor child");
+});
+
+test("shoot records no stock hash for a declared plumbing path, and feed reports it as not fed", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "timds-feed-plumbing-stock-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const parentRoot = path.join(directory, "parent"), child = path.join(directory, "child");
+  await fs.mkdir(parentRoot);
+  gitIn(parentRoot, "init", "-q", "-b", "main"); gitIn(parentRoot, "config", "user.email", "test@example.com"); gitIn(parentRoot, "config", "user.name", "Test");
+  await runWithOutputSink(() => {}, () => initializeRepository(parentRoot, { standalone: true, systemId: "example/core", name: "Example Core" }));
+  await write(parentRoot, ".timds/stock.json", json({ schemaVersion: 1, paths: ["src/pages/brand/color.html", "src/styles/viewer.css"] }));
+  gitIn(parentRoot, "add", "--all"); gitIn(parentRoot, "commit", "-qm", "Parent declares a plumbing path as stock");
+  await shootOffshoot({ destination: child, source: await loadOffshootSource(parentRoot, { sourceId: runnerSourceId }), systemId: "example/child" });
+  assert.deepEqual(Object.keys((await readJson(child, ".timds/parent.json")).files), ["src/pages/brand/color.html"]);
+  gitIn(child, "config", "user.email", "test@example.com"); gitIn(child, "config", "user.name", "Test");
+  gitIn(child, "add", "--all"); gitIn(child, "commit", "-qm", "Child");
+  const childChrome = await read(child, "src/styles/viewer.css");
+  await write(parentRoot, "src/styles/viewer.css", `${await read(parentRoot, "src/styles/viewer.css")}\n/* the parent's chrome */\n`);
+  gitIn(parentRoot, "add", "--all"); gitIn(parentRoot, "commit", "-qm", "Parent changes its chrome");
+  const report = await runFeed(["--root", child, "--from", parentRoot, "--source-id", runnerSourceId, "--json"]);
+  assert.deepEqual(report.stock.find((entry) => entry.path === "src/styles/viewer.css"), { path: "src/styles/viewer.css", status: "skipped", note: "toolkit plumbing: the parent declares it as stock, but feed never writes plumbing (only upgrade does), so it was not fed" });
+  assert.equal(await read(child, "src/styles/viewer.css"), childChrome);
+  assert.deepEqual(Object.keys((await readJson(child, ".timds/parent.json")).files), ["src/pages/brand/color.html"]);
+});
+
+test("shoot refuses a parent below the starter floor without touching it, stale aggregates included", async (t) => {
   const { parentRoot, directory } = await (async () => { const fixture = await runnerFixture(t); return { ...fixture, directory: path.dirname(fixture.parentRoot) }; })();
   const record = await readJson(parentRoot, ".timds/starter.json");
   delete record.level;
   await write(parentRoot, ".timds/starter.json", json(record));
+  await staleAggregates(parentRoot);
   gitIn(parentRoot, "add", "--all"); gitIn(parentRoot, "commit", "-qm", "A parent from before starter levels");
+  const cliDestination = path.join(directory, "cli-child");
+  await assert.rejects(runWithOutputSink(() => {}, () => runCli(["shoot", parentRoot, "--system-id", "example/cli-child", "--source-id", runnerSourceId, "--root", cliDestination])), belowFloor);
+  await assert.rejects(fs.access(cliDestination), { code: "ENOENT" });
+  cleanTree(parentRoot, "shoot from a below-floor parent");
   const source = await loadOffshootSource(parentRoot, { sourceId: runnerSourceId });
   const destination = path.join(directory, "too-old-child");
   await assert.rejects(shootOffshoot({ destination, source, systemId: "example/too-old" }), (error) => error.failureCode === "below_floor");

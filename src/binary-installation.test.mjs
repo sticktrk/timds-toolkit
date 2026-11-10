@@ -219,3 +219,20 @@ test('every executable download names the one public download host', async () =>
   }
   assert.ok(downloads >= 7, `expected the stock workflows and install docs to download executables, found ${downloads}`);
 });
+
+test('binary upgrade refuses a system below the starter floor before any write, stale aggregates included', async t => {
+  const root = await fixture(t);
+  const record = await read(root, '.timds/starter.json');
+  delete record.level;
+  await fs.writeFile(path.join(root, '.timds/starter.json'), `${JSON.stringify(record, null, 2)}\n`);
+  const group = await read(root, 'tokens/space.json');
+  group['1'].value = '0.3rem';
+  await fs.writeFile(path.join(root, 'tokens/space.json'), `${JSON.stringify(group, null, 2)}\n`);
+  git(root, 'add', '.'); git(root, 'commit', '-qm', 'Below the floor, with a stale aggregate');
+  for (const args of [['upgrade', '--json'], ['upgrade', '--version', runtimeIdentity.version, '--json']]) {
+    const result = run(root, args, {fail: true});
+    assert.equal(result.status, 1, args.join(' '));
+    assert.equal(JSON.parse(result.stdout).error.code, 'below_floor', args.join(' '));
+    assert.equal(git(root, 'status', '--porcelain', '--untracked-files=all').trim(), '', `${args.join(' ')} wrote nothing`);
+  }
+});

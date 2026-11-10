@@ -102,9 +102,13 @@ export async function declaredStock(files) {
   return stock;
 }
 
-/** SHA-256 of each declared stock file's source bytes; `{}` when none is declared. */
+/**
+ * SHA-256 of each declared stock file's source bytes; `{}` when none is
+ * declared. A declared path that is toolkit plumbing is never fed stock, so it
+ * has no stock hash.
+ */
 export function stockHashes(files, stock) {
-  return Object.fromEntries((stock?.paths || []).map(file => [file, sha256(files.get(file))]));
+  return Object.fromEntries((stock?.paths || []).filter(file => !isPlumbingPath(file)).map(file => [file, sha256(files.get(file))]));
 }
 
 function toolkitVersionFrom(lockText, installationText, label) {

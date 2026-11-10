@@ -102,7 +102,10 @@ export async function feedOffshoot({ designSystemRoot, source, baseline = null, 
     recordedFiles = stockHashes(baselineFiles, await declaredStock(baselineFiles));
   }
   const declared = await declaredStock(sourceFiles);
-  // Plumbing stays the toolkit's even where a stylesheet path is also declared.
+  // Plumbing stays the toolkit's even where the parent also declares the path
+  // as stock: the source is accepted, the path is reported, and it is never
+  // written into the child or recorded as fed stock.
+  const declaredPlumbing = (declared?.paths ?? []).filter((relative) => isPlumbingPath(relative));
   const stockPaths = (declared?.paths ?? []).filter((relative) => !isPlumbingPath(relative));
   const manifest = sourceJson(sourceFiles, "timds.json");
   if (manifest?.systemId !== identity.systemId || manifest?.version !== identity.version) throw Object.assign(new Error("The parent source identity or version disagrees with its release"), { failureCode: "parent_mismatch" });
@@ -112,7 +115,8 @@ export async function feedOffshoot({ designSystemRoot, source, baseline = null, 
   // before either the planner or a target write sees them.
   validateParentRecord({ schemaVersion: 1, ...identity, mode: parent.mode, baseline: { site: rawSite, formats } });
   const site = parent.mode === "structure" ? structureSite(rawSite) : rawSite;
-  const nextStockFiles = { ...recordedFiles };
+  // Fed stock never includes toolkit plumbing, whatever an earlier record held.
+  const nextStockFiles = Object.fromEntries(Object.entries(recordedFiles).filter(([relative]) => !isPlumbingPath(relative)));
   const nextParent = { ...parent, version: identity.version, commit: identity.commit, baseline: { site, formats }, files: nextStockFiles };
   const files = [], writes = [];
   const plan = async (relative, content, status, note, desiredMode) => {
@@ -172,6 +176,14 @@ export async function feedOffshoot({ designSystemRoot, source, baseline = null, 
       }
     }
     stock.push({ path: relative, status, ...(note ? { note } : {}) });
+  }
+  // A path the parent declares as stock that is toolkit plumbing: reported,
+  // never written, never recorded.
+  const plumbingNote = "toolkit plumbing: the parent declares it as stock, but feed never writes plumbing (only upgrade does), so it was not fed";
+  for (const relative of declaredPlumbing) {
+    const entry = { path: relative, status: "skipped", note: plumbingNote };
+    stock.push(entry);
+    files.push({ ...entry });
   }
   const currentSite = JSON.parse(await fs.readFile(await regularPath(designSystemRoot, STARTER_SITE_FILE), "utf8"));
   const findPage = (model, id) => {
@@ -233,6 +245,7 @@ export function describeFeed(report) {
   lines.push(...ordinary);
   for (const graft of kept) lines.push(`Your graft shades the parent's change at ${graft.path}; kept ${JSON.stringify(graft.current)} (parent: ${JSON.stringify(graft.stock)}). Keep your graft, or edit that field to let the parent through.`);
   for (const entry of report.stock ?? []) {
+    if (entry.status === "skipped") lines.push(`Not fed: ${entry.path} is toolkit plumbing; the parent declares it as stock, but feed never writes plumbing (only upgrade does).`);
     if (entry.status !== "created") continue;
     const id = stockPageId(entry.path);
     lines.push(id ? `New stock page from the parent: ${entry.path}, catalog page ${id}.` : `New stock file from the parent: ${entry.path}.`);

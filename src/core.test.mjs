@@ -71,6 +71,19 @@ async function jsonFailure(argv, expected) {
 }
 
 /**
+ * Leave the committed tokens.json aggregate stale: a token group changes
+ * without the aggregate being regenerated, as an editor may commit it. Any
+ * default workspace load rewrites tokens.json, so a refusal that loaded the
+ * workspace first would leave the tree dirty.
+ */
+async function staleAggregates(repoRoot) {
+  const file = path.join(repoRoot, "tokens/space.json");
+  const group = JSON.parse(await fs.readFile(file, "utf8"));
+  group["1"].value = "0.3rem";
+  await writeJson(file, group);
+}
+
+/**
  * Rewind a fresh standalone scaffold to a system recorded at the current
  * starter level under a release whose scaffold had only the Brand and Web
  * views: no Digital, Social, Print or Use views, no format catalog, composer
@@ -1453,14 +1466,22 @@ test("a starter-based system below the floor is refused before any write, and ch
       delete record.declined;
       await writeJson(recordPath, record);
     }
-    commitAll(repoRoot, `A system with ${shape}`);
+    await staleAggregates(repoRoot);
+    commitAll(repoRoot, `A system with ${shape} and a stale tokens.json aggregate`);
+    const clean = (label) => assert.equal(execFileSync("git", ["status", "--porcelain", "--untracked-files=all"], { cwd: repoRoot, encoding: "utf8" }).trim(), "", `${shape}: ${label} wrote nothing`);
     const belowFloor = (error) => error.failureCode === "below_floor" && /predates starter levels/.test(error.message) && /Regenerate it from the current starter/.test(error.message);
     await assert.rejects(upgradeRepository(repoRoot), belowFloor);
+    clean("upgradeRepository");
     await assert.rejects(syncStarterWorkspace(repoRoot), belowFloor);
+    clean("starter sync");
     await assert.rejects(runWithOutputSink(() => {}, () => runCli(["starter", "migrate", "--root", repoRoot])), belowFloor);
+    clean("starter migrate");
+    await assert.rejects(runWithOutputSink(() => {}, () => runCli(["upgrade", "--root", repoRoot])), belowFloor);
+    clean("upgrade");
     for (const argv of [["upgrade", "--json"], ["upgrade", "--version", "0.1.999", "--json"], ["starter", "migrate", "--json"]]) {
       const receipt = await jsonFailure([...argv, "--root", repoRoot], /predates starter levels/);
       assert.deepEqual([receipt.ok, receipt.error.code], [false, "below_floor"], argv.join(" "));
+      clean(argv.join(" "));
     }
     assert.equal(execFileSync("git", ["status", "--porcelain", "--untracked-files=all"], { cwd: repoRoot, encoding: "utf8" }).trim(), "", `${shape}: nothing was written`);
     // It still builds and stays editable until it is regenerated: check and doctor warn.

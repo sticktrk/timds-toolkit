@@ -126,8 +126,11 @@ creation, and in both modes it names the files feed keeps following the parent
 while the child leaves them unmodified (see below). Ordinary upgrades never
 touch them. Included pages must be self-contained: a link to an omitted design
 or asset fails the resulting workspace check. A declared path that is also
-plumbing (`src/styles/viewer.css`, `canvas.css`) stays the toolkit's and the
-stock pass skips it. A declared `src/layout.html` must carry the stylesheet
+plumbing (`src/styles/viewer.css`, `canvas.css`) stays the toolkit's: the
+source is accepted, shoot and feed record no stock hash for it, feed never
+writes it, and its report lists it in `stock` and `files` as `{ path, status:
+"skipped", note: "toolkit plumbing: the parent declares it as stock, but feed
+never writes plumbing (only upgrade does), so it was not fed" }`. A declared `src/layout.html` must carry the stylesheet
 links that starter sync maintains on the parent too: a later local insertion
 changes the child's bytes and makes the layout a graft.
 

@@ -115,17 +115,26 @@ export function starterFragments(kind = "starter") {
   return starterKind(kind) === "starter" ? starterManagedFragments : [];
 }
 
-/** Every file the selected sync may write, for clean-tree guards and rollback. */
+/**
+ * Every file the selected sync may write or remove, for clean-tree guards,
+ * rollback and the upgrade write boundary: the plumbing, the kind's managed
+ * fragments, the catalogs, the layout, the record, and every path a
+ * `remove-file` operation of the starter steps in effect names.
+ */
 export function starterPaths(kind = "starter") {
-  return [
+  return [...new Set([
     ...starterPlumbingFiles.map(([relative]) => relative),
     ...starterFragments(kind).map(([relative]) => relative),
     STARTER_SITE_FILE, STARTER_FORMATS_FILE, STARTER_LAYOUT_FILE, STARTER_RECORD_FILE,
-  ];
+    ...starterRemovalPaths(),
+  ])];
 }
 
-/** The original starter boundary, retained for existing callers. */
-export const starterSyncPaths = Object.freeze(starterPaths());
+/** The files the starter steps in effect may remove (their `remove-file` paths), for any starter kind. */
+export function starterRemovalPaths() {
+  return [...new Set(starterDefinition().steps.flatMap((step) => step.operations.filter((operation) => operation.op === "remove-file").map((operation) => operation.path)))];
+}
+
 
 /** The stylesheet links the sync adds to a layout that lacks them. */
 const starterLayoutStylesheets = Object.freeze(["/styles/canvas.css", "/styles/viewer.css"]);
@@ -195,6 +204,9 @@ export function withStarterDefinition(definition, task) {
   const steps = validateStarterSteps(structuredClone(definition.steps), { floor: definition.floor, level: definition.level });
   return definitionOverride.run({ level: definition.level, floor: definition.floor, steps, reasons: definition.reasons ?? {} }, task);
 }
+
+/** The original starter boundary at this release's steps, retained for existing callers. */
+export const starterSyncPaths = Object.freeze(starterPaths());
 
 /** The `starterSteps` block of the release metadata: the level, the floor and every step, as plain JSON. */
 export function describeStarterSteps() {

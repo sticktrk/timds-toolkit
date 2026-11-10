@@ -243,6 +243,38 @@ test("a conflict stops the level below its step; the brand kit and a customized 
   assert.equal(await kit.exists("src/scripts/legacy.js"), false);
 });
 
+test("a removal step's path is inside the starter boundary: dirty-tree guard, rollback and the upgrade write boundary", async (t) => {
+  const { isUpgradeWritePath } = await import("./core.mjs");
+  const { starterPaths } = await import("./starter.mjs");
+  assert.ok(!starterPaths().includes("src/scripts/legacy.js"), "this release declares no removal");
+  assert.ok(await withSteps(async () => starterPaths("starter").includes("src/scripts/legacy.js") && starterPaths("brand-kit").includes("src/scripts/legacy.js") && isUpgradeWritePath("src/scripts/legacy.js")));
+
+  // An untracked file at the removal path: migrate refuses like any dirty starter file, and the file stays.
+  const untracked = await scaffold(t);
+  await untracked.write("src/scripts/legacy.js", legacyScript);
+  const dirty = (error) => error.failureCode === "dirty_worktree" && /src\/scripts\/legacy\.js/.test(error.message);
+  await assert.rejects(withSteps(() => quiet(() => runCli(["starter", "migrate", "--root", untracked.root]))), dirty);
+  await assert.rejects(withSteps(() => quiet(() => upgradeRepository(untracked.root))), dirty);
+  assert.equal(await untracked.read("src/scripts/legacy.js"), legacyScript);
+
+  // A modified tracked file at the removal path: the same refusal from upgrade and migrate.
+  const modified = await behind(t);
+  await modified.write("src/scripts/legacy.js", `${legacyScript}// edited, uncommitted\n`);
+  await assert.rejects(withSteps(() => quiet(() => upgradeRepository(modified.root))), dirty);
+  await assert.rejects(withSteps(() => quiet(() => runCli(["starter", "migrate", "--root", modified.root]))), dirty);
+  assert.match(await modified.read("src/scripts/legacy.js"), /edited, uncommitted/);
+
+  // A failed check after the removal restores the removed file with everything else.
+  const failing = await behind(t);
+  const manifest = JSON.parse(await failing.read("timds.json"));
+  await failing.write("timds.json", json({ ...manifest, workspace: { ...manifest.workspace, after: { build: [["node", "-e", "process.exit(3)"]] } } }));
+  failing.commit("A build step that fails");
+  await assert.rejects(withSteps(() => quiet(() => runCli(["starter", "migrate", "--root", failing.root]))), (error) => error.failureCode === "check_failed");
+  assert.equal(await failing.read("src/scripts/legacy.js"), legacyScript, "the removed file is restored");
+  assert.equal((await readStarterRecord(failing.root)).level, 1);
+  assert.equal(execFileSync("git", ["status", "--porcelain", "--untracked-files=all"], { cwd: failing.root, encoding: "utf8" }).trim(), "");
+});
+
 test("a fresh scaffold records the level in effect, and init under this release records level 1", async (t) => {
   const system = await scaffold(t);
   assert.deepEqual([(await readStarterRecord(system.root)).level, (await readStarterRecord(system.root)).declined], [1, []]);
