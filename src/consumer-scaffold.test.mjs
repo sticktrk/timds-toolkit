@@ -13,6 +13,7 @@ import {
   EMDASH_GENERATOR,
   EMDASH_RECORD_PATH,
   EMDASH_TEMPLATES_ROOT,
+  astroRoute,
   scaffoldExistingEmdashSite,
   validateEmdashTemplateSet,
   compileTokenCss,
@@ -979,6 +980,61 @@ test("--existing lists every colliding path at once and writes nothing", async (
   assert.match(error.message, /_emdash live collection/);
   assert.match(error.message, /Nothing was written/);
   assert.deepEqual(await treeHash(site), before);
+});
+
+test("--existing refuses a site page at a route a template page takes, and writes nothing", async (t) => {
+  const root = await temporaryDirectory(t);
+  const options = { skipInstall: true, templatesRoot: TEMPLATES, readDesigns: async () => [], output: quiet };
+  for (const [name, page, pattern] of [
+    ["page", "src/pages/articles.astro", /\/articles: the site's src\/pages\/articles\.astro and the template's src\/pages\/articles\/index\.astro/],
+    ["dynamic", "src/pages/articles/[id].astro", /\/articles\/\[slug\]: the site's src\/pages\/articles\/\[id\]\.astro and the template's src\/pages\/articles\/\[slug\]\.astro/],
+    ["markdown", "src/pages/topics/[name].md", /\/topics\/\[slug\]: the site's src\/pages\/topics\/\[name\]\.md/],
+    ["endpoint", "src/pages/articles/rss.xml.js", /\/articles\/rss\.xml: the site's src\/pages\/articles\/rss\.xml\.js and the template's src\/pages\/articles\/rss\.xml\.ts/],
+    ["html", "src/pages/articles/index.html", /\/articles: the site's src\/pages\/articles\/index\.html/],
+  ]) {
+    const site = await existingSite(path.join(root, name));
+    await write(path.join(site, page), "---\n---\n<h1>The site's own</h1>\n");
+    const before = await treeHash(site);
+    await assert.rejects(scaffoldExistingEmdashSite(site, options), (error) => {
+      assert.match(error.message, pattern);
+      assert.match(error.message, /Move or remove the site's page[\s\S]*Nothing was written/);
+      return true;
+    }, name);
+    assert.deepEqual(await treeHash(site), before, name);
+  }
+});
+
+test("--existing installs beside an unrelated page and one Astro ignores, and names a catch-all the article routes outrank", async (t) => {
+  const root = await temporaryDirectory(t);
+  const options = { skipInstall: true, templatesRoot: TEMPLATES, readDesigns: async () => [], output: quiet };
+  for (const [name, page] of [["unrelated", "src/pages/about.astro"], ["ignored", "src/pages/_articles.astro"], ["ignored-folder", "src/pages/_drafts/articles.astro"], ["static-beside", "src/pages/articles/featured.astro"]]) {
+    const site = await existingSite(path.join(root, name));
+    await write(path.join(site, page), "---\n---\n<h1>The site's own</h1>\n");
+    const result = await scaffoldExistingEmdashSite(site, options);
+    assert.ok(result.written.includes("src/pages/articles/index.astro"), name);
+    assert.deepEqual(result.shadowed, [], name);
+  }
+
+  const site = await existingSite(path.join(root, "catch-all"));
+  await write(path.join(site, "src/pages/[...path].astro"), "---\n---\n<h1>Anything</h1>\n");
+  const result = await scaffoldExistingEmdashSite(site, options);
+  assert.deepEqual([...new Set(result.shadowed.map((entry) => entry.existing))], ["src/pages/[...path].astro"]);
+  assert.ok(result.shadowed.some((entry) => entry.route === "/articles/[slug]"));
+  assert.ok(result.todos.some((item) => item.startsWith("src/pages/[...path].astro may have answered /articles")), result.todos.join("\n"));
+});
+
+test("Astro routes compare by shape, with index folders, endpoint names and ignored underscores", () => {
+  assert.deepEqual(astroRoute("articles.astro"), { route: "/articles", key: "/articles", segments: ["articles"] });
+  assert.equal(astroRoute("articles/index.mdx").key, "/articles");
+  assert.equal(astroRoute("index.astro").key, "/");
+  assert.equal(astroRoute("articles/rss.xml.ts").route, "/articles/rss.xml");
+  assert.equal(astroRoute("articles/[id].astro").key, astroRoute("articles/[slug].md").key);
+  assert.equal(astroRoute("docs/[...path].astro").key, astroRoute("docs/[...rest].ts").key);
+  assert.notEqual(astroRoute("docs/[...path].astro").key, astroRoute("docs/[path].astro").key);
+  assert.equal(astroRoute("post-[id].astro").key, "/post-[]");
+  assert.equal(astroRoute("_articles.astro"), null);
+  assert.equal(astroRoute("_drafts/articles.astro"), null);
+  assert.equal(astroRoute("articles/notes.txt"), null);
 });
 
 test("--existing restores the site when a write fails part-way", async (t) => {

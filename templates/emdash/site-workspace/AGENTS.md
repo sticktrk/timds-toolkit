@@ -15,6 +15,12 @@ source paths, so a change to how the site looks is a change to the system.
   same change: `__SITE_CHECK__`, run from the repository root, finds
   it and says what to add. Never change an existing token's value or an
   existing class's rules.
+- A form in the design that posts (`<form method="post">`) is rendered
+  disabled, with a line saying it is not connected yet, until the site has a
+  handler for the address it posts to: a module in `src/forms/` named for
+  that address (`src/forms/contact.ts` for `/contact`) that exports `POST`.
+  `DESIGN_SYSTEM.md`, "Forms", has the steps. Never add a handler that
+  pretends to deliver what it does not.
 - The `timds-consume-design-system` and `timds-update-design-system` skills
   in the repository root's `.agents/skills/` walk through a design change
   and the article routes the system does not style yet.

@@ -26,7 +26,9 @@
 // the route: the reference on one side, the product on the other.
 //
 // A site inside its Design System's workspace (`designSystem.workspace`) has
-// no pin: its designs come from the workspace above it, built in place, and
+// no pin: its designs come from the workspace above it, rebuilt in place (its
+// `dist/`) with its declared build on every preview so the reference matches
+// the source the site reads, and
 // the base side is the same repository's merge base, with the site at its
 // own folder in the temporary worktree. Changed files and source stamps are
 // relative to the site, so a system file reads `../src/styles/...`.
@@ -767,8 +769,9 @@ async function captureHeadRoutes(browser, origin, preview, cells, outputDir, { b
 /**
  * Make the pinned Design System's website designs servable: build the pin's
  * artifact with its own declared commands when it is not built yet (a starter
- * needs nothing installed), then render the designs into it the way `check`
- * does. Returns `{ status: "ready", artifactRoot, designs }` or
+ * needs nothing installed), or every time for a workspace site, then render
+ * the designs into it the way `check` does. A build that fails leaves the
+ * reference unavailable rather than ready on the previous artifact. Returns `{ status: "ready", artifactRoot, designs }` or
  * `{ status: "unavailable", reason }`; a pin that cannot be shown never fails
  * the product's preview.
  */
@@ -787,8 +790,14 @@ async function prepareDesignReference(consumer, { commandEnv, install, output })
     const workspace = await loadWorkspace(designSystem.root);
     const { designSystemRoot, manifest } = workspace;
     const artifactRoot = path.join(designSystemRoot, "dist");
-    if (!existsSync(path.join(artifactRoot, ...manifest.artifact.entry.split("/")))) {
-      if (manifest.workspace.install && install) {
+    const built = existsSync(path.join(artifactRoot, ...manifest.artifact.entry.split("/")));
+    // A workspace site reads the system's styles and tokens from source, so its
+    // reference is rebuilt from source every time, in the system's own dist/
+    // (the only place its build writes); a stale artifact would compare the
+    // new site against old styling. A pin is a fixed commit, built once.
+    const rebuild = designSystem.mode === WORKSPACE_PIN_MODE;
+    if (!built || rebuild) {
+      if (manifest.workspace.install && install && !built) {
         output(`Installing the Design System at ${designSystem.path}: ${manifest.workspace.install.join(" ")}`);
         await execute(manifest.workspace.install, { cwd: designSystemRoot, env: commandEnv });
       }
@@ -797,9 +806,9 @@ async function prepareDesignReference(consumer, { commandEnv, install, output })
         await execute(manifest.workspace.build, { cwd: designSystemRoot, env: workspaceCommandEnvironment(commandEnv) });
       }
     }
-    const built = await buildDesigns(designSystemRoot, { manifest });
-    if (!built.designs.length) return { status: "unavailable", reason: `${designSystem.path} has no website designs under src/designs/.` };
-    return { status: "ready", artifactRoot, designs: built.designs };
+    const rendered = await buildDesigns(designSystemRoot, { manifest });
+    if (!rendered.designs.length) return { status: "unavailable", reason: `${designSystem.path} has no website designs under src/designs/.` };
+    return { status: "ready", artifactRoot, designs: rendered.designs };
   } catch (error) {
     return { status: "unavailable", reason: `${designSystem.path} could not be built to show its designs: ${error.message}` };
   }

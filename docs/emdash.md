@@ -146,7 +146,15 @@ declares several apps and none at the root, when the layout cannot be found,
 when `--platform` or `--site-url` is not one it accepts, and when any path it
 would write already exists, file or directory alike. Every colliding path is
 listed in one error: the mode never overwrites a file and never edits an
-existing page. A site with its own `src/live.config.ts` moves it aside, reruns,
+existing page. It also refuses a site page at a route a template page takes
+by Astro's file routing, naming both files: `src/pages/articles.astro` beside
+the template's `articles/index.astro`, `articles/[id].astro` beside
+`articles/[slug].astro`, an endpoint beside a page (`.astro`, Markdown,
+`.mdx`, `.html`, `.js` and `.ts` are compared; a name that starts with `_`
+is not a route). A static page beside a dynamic one is not a collision, and
+an existing dynamic or catch-all page the article routes now outrank is
+named in the closing list. The comparison reads `src/pages/` only, so a site
+with its own `srcDir` is not checked. A site with its own `src/live.config.ts` moves it aside, reruns,
 and adds its collections to the installed file, which defines the `_emdash`
 live collection EmDash reads entries through. A different `emdash.seed` in
 `package.json` is refused the same way. A failure part-way through the writes
@@ -310,7 +318,11 @@ In the site:
   repository's merge base, with the site at its folder in the temporary
   worktree; changed files outside the site are named from the site
   (`../src/styles/...`). It starts the site on `preview.port`, which must be
-  free.
+  free. For the designs shown beside the routes it runs the Design System's
+  declared `workspace.build` on every run, so they carry the current tokens
+  and stylesheets; that build writes the system's `dist/`, as `timds dev`
+  does, and when it fails the preview shows the routes without the designs
+  and says why.
 
 ### Pages from the designs
 
@@ -324,16 +336,35 @@ dev` serves and while `astro build` builds, never in the Worker:
   the way the system's own renderer fills it (`layout.html` around the page,
   the `{{name}}`, `{{description}}`, `{{version}}` and `{{title}}`
   placeholders), with Astro's `base` in front of root-relative links. Only a
-  page's default state is served.
+  page's default state is served: `about.html` or `about.default.html` (one
+  of them, as the designs catalog requires); named states
+  (`contact.sent.html`) stay references in the system.
+- A form in the design that posts (`<form method="post">`) is rendered
+  disabled, with its controls disabled and a line saying it is not connected
+  yet, until the site has a handler for the address it posts to. A POST to a
+  design page with no handler answers 405 with an `Allow` header, so no
+  submission is taken in and dropped. Forms that read with GET, and forms
+  that post to another origin, are left as the design wrote them.
 - The article, topic and 404 routes render inside the design's layout, or,
   for a design without `layout.html`, inside its home page with the content
   of its `<main>` taken out.
 - `/styles/`, `/scripts/` and `/assets/` are the system's `src/` folders of
   those names, at the URLs its own build serves them from, and, for a system
   on the starter build, `/tokens.css` compiles `tokens.json` (or the
-  `tokens/` groups) by the starter build's `--group-name` rule. In development
-  they are read from disk on every request; a build copies them into the
-  client output.
+  `tokens/` groups) by the starter build's rule: `--group-name` declarations,
+  with each `{group.name}` reference compiled to `var(--group-name)`. In
+  development they are read from disk on every request; a build copies them
+  into the client output under their names on disk.
+
+To wire a form up, add a module under the site's `src/forms/` named for the
+address the form posts to (`src/forms/contact.ts` for `/contact`,
+`src/forms/index.ts` for `/`) that exports `POST`, an Astro endpoint function.
+The catch-all route passes each POST to that address to it, a GET still
+renders the design's page, and the form renders enabled on the next build (at
+once under `astro dev`) with no change to the design. The integration decides
+which forms have a handler from the site's files each time it builds the
+pages, in development and in the build alike. The template ships no handler:
+what a submission does (mail, a queue, a CRM) is the site's decision.
 
 Editing a design or a token changes the site on the next request in
 development and on the next build, with no sync and no version to move. The
@@ -361,11 +392,17 @@ every system stylesheet a site file imports, and their `@import`s; the custom
 properties they declare plus, on the starter build, the compiled tokens (read
 directly from the `tokens/` groups when the system keeps them, so a token
 added to a group is seen without a system build); and every class those
-stylesheets declare. What is scanned: site files in the design surface or
+stylesheets declare. The system is read from source only: nothing under its
+`dist/` is ever read, by any of those routes, so a check run after a token
+change matches the new value whether or not the system was rebuilt, and a
+stylesheet that exists only in `dist/` contributes no token and no class. What is scanned: site files in the design surface or
 the protected globs, skipping `node_modules`, `dist`, `.astro`, `.wrangler`,
-dot-directories and git-ignored paths; `.css` files whole, and in `.astro`,
+dot-directories and git-ignored paths (outside a Git work tree nothing is
+ignored); `.css` files whole, and in `.astro`,
 `.html`, `.jsx`, `.tsx`, `.vue` and `.svelte` files the `<style>` blocks,
-static `style` attributes and static class names. Dynamic expressions are
+static `style` attributes and static class names. Each start tag's
+attributes are parsed whole, so CSS-looking text inside another attribute, a
+comment or a `<script>` is never read or rewritten. Dynamic expressions are
 never guessed at. The module comment of `src/consumer-workspace-check.mjs`
 has the full rules.
 
@@ -431,6 +468,12 @@ reach `/site/` at once; the system's own pages still need a restart of `dev`,
 which builds them once and does not watch. `consumer preview` runs the site
 without the dev server and still needs `preview.port` free.
 
+If the Design System already builds pages under `/site` (a view named `site`
+in `src/site.json`, or a build step that writes `dist/site/`), the dev server
+keeps those pages, does not start the site and says so: run the site on its
+own with `npm run dev` in `site/`, where it serves at `/` on its own port, or
+rename that view.
+
 The EmDash admin is on the same port, at the root:
 `http://127.0.0.1:PORT/_emdash/admin/`. The dev server prints it as
 `EmDash admin: <origin>/_emdash/admin/ (sign in on this machine at
@@ -468,8 +511,12 @@ other:
   `.astro/`, `.wrangler/`, `.emdash/`) and secrets (`.env*` except
   `.env.example`, `.dev.vars*`); `describe_workspace` lists them.
   `run_check` checks the system only.
-- `submit` carries the site with the system (in the embedded layout it also
-  stages the two consumer skills). A change confined to the site needs no
+- `submit` carries the site with the system. In the embedded layout it also
+  stages the two root consumer skills, but only those the site's record
+  (`site/.timds/emdash.json`, `mode: "workspace"`) lists in `workspaceFiles`,
+  and only when the repository root is not itself a consumer
+  (`timds.consumer.json`, or `consumer` in `.timds/installation.json`): a
+  product's own consumer skills never enter a system submission. A change confined to the site needs no
   note under `## Unreleased` in the system's `CHANGELOG.md`; any change to the
   system still does.
 - `shoot` never copies the parent's site: an offshoot is a new system and

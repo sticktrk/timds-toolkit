@@ -18,6 +18,12 @@
 // `/src/...` or the site folder's absolute path, and the HMR websocket at
 // `/`). So the dev server routes, in this order:
 //
+// 0. When the system's own build output already has a top-level `site`
+//    entry (a view named `site` in src/site.json, or a build step that writes
+//    `dist/site/`), the mount is the system's (`systemHoldsMount`): the dev
+//    server does not start the site, says why once, and every request and
+//    websocket is routed as if there were no site (the system's `dist/` or
+//    its 404; upgrades closed). Nothing below applies then.
 // 1. `/site` and `/site/**`: the site, always (503 while it starts). While
 //    a site runs, a GET or HEAD under `/site/_emdash/**` is redirected (307)
 //    to the same path at the root, where EmDash answers.
@@ -68,6 +74,16 @@ const manifestLabel = `${WORKSPACE_SITE_DIRECTORY}/${WORKSPACE_SITE_MANIFEST}`;
 /** True when a URL path is the mount itself or below it (`/site`, `/site/`, `/site/x`; not `/sitemap`). */
 export function isUnderMount(pathname, mount = WORKSPACE_SITE_MOUNT) {
   return typeof pathname === "string" && (pathname === mount || pathname.startsWith(`${mount}/`));
+}
+
+/**
+ * True when the system's own output already answers under the mount:
+ * `systemHas(segment)` holds for the mount's first segment (`site` for
+ * `/site`). The system then keeps the mount and no site is served through it.
+ */
+export function systemHoldsMount(systemHas = () => false, mount = WORKSPACE_SITE_MOUNT) {
+  const segment = mount.split("/")[1] || "";
+  return Boolean(segment) && Boolean(systemHas(segment));
 }
 
 /**
@@ -585,7 +601,9 @@ export async function startWorkspaceSite(site, { mount = WORKSPACE_SITE_MOUNT, r
 
 /**
  * Route a dev server's requests, in the order the module comment gives:
- * under the mount to `getSite()`'s handle (or a plain-text 503 while it is
+ * when the system holds the mount (`systemHoldsMount` with `systemHas`),
+ * every request goes to `fallback` and every upgrade is closed, whatever
+ * `getSite()` says; otherwise under the mount to `getSite()`'s handle (or a plain-text 503 while it is
  * starting or unavailable); while a site handle exists, the root routes
  * (`rootOwner`, with the handle's `folders` and `systemHas`) to it too;
  * everything else to `fallback`. Every websocket upgrade goes to the site
@@ -597,6 +615,7 @@ export async function startWorkspaceSite(site, { mount = WORKSPACE_SITE_MOUNT, r
 export function siteRouter({ fallback, getSite, mount = WORKSPACE_SITE_MOUNT, systemHas = () => false }) {
   return {
     request(request, response) {
+      if (systemHoldsMount(systemHas, mount)) return fallback(request, response);
       const pathname = requestPathname(request);
       const { site, message } = getSite();
       if (isUnderMount(pathname, mount)) {
@@ -618,6 +637,7 @@ export function siteRouter({ fallback, getSite, mount = WORKSPACE_SITE_MOUNT, sy
       return fallback(request, response);
     },
     upgrade(request, socket, head) {
+      if (systemHoldsMount(systemHas, mount)) return socket.destroy();
       const { site, message } = getSite();
       if (site) return site.handleUpgrade(request, socket, head);
       if (!isUnderMount(requestPathname(request), mount)) return socket.destroy();

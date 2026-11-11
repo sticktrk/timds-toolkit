@@ -41,6 +41,11 @@ export const WORKSPACE_SITE_PORT_ENV = "TIMDS_SITE_PORT";
  * commands can name them without loading the consumer modules.
  */
 export const WORKSPACE_SITE_SKILL_NAMES = Object.freeze(["timds-consume-design-system", "timds-update-design-system"]);
+/**
+ * The workspace site's scaffold record, relative to the site folder; the same
+ * path as EMDASH_RECORD_PATH in consumer-scaffold.mjs.
+ */
+export const WORKSPACE_SITE_RECORD = ".timds/emdash.json";
 
 function readJsonObject(filePath) {
   try {
@@ -81,6 +86,41 @@ export function workspaceSitePath(repoRoot, designSystemRoot) {
   const site = findWorkspaceSite(designSystemRoot);
   if (!site) return null;
   return path.relative(path.resolve(repoRoot), site.root).split(path.sep).join("/");
+}
+
+/**
+ * The root skill folders (`.agents/skills/<name>`, relative to `repoRoot`)
+ * that belong to the workspace site of the Design System at
+ * `designSystemRoot`, so the system's `submit` may carry them; empty unless
+ * all of these hold:
+ *
+ * - the system has a workspace site (`findWorkspaceSite`);
+ * - the site's record (`site/.timds/emdash.json`) says `mode: "workspace"`
+ *   and lists, in `workspaceFiles`, a file under the folder: the scaffold
+ *   records there every skill file it installed or found already holding its
+ *   exact bytes, and refuses any other folder at that path;
+ * - the repository root is not a consumer of its own: no
+ *   `timds.consumer.json` and no `consumer` in `.timds/installation.json`
+ *   there, since a pinned product keeps the same two skills for its own
+ *   manifest.
+ *
+ * Ownership is read from the record's paths only; the hashes there are the
+ * stock bytes and change as soon as anyone edits a skill, so they are not
+ * compared.
+ */
+export function workspaceSiteSkillFolders(repoRoot, designSystemRoot) {
+  const site = findWorkspaceSite(designSystemRoot);
+  if (!site) return [];
+  const record = readJsonObject(path.join(site.root, ...WORKSPACE_SITE_RECORD.split("/")));
+  const files = record?.mode === "workspace" ? record.workspaceFiles : null;
+  if (!files || typeof files !== "object" || Array.isArray(files)) return [];
+  const root = path.resolve(repoRoot);
+  if (existsSync(path.join(root, WORKSPACE_SITE_MANIFEST))) return [];
+  const installation = readJsonObject(path.join(root, ".timds", "installation.json"));
+  if (installation && installation.consumer) return [];
+  return WORKSPACE_SITE_SKILL_NAMES
+    .map((name) => `.agents/skills/${name}`)
+    .filter((folder) => Object.keys(files).some((file) => file.startsWith(`${folder}/`)));
 }
 
 /** True when the `/`-joined `relativePath` is `sitePath` or lies under it. */

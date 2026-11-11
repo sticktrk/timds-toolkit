@@ -23,7 +23,7 @@ import { isProtectedPath } from "./mcp.mjs";
 import { loadOffshootSource, transformOffshoot } from "./offshoots.mjs";
 import { CONSUMER_SKILL_NAMES } from "./consumer.mjs";
 import { designSystemSkillNames } from "./skill-names.mjs";
-import { WORKSPACE_SITE_DIRECTORY, WORKSPACE_SITE_SKILL_NAMES, findWorkspaceSite, isWorkspaceSitePath, workspaceSitePath } from "./workspace-site.mjs";
+import { WORKSPACE_SITE_DIRECTORY, WORKSPACE_SITE_SKILL_NAMES, findWorkspaceSite, isWorkspaceSitePath, workspaceSitePath, workspaceSiteSkillFolders } from "./workspace-site.mjs";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const toolkitVersion = JSON.parse(await fs.readFile(path.join(packageRoot, "package.json"), "utf8")).version;
@@ -298,4 +298,10 @@ test("a full offshoot of a system with a site starts without it", async () => {
 
 test("the skills the system's commands name for a workspace site are the consumer skills", () => {
   assert.deepEqual([...WORKSPACE_SITE_SKILL_NAMES], [...CONSUMER_SKILL_NAMES]);
+});
+
+test("the scaffold's record makes the root consumer skills the site's, and nothing else does", async () => {
+  assert.deepEqual(workspaceSiteSkillFolders(root, root), WORKSPACE_SITE_SKILL_NAMES.map((name) => `.agents/skills/${name}`));
+  // No site, no skills: the same folders at a plain root are not the system's.
+  assert.deepEqual(workspaceSiteSkillFolders(path.join(directory, "plain"), path.join(directory, "plain")), []);
 });

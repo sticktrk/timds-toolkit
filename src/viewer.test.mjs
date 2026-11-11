@@ -148,6 +148,44 @@ test('dev with a site that fails to start reports it and serves the system alone
   assert.match(down.body, /did not start/);
 });
 
+// A system view named "site" builds to dist/site/, the workspace site's mount.
+async function addSiteView(root) {
+  const catalogPath = path.join(root, 'src/site.json');
+  const catalog = JSON.parse(await fs.readFile(catalogPath, 'utf8'));
+  catalog.views.push({ id: 'site', label: 'Site', pages: [{ slug: '', title: 'Site guidance' }, { slug: 'guide', title: 'Site guide' }] });
+  await fs.writeFile(catalogPath, JSON.stringify(catalog, null, 2));
+  await fs.mkdir(path.join(root, 'src/pages/site'), { recursive: true });
+  await fs.writeFile(path.join(root, 'src/pages/site/index.html'), '<h1>Site guidance</h1>\n');
+  await fs.writeFile(path.join(root, 'src/pages/site/guide.html'), '<h1>Site guide</h1>\n');
+}
+
+for (const installed of [true, false]) {
+  test(`dev keeps the system's own pages under /site and does not start a site that is ${installed ? 'installed' : 'not installed'}`, async (t) => {
+    const workspace = await system(t, { site: true, installed });
+    await addSiteView(workspace.root);
+    const { server, port, lines } = await start(t, workspace);
+    const notice = 'The Design System already has pages under /site/ (dist/site/), so the site in site/ is not started or served through the dev server. Run the site on its own with npm run dev in site/, where it serves at / on its own port, or rename the view in src/site.json (or the build step) that writes dist/site/.';
+    assert.ok(lines.includes(notice), lines.join('\n'));
+    assert.ok(!lines.some((line) => line.startsWith('[site]') || line.startsWith('Site:') || /not installed|did not start/.test(line)), lines.join('\n'));
+    assert.equal(server.listenerCount('upgrade'), 0, 'no websocket is taken');
+    for (const [requestPath, file] of [['/site/', 'site/index.html'], ['/site', 'site/index.html'], ['/site/guide/', 'site/guide/index.html']]) {
+      const answer = await get(port, requestPath);
+      assert.equal(answer.status, 200, requestPath);
+      assert.equal(answer.body, await fs.readFile(path.join(workspace.root, 'dist', file), 'utf8'), `${requestPath} is the system's page`);
+    }
+    for (const rootPath of ['/_emdash/admin/', '/@vite/client', '/site/missing/']) {
+      assert.deepEqual(await get(port, rootPath), { status: 404, body: 'Not found' }, rootPath);
+    }
+    // Nothing listens on the site's port: its process was never started.
+    const probe = await new Promise((resolve) => {
+      const socket = net.connect(workspace.port, '127.0.0.1');
+      socket.once('connect', () => { socket.destroy(); resolve(true); });
+      socket.once('error', () => resolve(false));
+    });
+    assert.equal(probe, false, 'the site process was not started');
+  });
+}
+
 test('dev moves the site to a free port when preview.port is taken and names the EmDash admin', async (t) => {
   const workspace = await system(t, { site: true, namesPort: false, ready: '/_emdash/api/setup/dev-bypass?redirect=/' });
   const blocker = net.createServer().listen(workspace.port, '127.0.0.1');

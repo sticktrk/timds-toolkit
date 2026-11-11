@@ -37,8 +37,11 @@
 // template version in `.timds/emdash.json`. `planEmdashTemplates` and
 // `applyWritesWithRollback` are the installer both modes are meant to share.
 // The astro.config, wrangler.jsonc and .gitignore changes are printed, never
-// made. Every refusal comes before the first write, and a failed write
-// restores the site.
+// made. A site page at a route a template page takes, by Astro's file routing
+// (`articles.astro` and `articles/index.astro`, `[id]` and `[slug]`), is
+// refused like an existing path, and a dynamic or catch-all page the template
+// routes now outrank is reported. Every refusal comes before the first write,
+// and a failed write restores the site.
 //
 // `--workspace` (`scaffoldWorkspaceEmdashSite` in
 // consumer-scaffold-workspace.mjs) writes a complete site into `site/` of a
@@ -130,7 +133,11 @@ through EmDash's API. It adds the dependencies and package.json keys the
 templates need (keeping any the site already declares), the article routes
 and their design pairs to the app's preview, and the template version to
 ${EMDASH_RECORD_PATH}. It never overwrites a path or edits an existing page:
-any path that exists is refused before anything is written. The changes to
+any path that exists, and any page of the site at a route a template page
+takes by Astro's file routing (src/pages/articles.astro and
+articles/index.astro, [id] and [slug]), is refused before anything is
+written. A dynamic or catch-all page that the article routes now outrank is
+named in the closing list. The changes to
 astro.config, wrangler.jsonc and .gitignore are printed for the developer.
 --layout names the site's layout component (an .astro file relative to the
 site root; default ${BASE_LAYOUT}); --site-url fills the site's origin.
@@ -214,14 +221,20 @@ function isSafeRelativePath(value) {
 // ---------------------------------------------------------------------------
 // The Design System as the site reads it
 
-/** tokens.json as the `:root` block the starter build writes to tokens.css (`--group-name`). */
+/**
+ * tokens.json as the `:root` block the starter build writes to tokens.css:
+ * `--group-name` declarations, with each `{group.name}` reference in a value
+ * compiled to `var(--group-name)`, the rule of `compileTokens` in viewer.mjs
+ * (the site template's integration mirrors it; a test holds the three equal).
+ */
 export function compileTokenCss(tokens) {
   const declarations = [];
   for (const [group, entries] of Object.entries(tokens)) {
     if (!entries || typeof entries !== "object" || Array.isArray(entries)) continue;
     for (const [name, token] of Object.entries(entries)) {
       if (typeof token?.value !== "string" || !token.value.trim()) continue;
-      declarations.push(`  ${`--${group}-${name}`.replace(/[^a-z0-9-]/gi, "-").toLowerCase()}: ${token.value};`);
+      const value = token.value.replace(/\{([a-zA-Z0-9_.-]+)\}/g, (_match, reference) => `var(--${reference.replace(/[^a-z0-9-]/gi, "-").toLowerCase()})`);
+      declarations.push(`  ${`--${group}-${name}`.replace(/[^a-z0-9-]/gi, "-").toLowerCase()}: ${value};`);
     }
   }
   return `:root {\n${declarations.sort().join("\n")}\n}\n`;
@@ -817,6 +830,13 @@ export async function planEmdashTemplates(siteRoot, { platform, layout, siteUrl 
   const files = [...planned.values()];
   if (leftover.length) throw new Error(`The EmDash templates in this TimDS release use placeholders the installer does not fill: ${leftover.join("; ")}. Nothing was written; report it to TimDS.`);
   files.sort((left, right) => left.path.localeCompare(right.path));
+  const templateRoutes = new Map();
+  for (const file of files) {
+    const route = file.path.startsWith(`${ASTRO_PAGES}/`) ? astroRoute(file.path.slice(ASTRO_PAGES.length + 1)) : null;
+    if (!route) continue;
+    if (templateRoutes.has(route.key)) throw new Error(`The EmDash templates in this TimDS release put ${templateRoutes.get(route.key)} and ${file.path} at one Astro route (${route.route}). Nothing was written; report it to TimDS.`);
+    templateRoutes.set(route.key, file.path);
+  }
 
   const collisions = new Set();
   for (const file of files) {
@@ -940,6 +960,104 @@ export async function readPinnedDesigns({ repoRoot, manifest, fetchImpl = fetch 
   const catalog = await readDesignCatalog(checkout);
   if (!catalog.exists) throw new Error(`${manifest.designSystem.path} has no src/designs/`);
   return catalog.designs.map((design) => ({ id: design.id, routes: design.pages.map((page) => page.route) }));
+}
+
+// ---------------------------------------------------------------------------
+// Astro routes
+
+/** Astro's pages folder, relative to the site root. */
+const ASTRO_PAGES = "src/pages";
+/** The extensions Astro routes under src/pages/: pages (Astro, Markdown, MDX, HTML) and endpoints (JavaScript, TypeScript). */
+const ASTRO_ROUTE_EXTENSIONS = new Set([".astro", ".md", ".markdown", ".mdown", ".mkdn", ".mkd", ".mdwn", ".mdx", ".html", ".js", ".ts"]);
+const MAX_PAGES_DEPTH = 32;
+
+/**
+ * The route Astro gives the file at `file`, a POSIX path relative to
+ * src/pages/, or null when Astro does not route it (a file or folder whose
+ * name starts with `_`, or another extension). `route` is the address as
+ * written (`/articles/[slug]`; `index` names its folder, and an endpoint keeps
+ * the rest of its name, `rss.xml.ts` at `/rss.xml`); `key` compares routes by
+ * shape, with every `[param]` as `[]` and every `[...rest]` as `[...]`, so
+ * `[id]` and `[slug]` at one position are the same route. `segments` is the
+ * key's path segments.
+ */
+export function astroRoute(file) {
+  const parts = String(file).split("/").filter(Boolean);
+  if (!parts.length || parts.some((part) => part.startsWith("_"))) return null;
+  const name = parts.pop();
+  const extension = path.posix.extname(name);
+  if (!ASTRO_ROUTE_EXTENSIONS.has(extension)) return null;
+  const base = name.slice(0, -extension.length);
+  if (base !== "index") parts.push(base);
+  const segments = parts.map((part) => part.replace(/\[\.\.\.[^\]]*\]/g, "[...]").replace(/\[(?!\.\.\.\])[^\]]*\]/g, "[]"));
+  return { route: `/${parts.join("/")}`, key: `/${segments.join("/")}`, segments };
+}
+
+/**
+ * Whether an address the route `general` answers covers every address
+ * `specific` answers: `[]` takes any one segment, `[...]` any number,
+ * anything else only itself.
+ */
+function routeCovers(general, specific) {
+  if (!general.length) return !specific.length;
+  const [head, ...rest] = general;
+  if (head === "[...]") {
+    for (let taken = 0; taken <= specific.length; taken += 1) if (routeCovers(rest, specific.slice(taken))) return true;
+    return false;
+  }
+  if (!specific.length || specific[0] === "[...]") return false;
+  return (head === "[]" || head === specific[0]) && routeCovers(rest, specific.slice(1));
+}
+
+/** Every file Astro routes under the site's src/pages/, as `{ file, route, key, segments }` with `file` relative to the site root. */
+async function existingAstroRoutes(siteRoot) {
+  const found = [];
+  const visit = async (relative, depth) => {
+    if (depth > MAX_PAGES_DEPTH) return;
+    const entries = await fs.readdir(path.join(siteRoot, ...ASTRO_PAGES.split("/"), ...relative.split("/").filter(Boolean)), { withFileTypes: true }).catch((caught) => {
+      if (caught?.code === "ENOENT" || caught?.code === "ENOTDIR") return [];
+      throw caught;
+    });
+    for (const entry of entries) {
+      if (entry.name.startsWith("_")) continue;
+      const child = relative ? `${relative}/${entry.name}` : entry.name;
+      const info = entry.isSymbolicLink() ? await fs.stat(path.join(siteRoot, ...ASTRO_PAGES.split("/"), ...child.split("/"))).catch(() => null) : entry;
+      if (info?.isDirectory()) await visit(child, depth + 1);
+      else if (info?.isFile()) {
+        const route = astroRoute(child);
+        if (route) found.push({ file: `${ASTRO_PAGES}/${child}`, ...route });
+      }
+    }
+  };
+  await visit("", 0);
+  return found;
+}
+
+/**
+ * The template pages against the site's own, by Astro's routing: `clashes`
+ * pairs a template file with a different existing file at the same route
+ * (one of them could never be reached), and `shadowed` an existing dynamic
+ * or catch-all page with a template route it used to be able to answer and
+ * that Astro now gives to the template, because the template's route is more
+ * specific. Only routes with no more segments than the template's are
+ * reported as shadowed: Astro ranks a route with more segments first, and
+ * that case is left alone rather than guessed at.
+ */
+export async function planAstroRouteChecks(siteRoot, templatePaths) {
+  const existing = await existingAstroRoutes(siteRoot);
+  const clashes = [];
+  const shadowed = [];
+  for (const templateFile of templatePaths) {
+    if (!templateFile.startsWith(`${ASTRO_PAGES}/`)) continue;
+    const template = astroRoute(templateFile.slice(ASTRO_PAGES.length + 1));
+    if (!template) continue;
+    for (const page of existing) {
+      if (page.file === templateFile) continue; // The same path is a file collision, reported as one.
+      if (page.key === template.key) clashes.push({ route: template.route, template: templateFile, existing: page.file });
+      else if (page.segments.length <= template.segments.length && routeCovers(page.segments, template.segments)) shadowed.push({ route: template.route, template: templateFile, existing: page.file });
+    }
+  }
+  return { clashes, shadowed };
 }
 
 /** The app the templates install into: the only app, or the one at the repository root. */
@@ -1129,6 +1247,14 @@ export async function scaffoldExistingEmdashSite(rootInput, {
       : "";
     throw new Error(`The existing-site mode never overwrites a file or edits an existing page, and these already exist:\n${[...collisions.map((entry) => `  ${entry}`), ...packageCollisions.map((entry) => `  ${entry}`)].join("\n")}${liveConfig}\nMove or rename them (or remove an earlier EmDash install), then rerun. Nothing was written.`);
   }
+  // Two files at one Astro route (articles.astro and articles/index.astro,
+  // [id] and [slug]) leave one of them unreachable, so they are refused too.
+  const routes = await planAstroRouteChecks(appRoot, plan.files.map((file) => file.path));
+  if (routes.clashes.length) {
+    throw new Error(`The existing-site mode never edits an existing page, and the site already has a page at a route the templates need:\n${routes.clashes.map(({ route, template, existing }) => `  ${route}: the site's ${inApp(existing)} and the template's ${inApp(template)}`).join("\n")}\nAstro gives a route to one file only, so one of each pair could never be reached. Move or remove the site's page (merge it into the template's by hand afterwards if it should stay), then rerun. Nothing was written.`);
+  }
+  const shadowedBy = new Map();
+  for (const { route, existing } of routes.shadowed) shadowedBy.set(existing, [...(shadowedBy.get(existing) ?? []), route]);
 
   // The pinned system's designs decide which routes are paired; unreadable designs pair nothing.
   let designs = null;
@@ -1169,6 +1295,7 @@ export async function scaffoldExistingEmdashSite(rootInput, {
     ...(previewPlan.crawl && previewPlan.ready === "unchanged" ? [`preview.ready stays ${manifest.apps[appName].preview.ready}; the article routes need the seed loaded, so make sure the preview opens ${plan.set.preview.ready} before it captures them`] : []),
     ...(previewPlan.crawl && designsError ? [`The Design System's designs could not be read (${designsError}), so no preview.designs pairs were added; pair ${Object.keys(plan.set.preview.designs).join(", ")} with their designs by hand once they can be`] : []),
     ...previewPlan.unpaired.map((route) => `${route} has no design yet in the pinned Design System version: move the pin to a release that has it, or author it in the Design System, then pair it in preview.designs`),
+    ...[...shadowedBy].map(([existing, list]) => `${inApp(existing)} may have answered ${list.join(", ")}; Astro now gives ${list.length === 1 ? "that route" : "those routes"} to the template pages, which are more specific, so check nothing the site linked there is lost`),
     ...(previewPlan.crawl ? [`Rerun timds consumer init so the consumer skill and the launch entries match the edited ${CONSUMER_MANIFEST_FILE}`] : []),
     `Review the diff, commit it, and run npm run timds -- consumer check`,
   ];
@@ -1231,6 +1358,7 @@ export async function scaffoldExistingEmdashSite(rootInput, {
     },
     manual: plan.manual.map((entry) => ({ ...entry, file: inApp(entry.file) })),
     gitignore: plan.gitignore,
+    shadowed: routes.shadowed.map(({ route, template, existing }) => ({ route, template: inApp(template), existing: inApp(existing) })),
     todos,
     manifest: nextManifest,
   };

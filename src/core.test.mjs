@@ -799,6 +799,71 @@ test("refuses submit from a branch containing unrelated committed changes", asyn
   );
 });
 
+/**
+ * An embedded system, committed, whose product root holds a consumer skill;
+ * the skill is then edited and the system gains a release note, so the only
+ * question left for submit is whether the skill is the system's to carry.
+ * `site` writes a workspace site with that record before the commit.
+ */
+async function embeddedSubmitWithRootConsumerSkill(t, { site = null, rootConsumer = false } = {}) {
+  const repoRoot = await createDesignSystemRepo(t);
+  await initializeRepository(repoRoot);
+  const skill = path.join(repoRoot, ".agents", "skills", "timds-consume-design-system", "SKILL.md");
+  await fs.mkdir(path.dirname(skill), { recursive: true });
+  await fs.writeFile(skill, "# Consume the Design System\n", "utf8");
+  if (rootConsumer) await writeJson(path.join(repoRoot, "timds.consumer.json"), { schemaVersion: 1 });
+  if (site) {
+    await writeJson(path.join(repoRoot, "design-system", "site", "timds.consumer.json"), { schemaVersion: 1, designSystem: { workspace: true, systemId: "test/core" } });
+    await writeJson(path.join(repoRoot, "design-system", "site", ".timds", "emdash.json"), site);
+  }
+  execFileSync("git", ["add", "--all"], { cwd: repoRoot });
+  execFileSync("git", ["commit", "-m", "Initialize TimDS"], { cwd: repoRoot, stdio: "ignore" });
+  await fs.appendFile(skill, "\nA local note.\n", "utf8");
+  const changelogPath = path.join(repoRoot, "design-system", "CHANGELOG.md");
+  await fs.writeFile(changelogPath, (await fs.readFile(changelogPath, "utf8")).replace("## Unreleased\n", "## Unreleased\n\n- Guidance: a consumer skill note.\n"));
+  return repoRoot;
+}
+
+const SITE_SKILL = ".agents/skills/timds-consume-design-system";
+const siteRecord = (workspaceFiles) => ({ template: 1, platform: "cloudflare", mode: "workspace", files: {}, workspaceFiles, workspaceSections: {} });
+
+test("submit in an embedded system without a workspace site keeps the product's consumer skills out", async (t) => {
+  const repoRoot = await embeddedSubmitWithRootConsumerSkill(t);
+  await assert.rejects(
+    submitWorkspace(repoRoot, "Edit the consumer skill", { dryRun: true, noBuild: true }),
+    /outside the TimDS scope[\s\S]*timds-consume-design-system\/SKILL\.md/,
+  );
+  // The system's own change is carried, and the staging command never names the product's skill.
+  await fs.writeFile(path.join(repoRoot, SITE_SKILL, "SKILL.md"), "# Consume the Design System\n", "utf8");
+  await writeJson(path.join(repoRoot, "design-system", "tokens.json"), { color: { gold: "#a8863f" } });
+  const result = await submitWorkspace(repoRoot, "Darken the gold", { dryRun: true, noBuild: true });
+  const add = result.commands.find((command) => command[1] === "add");
+  assert.ok(!add.includes(SITE_SKILL), add.join(" "));
+});
+
+test("submit in an embedded system carries the consumer skills its workspace site's record owns", async (t) => {
+  const repoRoot = await embeddedSubmitWithRootConsumerSkill(t, { site: siteRecord({ [`${SITE_SKILL}/SKILL.md`]: "0".repeat(64) }) });
+  const result = await submitWorkspace(repoRoot, "Edit the consumer skill", { dryRun: true, noBuild: true });
+  const add = result.commands.find((command) => command[1] === "add");
+  assert.ok(add.includes(SITE_SKILL), add.join(" "));
+  assert.ok(!add.includes(".agents/skills/timds-update-design-system"), "a skill the record does not list is not staged");
+});
+
+test("submit refuses the root consumer skills when the workspace site's record does not own them, or the root is a consumer", async (t) => {
+  for (const [label, options] of [
+    ["record without the skill", { site: siteRecord({ ".agents/skills/timds-update-design-system/SKILL.md": "0".repeat(64) }) }],
+    ["record of another mode", { site: { ...siteRecord({ [`${SITE_SKILL}/SKILL.md`]: "0".repeat(64) }), mode: "existing" } }],
+    ["root consumer", { site: siteRecord({ [`${SITE_SKILL}/SKILL.md`]: "0".repeat(64) }), rootConsumer: true }],
+  ]) {
+    const repoRoot = await embeddedSubmitWithRootConsumerSkill(t, options);
+    await assert.rejects(
+      submitWorkspace(repoRoot, "Edit the consumer skill", { dryRun: true, noBuild: true }),
+      /outside the TimDS scope[\s\S]*timds-consume-design-system\/SKILL\.md/,
+      label,
+    );
+  }
+});
+
 test("preview server resolves entry, assets, and static routes", async (t) => {
   const repoRoot = await createDesignSystemRepo(t);
   await fs.mkdir(path.join(repoRoot, "design-system", "dist", "brand"), { recursive: true });

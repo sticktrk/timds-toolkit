@@ -6,7 +6,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { SITE_ROOT_ROUTES, isEmdashRootPath, isSiteRootRoute, navigationAccept, isUnderMount, mountedPath, readyRequestPath, rootOwner, serveNamesPort, siteFolderRoutes, siteRouter, siteServeOptions, startWorkspaceSite } from './site-proxy.mjs';
+import { SITE_ROOT_ROUTES, isEmdashRootPath, isSiteRootRoute, navigationAccept, isUnderMount, mountedPath, readyRequestPath, rootOwner, serveNamesPort, siteFolderRoutes, siteRouter, siteServeOptions, startWorkspaceSite, systemHoldsMount } from './site-proxy.mjs';
 
 // A fake site server: answers under TIMDS_SITE_BASE on the port it is given
 // (--port, else TIMDS_SITE_PORT), and at the root the way Astro with EmDash
@@ -257,6 +257,35 @@ test('without a running site the root routes stay with the system and upgrades o
   t.after(() => socket.destroy());
   socket.write(`GET /?token=t HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n`);
   await new Promise((resolve) => socket.once('close', resolve));
+});
+
+test('a system with its own pages under /site keeps them, with or without a site handle', async (t) => {
+  assert.ok(systemHoldsMount((segment) => segment === 'site'));
+  assert.ok(!systemHoldsMount((segment) => segment === 'sitemap.xml'));
+  assert.ok(!systemHoldsMount());
+  assert.ok(systemHoldsMount((segment) => segment === 'preview', '/preview'));
+  const systemHas = (segment) => segment === 'site';
+  // A handle that would answer everything, to prove it is never asked.
+  const handle = {
+    folders: [],
+    handleRequest: (request, response) => response.writeHead(200).end(`site ${request.url}`),
+    handleUpgrade: (request, socket) => socket.end('HTTP/1.1 101 Switching Protocols\r\n\r\n'),
+  };
+  for (const site of [() => null, () => handle]) {
+    const frontPort = await front(t, site, { systemHas });
+    for (const systemPath of ['/site', '/site/', '/site/guide/', '/site/_emdash/admin/', '/_emdash/admin/', '/@vite/client', '/src/pages/x.astro', '/']) {
+      assert.deepEqual(await request(frontPort, { path: systemPath }).then(({ status, body }) => [status, body]), [200, `system ${systemPath}`], systemPath);
+    }
+    for (const upgradePath of ['/', '/site/hmr']) {
+      const socket = net.connect(frontPort, '127.0.0.1');
+      t.after(() => socket.destroy());
+      let received = '';
+      socket.on('data', (data) => { received += data; });
+      socket.write(`GET ${upgradePath} HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n`);
+      await new Promise((resolve) => socket.once('close', resolve));
+      assert.equal(received, '', `${upgradePath} upgrade is closed, as with no site`);
+    }
+  }
 });
 
 test('starts the site with the base, proxies streamed HTTP and websockets, and stops its process group', async (t) => {

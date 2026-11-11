@@ -123,7 +123,10 @@ contract) into an Astro consumer that already has `timds.consumer.json`. Those
 templates are TimDS's port of the starter's article designs, not EmDash's
 template; keep their markup in step with
 `templates/starter/src/designs/website/`. The mode never overwrites a path or
-edits an existing page: it changes only `package.json` and
+edits an existing page, and it refuses a site page at a route a template page
+takes by Astro's file routing (`articles.astro` beside `articles/index.astro`,
+`[id]` beside `[slug]`), naming any dynamic or catch-all page the article
+routes now outrank: it changes only `package.json` and
 `timds.consumer.json`, prints every configuration change it cannot make
 safely, and records the template version in `.timds/emdash.json`. What it
 writes is product source too; a template fix reaches an installed site by
@@ -153,13 +156,23 @@ outside the Design System's managed set and release metadata on purpose: they
 are rendered for the site's manifest, which `upgrade` at the root does not
 read, so `upgrade` neither writes nor reports them; the record keeps their
 hashes (`workspaceFiles`, `workspaceSections`) for a later template update
-command. The site's integration compiles tokens by the same `--group-name`
-rule as `src/viewer.mjs`; change them together. Two builds share one
+command. The site's integration compiles tokens by the same rule as
+`compileTokens` in `src/viewer.mjs` (`--group-name`, `{group.name}` references
+to `var()`), as does `compileTokenCss` in `src/consumer-scaffold.mjs`, and
+names design pages by the catalog's default-state rule in `src/designs.mjs`;
+`src/emdash-workspace-integration.test.mjs` holds them equal, so change them
+together. A posting form in a design renders disabled until the site has a
+handler under `src/forms/`; the template never ships one. Two builds share one
 repository: any command that walks the Design System root (build, check,
 extract, doctor, upgrade, the bundle walk, offshoots, the MCP guard) must
 skip the workspace site (`src/workspace-site.mjs` locates it), and
 `src/workspace-site.test.mjs`, which proves the system's results are the same
-with and without `site/`, must keep passing. `package.json` `emdashTemplate`
+with and without `site/`, must keep passing. An embedded system's `submit`
+carries the two root consumer skills only while the site's record lists them
+in `workspaceFiles` and the repository root is not itself a consumer
+(`workspaceSiteSkillFolders`); a product's own consumer skills never enter a
+system submission. The two-way check reads the system from source only and
+must never index anything under its `dist/`. `package.json` `emdashTemplate`
 publishes the template version beside `hostContract` and must equal
 `templates/emdash/site.json` `version`: a template change an installed site
 would need to receive raises `version` in both places and adds a `history`

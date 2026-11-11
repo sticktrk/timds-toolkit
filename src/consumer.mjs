@@ -346,7 +346,12 @@ export function publishedBaseUrl(designSystem) {
 function run(command, args, cwd, { input = null } = {}) {
   return new Promise((resolve) => {
     const child = spawn(command, args, { cwd, shell: false, stdio: [input === null ? "ignore" : "pipe", "pipe", "pipe"] });
-    if (input !== null) child.stdin.end(input);
+    if (input !== null) {
+      // A child that exits before reading its input (git outside a work tree)
+      // closes the pipe; without a listener that write is an unhandled EPIPE.
+      child.stdin.on("error", () => {});
+      child.stdin.end(input);
+    }
     let stdout = "";
     let stderr = "";
     child.stdout.setEncoding("utf8");

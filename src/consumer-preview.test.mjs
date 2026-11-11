@@ -1141,3 +1141,65 @@ test("--base previews a workspace site with no pin: the base is the same workspa
   assert.equal(await portAnswers(port), false, "the port is free afterwards");
   assert.equal(git(repoRoot, "worktree", "list").includes("base-checkout"), false, "the base worktree is removed");
 });
+
+test("preview.designs rebuilds a workspace site's reference from source every time, and reports a failed rebuild instead of stale output", async (t) => {
+  const repoRoot = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "timds-workspace-reference-")));
+  t.after(() => fs.rm(repoRoot, { recursive: true, force: true }));
+  git(repoRoot, "init", "-q", "-b", "main");
+  // A scaffolded system, built once with its stock accent.
+  await initializeRepository(repoRoot, { standalone: true, name: "Sample" });
+  assert.match(await fs.readFile(path.join(repoRoot, "dist", "tokens.css"), "utf8"), /--color-accent: #2457d6;/);
+  const port = await freePort();
+  await fs.mkdir(path.join(repoRoot, "site"));
+  await fs.writeFile(path.join(repoRoot, "site", "server.mjs"), SERVER_SOURCE, "utf8");
+  await fs.writeFile(path.join(repoRoot, "site", "timds.consumer.json"), `${JSON.stringify({
+    schemaVersion: 1,
+    designSystem: { workspace: true, systemId: "sample/core" },
+    apps: { site: { cwd: ".", preview: { serve: ["node", "server.mjs", String(port)], port, routes: ["/"], viewports: ["phone"], schemes: ["light"], designs: { "/": "website:/" } }, designSurface: ["src/**"] } },
+  }, null, 2)}\n`, "utf8");
+
+  // The source changes after the build: a token value and the stylesheet.
+  for (const file of ["tokens.json", "tokens/color.json"]) {
+    const target = path.join(repoRoot, file);
+    await fs.writeFile(target, (await fs.readFile(target, "utf8")).replace("#2457d6", "#0a7a3c"), "utf8");
+  }
+  await fs.appendFile(path.join(repoRoot, "src", "styles", "system.css"), "\n.reference-marker { color: var(--color-accent); }\n", "utf8");
+
+  // The reference server is fetched for the design's stylesheets as a browser would.
+  const served = [];
+  const browser = async () => ({
+    async capture({ url }) {
+      const response = await fetch(url);
+      const html = await response.text();
+      if (url.includes("/designs/")) {
+        const origin = new URL(url).origin;
+        served.push(await (await fetch(`${origin}/tokens.css`)).text(), await (await fetch(`${origin}/styles/system.css`)).text());
+      }
+      return { html, png: PNG_SIGNATURE, status: response.status };
+    },
+    async close() {},
+  });
+  const site = path.join(repoRoot, "site");
+  const lines = [];
+  let consumer = await loadConsumer(site);
+  let preview = await buildConsumerPreview(consumer, resolveConsumerApp(consumer, "site"), { env: cleanEnv(), launchBrowser: browser, output: (line) => lines.push(line) });
+  assert.deepEqual(preview.designs, { status: "ready", pairedRoutes: 1 });
+  assert.ok(lines.some((line) => line.startsWith("Building the Design System at ..: node scripts/build.mjs")), lines.join("\n"));
+  assert.equal(served.length, 2, "the design page was captured from the reference server");
+  assert.match(served[0], /--color-accent: #0a7a3c;/, "the reference serves the current token value");
+  assert.doesNotMatch(served[0], /#2457d6/);
+  assert.match(served[1], /\.reference-marker/, "the reference serves the current stylesheet");
+
+  // A rebuild that fails never reports ready on the previous artifact.
+  const manifestPath = path.join(repoRoot, "timds.json");
+  const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
+  manifest.workspace.build = ["node", "-e", "console.error('the build broke'); process.exit(1)"];
+  await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  served.length = 0;
+  consumer = await loadConsumer(site);
+  preview = await buildConsumerPreview(consumer, resolveConsumerApp(consumer, "site"), { env: cleanEnv(), launchBrowser: browser, output: () => {} });
+  assert.equal(preview.designs.status, "unavailable");
+  assert.match(preview.designs.reason, /could not be built to show its designs/);
+  assert.equal(served.length, 0, "no design is captured from the stale artifact");
+  assert.equal(await portAnswers(port), false);
+});

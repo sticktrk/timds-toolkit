@@ -108,7 +108,10 @@ unset. The secret is compared in constant time. Call it about once a minute.
 3. [ ] Back up `EMDASH_ENCRYPTION_KEY` outside Cloudflare.
 4. [ ] Give the Worker a Cron Trigger, or have the platform call
        `POST /_scheduled` with `SCHEDULED_TASKS_SECRET` about once a minute.
-5. [ ] Create one draft through the REST API with the writer's token,
+5. [ ] Wire up or remove each posting form of the design. A form with no
+       handler in `src/forms/` renders disabled and a POST to its address
+       answers 405 (`DESIGN_SYSTEM.md`, "Forms").
+6. [ ] Create one draft through the REST API with the writer's token,
        publish it, and confirm it appears at `/articles/<slug>/` without a
        rebuild; unpublish it and confirm the page answers 404.
 

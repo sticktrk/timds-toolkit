@@ -15,7 +15,8 @@ system and the site are edited, reviewed and committed together.
   `src/integrations/design-system.mjs` and served by
   `src/pages/[...page].astro`. There is one copy, in the system: editing the
   design is editing the page, and a page added to the design is a page here.
-  Only a page's default state is served; its other states (`contact.sent`)
+  Only a page's default state is served (`about.html`, or
+  `about.default.html`, for `/about`); its other states (`contact.sent`)
   stay references in the system.
 - **Layout.** The article, topic and 404 routes render inside the design's
   `layout.html`, its head, header and footer, through `src/layouts/Base.astro`.
@@ -31,6 +32,50 @@ system and the site are edited, reviewed and committed together.
 
 `astro.config.mjs` names the design (`designSystem({ design: "__DESIGN_ID__" })`).
 
+## Forms
+
+A form in the design that posts (`<form method="post">`, such as a contact
+form) needs a handler in the site before it can send anything. Until it has
+one, the page renders the form disabled: every control carries `disabled`,
+the form carries `data-timds-form="not-connected"`, and a line inside it
+says it is not connected yet. A POST to the address answers 405, so nothing
+is taken in and dropped. Forms that read with GET (a search box) and forms
+that post to another origin are left as the design wrote them.
+
+To wire a form up:
+
+1. Find the address it posts to: its `action` (`/contact`), or the page's
+   own address when it has none.
+2. Add a module under `src/forms/` named for that address, which exports
+   `POST`: `src/forms/contact.ts` for `/contact`, `src/forms/index.ts` for
+   `/`, `src/forms/support/request.ts` (or `support/request/index.ts`) for
+   `/support/request`.
+
+   ```ts
+   // src/forms/contact.ts: the contact form, POST /contact.
+   import type { APIContext } from "astro";
+
+   export async function POST({ request }: APIContext) {
+     const form = await request.formData();
+     // Deliver form.get("name") and form.get("email") where the site keeps
+     // them (a store, or a mail or form service this site is configured for),
+     // and answer only once that succeeded.
+     return new Response(null, { status: 303, headers: { Location: `${import.meta.env.BASE_URL.replace(/\/$/, "")}/contact` } });
+   }
+   ```
+
+3. Rebuild, or let `astro dev` reload: the form renders enabled, with no
+   change to the design, and `src/pages/[...page].astro` passes each POST to
+   the address on to `POST` with the request's context. A GET still renders
+   the design's page.
+
+The integration decides which forms have a handler from the files in
+`src/forms/` each time it builds the pages, in development and in the build
+alike; a module that does not export `POST` handles nothing. Two modules
+for one address (`contact.ts` and `contact/index.ts`) are an error. A design
+page that needs more than a POST handler, such as server data on GET, is
+ported into an Astro route by hand instead (see the rules below).
+
 ## Which change goes where
 
 | Change | Lives in | How it is made |
@@ -39,6 +84,7 @@ system and the site are edited, reviewed and committed together.
 | A page's content, layout, header, footer, head | The design in the system: `src/designs/__DESIGN_ID__/` | Edit the design file. The site follows on its next build. |
 | Colors, fonts, spacing, component styles | The system: its tokens and `src/styles/` | One change to the system; the site picks it up. |
 | A style the site needs that the system lacks | Added to the system, in the same change | `__SITE_CHECK__`, from the repository root, finds it: a literal that equals a token is rewritten to the token, and anything else is listed for the agent to add to the system, never to the site. |
+| What a posting form does with what it receives | `site/src/forms/` | A module named for the form's address that exports `POST` (see "Forms"). Until it exists the form renders disabled. |
 | Article routes, serializer, seed, configuration, dependencies | `site/` | A developer change. |
 
 ## Rules

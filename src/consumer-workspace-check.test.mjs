@@ -11,6 +11,7 @@ import {
   fontStackKey,
   formatWorkspaceFindings,
   normalizeColor,
+  runProcess,
 } from "./consumer-workspace-check.mjs";
 
 async function temporaryDirectory(t) {
@@ -29,6 +30,7 @@ async function write(root, files) {
 
 const read = (root, relative) => fs.readFile(path.join(root, ...relative.split("/")), "utf8");
 
+const STARTER_SHEET = "src/styles/system.css";
 const SURFACE = ["src/styles/**", "src/components/**", "src/pages/**", "src/layouts/**"];
 
 /** A Design System whose tokens are CSS custom properties in src/styles/system.css, with a site in site/. */
@@ -417,4 +419,119 @@ test("a system that keeps tokens/ groups is read from them, and a suggestion nam
   result = await run(fixture);
   assert.deepEqual(result.rewrites.map((rewrite) => rewrite.to), ["var(--color-link)"]);
   assert.deepEqual(result.findings, []);
+});
+
+test("the index is built from the source the site loads, never from a stale built tokens.css", async (t) => {
+  const fixture = await starterSystem(t, {
+    tokens: { color: { ink: { value: "#222222" } } },
+    site: {
+      "src/styles/site.css": ".wrap { color: #111111; }\n.prose { color: #222222; }\n",
+      "src/layouts/Layout.astro": "---\nimport \"../../../dist/styles/system.css\";\n---\n<main class=\"wrap stale-only\"><slot /></main>\n",
+    },
+  });
+  // The system was built when --color-ink was #111111; the token has changed since, without a rebuild.
+  await write(fixture.root, {
+    "timds.json": { schemaVersion: 2, systemId: "acme/starter", name: "Starter", workspace: { build: ["node", "scripts/build.mjs"] }, bundle: { include: ["dist/tokens.css", "dist/styles/system.css"] } },
+    "dist/tokens.css": ":root {\n  --color-ink: #111111;\n}\n",
+    "dist/styles/system.css": ":root { --color-ink: #111111; }\n.stale-only { color: var(--color-ink); }\n",
+  });
+  await fs.symlink(path.join("..", "..", "dist", "tokens.css"), path.join(fixture.root, "src", "styles", "linked.css"));
+
+  for (const stylesheets of [null, ["dist/tokens.css", "./dist/styles/system.css", "src/styles/linked.css", STARTER_SHEET]]) {
+    const result = await run(fixture, { fix: false, stylesheets });
+    assert.deepEqual(result.system.stylesheets, [STARTER_SHEET], String(stylesheets));
+    assert.deepEqual(result.rewrites.map((rewrite) => [rewrite.from, rewrite.to]), [["#222222", "var(--color-ink)"]]);
+    assert.deepEqual(result.findings.map((finding) => [finding.kind, finding.value ?? finding.class, finding.candidates]), [
+      ["class", "stale-only", undefined],
+      ["literal", "#111111", []],
+    ]);
+  }
+});
+
+test("a system off the starter build never takes tokens or classes from its built output", async (t) => {
+  const fixture = await cssSystem(t, {
+    site: { "src/styles/site.css": ".card { color: #000001; background: #1a1a1a; }\n" },
+  });
+  await write(fixture.root, {
+    "timds.json": { schemaVersion: 2, systemId: "acme/core", name: "Acme", workspace: { build: ["npm", "run", "build"] }, bundle: { include: ["dist/**"] } },
+    "dist/styles/system.css": ":root { --color-ink: #000001; }\n.built { color: red; }\n",
+  });
+  const result = await run(fixture, { fix: false });
+  assert.deepEqual(result.system.stylesheets, [STARTER_SHEET]);
+  assert.deepEqual(result.rewrites.map((rewrite) => [rewrite.from, rewrite.to]), [["#1a1a1a", "var(--color-ink)"]]);
+  assert.deepEqual(result.findings.map((finding) => [finding.kind, finding.value, finding.candidates]), [["literal", "#000001", []]]);
+});
+
+test("a site outside any git work tree is checked without asking git what it ignores", async (t) => {
+  // Many long candidate paths: more input than a pipe holds, so a git that
+  // exits before reading it would break the write.
+  const site = { ".gitignore": "src/styles/\n" };
+  for (let index = 0; index < 400; index += 1) site[`src/styles/${String(index).padStart(4, "0")}-${"x".repeat(190)}.css`] = "a { margin: 0; }\n";
+  site["src/styles/site.css"] = "a { color: #ffffff; }\n";
+  const fixture = await cssSystem(t, { site });
+  // Make the test independent of where the temporary folder is: git never looks above it.
+  const saved = { ceiling: process.env.GIT_CEILING_DIRECTORIES, dir: process.env.GIT_DIR, tree: process.env.GIT_WORK_TREE };
+  process.env.GIT_CEILING_DIRECTORIES = path.dirname(fixture.root);
+  delete process.env.GIT_DIR;
+  delete process.env.GIT_WORK_TREE;
+  t.after(() => {
+    for (const [key, value] of [["GIT_CEILING_DIRECTORIES", saved.ceiling], ["GIT_DIR", saved.dir], ["GIT_WORK_TREE", saved.tree]]) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+  const result = await run(fixture, { fix: false });
+  assert.equal(result.scanned.length, 401);
+  assert.deepEqual(result.rewrites.map((rewrite) => [rewrite.file, rewrite.to]), [["src/styles/site.css", "var(--color-surface)"]]);
+});
+
+test("the subprocess helper survives a child that exits before reading its input", async () => {
+  const input = "x".repeat(4 * 1024 * 1024);
+  const result = await runProcess(process.execPath, ["-e", "process.exit(3)"], { input });
+  assert.equal(result.code, 3);
+  const missing = await runProcess(path.join(os.tmpdir(), "timds-no-such-command"), [], { input: "x" });
+  assert.equal(missing.code, -1);
+  const echoed = await runProcess(process.execPath, ["-e", "process.stdin.pipe(process.stdout)"], { input: "kept" });
+  assert.deepEqual([echoed.code, echoed.stdout], [0, "kept"]);
+});
+
+test("CSS-looking text in another attribute, a comment or a script is never read as a style", async (t) => {
+  const page = `<a title='style="color: #1a1a1a"' data-note="color: #1a1a1a" style="color: #1a1a1a" class="card">x</a>
+<p title="a style='color: #ffffff'">y</p>
+<p data-html='<b style="color: #ffffff" class="nope">' class="button">z</p>
+<p title="<!--" style="background: #ffffff">w</p>
+<p title="<script>" style="border-color: #0055ff">v</p>
+<!-- <p style="color: #1a1a1a" class="commented"> -->
+<p alt=a/b style=color:#ffffff>u</p>
+`;
+  const fixture = await cssSystem(t, { site: { "src/components/Card.html": page } });
+  const result = await run(fixture);
+  assert.deepEqual(result.findings, []);
+  assert.deepEqual(result.rewrites.map((rewrite) => [rewrite.line, rewrite.from, rewrite.to]), [
+    [1, "#1a1a1a", "var(--color-ink)"],
+    [4, "#ffffff", "var(--color-surface)"],
+    [5, "#0055ff", "var(--color-accent)"],
+    [7, "#ffffff", "var(--color-surface)"],
+  ]);
+  assert.equal(await read(fixture.siteRoot, "src/components/Card.html"), page
+    .replace('style="color: #1a1a1a" class="card"', 'style="color: var(--color-ink)" class="card"')
+    .replace('style="background: #ffffff"', 'style="background: var(--color-surface)"')
+    .replace('style="border-color: #0055ff"', 'style="border-color: var(--color-accent)"')
+    .replace("style=color:#ffffff", "style=color:var(--color-surface)"));
+});
+
+test(".astro: attribute expressions holding markup and a <style> named inside an attribute are passed over whole", async (t) => {
+  const astro = `---
+const note = '<p style="color: #ffffff">';
+---
+<Card label={'<i style="color: #ffffff">'} {...rest} title="<style>.x { color: #ffffff }</style>" style="color: #1a1a1a" />
+<section class:list={["card", { button: true }]}><slot /></section>
+<style>
+  .card { color: #FFFFFF; }
+</style>
+`;
+  const fixture = await cssSystem(t, { site: { "src/pages/index.astro": astro } });
+  const result = await run(fixture, { fix: false });
+  assert.deepEqual(result.findings, []);
+  assert.deepEqual(result.rewrites.map((rewrite) => [rewrite.line, rewrite.from]), [[4, "#1a1a1a"], [7, "#FFFFFF"]]);
 });

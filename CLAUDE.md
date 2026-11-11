@@ -300,8 +300,11 @@ pairs, `.gitignore` lines and manual changes; its `version` is the template
 version a site records, equal to `package.json` `emdashTemplate.version`).
 `templates/emdash/site-workspace/` and `AGENTS-workspace-site.md` are the
 workspace mode's overlay and the system `AGENTS.md` section; the site's
-`src/integrations/design-system.mjs` mirrors the starter build's
-`--group-name` token rule. `templates/starter/` is the standalone repo scaffold including
+`src/integrations/design-system.mjs` mirrors the starter build's token rule
+(`--group-name`, `{group.name}` references to `var()`) and the designs
+catalog's default-state rule, held equal by
+`src/emdash-workspace-integration.test.mjs`, and renders a posting form
+disabled until the site has a handler under `src/forms/`. `templates/starter/` is the standalone repo scaffold including
 its release scripts; `templates/*.yml` are the stock workflows.
 `templates/brand-kit/` overlays only the second starter's catalogs, token and
 copy samples, stock declaration, styles, layout, pages and empty Designs

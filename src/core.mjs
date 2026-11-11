@@ -64,7 +64,7 @@ import { migrateVideoComponents } from "./video-migration.mjs";
 import { acceptsToolkitReleaseRange, assertVideoContractRuntime, runtimeIdentity, toolkitReleaseRange } from "./runtime.mjs";
 import { publishExtractedIndex } from "./artifact.mjs";
 import { MAX_ARTIFACT_FILE_BYTES, collectArtifactFiles } from "./artifact-files.mjs";
-import { WORKSPACE_SITE_SKILL_NAMES, isWorkspaceSitePath, workspaceSitePath } from "./workspace-site.mjs";
+import { isWorkspaceSitePath, workspaceSitePath, workspaceSiteSkillFolders } from "./workspace-site.mjs";
 import { publicStampUrl, publishArtifactRef, publishRelease } from "./publish.mjs";
 import { normalizeProvider, runHostedCommand, sessionReference, workspaceProvider } from "./hosted.mjs";
 import { buildBundle, describeBundle, normalizeBundleConfig } from "./bundle.mjs";
@@ -1788,13 +1788,20 @@ function statusPath(line) {
   return value.includes(" -> ") ? value.split(" -> ").at(-1) : value;
 }
 
-function allowedSubmitPath(filePath, layout) {
+/**
+ * Whether `submit` may carry `filePath`. A standalone system is the whole
+ * repository. An embedded one carries `design-system/`, its managed skills
+ * and workflow, and `siteSkillFolders`: the consumer skills its workspace
+ * site's scaffold installed at the repository root (workspaceSiteSkillFolders
+ * in workspace-site.mjs, empty without a site that owns them, so a product's
+ * own consumer skills stay out).
+ */
+function allowedSubmitPath(filePath, layout, siteSkillFolders = []) {
   if (layout === "standalone") return filePath !== ".git" && !filePath.startsWith(".git/");
   return filePath === "design-system"
     || filePath.startsWith("design-system/")
     || designSystemSkillNames.some((name) => filePath.startsWith(`.agents/skills/${name}/`))
-    // The two consumer skills a workspace site's scaffold installs beside them.
-    || WORKSPACE_SITE_SKILL_NAMES.some((name) => filePath.startsWith(`.agents/skills/${name}/`))
+    || siteSkillFolders.some((folder) => filePath.startsWith(`${folder}/`))
     || filePath === ".claude/skills"
     || filePath === ".github/workflows/timds-design-system.yml";
 }
@@ -1818,7 +1825,8 @@ export async function submitWorkspace(repoRootInput, message, options = {}) {
   const workspace = await loadWorkspace(repoRootInput);
   const preflightStatus = await git(["status", "--porcelain", "--untracked-files=all"], workspace.repoRoot);
   const preflightChangedPaths = preflightStatus.stdout.split("\n").filter(Boolean).map(statusPath);
-  const preflightOutside = preflightChangedPaths.filter((filePath) => !allowedSubmitPath(filePath, workspace.layout));
+  const siteSkillFolders = workspaceSiteSkillFolders(workspace.repoRoot, workspace.designSystemRoot);
+  const preflightOutside = preflightChangedPaths.filter((filePath) => !allowedSubmitPath(filePath, workspace.layout, siteSkillFolders));
   if (preflightOutside.length) {
     throw new Error(`Refusing to submit with changes outside the TimDS scope:\n${preflightOutside.map((filePath) => `- ${filePath}`).join("\n")}`);
   }
@@ -1833,7 +1841,7 @@ export async function submitWorkspace(repoRootInput, message, options = {}) {
     const outsideCommittedScope = committed.stdout
       .split("\n")
       .filter(Boolean)
-      .filter((filePath) => !allowedSubmitPath(filePath, workspace.layout));
+      .filter((filePath) => !allowedSubmitPath(filePath, workspace.layout, siteSkillFolders));
     if (outsideCommittedScope.length) {
       throw new Error(`Refusing to submit a branch containing committed changes outside the TimDS scope:\n${outsideCommittedScope.map((filePath) => `- ${filePath}`).join("\n")}`);
     }
@@ -1854,7 +1862,7 @@ export async function submitWorkspace(repoRootInput, message, options = {}) {
   const checked = await checkWorkspace(repoRootInput, { skipBuild: options.noBuild });
   const status = await git(["status", "--porcelain", "--untracked-files=all"], checked.repoRoot);
   const changedPaths = status.stdout.split("\n").filter(Boolean).map(statusPath);
-  const outside = changedPaths.filter((filePath) => !allowedSubmitPath(filePath, checked.layout));
+  const outside = changedPaths.filter((filePath) => !allowedSubmitPath(filePath, checked.layout, siteSkillFolders));
   if (outside.length) {
     throw new Error(`Refusing to submit with changes outside the TimDS scope:\n${outside.map((filePath) => `- ${filePath}`).join("\n")}`);
   }
@@ -1869,7 +1877,7 @@ export async function submitWorkspace(repoRootInput, message, options = {}) {
     const outsideCommittedScope = committed.stdout
       .split("\n")
       .filter(Boolean)
-      .filter((filePath) => !allowedSubmitPath(filePath, checked.layout));
+      .filter((filePath) => !allowedSubmitPath(filePath, checked.layout, siteSkillFolders));
     if (outsideCommittedScope.length) {
       throw new Error(`Refusing to submit a branch containing committed changes outside the TimDS scope:\n${outsideCommittedScope.map((filePath) => `- ${filePath}`).join("\n")}`);
     }
@@ -1879,7 +1887,7 @@ export async function submitWorkspace(repoRootInput, message, options = {}) {
   if (!branch || branch === baseBranch) commands.push(["git", "switch", "-c", plannedBranch]);
   commands.push(checked.layout === "standalone"
     ? ["git", "add", "--all"]
-    : ["git", "add", "--", "design-system", ...designSystemSkillNames.map((name) => `.agents/skills/${name}`), ...WORKSPACE_SITE_SKILL_NAMES.map((name) => `.agents/skills/${name}`).filter((skill) => existsSync(path.join(checked.repoRoot, skill))), ".claude/skills", ".github/workflows/timds-design-system.yml"]);
+    : ["git", "add", "--", "design-system", ...designSystemSkillNames.map((name) => `.agents/skills/${name}`), ...siteSkillFolders.filter((folder) => existsSync(path.join(checked.repoRoot, folder))), ".claude/skills", ".github/workflows/timds-design-system.yml"]);
   commands.push(["git", "commit", "-m", message]);
   if (!options.noPush) commands.push(["git", "push", "--set-upstream", "origin", plannedBranch]);
   if (!options.noPr && !options.noPush) {

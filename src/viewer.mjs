@@ -976,7 +976,10 @@ const contentTypes = {
  * every websocket (site-proxy.mjs, imported only then; its module comment
  * holds the routing table); it resolves once the site answered or failed.
  * A site that is not installed or does not start is reported and the system
- * is served alone; closing the server stops the site.
+ * is served alone; closing the server stops the site. When the system's own
+ * build already wrote dist/site/ (a view named site, or a build step), the
+ * system keeps /site: the site is not started, the server is the plain one
+ * above, and the dev server says how to run the site on its own instead.
  */
 export async function dev(designSystemRoot, { port = Number(process.env.PORT || 4321), siteReadyTimeoutMs } = {}) {
   const { root, destination } = folders(designSystemRoot);
@@ -1007,7 +1010,16 @@ export async function dev(designSystemRoot, { port = Number(process.env.PORT || 
     }
   };
   const workspaceSite = findWorkspaceSite(root);
-  if (workspaceSite) return devWithSite({ root, destination, port, serveDist, workspaceSite, siteReadyTimeoutMs });
+  if (workspaceSite) {
+    // The system's own pages under /site win: checked on the build just made,
+    // so a view, page or build step that writes dist/site/ is never shadowed.
+    const siteFolder = path.relative(root, workspaceSite.root) || WORKSPACE_SITE_MOUNT.slice(1);
+    if (existsSync(path.join(destination, WORKSPACE_SITE_MOUNT.slice(1)))) {
+      console.log(`The Design System already has pages under ${WORKSPACE_SITE_MOUNT}/ (dist${WORKSPACE_SITE_MOUNT}/), so the site in ${siteFolder}/ is not started or served through the dev server. Run the site on its own with npm run dev in ${siteFolder}/, where it serves at / on its own port, or rename the view in src/site.json (or the build step) that writes dist${WORKSPACE_SITE_MOUNT}/.`);
+    } else {
+      return devWithSite({ root, destination, port, serveDist, workspaceSite, siteFolder, siteReadyTimeoutMs });
+    }
+  }
   const server = createServer(serveDist);
   listenDev(server, port);
   return server;
@@ -1029,15 +1041,17 @@ function listenDev(server, port) {
 // The dev server with the workspace site behind /site: the system's pages are
 // served as soon as the server listens, while the site starts (requests under
 // the mount answer 503 until it is ready). Resolves once the site answered,
-// failed, or was not started.
-async function devWithSite({ root, destination, port, serveDist, workspaceSite, siteReadyTimeoutMs }) {
+// failed, or was not started. `dev` calls it only when the system's dist/ has
+// nothing at the mount; the router checks that again on every request, so a
+// system page under /site is never answered by the site or its 503.
+async function devWithSite({ destination, port, serveDist, workspaceSite, siteFolder, siteReadyTimeoutMs }) {
   const { siteRouter, startWorkspaceSite } = await import("./site-proxy.mjs");
-  const siteFolder = path.relative(root, workspaceSite.root) || WORKSPACE_SITE_MOUNT.slice(1);
   let site = null;
   let starting = null;
   const abort = new AbortController();
   let message = `The site in ${siteFolder}/ is starting; reload in a moment.`;
-  // The system's own top-level output wins over the site's /src/** and folder paths.
+  // The system's own top-level output wins over the site's /src/** and folder
+  // paths, and over the mount itself (site-proxy.mjs `systemHoldsMount`).
   const systemHas = (segment) => existsSync(path.join(destination, segment));
   const router = siteRouter({ fallback: serveDist, getSite: () => ({ site, message }), systemHas });
   const server = createServer(router.request);
