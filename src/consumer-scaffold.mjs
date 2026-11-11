@@ -40,6 +40,11 @@
 // made. Every refusal comes before the first write, and a failed write
 // restores the site.
 //
+// `--workspace` (`scaffoldWorkspaceEmdashSite` in
+// consumer-scaffold-workspace.mjs) writes a complete site into `site/` of a
+// Design System workspace through the same planner, with
+// templates/emdash/site-workspace/ laid over the shared set (`overlay`).
+//
 // Boundary: nothing is copied out of the Design System; the site reads the
 // pin at build time, so moving the pin is what changes the brand. Everything
 // written here is product source from then on: `upgrade` refreshes only the
@@ -98,6 +103,7 @@ const SCAFFOLD_HELP = `Usage:
   timds consumer scaffold emdash --existing --root PATH
       [--platform cloudflare|node] [--layout PATH] [--site-url URL]
       [--skip-install]
+  timds consumer scaffold emdash --workspace [--root PATH] [--skip-install]
 
 Creates a new EmDash CMS site repository at --root (which must not exist, or
 be empty) that consumes a TimDS Design System: the Design System is pinned as
@@ -127,7 +133,26 @@ ${EMDASH_RECORD_PATH}. It never overwrites a path or edits an existing page:
 any path that exists is refused before anything is written. The changes to
 astro.config, wrangler.jsonc and .gitignore are printed for the developer.
 --layout names the site's layout component (an .astro file relative to the
-site root; default ${BASE_LAYOUT}); --site-url fills the site's origin.`;
+site root; default ${BASE_LAYOUT}); --site-url fills the site's origin.
+
+--workspace writes a complete EmDash site for Cloudflare Workers into site/
+of the Design System workspace at --root (default: the current folder; an
+embedded system's design-system/ folder is used the way the workspace
+commands use it). The site has no pin: it reads the system's stylesheets and
+tokens from their source paths, and builds every page of the system's
+website design that is not an article, topic or list route from the design
+file, with the article routes inside the design's layout, so a change to the
+system is a change to the site on its next build. site/ is its own package
+(package.json and package-lock.json with exact versions, not an npm
+workspace of the root); its manifest is site/${CONSUMER_MANIFEST_FILE} with
+designSystem { "workspace": true, "systemId": ... }, and ${EMDASH_RECORD_PATH}
+records the template version and a sha256 of every template file written. It
+asks nothing and runs no generator, so one toolkit release writes the same
+files for the same workspace. It refuses a folder that is not in a Design
+System workspace, a site/ that exists and is not empty, and a system with no
+website design, before writing anything; then, unless --skip-install, it
+runs npm ci in site/. Article routes whose classes the system's stylesheets
+do not declare are listed as having no port yet.`;
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -638,7 +663,7 @@ function exactKeys(value, keys, where) {
  * reported as a TimDS bug, never as something the developer fixes.
  */
 export function validateEmdashTemplateSet(value) {
-  exactKeys(value, ["version", "dependencies", "devDependencies", "package", "preview", "gitignore", "manual"], "the top level");
+  exactKeys(value, ["version", "dependencies", "devDependencies", "package", "preview", "gitignore", "workspace", "manual"], "the top level");
   if (!Number.isInteger(value.version) || value.version < 1) throw templateDefect("version must be a positive whole number");
   for (const block of ["dependencies", "devDependencies"]) {
     exactKeys(value[block], TEMPLATE_GROUPS, block);
@@ -665,6 +690,17 @@ export function validateEmdashTemplateSet(value) {
   exactKeys(value.gitignore, TEMPLATE_GROUPS, "gitignore");
   for (const group of TEMPLATE_GROUPS) {
     if (!Array.isArray(value.gitignore[group]) || !value.gitignore[group].every((line) => typeof line === "string" && line.trim())) throw templateDefect(`gitignore.${group} must be a list of lines`);
+  }
+  exactKeys(value.workspace, ["dependencies", "devDependencies", "scripts", "renames"], "workspace");
+  for (const block of ["dependencies", "devDependencies", "scripts"]) {
+    if (!isPlainObject(value.workspace[block])) throw templateDefect(`workspace.${block} must be an object`);
+    for (const [name, entry] of Object.entries(value.workspace[block])) {
+      if (!name || typeof entry !== "string" || !entry.trim()) throw templateDefect(`workspace.${block}.${name} must be a string`);
+    }
+  }
+  if (!isPlainObject(value.workspace.renames)) throw templateDefect("workspace.renames must be an object of template file to site path");
+  for (const [from, to] of Object.entries(value.workspace.renames)) {
+    if (!isSafeRelativePath(from) || typeof to !== "string" || !isSafeRelativePath(to)) throw templateDefect(`workspace.renames ${from} must map a relative path to a relative path`);
   }
   exactKeys(value.manual, [...EMDASH_PLATFORMS], "manual");
   for (const platform of EMDASH_PLATFORMS) {
@@ -721,8 +757,10 @@ export function layoutImport(fromFile, layout) {
   return relative.startsWith("../") ? relative : `./${relative}`;
 }
 
-function substitute(text, { file, layout, siteUrl, siteName }) {
-  return text
+function substitute(text, { file, layout, siteUrl, siteName, placeholders = {} }) {
+  let result = text;
+  for (const [name, value] of Object.entries(placeholders)) result = result.replaceAll(name, () => value);
+  return result
     .replaceAll("__LAYOUT_IMPORT__", () => layoutImport(file, layout))
     .replaceAll("__SITE_URL__", () => siteUrl)
     .replaceAll("__SITE_NAME__", () => siteName);
@@ -736,8 +774,14 @@ function substitute(text, { file, layout, siteUrl, siteName }) {
  * or a file where a directory has to be), the files that received the
  * example origin, and the manual changes with their snippet text. Refuses a
  * template defect (a file in both directories, a placeholder left over).
+ *
+ * `overlay` names one more template directory whose files are added on top
+ * (the workspace mode's `site-workspace/`): a file there replaces the shared
+ * file at the same path, and `renames` maps a template file name to the
+ * path it is written at (files npm would not publish under their own name).
+ * `placeholders` fills further placeholders before the standard ones.
  */
-export async function planEmdashTemplates(siteRoot, { platform, layout, siteUrl = "", siteName, templatesRoot = EMDASH_TEMPLATES_ROOT } = {}) {
+export async function planEmdashTemplates(siteRoot, { platform, layout, siteUrl = "", siteName, templatesRoot = EMDASH_TEMPLATES_ROOT, overlay = null, renames = {}, placeholders = {} } = {}) {
   const set = await readEmdashTemplateSet(templatesRoot);
   const shared = await templateFiles(path.join(templatesRoot, "site"));
   if (shared === null) throw templateDefect("templates/emdash/site/ is missing");
@@ -745,24 +789,32 @@ export async function planEmdashTemplates(siteRoot, { platform, layout, siteUrl 
   const both = own.filter((file) => shared.includes(file));
   if (both.length) throw templateDefect(`${both.join(", ")} is in both site/ and site-${platform}/`);
   const origin = siteUrl || EXAMPLE_SITE_URL;
-  const values = { layout, siteUrl: origin, siteName };
-  const files = [];
+  const values = { layout, siteUrl: origin, siteName, placeholders };
+  const layers = [["site", shared], [`site-${platform}`, own]];
+  if (overlay) {
+    const extra = await templateFiles(path.join(templatesRoot, overlay));
+    if (extra === null) throw templateDefect(`templates/emdash/${overlay}/ is missing`);
+    layers.push([overlay, extra]);
+  }
+  const planned = new Map();
   const exampleOrigin = [];
   const leftover = [];
-  for (const [directory, list] of [["site", shared], [`site-${platform}`, own]]) {
-    for (const file of list) {
-      const bytes = await fs.readFile(path.join(templatesRoot, directory, ...file.split("/")));
+  for (const [directory, list] of layers) {
+    for (const template of list) {
+      const file = directory === overlay && Object.hasOwn(renames, template) ? renames[template] : template;
+      const bytes = await fs.readFile(path.join(templatesRoot, directory, ...template.split("/")));
       let content = bytes;
       if (!bytes.includes(0)) {
         const text = bytes.toString("utf8");
-        if (!siteUrl && text.includes("__SITE_URL__")) exampleOrigin.push(file);
+        if (!siteUrl && !Object.hasOwn(placeholders, "__SITE_URL__") && text.includes("__SITE_URL__")) exampleOrigin.push(file);
         content = substitute(text, { ...values, file });
         const left = content.match(PLACEHOLDER);
-        if (left) leftover.push(`${directory}/${file} (${[...new Set(left)].join(", ")})`);
+        if (left) leftover.push(`${directory}/${template} (${[...new Set(left)].join(", ")})`);
       }
-      files.push({ path: file, content });
+      planned.set(file, { path: file, content, template: `${directory}/${template}` });
     }
   }
+  const files = [...planned.values()];
   if (leftover.length) throw new Error(`The EmDash templates in this TimDS release use placeholders the installer does not fill: ${leftover.join("; ")}. Nothing was written; report it to TimDS.`);
   files.sort((left, right) => left.path.localeCompare(right.path));
 
@@ -786,7 +838,7 @@ export async function planEmdashTemplates(siteRoot, { platform, layout, siteUrl 
   }
 
   const manual = [];
-  for (const entry of set.manual[platform]) {
+  for (const entry of overlay ? [] : set.manual[platform]) {
     let text;
     try {
       text = await fs.readFile(path.join(templatesRoot, ...entry.snippet.split("/")), "utf8");
@@ -1195,7 +1247,7 @@ function parseScaffoldArguments(argv) {
     }
     const [rawName, inlineValue] = value.replace(/^--?/, "").split("=", 2);
     const name = rawName.replace(/-([a-z])/g, (_match, letter) => letter.toUpperCase());
-    if (["help", "h", "skipInstall", "existing"].includes(name)) {
+    if (["help", "h", "skipInstall", "existing", "workspace"].includes(name)) {
       options[name === "h" ? "help" : name] = true;
       continue;
     }
@@ -1209,14 +1261,28 @@ function parseScaffoldArguments(argv) {
   return { options, positional };
 }
 
-/** `timds consumer scaffold emdash --root PATH --design-system GIT_URL [...]`, or `--existing --root PATH [...]` */
-export async function runConsumerScaffold(args = [], { output = (message = "") => process.stdout.write(`${message}\n`), existingOptions = {} } = {}) {
+/** `timds consumer scaffold emdash --root PATH --design-system GIT_URL [...]`, `--existing --root PATH [...]`, or `--workspace [--root PATH]` */
+export async function runConsumerScaffold(args = [], { output = (message = "") => process.stdout.write(`${message}\n`), existingOptions = {}, workspaceOptions = {} } = {}) {
   const { options, positional } = parseScaffoldArguments(args);
   if (options.help || !positional.length) {
     output(SCAFFOLD_HELP);
     return null;
   }
   if (positional.length > 1 || positional[0] !== "emdash") throw new Error(`Unknown site kind ${positional.join(" ")}; timds consumer scaffold creates emdash sites\n${SCAFFOLD_HELP}`);
+  if (options.workspace) {
+    const foreign = [
+      ...(options.existing ? ["--existing"] : []),
+      ...(options.designSystem ? ["--design-system"] : []),
+      ...(options.stylesheets.length ? ["--stylesheet"] : []),
+      ...(options.portalUrl ? ["--portal-url"] : []),
+      ...(options.layout ? ["--layout"] : []),
+      ...(options.siteUrl ? ["--site-url"] : []),
+    ];
+    if (foreign.length) throw new Error(`${foreign.join(", ")} ${foreign.length === 1 ? "belongs" : "belong"} to the other scaffold modes, not --workspace: a workspace site reads the Design System it sits in, writes its own layout, and takes its origin from EMDASH_SITE_URL when it runs, so it needs none of them. Rerun without ${foreign.length === 1 ? "it" : "them"}.`);
+    if (options.platform && options.platform !== "cloudflare") throw new Error(`--platform ${options.platform} is not available with --workspace: a workspace site runs on Cloudflare Workers only. Rerun without --platform, or use --existing for a Node.js site.`);
+    const { scaffoldWorkspaceEmdashSite } = await import("./consumer-scaffold-workspace.mjs");
+    return scaffoldWorkspaceEmdashSite(options.root, { skipInstall: Boolean(options.skipInstall), output, ...workspaceOptions });
+  }
   if (options.existing) {
     const fresh = [
       ...(options.designSystem ? ["--design-system"] : []),

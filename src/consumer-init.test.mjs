@@ -10,6 +10,7 @@ import {
   consumerLaunchConfigurations,
   consumerManagedFiles,
   consumerMcpServers,
+  consumerSkillFiles,
   initializeConsumer,
   renderConsumerSkill,
   renderConsumerSkillFile,
@@ -641,4 +642,111 @@ test("the designs to match are read under the manifest's Design System path, rel
   assert.match(designsLine(await renderConsumerSkillFile("timds-consume-design-system", manifest("vendor/brand", "apps/site"))), /under `\.\.\/\.\.\/vendor\/brand\/dist\/designs\/`/);
   const nested = await renderConsumerSkillFile("timds-consume-design-system", manifest("vendor/brand", "apps/site"));
   assert.doesNotMatch(nested, /\.\.\/design-system\/dist\/designs/u);
+});
+
+// The consumer skills render one text per manifest form: the pinned forms
+// (published, submodule) and a site inside its Design System's workspace.
+const skillApps = { web: { cwd: ".", preview: { serve: ["npm", "run", "dev"], port: 4321, routes: ["/contact"], designs: { "/contact": "website:/contact" } }, designSurface: ["src/**"] } };
+const skillManifests = {
+  published: { schemaVersion: 1, designSystem: { path: "design-system", systemId: "example/core", version: "2026.10.27-1", url: "https://public.example.com" }, apps: skillApps },
+  submodule: { schemaVersion: 1, designSystem: { path: "design-system", systemId: "example/core" }, apps: skillApps },
+  workspace: { schemaVersion: 1, designSystem: { workspace: true, systemId: "example/core" }, apps: { site: { ...skillApps.web, preview: { ...skillApps.web.preview, port: 4380, ready: "/_emdash/api/setup/dev-bypass?redirect=/" } } } },
+};
+const consumerSkillNames = ["timds-consume-design-system", "timds-update-design-system"];
+
+/** The lines of each `<!-- timds:pinned|workspace -->` branch of a skill's source, by form. */
+function skillBranches(source) {
+  const branches = { pinned: [], workspace: [] };
+  let form = null;
+  let lines = [];
+  for (const line of source.split("\n")) {
+    const marker = line.match(/^<!-- timds:(pinned|workspace|end) -->$/);
+    if (!marker) {
+      if (form) lines.push(line);
+      continue;
+    }
+    if (form) branches[form].push(lines.join("\n"));
+    form = marker[1] === "end" ? null : marker[1];
+    lines = [];
+  }
+  assert.equal(form, null, "every block is closed");
+  return branches;
+}
+
+test("the consumer skills render every manifest form with no placeholder or block marker left", async () => {
+  for (const skill of consumerSkillNames) {
+    for (const [form, manifest] of Object.entries(skillManifests)) {
+      for (const options of [{}, { mode: "binary" }, ...(form === "workspace" ? [{ siteFolder: "design-system/site" }, { siteFolder: "design-system/site", mode: "binary" }] : [])]) {
+        const text = await renderConsumerSkillFile(skill, manifest, { defaultBranch: "main", ...options });
+        const label = `${skill} ${form} ${JSON.stringify(options)}`;
+        assert.doesNotMatch(text, /__[A-Z][A-Z0-9_]*__/, `${label}: a placeholder survived`);
+        assert.doesNotMatch(text, /<!-- \/?timds:/, `${label}: a block marker survived`);
+        assert.doesNotMatch(text, /undefined/, label);
+        if (options.mode === "binary") assert.doesNotMatch(text, /npm run timds --/, label);
+        if (form === "workspace") {
+          assert.doesNotMatch(text, /pinned at|`\.\.\/|\.claude\/launch\.json|consumer sync|git submodule|## Move the pin/, `${label}: pinned text in the workspace form`);
+          const site = options.siteFolder ?? "site";
+          assert.ok(text.includes(`consumer check --root ${site}`), `${label}: the check runs from the repository root on the site`);
+          if (options.mode === "binary") assert.ok(text.includes(`${site === "site" ? "" : "design-system/"}.timds/installation.json`), label);
+        } else {
+          assert.match(text, /pinned at `?design-system\/`?/, label);
+          assert.doesNotMatch(text, /## Run the two-way check|## Find the routes with no port|`site\//, `${label}: workspace text in a pinned form`);
+        }
+      }
+    }
+  }
+});
+
+test("each form keeps its own branch of the skill text and none of the other's", async () => {
+  for (const skill of consumerSkillNames) {
+    const source = await fs.readFile(new URL(`../skills/${skill}/SKILL.md`, import.meta.url), "utf8");
+    const branches = skillBranches(source);
+    assert.ok(branches.pinned.length && branches.workspace.length, `${skill} has both forms`);
+    const distinct = (body) => body.split("\n").find((line) => line.trim().length > 30 && !/__[A-Z_]+__/.test(line));
+    for (const [form, manifest] of Object.entries(skillManifests)) {
+      const text = await renderConsumerSkillFile(skill, manifest, { defaultBranch: "main" });
+      const own = form === "workspace" ? branches.workspace : branches.pinned;
+      const other = form === "workspace" ? branches.pinned : branches.workspace;
+      // A branch without placeholders is kept byte for byte.
+      for (const body of own.filter((entry) => !/__[A-Z_]+__/.test(entry))) assert.ok(text.includes(body), `${skill} ${form} keeps:\n${body.slice(0, 120)}`);
+      for (const body of other) {
+        const line = distinct(body);
+        if (line && !own.some((entry) => entry.includes(line))) assert.ok(!text.includes(line), `${skill} ${form} drops: ${line}`);
+      }
+    }
+  }
+});
+
+test("the workspace form renders paths from the repository root and refuses a site folder outside it", async () => {
+  const standalone = await renderConsumerSkillFile("timds-consume-design-system", skillManifests.workspace);
+  assert.match(standalone, /it reads the Design System `example\/core` \(at the repository root\)/);
+  assert.match(standalone, /served from `src\/designs\/<id>\/pages\/`/);
+  assert.match(standalone, /- Folder: `site\/`\./);
+  assert.match(standalone, /`npm run timds -- dev` at the repository root serves the system at http:\/\/127\.0\.0\.1:4321\/ .* under `\/site`/);
+  const embedded = await renderConsumerSkillFile("timds-consume-design-system", skillManifests.workspace, { siteFolder: "design-system/site" });
+  assert.match(embedded, /\(in `design-system\/`\)/);
+  assert.match(embedded, /served from `design-system\/src\/designs\/<id>\/pages\/`/);
+  assert.match(embedded, /the Design System's own `design-system\/AGENTS\.md`/);
+  assert.match(embedded, /`design-system\/CHANGELOG\.md`/);
+  for (const siteFolder of ["../site", "/abs/site", "site/../x", "", "site/"]) {
+    await assert.rejects(renderConsumerSkillFile("timds-consume-design-system", skillManifests.workspace, { siteFolder }), /siteFolder must be a relative POSIX path/);
+  }
+  // A published update target or hosted delivery never applies to a site with no pin.
+  await assert.rejects(renderConsumerSkillFile("timds-update-design-system", skillManifests.workspace, { targetLabel: "2026.10.27-2" }), /immutable published release/);
+});
+
+test("consumerSkillFiles renders the update skill's agent interface for a workspace site and ships it as is otherwise", async () => {
+  const shipped = await fs.readFile(new URL("../skills/timds-update-design-system/agents/openai.yaml", import.meta.url), "utf8");
+  const interfaceOf = async (manifest) => (await consumerSkillFiles(manifest)).find((file) => file.path === ".agents/skills/timds-update-design-system/agents/openai.yaml").content;
+  assert.equal(await interfaceOf(skillManifests.published), shipped);
+  assert.equal(await interfaceOf(skillManifests.submodule), shipped);
+  const workspace = await interfaceOf(skillManifests.workspace);
+  assert.match(workspace, /^ {2}display_name: "Keep the site in step with its Design System"$/m);
+  assert.match(workspace, /^ {2}default_prompt: "Use \$timds-update-design-system to port this site's article routes/m);
+  assert.doesNotMatch(workspace, /pin|release/);
+  const consume = await fs.readFile(new URL("../skills/timds-consume-design-system/agents/openai.yaml", import.meta.url), "utf8");
+  assert.equal((await consumerSkillFiles(skillManifests.workspace)).find((file) => file.path.endsWith("timds-consume-design-system/agents/openai.yaml")).content, consume);
+  // consumerManagedFiles is the skills plus the workflows, unchanged for a pinned product.
+  const managed = await consumerManagedFiles(skillManifests.published, { defaultBranch: "main" });
+  assert.deepEqual(managed.slice(0, 4), await consumerSkillFiles(skillManifests.published, { defaultBranch: "main" }));
 });

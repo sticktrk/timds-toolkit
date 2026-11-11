@@ -27,6 +27,20 @@ export const WORKSPACE_PIN_MODE = "workspace";
 export const WORKSPACE_SITE_MOUNT = "/site";
 /** The environment variable that carries that prefix to the site's dev server (Astro `base`). */
 export const WORKSPACE_SITE_BASE_ENV = "TIMDS_SITE_BASE";
+/**
+ * The environment variable that carries the port the site's dev server must
+ * listen on (Astro `server.port`); without it the site listens on the
+ * manifest's `preview.port`, which is what `consumer preview` expects.
+ */
+export const WORKSPACE_SITE_PORT_ENV = "TIMDS_SITE_PORT";
+
+/**
+ * The consumer skills the workspace scaffold installs at the repository root,
+ * beside the Design System's own. The same names as CONSUMER_SKILL_NAMES in
+ * consumer.mjs (a test holds the two equal); repeated here so the system's
+ * commands can name them without loading the consumer modules.
+ */
+export const WORKSPACE_SITE_SKILL_NAMES = Object.freeze(["timds-consume-design-system", "timds-update-design-system"]);
 
 function readJsonObject(filePath) {
   try {
@@ -54,6 +68,26 @@ export function findWorkspaceSite(designSystemRoot) {
   if (!existsSync(manifestPath)) return null;
   const manifest = readJsonObject(manifestPath);
   return isWorkspaceDesignSystem(manifest) ? { root, manifestPath, manifest } : null;
+}
+
+/**
+ * The workspace site's folder as a `/`-joined path relative to `repoRoot`
+ * (`site` for a standalone system, `design-system/site` for an embedded one),
+ * or null when the Design System at `designSystemRoot` has no workspace site.
+ * The system's commands use it to leave the site alone: the site is its own
+ * package, with its own build output, dependencies and local state.
+ */
+export function workspaceSitePath(repoRoot, designSystemRoot) {
+  const site = findWorkspaceSite(designSystemRoot);
+  if (!site) return null;
+  return path.relative(path.resolve(repoRoot), site.root).split(path.sep).join("/");
+}
+
+/** True when the `/`-joined `relativePath` is `sitePath` or lies under it. */
+export function isWorkspaceSitePath(relativePath, sitePath) {
+  if (!sitePath) return false;
+  const value = String(relativePath ?? "");
+  return value === sitePath || value.startsWith(`${sitePath}/`);
 }
 
 /**

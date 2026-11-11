@@ -5,7 +5,7 @@
 import type { APIRoute } from "astro";
 import { getEmDashCollection, getSiteSettingsWithCacheHint } from "emdash";
 
-import { ARTICLES, absoluteUrl, articlePath, cacheControl, siteOrigin, type ArticleData } from "../../lib/articles/index";
+import { ARTICLES, absoluteUrl, articlePath, cacheControl, siteOrigin, sitePath, type ArticleData } from "../../lib/articles/index";
 
 export const prerender = false;
 
@@ -31,7 +31,7 @@ export const GET: APIRoute = async ({ url, site, locals, cache }) => {
 	}
 
 	const title = settings.data.title || "__SITE_NAME__";
-	const feedUrl = absoluteUrl("/articles/rss.xml", origin);
+	const feedUrl = absoluteUrl(sitePath("/articles/rss.xml"), origin);
 	const items = entries
 		.filter((entry) => entry.data.publishedAt)
 		.map((entry) => {
@@ -52,7 +52,7 @@ export const GET: APIRoute = async ({ url, site, locals, cache }) => {
 		'<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">',
 		"  <channel>",
 		`    <title>${escapeXml(`${title}: articles`)}</title>`,
-		`    <link>${escapeXml(absoluteUrl("/articles/", origin))}</link>`,
+		`    <link>${escapeXml(absoluteUrl(sitePath("/articles/"), origin))}</link>`,
 		`    <description>${escapeXml(settings.data.tagline || `Articles from ${title}`)}</description>`,
 		`    <atom:link href="${escapeXml(feedUrl)}" rel="self" type="application/rss+xml"/>`,
 		...items,

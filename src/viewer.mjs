@@ -37,6 +37,7 @@ import { access, cp, lstat, mkdir, readFile, readdir, rm, stat, writeFile } from
 import { createServer } from "node:http";
 import path from "node:path";
 import { brandKitCopySamples, brandKitMediaSamples, brandKitSlots, brandKitLabels } from "./brand-kit.mjs";
+import { WORKSPACE_SITE_MOUNT, findWorkspaceSite } from "./workspace-site.mjs";
 
 /** The design system's own folders, from the root a stub passes. */
 function folders(root) {
@@ -966,11 +967,21 @@ const contentTypes = {
  * The stock dev server: build once, then serve dist/ on 127.0.0.1 (PORT, else
  * 4321). It does not watch files; rerun it after a change. Resolves with the
  * listening server.
+ *
+ * When the workspace holds a site (`site/timds.consumer.json` in the
+ * workspace form, see workspace-site.mjs), the same server also starts the
+ * site's own dev server (on preview.port, or a free port when that is taken)
+ * and proxies /site and /site/** to it, plus the root paths the site's dev
+ * server answers outside its base (EmDash's /_emdash, Vite's modules) and
+ * every websocket (site-proxy.mjs, imported only then; its module comment
+ * holds the routing table); it resolves once the site answered or failed.
+ * A site that is not installed or does not start is reported and the system
+ * is served alone; closing the server stops the site.
  */
-export async function dev(designSystemRoot, { port = Number(process.env.PORT || 4321) } = {}) {
+export async function dev(designSystemRoot, { port = Number(process.env.PORT || 4321), siteReadyTimeoutMs } = {}) {
   const { root, destination } = folders(designSystemRoot);
   await build(root);
-  const server = createServer(async (request, response) => {
+  const serveDist = async (request, response) => {
     try {
       const url = new URL(request.url || "/", "http://localhost");
       const pathname = decodeURIComponent(url.pathname);
@@ -994,8 +1005,15 @@ export async function dev(designSystemRoot, { port = Number(process.env.PORT || 
     } catch {
       response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" }).end("Not found");
     }
-  });
+  };
+  const workspaceSite = findWorkspaceSite(root);
+  if (workspaceSite) return devWithSite({ root, destination, port, serveDist, workspaceSite, siteReadyTimeoutMs });
+  const server = createServer(serveDist);
+  listenDev(server, port);
+  return server;
+}
 
+function listenDev(server, port) {
   server.on("error", (error) => {
     if (error.code !== "EADDRINUSE") throw error;
     console.error(`Starter viewer port ${port} is already in use. Run timds dev --port ${port < 65535 ? port + 1 : 4321}.`);
@@ -1005,5 +1023,62 @@ export async function dev(designSystemRoot, { port = Number(process.env.PORT || 
   server.listen(port, "127.0.0.1", () => {
     console.log(`Starter viewer: http://127.0.0.1:${port}`);
   });
+  return server;
+}
+
+// The dev server with the workspace site behind /site: the system's pages are
+// served as soon as the server listens, while the site starts (requests under
+// the mount answer 503 until it is ready). Resolves once the site answered,
+// failed, or was not started.
+async function devWithSite({ root, destination, port, serveDist, workspaceSite, siteReadyTimeoutMs }) {
+  const { siteRouter, startWorkspaceSite } = await import("./site-proxy.mjs");
+  const siteFolder = path.relative(root, workspaceSite.root) || WORKSPACE_SITE_MOUNT.slice(1);
+  let site = null;
+  let starting = null;
+  const abort = new AbortController();
+  let message = `The site in ${siteFolder}/ is starting; reload in a moment.`;
+  // The system's own top-level output wins over the site's /src/** and folder paths.
+  const systemHas = (segment) => existsSync(path.join(destination, segment));
+  const router = siteRouter({ fallback: serveDist, getSite: () => ({ site, message }), systemHas });
+  const server = createServer(router.request);
+  server.on("upgrade", router.upgrade);
+  const close = server.close.bind(server);
+  server.close = (callback) => {
+    abort.abort();
+    const stopping = site ? site.stop() : starting ? starting.catch(() => {}) : Promise.resolve();
+    close((error) => stopping.then(() => callback?.(error)));
+    return server;
+  };
+
+  const listening = new Promise((resolve) => {
+    server.once("listening", () => resolve(true));
+    server.once("error", () => resolve(false));
+  });
+  listenDev(server, port);
+  if (!(await listening)) return server;
+  const origin = `http://127.0.0.1:${server.address().port}`;
+
+  if (!existsSync(path.join(workspaceSite.root, "node_modules"))) {
+    message = `The site in ${siteFolder}/ is not installed, so the dev server shows the Design System alone; run npm ci in ${siteFolder}/, then start the dev server again.`;
+    console.log(message);
+    return server;
+  }
+  try {
+    starting = startWorkspaceSite(workspaceSite, {
+      mount: WORKSPACE_SITE_MOUNT,
+      signal: abort.signal,
+      ...(siteReadyTimeoutMs === undefined ? {} : { readyTimeoutMs: siteReadyTimeoutMs }),
+      onStop: (reason) => {
+        message = `The site's dev server stopped with ${reason}; restart the dev server to start it again.`;
+      },
+    });
+    site = await starting;
+    console.log(`Site: ${origin}${WORKSPACE_SITE_MOUNT}/`);
+    if (site.emdash) console.log(`EmDash admin: ${origin}/_emdash/admin/ (sign in on this machine at ${origin}/_emdash/api/setup/dev-bypass?redirect=/_emdash/admin/)`);
+  } catch (error) {
+    if (abort.signal.aborted) return server;
+    message = `The site in ${siteFolder}/ did not start, so the dev server shows the Design System alone: ${error.message}`;
+    console.error(message);
+  }
   return server;
 }

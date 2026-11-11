@@ -217,6 +217,15 @@ they write a configuration of their own.
        publish it, and confirm it appears at `/articles/<slug>/` without a
        rebuild; unpublish it and confirm the page answers 404.
 
+## Scheduled work without a Cron Trigger
+
+On Cloudflare, `src/worker.ts` also runs the scheduled work (publishing
+scheduled articles, maintenance) on `POST /_scheduled` for a caller that
+sends `Authorization: Bearer <SCHEDULED_TASKS_SECRET>`, for a host that gives
+the Worker no Cron Trigger. Set the secret with
+`npx wrangler secret put SCHEDULED_TASKS_SECRET`. Without it the path answers
+404 like a missing page, and so does any other method or a wrong secret.
+
 ## Caching
 
 The routes set `Cache-Control: private, no-store` for a signed-in user or a

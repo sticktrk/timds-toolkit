@@ -8,7 +8,7 @@ import { decodeSlug, getEmDashCollection, getTaxonomyTermsWithCacheHint } from "
 
 import Layout from "__LAYOUT_IMPORT__";
 import ArticleCard from "../../components/articles/ArticleCard.astro";
-import { ARTICLES, TOPIC, cacheControl, type ArticleData } from "../../lib/articles/index";
+import { ARTICLES, TOPIC, cacheControl, sitePath, type ArticleData } from "../../lib/articles/index";
 
 export const prerender = false;
 
@@ -56,7 +56,7 @@ const description = topic.description || `Articles about ${topic.label}.`;
 			<section class="section" id="list">
 				<h2>Nothing published yet</h2>
 				<p>
-					Articles filed under this topic appear here as soon as they are published. <a href="/articles/">See all articles</a>.
+					Articles filed under this topic appear here as soon as they are published. <a href={sitePath("/articles/")}>See all articles</a>.
 				</p>
 			</section>
 		)

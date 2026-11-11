@@ -43,6 +43,22 @@
     "cloudflare": [".wrangler", ".dev.vars", ".dev.vars.*"],
     "node": ["data.db", "data.db-*", "uploads"]
   },
+  "workspace": {
+    "dependencies": {
+      "astro": "7.4.10"
+    },
+    "devDependencies": {},
+    "scripts": {
+      "dev": "astro dev",
+      "build": "astro build",
+      "preview": "astro preview",
+      "worker": "astro build && wrangler deploy --dry-run --outdir dist/worker"
+    },
+    "renames": {
+      "gitignore": ".gitignore",
+      "env.example": ".env.example"
+    }
+  },
   "manual": {
     "cloudflare": [
       {

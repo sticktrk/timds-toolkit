@@ -1,8 +1,9 @@
 ---
 name: timds-update-design-system
-description: Bring a new release of the TimDS Design System pinned at __DESIGN_SYSTEM_PATH__/ into this product as a developer: move the version pin, read what changed in the system, port changed or new website designs and their states onto the product's stack, and verify the review routes. Use when a developer asks to update, bump, or adopt a Design System release, or to port a design the designers finished.
+description: __UPDATE_DESCRIPTION__
 ---
 
+<!-- timds:pinned -->
 # Update this product to a Design System release
 
 Designers do their work in the Design System repository and release it;
@@ -106,6 +107,104 @@ names the file to open):
    product** below, or the serve command) and visit every review route at
    each declared width and scheme, paired routes against their design state
    by state. Fix what you find.
+<!-- timds:workspace -->
+# Keep this site in step with its Design System
+
+The EmDash site in `__SITE__/` lives in the repository of the Design System
+`__SYSTEM_ID__` (__SYSTEM_AT__) and reads it from its source files, so there
+is no release to adopt and no pin to move: a change to the system reaches
+the site at its next build. Two things still need a developer, and they are
+this skill's work: the article routes that have no port to the system yet,
+and the site's TimDS templates when a newer toolkit ships new ones. Work
+only in the repository the user supplied, on a branch named for the change.
+`__SITE__/timds.consumer.json` declares the site's app and review routes,
+relative to `__SITE__/`. Run the commands below from the repository root
+unless a step names another folder.
+
+## Start
+
+1. Read __SYSTEM_GUIDANCE__, `__SITE__/AGENTS.md`, and
+   `__SITE__/DESIGN_SYSTEM.md` completely. Where they are stricter than
+   this skill, they win.
+2. Run `git status --short` and preserve all pre-existing work.
+3. Run `npm ci` in `__SITE__/`.
+
+## Find the routes with no port
+
+Every site gets the same article routes: `/articles`
+(`__SITE__/src/pages/articles/index.astro`), `/articles/[slug]`
+(`__SITE__/src/pages/articles/[slug].astro`), and `/topics/[slug]`
+(`__SITE__/src/pages/topics/[slug].astro`), with the components they import
+under `__SITE__/src/components/articles/`. They are written on the starter's
+classes (`hero`, `section`, `article-list`, `article-card`, `article-meta`,
+`topic-list`, `prose`, `table-scroll`, `button`, `button--secondary`) and
+render inside the design's layout, so they are styled only by the
+stylesheets that layout links: the `<link>`s in
+`__SYSTEM_PREFIX__src/designs/<id>/layout.html` (or, in a design without
+one, its home page), where `/styles/name.css` is
+`__SYSTEM_PREFIX__src/styles/name.css`, with its `@import`s. A route that
+uses a class none of those stylesheets declares has no port to this system
+yet: it is installed and renders, unstyled where the class is missing.
+
+The scaffold printed those routes and their missing classes under "No port
+yet"; no command lists them again. To find them, compare the classes in each
+route's file and its components with the rules in the linked stylesheets.
+`npm run timds -- consumer check --root __SITE__` is not that list: it
+accepts a class declared in any system stylesheet, linked or not.
+
+## Port each route
+
+For every route with missing classes, choose per class:
+
+1. **Use a class the system has.** When a linked stylesheet already has a
+   class for the job, change the route's markup to use it. The route files
+   and components are the site's own templates; edit them in place.
+2. **Add the class to the system.** Otherwise add a rule for it to a
+   stylesheet the design links (the starter's is
+   `__SYSTEM_PREFIX__src/styles/system.css`), written with the system's
+   tokens (`var(--…)`). When the design has article pages
+   (`__SYSTEM_PREFIX__src/designs/<id>/pages/articles/`), match them: they
+   are samples of the route. A value the system has no token for is a new
+   token, added the way **Run the two-way check** in the
+   `timds-consume-design-system` skill describes.
+
+Only add to the system: never change the value of an existing token or the
+rules of an existing class, and never change the design's pages to suit a
+route. Never copy a design's HTML into `__SITE__/src/pages/` or write a
+color or font literal in the site.
+
+## Bring the templates forward
+
+`__SITE__/.timds/emdash.json` records the template version the site was
+written from (`template`), the sha256 of every file the scaffold wrote from
+its templates (`files`, relative to `__SITE__/`), and what it wrote outside
+the site (`workspaceFiles`, relative to the repository root, and
+`workspaceSections`, the delimited section it added to an `AGENTS.md`). The
+toolkit's template version and what each version changed are
+`emdashTemplate` in the toolkit's `package.json`
+(`node_modules/@dtconcepts/timds/package.json` in an npm workspace;
+`npm view @dtconcepts/timds emdashTemplate` for the latest release).
+
+There is no template update command yet. When `emdashTemplate.version` is
+above the recorded `template`, carry each later version's `changes` into the
+site by hand. The templates are in the same package under
+`templates/emdash/` (`site/` and `site-cloudflare/`, with `site-workspace/`
+on top), with placeholders the scaffold filled in for this system. A file
+whose sha256 still equals its `files` entry is as the scaffold wrote it; one
+that differs was edited here, so keep the edit and add the change to it.
+Then set `template` to the version reached and each changed file's hash to
+its new sha256, so a later update can still tell a stock file from an
+edited one.
+
+## Verify
+
+1. In `__SITE__/`, run `npm ci` and `npm run build`; when the change
+   touches the Worker, also `npm run worker`, which writes the uploadable
+   Worker to `__SITE__/dist/worker`.
+2. Run `npm run timds -- dev` and visit every review route under `/site` at
+   each declared width and scheme, each ported route against the design's
+   article pages when it has them. Fix what you find.
+<!-- timds:end -->
 __PIN_VERIFY__
 
 __UPDATE_DELIVERY__

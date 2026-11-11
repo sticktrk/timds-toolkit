@@ -25,6 +25,12 @@
 // widths and schemes into `designs/`, so the review shows the design beside
 // the route: the reference on one side, the product on the other.
 //
+// A site inside its Design System's workspace (`designSystem.workspace`) has
+// no pin: its designs come from the workspace above it, built in place, and
+// the base side is the same repository's merge base, with the site at its
+// own folder in the temporary worktree. Changed files and source stamps are
+// relative to the site, so a system file reads `../src/styles/...`.
+//
 // Boundary: TimDS never builds the product. It runs the product's declared
 // `install`, `build`, and `serve` commands in the app's cwd (for the base,
 // as the base's own manifest declares them) and captures what a reviewer
@@ -57,6 +63,7 @@ import {
   validateConsumerManifest,
 } from "./consumer.mjs";
 import { syncConsumerBundle } from "./consumer-sync.mjs";
+import { WORKSPACE_PIN_MODE } from "./workspace-site.mjs";
 import { createPreviewServer, execute, loadWorkspace, workspaceCommandEnvironment } from "./core.mjs";
 import { buildDesigns } from "./designs.mjs";
 import { escapeHtml } from "./html.mjs";
@@ -770,6 +777,9 @@ async function prepareDesignReference(consumer, { commandEnv, install, output })
   if (designSystem.mode === "published" && !designSystem.linked) {
     return { status: "unavailable", reason: `${designSystem.path} is a published bundle, not a Design System checkout; designs are shown beside routes only from a checkout.` };
   }
+  if (designSystem.mode === WORKSPACE_PIN_MODE && !designSystem.present) {
+    return { status: "unavailable", reason: `no folder above ${consumer.repoRoot} holds timds.json, so this workspace site has no Design System to show designs from.` };
+  }
   if (!designSystem.present) {
     return { status: "unavailable", reason: `${designSystem.path}/timds.json is not checked out; run git submodule update --init ${designSystem.path}.` };
   }
@@ -883,14 +893,26 @@ async function resolveMergeBase(repoRoot, ref) {
   return sha;
 }
 
-/** Files changed between the merge base and HEAD plus working-tree changes, repository-relative, sorted. */
+/** The consumer folder below the git top level, with a trailing slash (`site/`), or empty at the top. */
+async function gitPrefix(repoRoot) {
+  const result = await gitRun(["rev-parse", "--show-prefix"], repoRoot);
+  return result.code === 0 ? result.stdout.trim() : "";
+}
+
+/**
+ * Files changed between the merge base and HEAD plus working-tree changes,
+ * relative to the consumer root, sorted. Git names them from the top level;
+ * a consumer below it (a workspace site) gets `../` for the files outside it.
+ */
 async function changedFilesSince(repoRoot, mergeBase, ignoredPrefix) {
   const files = new Set();
   const committed = await gitRun(["diff", "--name-only", "--no-renames", "-z", `${mergeBase}...HEAD`], repoRoot);
   if (committed.code === 0) for (const file of committed.stdout.split("\0").filter(Boolean)) files.add(file);
   const status = await gitRun(["status", "--porcelain", "-z", "--no-renames", "--untracked-files=all"], repoRoot);
   if (status.code === 0) for (const entry of status.stdout.split("\0").filter(Boolean)) files.add(entry.slice(3));
-  return [...files].filter((file) => !ignoredPrefix || !(file === ignoredPrefix || file.startsWith(`${ignoredPrefix}/`))).sort();
+  const prefix = (await gitPrefix(repoRoot)).replace(/\/$/, "");
+  const relative = (file) => (prefix ? path.posix.relative(prefix, file) : file);
+  return [...files].map(relative).filter((file) => !ignoredPrefix || !(file === ignoredPrefix || file.startsWith(`${ignoredPrefix}/`))).sort();
 }
 
 /**
@@ -902,7 +924,10 @@ async function changedFilesSince(repoRoot, mergeBase, ignoredPrefix) {
 async function captureBaseSide({ app, captureTimeoutMs, cells, commandEnv, compareRef, consumer, fetchImpl, guard, launchBrowser, mergeBase, output, preview, readyTimeoutMs, scratch }) {
   const repoRoot = consumer.repoRoot;
   const where = `${compareRef} (${shortCommit(mergeBase)})`;
-  const shown = await gitRun(["show", `${mergeBase}:${CONSUMER_MANIFEST_FILE}`], repoRoot);
+  // The consumer's folder below the top level: the worktree checks out the
+  // whole repository, so a workspace site is at that folder inside it.
+  const prefix = await gitPrefix(repoRoot);
+  const shown = await gitRun(["show", `${mergeBase}:${prefix}${CONSUMER_MANIFEST_FILE}`], repoRoot);
   if (shown.code !== 0) return { reason: `${CONSUMER_MANIFEST_FILE} does not exist at ${where}, so there is no earlier version of this app to compare with.` };
   let manifest;
   try {
@@ -913,6 +938,7 @@ async function captureBaseSide({ app, captureTimeoutMs, cells, commandEnv, compa
   if (!Object.hasOwn(manifest.apps, app.name)) return { reason: `App "${app.name}" does not exist at ${where}, so there is no earlier version of it to compare with.` };
   const baseApp = manifest.apps[app.name];
   const checkout = path.join(scratch, "base-checkout");
+  const baseRoot = path.join(checkout, prefix);
   let added = false;
   // Set when the base Design System is a linked worktree of the checked-out
   // submodule rather than a fresh clone; it has to go first, because git
@@ -940,7 +966,10 @@ async function captureBaseSide({ app, captureTimeoutMs, cells, commandEnv, compa
     if (worktree.code !== 0) return { reason: `git could not check out ${where}: ${firstLine(worktree.stderr)}` };
     added = true;
     const designSystemPath = manifest.designSystem.path;
-    if (consumerPinMode(manifest.designSystem) === "published") {
+    if (consumerPinMode(manifest.designSystem) === WORKSPACE_PIN_MODE) {
+      // The base worktree is the whole workspace: the system sits above the
+      // site there exactly as it did at the merge base.
+    } else if (consumerPinMode(manifest.designSystem) === "published") {
       // App installs can run below the repository root and need not invoke
       // its postinstall. Resolve the base pin here, before running the app.
       const head = consumer.designSystem;
@@ -951,8 +980,8 @@ async function captureBaseSide({ app, captureTimeoutMs, cells, commandEnv, compa
         && head.record.systemId === head.systemId
         && (head.version === "current" || head.record.version === head.version);
       try {
-        if (samePin) await fs.cp(head.root, path.join(checkout, designSystemPath), { recursive: true });
-        else await syncConsumerBundle(checkout, { fetchImpl, output });
+        if (samePin) await fs.cp(head.root, path.join(baseRoot, designSystemPath), { recursive: true });
+        else await syncConsumerBundle(baseRoot, { fetchImpl, output });
       } catch (error) {
         return { reason: `The Design System could not be prepared at ${where}: ${firstLine(error.message)}` };
       }
@@ -967,18 +996,18 @@ async function captureBaseSide({ app, captureTimeoutMs, cells, commandEnv, compa
       if (basePin && headDesignSystem && existsSync(path.join(headDesignSystem, ".git"))) {
         const available = await gitRun(["cat-file", "-e", `${basePin}^{commit}`], headDesignSystem);
         if (available.code === 0) {
-          const target = path.join(checkout, designSystemPath);
+          const target = path.join(baseRoot, designSystemPath);
           await fs.rm(target, { force: true, recursive: true });
           const linked = await gitRun(["worktree", "add", "--detach", target, basePin], headDesignSystem);
           if (linked.code === 0) linkedDesignSystem = { repository: headDesignSystem, target };
         }
       }
       if (!linkedDesignSystem) {
-        const submodule = await gitRun(["submodule", "update", "--init", "--", designSystemPath], checkout);
+        const submodule = await gitRun(["submodule", "update", "--init", "--", designSystemPath], baseRoot);
         if (submodule.code !== 0) output(`Warning: could not check out ${designSystemPath} at ${where} (${firstLine(submodule.stderr)}); building the base without it`);
       }
     }
-    const baseCwd = path.resolve(checkout, baseApp.cwd);
+    const baseCwd = path.resolve(baseRoot, baseApp.cwd);
     if (!existsSync(baseCwd)) return { reason: `App "${app.name}" folder ${baseApp.cwd} does not exist at ${where}.` };
     if (baseApp.install) {
       output(`Running the base install: ${baseApp.install.join(" ")}`);
@@ -1412,7 +1441,18 @@ export async function buildConsumerPreview(consumer, app, options = {}) {
     let routes = [];
     let sources = new Map();
     let site = null;
-    const normalizeSource = await sourceNormalizer(consumer.repoRoot, app.cwdRelative || ".", [path.join(scratch, "base-checkout")]);
+    const prefix = await gitPrefix(consumer.repoRoot);
+    const normalizeInConsumer = await sourceNormalizer(consumer.repoRoot, app.cwdRelative || ".", [path.join(scratch, "base-checkout", prefix)]);
+    // A workspace site loads the system's own files from the folder above
+    // it; name them relative to the site, as the changed files are.
+    const systemRoots = consumer.designSystem.mode === WORKSPACE_PIN_MODE && consumer.designSystem.root
+      ? [consumer.designSystem.root, await fs.realpath(consumer.designSystem.root).catch(() => consumer.designSystem.root)].map((root) => root.replace(/\\/g, "/"))
+      : [];
+    const normalizeSource = (file) => {
+      const value = normalizeInConsumer(file);
+      const root = value && systemRoots.find((candidate) => value.startsWith(`${candidate}/`));
+      return root ? path.posix.join(consumer.designSystem.path, value.slice(root.length + 1)) : value;
+    };
     const crawl = async (origin) => {
       const browser = await launchBrowser();
       const releaseBrowser = guard.add(() => browser.close());
@@ -1491,7 +1531,10 @@ export async function buildConsumerPreview(consumer, app, options = {}) {
       branch: provenance.branch,
       commit: provenance.commit,
       pullRequest: resolvePullRequest(options.pullRequest, env),
-      designSystem: { systemId: consumer.designSystem.systemId, commit: consumer.designSystem.commit ?? null, ...(consumer.designSystem.mode === "published" ? { version: consumer.designSystem.record?.version ?? consumer.designSystem.version } : {}) },
+      // A workspace site's system is the same repository at the same commit.
+      designSystem: consumer.designSystem.mode === WORKSPACE_PIN_MODE
+        ? { systemId: consumer.designSystem.systemId, commit: provenance.commit ?? null, workspace: true }
+        : { systemId: consumer.designSystem.systemId, commit: consumer.designSystem.commit ?? null, ...(consumer.designSystem.mode === "published" ? { version: consumer.designSystem.record?.version ?? consumer.designSystem.version } : {}) },
       mode,
       ...(site ? { site } : {}),
       compare,

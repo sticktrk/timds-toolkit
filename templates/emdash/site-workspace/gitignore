@@ -1,0 +1,17 @@
+node_modules
+dist
+.astro
+.wrangler
+.emdash/migrations.json
+
+# Generated types: astro dev and astro build write the first from the
+# content model, npx wrangler types writes the second
+emdash-env.d.ts
+worker-configuration.d.ts
+
+# Environment and Wrangler secrets
+.env
+.env.*
+!.env.example
+.dev.vars
+.dev.vars.*

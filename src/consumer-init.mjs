@@ -41,6 +41,19 @@
 // is checked with `git check-ignore` and refused, before anything is written,
 // when any planned path is ignored (`refuseIgnoredPaths`).
 //
+// A site inside its Design System's workspace (`designSystem.workspace`,
+// written by `consumer scaffold emdash --workspace`) has no installation of
+// its own: init, upgrade and binary adoption refuse it and point at the
+// workspace root, and init refuses a Design System root itself. The skill
+// renderer renders that form too: each SKILL.md keeps the pinned text and the
+// workspace text side by side in `<!-- timds:pinned -->` /
+// `<!-- timds:workspace -->` blocks, and the form's block is kept, so a
+// pinned rendering is unchanged by the workspace text. Workspace paths are
+// written from the repository root (`siteFolder`: `site`, or
+// `design-system/site` in an embedded system). `consumer scaffold emdash
+// --workspace` installs that rendering (`consumerSkillFiles`) beside the
+// system's own skills; no init or upgrade here manages it.
+//
 // Boundary: init never edits product source, the Design System submodule, or
 // an existing manifest (it is kept unless --force regenerates it); upgrade
 // never touches the manifest, package.json, or product source at all
@@ -55,7 +68,8 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-import { CONSUMER_INSTALLATION_PATH, CONSUMER_MANIFEST_FILE, CONSUMER_SKILL_NAME, CONSUMER_SKILL_NAMES, CONSUMER_UPDATE_SKILL_NAME, consumerPinMode, gitIgnoredPaths, publishedBaseUrl, validateConsumerManifest } from "./consumer.mjs";
+import { CONSUMER_INSTALLATION_PATH, CONSUMER_MANIFEST_FILE, CONSUMER_SKILL_NAME, CONSUMER_SKILL_NAMES, CONSUMER_UPDATE_SKILL_NAME, consumerPinMode, findConsumerManifestRoot, gitIgnoredPaths, publishedBaseUrl, readWorkspaceSiteManifest, validateConsumerManifest, workspaceSiteRefusal } from "./consumer.mjs";
+import { WORKSPACE_PIN_MODE, WORKSPACE_SITE_DIRECTORY, WORKSPACE_SITE_MOUNT } from "./workspace-site.mjs";
 import { resolvePublishedBundle, syncConsumerBundle } from "./consumer-sync.mjs";
 import { planConsumerToolkitLock, resolveConsumerToolkitLock, runConsumerNpm } from "./consumer-install.mjs";
 import { acceptsToolkitReleaseRange, runtimeIdentity, toolkitReleaseRange } from "./runtime.mjs";
@@ -185,6 +199,12 @@ async function findGitRoot(start) {
     throw new Error(`${resolved} is not inside a git repository. Run timds consumer init at the root of the product repository.`);
   }
   return fs.realpath(result.stdout.trim());
+}
+
+/** Refuse a workspace site at or above `start` (below its git top level) before any repository-level write. */
+async function refuseWorkspaceSite(start, command, message = workspaceSiteRefusal) {
+  const consumerRoot = await findConsumerManifestRoot(start);
+  if (consumerRoot && await readWorkspaceSiteManifest(consumerRoot)) throw new Error(message(consumerRoot, command));
 }
 
 async function gitlinkCommit(repoRoot, designSystemPath) {
@@ -378,9 +398,79 @@ function appSection(name, app, invocation = "npm run timds --", designSystemPath
   return lines.join("\n");
 }
 
+/**
+ * An app of a site inside its Design System's workspace: its folder from the
+ * repository root, the one dev server that serves the system and the site
+ * (viewer.mjs `dev`, mounting the site under /site), and the designs it is
+ * built from, which live in the system rather than in a pin.
+ */
+function workspaceAppSection(name, app, site, invocation = "npm run timds --") {
+  const folder = app.cwd === "." ? site : path.posix.join(site, app.cwd);
+  const systemFolder = path.posix.dirname(site);
+  const systemPrefix = systemFolder === "." ? "" : `${systemFolder}/`;
+  const preview = app.preview;
+  const lines = [`### ${code(name)}`, ""];
+  lines.push(`- Folder: ${code(`${folder}/`)}. Paths below are relative to it; run its npm commands there.`);
+  if (app.install) lines.push(`- Install: ${code(app.install.join(" "))}.`);
+  if (preview.serve) {
+    lines.push(`- Run locally: after the install, ${code(`${invocation} dev`)} at the repository root serves the system at http://127.0.0.1:4321/ (another port with ${code("--port PORT")}) and this site under ${code(WORKSPACE_SITE_MOUNT)}, http://127.0.0.1:4321${WORKSPACE_SITE_MOUNT}/, by starting the site's own server (${code(preview.serve.join(" "))}) behind it. For the site alone, run that command in ${code(`${folder}/`)} and open http://localhost:${preview.port}${preview.ready || "/"}.`);
+  } else {
+    lines.push(`- Run locally: build with ${code(preview.build.join(" "))} in ${code(`${folder}/`)} (output in ${code(`${preview.output}/`)}).`);
+  }
+  if (preview.routes?.length) lines.push(`- Review routes: ${list(preview.routes)}${preview.serve ? `, under ${code(WORKSPACE_SITE_MOUNT)} on the workspace's dev server` : ""}.`);
+  const designs = Object.entries(preview.designs || {});
+  if (designs.length) lines.push(`- Designs to match: ${designs.map(([route, reference]) => `${code(route)} matches ${code(reference)}`).join(", ")}. A design is ${code("<design>:<route>")}, a page under ${code(`${systemPrefix}src/designs/<design>/pages/`)}: the site serves each design page that is not an article, topic, or list route from that file, and an article route's design is a sample of it.`);
+  lines.push(`- Review at: ${list(preview.viewports)} widths; ${list(preview.schemes)} schemes.`);
+  lines.push(`- Design surface (may change): ${list(app.designSurface)}.`);
+  lines.push(app.protected.length
+    ? `- Protected (never change, even inside the surface): ${list(app.protected)}.`
+    : "- Protected: nothing beyond the rule that everything outside the design surface is off limits.");
+  return lines.join("\n");
+}
+
+// A skill's text for one manifest form: `<!-- timds:pinned -->` and
+// `<!-- timds:workspace -->` open a block (each on its own line), the other
+// may follow as the alternative, and `<!-- timds:end -->` closes it. The
+// block for the manifest's form is kept and the marker lines are dropped, so
+// a pinned rendering is the pinned text byte for byte.
+const SKILL_BLOCK = /^<!-- timds:(pinned|workspace) -->\n([\s\S]*?)(?:^<!-- timds:(pinned|workspace) -->\n([\s\S]*?))?^<!-- timds:end -->\n/gm;
+
+function selectSkillBlocks(text, form) {
+  const selected = text.replace(SKILL_BLOCK, (_match, first, firstBody, second, secondBody) => (first === form ? firstBody : second === form ? secondBody : ""));
+  if (/<!-- timds:(?:pinned|workspace|end) -->/.test(selected)) throw new Error("A consumer skill has an unbalanced <!-- timds:pinned|workspace|end --> block");
+  return selected;
+}
+
+/**
+ * The placeholders of the workspace form, from the site's folder relative to
+ * the repository root: `site` in a standalone system, `design-system/site`
+ * in an embedded one (the site is always `site/` of the Design System root).
+ */
+function workspacePlaceholders(siteFolder = WORKSPACE_SITE_DIRECTORY) {
+  if (typeof siteFolder !== "string" || !/^[A-Za-z0-9_][A-Za-z0-9._-]*(?:\/[A-Za-z0-9_][A-Za-z0-9._-]*)*$/.test(siteFolder)) {
+    throw new Error("A workspace site's siteFolder must be a relative POSIX path inside the repository, such as site or design-system/site");
+  }
+  const systemFolder = path.posix.dirname(siteFolder);
+  const standalone = systemFolder === ".";
+  return {
+    __SITE__: siteFolder,
+    __SYSTEM_PREFIX__: standalone ? "" : `${systemFolder}/`,
+    __SYSTEM_AT__: standalone ? "at the repository root" : `in ${code(`${systemFolder}/`)}`,
+    __SYSTEM_GUIDANCE__: standalone
+      ? "the repository's root `AGENTS.md` and `CLAUDE.md` (the Design System's own guidance)"
+      : `the repository's root \`AGENTS.md\` and \`CLAUDE.md\`, the Design System's own \`${systemFolder}/AGENTS.md\``,
+  };
+}
+
 /** The skill paragraphs that differ by pin mode: how the system arrives and what must never be touched. */
 function pinSections(designSystem, binary = false, { targetLabel, delivery } = {}) {
   const dsPath = designSystem.path;
+  if (consumerPinMode(designSystem) === WORKSPACE_PIN_MODE) {
+    // The rest of the workspace text is in the skills' workspace blocks.
+    return {
+      __PIN_SETUP__: "Run `npm ci` in `__SITE__/`: the site is its own package, so its\n   packages never go in the root `package.json`. The Design System needs\n   nothing fetched or checked out.",
+    };
+  }
   if (consumerPinMode(designSystem) === "published") {
     const pin = designSystem.version === "current" ? "the current published version" : `version ${designSystem.version}`;
     return {
@@ -402,10 +492,31 @@ function pinSections(designSystem, binary = false, { targetLabel, delivery } = {
   };
 }
 
+/** The skills' front-matter descriptions, which name what the skill works on. */
+function descriptionSections(workspace) {
+  return workspace
+    ? {
+      __CONSUMER_SUBJECT__: "the EmDash site in `__SITE__/` of its own TimDS Design System's repository (no pin: a style the site needs is added to the system in the same change)",
+      __UPDATE_DESCRIPTION__: "Keep the EmDash site in `__SITE__/` in step with its own TimDS Design System as a developer: port the article routes that have no port to the system yet (author the missing classes in the system, or move the route's markup onto classes it has) and bring the site's TimDS templates forward. Use when a developer asks to port an article route, to style the articles in the system's design, or to update the site's templates.",
+    }
+    : {
+      __CONSUMER_SUBJECT__: "a product that consumes a TimDS Design System pinned at __DESIGN_SYSTEM_PATH__/ (a published bundle fetched by npm install, or a git submodule)",
+      __UPDATE_DESCRIPTION__: "Bring a new release of the TimDS Design System pinned at __DESIGN_SYSTEM_PATH__/ into this product as a developer: move the version pin, read what changed in the system, port changed or new website designs and their states onto the product's stack, and verify the review routes. Use when a developer asks to update, bump, or adopt a Design System release, or to port a design the designers finished.",
+    };
+}
+
 /** The host receives a checked working tree; a local developer owns Git delivery. The verify step follows the pin mode. */
 function updateSections(designSystem, { targetLabel, delivery } = {}) {
   const hosted = delivery === "hosted";
   const published = consumerPinMode(designSystem) === "published";
+  if (consumerPinMode(designSystem) === WORKSPACE_PIN_MODE) {
+    // No release to adopt and never hosted (a hosted update needs a published target).
+    return {
+      __UPDATE_DELIVERY__: "## Open the pull request\n\nShip the ports, the system's additions, and any template changes in one pull\nrequest, the way this repository ships every change: the `design-ship` skill\nwrites the note under `## Unreleased` in `__SYSTEM_PREFIX__CHANGELOG.md` and\nopens the draft pull request with `npm run timds -- submit`. Describe what\nwas ported route by route, every token and class added to the system, what\nwas left out and why, and the review routes. Never merge, deploy, or publish\nwithout separate authorization.",
+      __UPDATE_RESULT__: "Lead with the routes ported and how (classes added to the system, or markup\nmoved onto classes it has) and the template version the site is at. Include\nthe pull-request link, the routes and widths you checked, every token and\nclass added to the system, and any route still without a port.",
+      __PIN_VERIFY__: "3. Run, from the repository root:\n\n```bash\nnpm run timds -- consumer check --root __SITE__ --base origin/__DEFAULT_BRANCH__\nnpm run timds -- check\n```\n\n   The first checks the site against the system both ways (**Run the\n   two-way check** in the `timds-consume-design-system` skill says what each\n   finding asks for) and fails on a changed path in `__SITE__/` outside the\n   design surface; the second checks the system, with what the port added\n   to it. Resolve every finding by adding to the system, never by changing\n   what it has, until both pass.",
+    };
+  }
   return {
     __UPDATE_WORKSPACE__: hosted
       ? "Use only the prepared consumer checkout and the exact supplied release. The host owns branches, commits and pull requests; keep your changes in the working tree."
@@ -429,6 +540,8 @@ function updateSections(designSystem, { targetLabel, delivery } = {}) {
  * `options.defaultBranch` names the pull-request base (default `main`).
  * `options.targetLabel` fixes the published update to one immutable release;
  * `options.delivery: "hosted"` leaves Git delivery to the host and requires it.
+ * `options.siteFolder` (workspace form only; default `site`) is the site's
+ * folder from the repository root, which every workspace path starts from.
  */
 export async function renderConsumerSkill(manifest, options = {}) {
   return renderConsumerSkillFile(CONSUMER_SKILL_NAME, manifest, options);
@@ -440,12 +553,18 @@ export async function renderConsumerSkillFile(skillName, manifest, options = {})
   if (options.targetLabel !== undefined && (typeof options.targetLabel !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(options.targetLabel) || ["current", "latest"].includes(options.targetLabel) || consumerPinMode(validated.designSystem) !== "published")) throw new Error("A consumer update skill targetLabel must name one immutable published release");
   if (options.delivery !== undefined && !["local", "hosted"].includes(options.delivery)) throw new Error("Consumer skill delivery must be local or hosted");
   if (options.delivery === "hosted" && !options.targetLabel) throw new Error("A hosted consumer update skill requires targetLabel");
+  const workspace = consumerPinMode(validated.designSystem) === WORKSPACE_PIN_MODE;
+  // Validated even when unused, so a caller's typo fails for every form.
+  const workspaceText = workspace || options.siteFolder !== undefined ? workspacePlaceholders(options.siteFolder) : null;
   const source = await fs.readFile(path.join(packageRoot, "skills", skillName, "SKILL.md"), "utf8");
   const binary = options.mode === "binary";
   const invocation = binary ? "timds-cli" : "npm run timds --";
-  const apps = Object.entries(validated.apps).map(([name, app]) => appSection(name, app, invocation, validated.designSystem.path)).join("\n\n");
-  let text = source;
-  for (const [placeholder, replacement] of Object.entries({ ...pinSections(validated.designSystem, binary, options), ...updateSections(validated.designSystem, options) })) text = text.replace(placeholder, () => replacement);
+  const designSystemPath = validated.designSystem.path;
+  const apps = Object.entries(validated.apps)
+    .map(([name, app]) => (workspace ? workspaceAppSection(name, app, workspaceText.__SITE__, invocation) : appSection(name, app, invocation, designSystemPath)))
+    .join("\n\n");
+  let text = selectSkillBlocks(source, workspace ? "workspace" : "pinned");
+  for (const [placeholder, replacement] of Object.entries({ ...descriptionSections(workspace), ...pinSections(validated.designSystem, binary, options), ...updateSections(validated.designSystem, options) })) text = text.replace(placeholder, () => replacement);
   if (binary) {
     text = text.replaceAll("npm run timds --", "timds-cli")
       .replaceAll("fetched by npm install", "fetched by timds-cli consumer sync")
@@ -459,11 +578,14 @@ export async function renderConsumerSkillFile(skillName, manifest, options = {})
         .replace(`Then \`npm --prefix ${dsPath} ci\` and \`npm --prefix ${dsPath} run timds -- check\``, `Build the pin using its own installation record: \`timds-cli check --root ${dsPath}\` with its exact binary release, or \`npm --prefix ${dsPath} ci\` and \`npm --prefix ${dsPath} run timds -- check\` for an npm installation,`)
         .replace(`- After \`npm --prefix ${dsPath} ci\` and\n  \`npm --prefix ${dsPath} run timds -- check\`, the derived layer`, "- After building the pinned system with its own selected toolkit, the derived layer");
     }
-    text = text.replace("## Start\n", "## Start\n\nThis product selects an exact TimDS executable release in `.timds/installation.json`.\nUse `timds-cli` for its TimDS commands; keep the product's declared toolchain.\nA submodule Design System keeps its own installation mode and version.\n");
+    text = text.replace("## Start\n", workspace
+      ? "## Start\n\nThis repository selects an exact TimDS executable release in\n`__SYSTEM_PREFIX__.timds/installation.json`. Use `timds-cli` for its TimDS\ncommands; the site keeps its own npm toolchain.\n"
+      : "## Start\n\nThis product selects an exact TimDS executable release in `.timds/installation.json`.\nUse `timds-cli` for its TimDS commands; keep the product's declared toolchain.\nA submodule Design System keeps its own installation mode and version.\n");
   }
+  if (workspaceText) for (const [placeholder, value] of Object.entries(workspaceText)) text = text.replaceAll(placeholder, () => value);
   return text
     .replaceAll("__SYSTEM_ID__", () => validated.designSystem.systemId)
-    .replaceAll("__DESIGN_SYSTEM_PATH__", () => validated.designSystem.path)
+    .replaceAll("__DESIGN_SYSTEM_PATH__", () => designSystemPath)
     .replaceAll("__DEFAULT_BRANCH__", () => options.defaultBranch || "main")
     .replace("__APPS__", () => apps);
 }
@@ -482,12 +604,24 @@ export async function consumerLaunchConfigurations(manifest) {
       .replace("__PORT__", () => String(app.preview.port))));
 }
 
+// The update skill's agent interface for a workspace site, which has no
+// release to adopt; the pinned forms keep the shipped file as it is.
+const WORKSPACE_SKILL_INTERFACE = Object.freeze({
+  [CONSUMER_UPDATE_SKILL_NAME]: Object.freeze({
+    display_name: "Keep the site in step with its Design System",
+    short_description: "Port the article routes and bring the templates forward",
+    default_prompt: "Use $timds-update-design-system to port this site's article routes to the Design System and bring its templates forward.",
+  }),
+});
+
 /**
- * Every whole file TimDS manages in a consumer repo for this manifest, as
- * `[{ path, content }]` with repo-relative POSIX paths. `.claude/launch.json`
- * is merged, not owned, so it is not listed (see consumerLaunchConfigurations).
+ * The two consumer skills for this manifest, as `[{ path, content }]` under
+ * `.agents/skills/<name>/`: each SKILL.md rendered for the manifest, and the
+ * skill's other files as shipped (the update skill's `agents/openai.yaml`
+ * names its workspace job in the workspace form).
  */
-export async function consumerManagedFiles(manifest, options = {}) {
+export async function consumerSkillFiles(manifest, options = {}) {
+  const workspace = consumerPinMode(validateConsumerManifest(manifest).designSystem) === WORKSPACE_PIN_MODE;
   const files = [];
   for (const skillName of CONSUMER_SKILL_NAMES) {
     const skillPath = `.agents/skills/${skillName}`;
@@ -498,12 +632,32 @@ export async function consumerManagedFiles(manifest, options = {}) {
         const absolute = path.join(directory, entry.name);
         if (entry.isDirectory()) await walk(absolute);
         else if (entry.isFile() && absolute !== path.join(skillRoot, "SKILL.md")) {
-          files.push({ path: `${skillPath}/${path.relative(skillRoot, absolute).split(path.sep).join("/")}`, content: await fs.readFile(absolute, "utf8") });
+          const relative = path.relative(skillRoot, absolute).split(path.sep).join("/");
+          let content = await fs.readFile(absolute, "utf8");
+          const fields = workspace && relative === "agents/openai.yaml" ? WORKSPACE_SKILL_INTERFACE[skillName] : null;
+          if (fields) {
+            for (const [field, value] of Object.entries(fields)) {
+              const pattern = new RegExp(`^(\\s*${field}: ).*$`, "m");
+              if (!pattern.test(content)) throw new Error(`${skillPath}/${relative} has no ${field} to render for a workspace site`);
+              content = content.replace(pattern, (_match, prefix) => `${prefix}${JSON.stringify(value)}`);
+            }
+          }
+          files.push({ path: `${skillPath}/${relative}`, content });
         }
       }
     };
     await walk(skillRoot);
   }
+  return files;
+}
+
+/**
+ * Every whole file TimDS manages in a consumer repo for this manifest, as
+ * `[{ path, content }]` with repo-relative POSIX paths. `.claude/launch.json`
+ * is merged, not owned, so it is not listed (see consumerLaunchConfigurations).
+ */
+export async function consumerManagedFiles(manifest, options = {}) {
+  const files = await consumerSkillFiles(manifest, options);
   files.push({ path: CONSUMER_WORKFLOW_PATH, content: await consumerWorkflow("timds-consumer-preview.yml", options) });
   files.push({ path: CONSUMER_DESIGNER_WORKFLOW_PATH, content: await consumerWorkflow("timds-designer-change.yml", options) });
   return files;
@@ -818,6 +972,10 @@ async function resolvePublishedPin({ system, version, url, fetchImpl }) {
  */
 export async function initializeConsumer(rootInput = process.cwd(), { force = false, skipInstall = false, portalUrl = DEFAULT_PORTAL_URL, system = null, version = null, url = null, draftPreview = false, mode = null, fetchImpl = fetch, runNpm = runConsumerNpm, output = () => {} } = {}) {
   const repoRoot = await findGitRoot(rootInput);
+  await refuseWorkspaceSite(rootInput, "timds consumer init", (siteRoot) => `${siteRoot} is a site inside a Design System workspace (designSystem.workspace in its ${CONSUMER_MANIFEST_FILE}); it needs no consumer init: it uses the workspace's toolkit and has no pin to install. Check it with timds consumer check --root ${siteRoot}, and keep the toolkit current with timds upgrade at the workspace root.`);
+  if (existsSync(path.join(repoRoot, "timds.json"))) {
+    throw new Error(`${repoRoot} is a Design System workspace (it holds timds.json); consumer init adopts a product repository that pins a Design System. To give this system its own site, run timds consumer scaffold emdash --workspace here.`);
+  }
   const manifestPath = path.join(repoRoot, CONSUMER_MANIFEST_FILE);
   const existingRaw = await readJsonFile(manifestPath, CONSUMER_MANIFEST_FILE);
   const keepManifest = Boolean(existingRaw) && !force;
@@ -970,6 +1128,7 @@ async function installedPortalUrl(repoRoot) {
  * the newly installed CLI, which lands here).
  */
 export async function upgradeConsumer(rootInput = process.cwd(), { force = false, output = () => {} } = {}) {
+  await refuseWorkspaceSite(rootInput, "timds upgrade");
   const repoRoot = await findGitRoot(rootInput);
   await assertBinaryInstallation(repoRoot);
   const manifest = await readJsonFile(path.join(repoRoot, CONSUMER_MANIFEST_FILE), CONSUMER_MANIFEST_FILE);
@@ -1043,6 +1202,7 @@ export async function upgradeConsumer(rootInput = process.cwd(), { force = false
 
 /** Explicitly adopt the binary managed boundary; product source, package hooks and pins stay authored. */
 export async function adoptConsumerBinary(rootInput = process.cwd(), { apply = false, force = false, output = () => {} } = {}) {
+  await refuseWorkspaceSite(rootInput, "timds-cli installation adopt --binary");
   const repoRoot = await findGitRoot(rootInput);
   const manifest = await readJsonFile(path.join(repoRoot, CONSUMER_MANIFEST_FILE), CONSUMER_MANIFEST_FILE);
   if (!manifest) throw new Error(`No ${CONSUMER_MANIFEST_FILE} at ${repoRoot}. Run timds-cli consumer init first.`);

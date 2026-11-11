@@ -115,6 +115,17 @@ build step declares it in `timds.json` as `workspace.after.build` (argv
 arrays, run in order from the design-system root after every stock build,
 failing it on a non-zero exit) rather than editing the build stub.
 
+## A workspace site
+
+A Design System may hold its own EmDash site in `site/`
+(`consumer scaffold emdash --workspace`, see [EmDash sites](emdash.md#a-site-in-its-design-systems-workspace)).
+`upgrade` at the workspace root is the system's own upgrade with the same
+result and records as without the site: it never writes into `site/`, and it
+neither writes nor reports the two consumer skills or the `AGENTS.md`
+section the scaffold added beside the system's guidance, which sit outside
+the managed set. `timds upgrade` inside `site/` refuses and names the
+workspace root; the site has no toolkit of its own.
+
 ## One dependency selection
 
 After bootstrapping a release that supports dependency selection, prepare a

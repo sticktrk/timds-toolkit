@@ -1,0 +1,39 @@
+---
+/**
+ * The layout the article, topic and 404 routes render inside: the shell of
+ * the Design System's website design (its layout.html, or for a design
+ * without one its home page with the main content taken out), read from the
+ * system when the site builds. Change the header, footer or head there, in
+ * the design, not here.
+ *
+ * Props: `title` (the page title, without the site name) and `description`
+ * (a plain sentence, possibly empty). The `head` slot goes at the end of
+ * <head>; the default slot is the page's content.
+ */
+import { shell, titleMarker } from "virtual:timds/design-system";
+
+interface Props {
+	title: string;
+	description?: string;
+}
+
+const { title, description = "" } = Astro.props;
+const escape = (value: string) =>
+	value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+const head = [
+	shell.head.replaceAll(titleMarker, escape(title)),
+	description && !shell.describes ? `<meta name="description" content="${escape(description)}">` : "",
+].join("\n");
+---
+
+<html {...shell.htmlAttributes}>
+	<head>
+		<Fragment set:html={head} />
+		<slot name="head" />
+	</head>
+	<body {...shell.bodyAttributes}>
+		<Fragment set:html={shell.before} />
+		<slot />
+		<Fragment set:html={shell.after} />
+	</body>
+</html>

@@ -20,10 +20,17 @@
 //
 // The bundle is optional: a manifest without `bundle` builds none, and a stale
 // bundle from an earlier manifest is removed so the artifact matches it.
+//
+// A workspace site (`site/`, see workspace-site.mjs) is its own package with
+// its own dependencies and build output, so the walk never enters it: a
+// system's bundle holds the system's files only, and a check stays as fast
+// with an installed site as without one.
 
 import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+
+import { WORKSPACE_SITE_DIRECTORY, findWorkspaceSite } from "./workspace-site.mjs";
 
 export const BUNDLE_SCHEMA_VERSION = 1;
 export const BUNDLE_OUTPUT_DIRECTORY = "bundle";
@@ -94,13 +101,14 @@ export function matchesPattern(filePath, pattern) {
  * The files the bundle holds, walked from the Design System root. `dist/` is
  * entered only when a pattern names something under it, since a built file
  * (the starter's `tokens.css`) can be the thing a website wants; the bundle's
- * own output is never part of itself. Symbolic links and empty files are skipped and
+ * own output is never part of itself, and neither is a workspace site. Symbolic links and empty files are skipped and
  * reported. A pattern that matches nothing is an error: the manifest is
  * wrong, and a website would silently lose a file.
  */
 export async function collectBundleFiles(designSystemRoot, config, { outputDirectory = null } = {}) {
   const wantsDist = config.include.some((pattern) => pattern === "dist" || pattern.startsWith("dist/"));
   const ownOutput = outputDirectory ? `dist/${outputDirectory}` : null;
+  const siteDirectory = findWorkspaceSite(designSystemRoot) ? WORKSPACE_SITE_DIRECTORY : null;
   const found = [];
   const skipped = [];
   const walk = async (directory, relativeDirectory) => {
@@ -112,7 +120,7 @@ export async function collectBundleFiles(designSystemRoot, config, { outputDirec
         continue;
       }
       if (entry.isDirectory()) {
-        if (!relativeDirectory && (NEVER_WALKED.has(entry.name) || (entry.name === "dist" && !wantsDist))) continue;
+        if (!relativeDirectory && (NEVER_WALKED.has(entry.name) || entry.name === siteDirectory || (entry.name === "dist" && !wantsDist))) continue;
         if (ownOutput && (relative === ownOutput || relative === `${ownOutput}.json`)) continue;
         await walk(path.join(directory, entry.name), relative);
         continue;

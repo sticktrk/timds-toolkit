@@ -540,3 +540,254 @@ test("every consumer skill consumer init renders is always allowed in a consumer
   for (const name of CONSUMER_SKILL_NAMES) assert.ok(CONSUMER_ALWAYS_ALLOWED.includes(`.agents/skills/${name}/**`), name);
   assert.deepEqual(CONSUMER_SKILL_NAMES, ["timds-consume-design-system", "timds-update-design-system"]);
 });
+
+// ---------------------------------------------------------------------------
+// A site inside its Design System's workspace (designSystem.workspace)
+
+function workspaceManifest(extra = {}) {
+  return {
+    schemaVersion: 1,
+    designSystem: { workspace: true, systemId: "acme/core", ...extra },
+    apps: { site: { cwd: ".", preview: { build: ["npm", "run", "build"], output: "dist" }, designSurface: ["src/styles/**", "src/components/**"], protected: [] } },
+  };
+}
+
+/** A Design System workspace (timds.json at the git top level) with a workspace site in site/. */
+async function workspaceFixture(t, { systemId = "acme/core" } = {}) {
+  const root = await temporaryDirectory(t);
+  initRepo(root);
+  await write(root, "timds.json", { schemaVersion: 2, systemId, name: "Acme" });
+  await write(root, "tokens.json", {});
+  await write(root, "src/styles/system.css", ":root { --color-brand: #123456; --focus-ring: var(--color-brand); }\n");
+  await write(root, "site/timds.consumer.json", workspaceManifest());
+  await write(root, "site/package.json", { name: "site", private: true });
+  await write(root, "site/package-lock.json", { name: "site", lockfileVersion: 3, packages: {} });
+  await write(root, "site/src/styles/site.css", ":root { --site-only: red; }\nbody { color: var(--color-brand); }\n");
+  await write(root, "site/astro.config.mjs", "export default {};\n");
+  git(root, "add", ".");
+  git(root, "commit", "-q", "-m", "Workspace with a site");
+  return { root, site: path.join(root, "site") };
+}
+
+test("validateConsumerManifest accepts the workspace form without a default path and refuses pins beside it", async () => {
+  const { consumerPinMode } = await import("./consumer.mjs");
+  const manifest = validateConsumerManifest(workspaceManifest());
+  assert.deepEqual(manifest.designSystem, { workspace: true, systemId: "acme/core" });
+  assert.equal(consumerPinMode(manifest.designSystem), "workspace");
+  assert.equal(consumerPinMode({ systemId: "acme/core", path: "design-system" }), "submodule");
+  assert.equal(consumerPinMode({ systemId: "acme/core", version: "1.0.0" }), "published");
+  assertInvalid(workspaceManifest({ path: "design-system" }), /designSystem\.path: designSystem\.path does not apply with designSystem\.workspace.*Remove it/);
+  assertInvalid(workspaceManifest({ version: "1.0.0" }), /designSystem\.version: .*no version to pin/);
+  assertInvalid(workspaceManifest({ url: "https://example.com/acme" }), /designSystem\.url: .*Remove it/);
+  assertInvalid(workspaceManifest({ workspace: false }), /designSystem\.workspace: designSystem\.workspace must be true/);
+  assertInvalid(workspaceManifest({ workspace: "yes" }), /designSystem\.workspace must be true/);
+  assertInvalid({ ...workspaceManifest(), designSystem: { workspace: true } }, /designSystem\.systemId is required/);
+  assertInvalid(workspaceManifest({ extra: 1 }), /unknown field "extra"/);
+  // The pinned forms validate as before.
+  assert.equal(validateConsumerManifest(baseManifest()).designSystem.path, "design-system");
+});
+
+test("findConsumerManifestRoot finds a workspace site from it or below it, never from the workspace root", async (t) => {
+  const { findConsumerManifestRoot } = await import("./consumer.mjs");
+  const { root, site } = await workspaceFixture(t);
+  assert.equal(await findConsumerManifestRoot(site), site);
+  assert.equal(await findConsumerManifestRoot(path.join(site, "src", "styles")), site);
+  assert.equal(await findConsumerManifestRoot(root), null);
+  assert.equal(await findConsumerManifestRoot(path.join(root, "src")), null);
+  // A product at the top level is still found from below, and a submodule stays its own repository.
+  const { product } = await consumerFixture(t);
+  assert.equal(await findConsumerManifestRoot(path.join(product, "web", "src")), product);
+  assert.equal(await findConsumerManifestRoot(path.join(product, "design-system")), null);
+});
+
+test("loadConsumer resolves a workspace site to the Design System above it", async (t) => {
+  const { root, site } = await workspaceFixture(t);
+  const consumer = await loadConsumer(path.join(site, "src"));
+  assert.equal(consumer.repoRoot, site);
+  assert.deepEqual(consumer.designSystem, {
+    mode: "workspace", workspace: true, systemId: "acme/core", root, path: "..",
+    version: null, url: null, commit: null, record: null, linked: false, present: true,
+  });
+  assert.equal(consumer.binaryInstallation, null);
+});
+
+test("checkConsumer passes a workspace site with no bundle, gitlink, or toolkit lock, and reads the workspace's tokens", async (t) => {
+  const { site } = await workspaceFixture(t);
+  const result = await checkConsumer(site, { requireTokens: ["--focus-ring"] });
+  assert.equal(result.status, "passed", result.errors.join("\n"));
+  assert.deepEqual(result.warnings, []);
+  assert.equal(result.designSystem.mode, "workspace");
+  // The site's own stylesheets are not the system's.
+  const siteOnly = await checkConsumer(site, { requireTokens: ["--site-only"] });
+  assert.match(siteOnly.errors.join("\n"), /Missing required Design System token --site-only/);
+  // What a clone needs is judged in the site folder; there is no installation record to require.
+  await fs.rm(path.join(site, "package-lock.json"));
+  const unlocked = await checkConsumer(site);
+  assert.equal(unlocked.status, "failed");
+  assert.match(unlocked.errors.join("\n"), /package-lock\.json is missing\. A workspace site is its own package/);
+});
+
+test("checkConsumer refuses a workspace site with no Design System above it and warns on another systemId", async (t) => {
+  const lonely = await temporaryDirectory(t);
+  initRepo(lonely);
+  await write(lonely, "site/timds.consumer.json", workspaceManifest());
+  await write(lonely, "site/package.json", { name: "site" });
+  await write(lonely, "site/package-lock.json", { name: "site", lockfileVersion: 3 });
+  const missing = await checkConsumer(path.join(lonely, "site"));
+  assert.equal(missing.status, "failed");
+  assert.equal(missing.designSystem.root, null);
+  assert.match(missing.errors.join("\n"), /No folder above .* holds timds\.json\. timds\.consumer\.json declares designSystem\.workspace/);
+
+  const { site } = await workspaceFixture(t, { systemId: "acme/other" });
+  const mismatch = await checkConsumer(site);
+  assert.equal(mismatch.status, "passed");
+  assert.match(mismatch.warnings.join("\n"), /designSystem\.systemId is acme\/core but the workspace's timds\.json .* declares acme\/other/);
+});
+
+test("checkConsumer judges a workspace site's branch inside the site and leaves system changes to the system", async (t) => {
+  const { root, site } = await workspaceFixture(t);
+  git(root, "checkout", "-q", "-b", "design/change");
+  await write(root, "site/src/styles/site.css", "body { color: var(--focus-ring); }\n");
+  await write(root, "src/styles/system.css", ":root { --color-brand: #654321; --focus-ring: var(--color-brand); }\n");
+  git(root, "add", ".");
+  git(root, "commit", "-q", "-m", "Inside the surface, and the system");
+  const inside = await checkConsumer(site, { base: "main" });
+  assert.equal(inside.status, "passed", inside.errors.join("\n"));
+  assert.deepEqual(inside.changes, [
+    { path: "site/src/styles/site.css", sitePath: "src/styles/site.css", status: "allowed", app: "site" },
+    { path: "src/styles/system.css", sitePath: null, status: "system", app: null },
+  ]);
+  // A system change can change every app's look.
+  assert.deepEqual(inside.previewApps, ["site"]);
+
+  await write(root, "site/astro.config.mjs", "export default { base: '/x' };\n");
+  const outside = await checkConsumer(site, { base: "main" });
+  assert.equal(outside.status, "failed");
+  assert.deepEqual(outside.changes.find((change) => change.sitePath === "astro.config.mjs"), { path: "site/astro.config.mjs", sitePath: "astro.config.mjs", status: "outside", app: null });
+  assert.match(outside.errors.join("\n"), /Changes outside the design surface declared in timds\.consumer\.json:\n- site\/astro\.config\.mjs$/);
+  assert.doesNotMatch(outside.errors.join("\n"), /system\.css|pin/);
+
+  await assert.rejects(checkConsumer(site, { base: "main", allowPinUpdate: "2026.01.01-1" }), /--allow-pin-update applies to a published pin, and this site has none/);
+});
+
+test("checkConsumer reads a workspace site's base manifest at its real path and passes the branch that adds the site", async (t) => {
+  const { root, site } = await workspaceFixture(t);
+  // The surface is judged against the manifest at the base, under site/.
+  git(root, "checkout", "-q", "-b", "widen");
+  const widened = workspaceManifest();
+  widened.apps.site.designSurface.push("astro.config.mjs");
+  await write(root, "site/timds.consumer.json", widened);
+  await write(root, "site/astro.config.mjs", "export default { base: '/x' };\n");
+  const result = await checkConsumer(site, { base: "main" });
+  assert.equal(result.status, "failed");
+  assert.match(result.warnings.join("\n"), /changed on this branch; the design surface is judged against the manifest at main/);
+  assert.match(result.errors.join("\n"), /- site\/astro\.config\.mjs/);
+  assert.ok(!result.changes.some((change) => change.status === "pin"));
+
+  // A branch that adds the site adds the whole folder.
+  const fresh = await temporaryDirectory(t);
+  initRepo(fresh);
+  await write(fresh, "timds.json", { schemaVersion: 2, systemId: "acme/core" });
+  git(fresh, "add", ".");
+  git(fresh, "commit", "-q", "-m", "System");
+  git(fresh, "checkout", "-q", "-b", "site");
+  await fs.mkdir(path.join(fresh, "site"));
+  for (const file of ["timds.consumer.json", "package.json", "package-lock.json", "astro.config.mjs"]) {
+    await fs.copyFile(path.join(site, file), path.join(fresh, "site", file));
+  }
+  git(fresh, "add", ".");
+  git(fresh, "commit", "-q", "-m", "Add the site");
+  const adopted = await checkConsumer(path.join(fresh, "site"), { base: "main" });
+  assert.equal(adopted.status, "passed", adopted.errors.join("\n"));
+  assert.ok(adopted.changes.every((change) => change.status === "allowed"));
+});
+
+test("timds consumer check takes --no-fix for a workspace site", async (t) => {
+  const { site } = await workspaceFixture(t);
+  const lines = [];
+  const result = await runConsumerCli(["check", "--root", site, "--no-fix"], { output: (line) => lines.push(line) });
+  assert.equal(result.status, "passed");
+  assert.match(lines.join("\n"), /Design System: acme\/core in the workspace at .* \(no pin; the site reads its source\)/);
+});
+
+test("pin commands do nothing or refuse in a workspace site, and say what to do instead", async (t) => {
+  const { site } = await workspaceFixture(t);
+  const { syncConsumerBundle, updateConsumerPin, updateConsumerDraft } = await import("./consumer-sync.mjs");
+  const { runConsumerMigrate } = await import("./consumer-migrate.mjs");
+  const { registerConsumer, consumerUpdates } = await import("./consumer-register.mjs");
+  const lines = [];
+  const synced = await syncConsumerBundle(site, { output: (line) => lines.push(line), fetchImpl: () => assert.fail("no fetch") });
+  assert.equal(synced.status, "workspace");
+  assert.match(lines.join("\n"), /Nothing to sync: .*reads its Design System's workspace/);
+  await assert.rejects(updateConsumerPin(site, { version: "1.0.0", fetchImpl: () => assert.fail("no fetch") }), /no pin to move\. A change to the system reaches the site at its next build/);
+  await assert.rejects(updateConsumerDraft(site, { draft: "spring" }), /no pin to override with a draft.*check out the draft's branch/);
+  await assert.rejects(runConsumerMigrate(["--root", site]), /declares designSystem\.workspace.*no submodule to migrate/);
+  await assert.rejects(registerConsumer(site, { portalUrl: "https://example.com" }), /nothing for a host to follow/);
+  await assert.rejects(consumerUpdates(site, { portalUrl: "https://example.com" }), /nothing for a host to follow/);
+});
+
+test("consumer init, upgrade, and binary adoption refuse a workspace site and init refuses a Design System root", async (t) => {
+  const { root, site } = await workspaceFixture(t);
+  const { initializeConsumer, upgradeConsumer, adoptConsumerBinary, renderConsumerSkillFile } = await import("./consumer-init.mjs");
+  await assert.rejects(initializeConsumer(site, { skipInstall: true }), /is a site inside a Design System workspace .* needs no consumer init/);
+  await assert.rejects(initializeConsumer(root, { skipInstall: true }), /is a Design System workspace \(it holds timds\.json\).*scaffold emdash --workspace/);
+  await assert.rejects(upgradeConsumer(path.join(site, "src")), /Run timds upgrade at the workspace root \(.*\) instead.*site\/\.timds\/emdash\.json/);
+  await assert.rejects(adoptConsumerBinary(site), /Run timds-cli installation adopt --binary at the workspace root/);
+  // The skill still renders the workspace form, with no pin to move.
+  for (const skill of CONSUMER_SKILL_NAMES) {
+    const text = await renderConsumerSkillFile(skill, workspaceManifest());
+    assert.doesNotMatch(text, /__[A-Z_]+__|undefined/);
+    // Paths are written from the repository root, where the commands run.
+    assert.match(text, /consumer check --root site/);
+    assert.doesNotMatch(text, /`\.\.\//);
+  }
+});
+
+test("checkConsumer pairs a workspace site's routes with the workspace's own designs", async (t) => {
+  const { root, site } = await workspaceFixture(t);
+  const manifest = workspaceManifest();
+  manifest.apps.site.preview = { serve: ["npm", "run", "dev"], port: 4321, routes: ["/", "/about"], designs: { "/": "website:/", "/about": "website:/about" } };
+  await write(root, "site/timds.consumer.json", manifest);
+  let result = await checkConsumer(site);
+  assert.match(result.errors.join("\n"), /pairs \/ with website:\/, but the workspace Design System has no src\/designs\//);
+  await write(root, "src/designs/website/design.json", { title: "Site" });
+  await write(root, "src/designs/website/pages/index.html", "<h1>Home</h1>");
+  result = await checkConsumer(site);
+  assert.deepEqual(result.errors, ['App "site": preview.designs pairs /about with website:/about, but design website has no route /about (routes: /)']);
+  await write(root, "src/designs/website/pages/about.html", "<h1>About</h1>");
+  result = await checkConsumer(site);
+  assert.equal(result.status, "passed", result.errors.join("\n"));
+});
+
+test("checkConsumer runs the two-way check in a workspace site: rewrites a literal that equals a token and fails on a style the system lacks", async (t) => {
+  const { root, site } = await workspaceFixture(t);
+  // One token holds the value, so the literal has one right answer (an alias beside it would make it ambiguous).
+  await write(root, "src/styles/system.css", ":root { --color-brand: #123456; }\n");
+  await write(root, "site/src/styles/site.css", "body { color: #123456; }\n.card { border-color: #abcdef; }\n");
+
+  // --no-fix reports the rewrite without touching the file.
+  let result = await checkConsumer(site, { fix: false });
+  assert.equal(result.status, "failed");
+  assert.equal(result.workspaceCheck.fix, false);
+  assert.deepEqual(result.workspaceCheck.rewrites.map((rewrite) => [rewrite.file, rewrite.from, rewrite.to, rewrite.applied]), [["src/styles/site.css", "#123456", "var(--color-brand)", false]]);
+  assert.match(await fs.readFile(path.join(site, "src/styles/site.css"), "utf8"), /color: #123456/);
+  assert.match(result.errors.join("\n"), /without --no-fix/);
+
+  // By default the literal with one right answer is rewritten; the rest stay findings.
+  result = await checkConsumer(site);
+  assert.equal(result.status, "failed");
+  assert.deepEqual(result.workspaceCheck.changedFiles, ["src/styles/site.css"]);
+  assert.match(await fs.readFile(path.join(site, "src/styles/site.css"), "utf8"), /body \{ color: var\(--color-brand\); \}/);
+  assert.deepEqual(result.workspaceCheck.findings.map((finding) => [finding.kind, finding.class ?? finding.value, finding.app]).sort(), [["class", "card", "site"], ["literal", "#abcdef", "site"]]);
+  assert.equal(result.errors.length, 1);
+  assert.match(result.errors[0], /adding to the Design System/);
+
+  // The agent adds the token and the class to the system and uses the token: the second run is clean.
+  await write(root, "src/styles/system.css", ":root { --color-brand: #123456; --color-line: #abcdef; }\n.card { border: 1px solid var(--color-line); }\n");
+  await write(root, "site/src/styles/site.css", "body { color: var(--color-brand); }\n.card { border-color: var(--color-line); }\n");
+  result = await checkConsumer(site);
+  assert.equal(result.status, "passed", result.errors.join("\n"));
+  assert.deepEqual(result.workspaceCheck.rewrites, []);
+  assert.deepEqual(result.workspaceCheck.findings, []);
+  assert.deepEqual(result.workspaceCheck.scanned, ["src/styles/site.css"]);
+});

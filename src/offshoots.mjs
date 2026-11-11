@@ -1,6 +1,8 @@
 // Local offshoot creation mirrors the host's version-1 source transform.
 // Source is an immutable release or Git tree; writing is confined to a new,
-// empty destination. Host provisioning, grants and catalog lineage stay there.
+// empty destination. Host provisioning, grants and catalog lineage stay
+// there. A parent's workspace site (site/) is never carried: it is the
+// parent's own website, not part of the system.
 // The parent record names the stock the release shipped, by hash, so feed can
 // later refresh it while the child's own edits (grafts) stay. The child keeps
 // its parent's toolkit pin, and a CLI older than the running release rejects
@@ -19,6 +21,7 @@ import { readBlobs } from './git-blobs.mjs';
 import { compareDesignSystemVersions } from './changelog.mjs';
 import { runtimeIdentity } from './runtime.mjs';
 import { belowFloorError, starterBelowFloor } from './starter.mjs';
+import { WORKSPACE_SITE_DIRECTORY, WORKSPACE_SITE_MANIFEST, isWorkspaceDesignSystem } from './workspace-site.mjs';
 
 const exec = promisify(execFile);
 const json = value => `${JSON.stringify(value, null, 2)}\n`;
@@ -173,6 +176,13 @@ async function transformDecodedOffshoot(source, {mode = 'full', systemId, name} 
   if (manifest.systemId !== parent.systemId || manifest.version !== parent.version) throw new Error('The parent source identity or version disagrees with its release');
   const stock = await declaredStock(original);
   let result = new Map(original);
+  // A workspace site (site/ with a workspace-form consumer manifest) is the
+  // parent's own website, a separate package that names the parent's system:
+  // an offshoot is a new system and starts without it.
+  const siteManifest = original.get(`${WORKSPACE_SITE_DIRECTORY}/${WORKSPACE_SITE_MANIFEST}`);
+  let parsedSiteManifest = null;
+  try { parsedSiteManifest = siteManifest && siteManifest.mode !== '120000' ? JSON.parse(siteManifest.toString('utf8')) : null; } catch { parsedSiteManifest = null; }
+  if (isWorkspaceDesignSystem(parsedSiteManifest)) for (const file of [...result.keys()]) if (file.startsWith(`${WORKSPACE_SITE_DIRECTORY}/`)) result.delete(file);
   const set = (file, bytes) => { const content = Buffer.from(bytes); content.mode = '100644'; result.set(file, content); };
   if (mode === 'structure') {
     const starter = parse(original, '.timds/starter.json');

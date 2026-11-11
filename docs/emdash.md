@@ -1,6 +1,20 @@
 # EmDash sites
 
-The scaffold command is in the [README](../README.md#emdash-sites).
+The scaffold commands are in the [README](../README.md#emdash-sites).
+
+## Choosing a mode
+
+`timds consumer scaffold emdash` has three modes. A product in its own
+repository keeps a pin to the Design System: the fresh mode creates that
+repository with the system as a submodule ([a new site
+repository](#a-new-site-repository)), and `--existing` adds EmDash's articles
+to an Astro site that already pins one ([adding EmDash to an existing
+site](#adding-emdash-to-an-existing-site)). A system's own website lives in
+the system's workspace with `--workspace` ([a site in its Design System's
+workspace](#a-site-in-its-design-systems-workspace)): it has no pin, reads the
+system from source, and is edited, reviewed and committed with it.
+
+## A new site repository
 
 `--root` must not exist, or be empty, and must sit outside any git repository.
 The scaffold initializes the repository, adds the Design System as the
@@ -164,3 +178,364 @@ Everything written is product source. `upgrade` never touches it, and neither
 `consumer init --force` regenerates the manifest, so the article routes and
 pairs are then added back by hand. Template fixes reach an existing site by
 hand, and the recorded template version says how far behind it is.
+
+## A site in its Design System's workspace
+
+```bash
+npm run timds -- consumer scaffold emdash --workspace [--root PATH] [--skip-install]
+```
+
+Run it in a Design System workspace (`timds-cli consumer scaffold emdash
+--workspace` in binary mode). The workspace is found the way the workspace
+commands find it: the repository root (a hosted session folder, the git top
+level, or the nearest folder holding `timds.json` or
+`design-system/timds.json`) when it holds `timds.json`, else its
+`design-system/` folder. The site goes in `site/` of the Design System root:
+`site/` in a standalone system, `design-system/site/` in an embedded one.
+`--root` defaults to the current folder.
+
+The mode writes a complete EmDash site for Cloudflare Workers. It runs no
+generator and asks nothing; every name comes from the system's id, so one
+toolkit release writes the same bytes for the same workspace. It refuses,
+before writing anything, when the folder is not in a Design System workspace,
+when `timds.json` has no `systemId`, when `site/` exists and is not an empty
+directory, when the system has no website design with a page to build (`timds
+designs init` adds the starter's sample), when `.agents` or `.agents/skills`
+at the repository root is not a directory, when a consumer skill folder there
+holds anything but the bytes it would write, and when the system's
+`AGENTS.md` is not a regular file. `--existing`, `--design-system`,
+`--stylesheet`, `--portal-url`, `--layout` and `--site-url` belong to the
+other modes and are refused, and so is any `--platform` but `cloudflare`. A
+failed write removes the site and restores the files outside it. Then, unless
+`--skip-install`, it runs `npm ci` in `site/`; a failed install leaves the
+files in place, and the scaffold is not rerun (it refuses a folder that is
+not empty).
+
+### What it writes
+
+In `site/`, the shared template set (`templates/emdash/site/` and
+`site-cloudflare/`: the article, topic and feed routes, the Portable Text
+serializer, the seed, `src/live.config.ts`, `src/worker.ts` and
+`docs/content-api.md`) with `templates/emdash/site-workspace/` laid over it,
+where a file at the same path replaces the shared one:
+
+- `astro.config.mjs`: EmDash with D1 (`DB`) and R2 (`MEDIA`) bindings,
+  `output: "server"`, `base` from `TIMDS_SITE_BASE` (else `/`), the dev port
+  from `TIMDS_SITE_PORT` (else 4380, with `strictPort`), `migrations: {
+  runtime: "check", dev: "auto" }`, EmDash's MCP server, no plugin registry,
+  and the integration that reads the system, naming the website design.
+- `src/integrations/design-system.mjs`, `src/pages/[...page].astro`,
+  `src/pages/404.astro`, `src/components/DesignPage.astro`,
+  `src/layouts/Base.astro` and `src/design-system.d.ts` (below).
+- `wrangler.jsonc`, `tsconfig.json`, `package-lock.json`, `.gitignore`,
+  `.env.example`, `AGENTS.md`, `DESIGN_SYSTEM.md` and the workspace version of
+  `docs/emdash-handover.md`.
+- `package.json`, generated: private, named `<system id>-site` (slugged), the
+  exact versions `templates/emdash/site.json` lists for every mode plus the
+  workspace block, and the scripts `dev` (`astro dev`), `build`, `preview` and
+  `worker`. The site is its own package, not an npm workspace of the root, and
+  declares no toolkit: it uses the workspace's.
+- `timds.consumer.json` and `.timds/emdash.json` (both below).
+
+Outside `site/`, beside the system's own guidance:
+
+- The two consumer skills, `timds-consume-design-system` and
+  `timds-update-design-system`, in `.agents/skills/` at the repository root,
+  rendered for the site's manifest in their workspace form (the skill sources
+  keep that text in `<!-- timds:workspace -->` blocks beside the pinned text,
+  and every path in it is written from the repository root). A skill folder
+  that already holds exactly those bytes is kept.
+- One section in the system's `AGENTS.md` (created when there is none),
+  between `<!-- timds:emdash-site -->` and `<!-- /timds:emdash-site -->`: where
+  the site is, which change goes where, and the check to run. A section that
+  is already there is left as it is.
+
+The run prints the files written, the pages built from the design, the
+article routes with no port yet, and what the developer confirms: the
+install if it was skipped, loading the sample content, the routes to port,
+the deploy handover, and committing the site with the system.
+
+### The manifest has no pin
+
+```json
+{
+  "schemaVersion": 1,
+  "designSystem": { "workspace": true, "systemId": "acme/core" },
+  "apps": {
+    "site": {
+      "cwd": ".",
+      "install": ["npm", "ci", "--no-audit", "--no-fund"],
+      "preview": {
+        "serve": ["npm", "run", "dev", "--", "--host", "127.0.0.1", "--ignore-lock"],
+        "port": 4380,
+        "ready": "/_emdash/api/setup/dev-bypass?redirect=/",
+        "routes": ["/", "/about", "/articles", "/articles/example-article", "/topics/example-topic"],
+        "designs": { "/": "website:/", "/about": "website:/about", "/articles": "website:/articles" }
+      },
+      "designSurface": ["src/layouts/**", "src/components/**", "src/styles/**", "src/pages/**", "public/**"]
+    }
+  }
+}
+```
+
+(Abridged: the routes are `/`, every page of the design that is not an
+article, topic or 404 route, and the article routes; each route the design
+has is paired with it; the preview also discovers routes, at two viewports
+and two schemes.) `designSystem.workspace: true` takes no `path`, `version`
+or `url`, and each is refused with the reason. The Design System is the
+nearest folder above the site that holds `timds.json`. A consumer manifest is
+looked for at or above the starting folder, never below it, so the workspace
+root stays a plain Design System: `timds upgrade` there is the system's own.
+
+In the site:
+
+- `consumer check` needs no bundle record, gitlink or toolkit lock: it
+  confirms a Design System sits above the site (warning when its `systemId`
+  differs), that `package.json` and the lockfile are there (warning until
+  they are committed), the
+  design pairs, `--require-token`, and, with `--base`, the design surface.
+  There a change outside the site folder has status `system` and is left to
+  the system's own check; such a change previews every app.
+  `--allow-pin-update` is refused: there is no pin.
+- `consumer sync` does nothing and says so, so a script that runs it
+  everywhere still passes. `consumer update` (with a version or `--draft`),
+  `consumer migrate`, `consumer register` and `consumer updates` refuse: there
+  is nothing to move, migrate or follow; try a draft by checking out its
+  branch of the workspace.
+- `consumer init`, `timds upgrade` and `timds-cli installation adopt --binary`
+  refuse inside the site and name the workspace root, where they belong.
+  `consumer init` at a Design System root refuses too and points at
+  `--workspace`.
+- `consumer preview` builds the base side of `--base` from the same
+  repository's merge base, with the site at its folder in the temporary
+  worktree; changed files outside the site are named from the site
+  (`../src/styles/...`). It starts the site on `preview.port`, which must be
+  free.
+
+### Pages from the designs
+
+The site builds its pages from the system's website design. The design is the
+one with a home page (`website` first, else the first in order). Its
+integration (`src/integrations/design-system.mjs`) runs in Node while `astro
+dev` serves and while `astro build` builds, never in the Worker:
+
+- Every page of the design that is not an article, topic or list route
+  (`/articles`, `/articles/...`, `/topics/...`) is a page of the site, filled
+  the way the system's own renderer fills it (`layout.html` around the page,
+  the `{{name}}`, `{{description}}`, `{{version}}` and `{{title}}`
+  placeholders), with Astro's `base` in front of root-relative links. Only a
+  page's default state is served.
+- The article, topic and 404 routes render inside the design's layout, or,
+  for a design without `layout.html`, inside its home page with the content
+  of its `<main>` taken out.
+- `/styles/`, `/scripts/` and `/assets/` are the system's `src/` folders of
+  those names, at the URLs its own build serves them from, and, for a system
+  on the starter build, `/tokens.css` compiles `tokens.json` (or the
+  `tokens/` groups) by the starter build's `--group-name` rule. In development
+  they are read from disk on every request; a build copies them into the
+  client output.
+
+Editing a design or a token changes the site on the next request in
+development and on the next build, with no sync and no version to move. The
+pages are rendered on request from HTML baked into the server bundle at build
+time, not prerendered: EmDash's middleware also runs while a page is
+prerendered, and a build machine has no migrated database to answer it. The
+stock article routes are installed for every system. They render on the
+system's classes (`prose`, `article-card` and the rest), and the scaffold
+lists each route whose classes the design's stylesheets do not declare as
+having no port yet; the `timds-update-design-system` skill ports it.
+
+### The check runs both ways
+
+From the repository root:
+
+```bash
+npm run timds -- consumer check --root site            # design-system/site when embedded
+npm run timds -- consumer check --root site --no-fix   # report without rewriting
+```
+
+In a workspace site, `consumer check` also scans the site's design surface
+for styles the system lacks. What the system has: the stylesheets
+`timds.json` `bundle.include` names, `src/styles/system.css` when it exists,
+every system stylesheet a site file imports, and their `@import`s; the custom
+properties they declare plus, on the starter build, the compiled tokens (read
+directly from the `tokens/` groups when the system keeps them, so a token
+added to a group is seen without a system build); and every class those
+stylesheets declare. What is scanned: site files in the design surface or
+the protected globs, skipping `node_modules`, `dist`, `.astro`, `.wrangler`,
+dot-directories and git-ignored paths; `.css` files whole, and in `.astro`,
+`.html`, `.jsx`, `.tsx`, `.vue` and `.svelte` files the `<style>` blocks,
+static `style` attributes and static class names. Dynamic expressions are
+never guessed at. The module comment of `src/consumer-workspace-check.mjs`
+has the full rules.
+
+- A color literal (hex, the color functions, a named color in a color
+  property) or a `font-family` stack equal to exactly one document-scope
+  token (`:root`/`html`, unconditional) is rewritten to `var(--that-token)`
+  in place; with `--no-fix` it is reported and fails the check instead. A
+  literal in a protected file is reported, never rewritten.
+- A literal no token holds (`literal`), one several tokens hold
+  (`ambiguous-literal`, listing the candidates), a site declaration of a
+  system custom property (`token-override`), and a class no system stylesheet
+  declares (`class`) are findings. Each fails the check until it is resolved
+  in the same change by adding to the system (a new token, a new class), or
+  by using what the system has; the check never proposes changing an existing
+  token's value or an existing class's rules. A suggestion names where to add
+  it: the `:root` block of a stylesheet, `tokens.json` and its group, or
+  `tokens/<group>.json` in a system that keeps groups.
+- Lengths, numbers, durations and everything else are never flagged. A
+  second run after the rewrites and additions is clean.
+
+`--json` carries `workspaceCheck`: `schemaVersion`, `fix`, `rewrites` (each
+with file, line, column, property, `from`, `to`, `token`, `applied`),
+`findings` (`kind`, position, the value or class, `candidates`,
+`suggestion`), `changedFiles`, `scanned`, and `system` (the stylesheets,
+whether `tokens.json` was read, and the token and class counts). The Design
+System is never written.
+
+### One dev server
+
+`npm run timds -- dev` at the workspace root (`timds dev`) serves the system
+at `/` and the site at `/site/` on one port. This is the stock dev server
+(`scripts/dev.mjs`, the viewer's `dev`); a system whose `workspace.dev` runs
+its own server does not start the site. It builds the system once, serves
+`dist/`, and starts the site's `preview.serve` in `site/` with
+`TIMDS_SITE_BASE=/site` and the port in `TIMDS_SITE_PORT`: `preview.port`
+(4380), or a free port when that is taken. The site's output is printed with
+a `[site]` prefix. Readiness is polled on `preview.ready`, EmDash's
+development seed route, at the root with its `redirect` moved under `/site`,
+so starting also loads the sample content; the site has 120 seconds.
+Requests under `/site` answer 503 while it starts and 502 with the reason if
+it stops; the system's pages are served whatever the site does. Closing the
+dev server, or `Ctrl-C`, stops the site's whole process group.
+
+EmDash 1.4 does not work under a base path, and Vite answers at its root, so
+the dev server routes, in order:
+
+1. `/site` and `/site/**`: the site. A `GET` or `HEAD` under
+   `/site/_emdash/**` is redirected (307) to the same path at the root.
+2. Reserved root paths no Design System output has: `/_emdash/**`,
+   `/@vite/**`, `/@id/**`, `/@fs/**`, `/@react-refresh`, `/__vite*`,
+   `/__open-in-editor`, `/node_modules/**`, `/.astro/**`: the site, while it
+   runs.
+3. `/src/**` and the site folder's absolute path (Vite asks for component
+   modules by it): the site, unless the system's `dist/` has that top-level
+   entry, which then wins.
+4. Everything else: the system's `dist/`.
+
+Every websocket upgrade (Vite's HMR) goes to the running site. With
+`site/node_modules` missing the dev server serves the system alone and says
+to run `npm ci` in `site/`; a site that fails to start is reported with the
+tail of its output and the system is served alone. Token and design edits
+reach `/site/` at once; the system's own pages still need a restart of `dev`,
+which builds them once and does not watch. `consumer preview` runs the site
+without the dev server and still needs `preview.port` free.
+
+The EmDash admin is on the same port, at the root:
+`http://127.0.0.1:PORT/_emdash/admin/`. The dev server prints it as
+`EmDash admin: <origin>/_emdash/admin/ (sign in on this machine at
+<origin>/_emdash/api/setup/dev-bypass?redirect=/_emdash/admin/)`. Open that
+sign-in link once: it signs you in as a development administrator and loads
+the sample content, and it answers only in development. Saving an entry
+stores a draft; Publish changes publishes it, and the page under `/site/`
+shows it on reload, with no restart. The admin's own View Site, Live View and
+Preview links point at the root, not at `/site/`, so through the one port
+they reach the Design System (or its 404): put `/site` at the start of the
+path. For those links to work as written, run `npm run dev` in `site/`
+instead, which serves the site alone at `/` (on 4380, or `TIMDS_SITE_PORT`).
+
+The dev server changes one kind of request: one to `/_emdash/**` whose
+`Accept` contains `text/html` (a browser opening the admin or the sign-in
+link) is forwarded with `text/html` taken out of `Accept`, because Astro's
+dev server answers an HTML page load outside its base path with its own 404
+and EmDash 1.4 answers only at the root; EmDash's handlers do not read
+`Accept`. Every other request is forwarded unchanged. The module comment of
+`src/site-proxy.mjs` holds the full routing table.
+
+### Two builds in one repository
+
+The system and the site build side by side and neither writes into the
+other:
+
+- The system's `build`, `check` (with `--require-clean-dist`, which compares
+  the system's `dist/` only), `extract`, `doctor` and `upgrade` give the same
+  results with and without `site/` and never write into it
+  (`src/workspace-site.test.mjs` holds the comparison).
+- The consumer bundle walk never enters the site.
+- The MCP edit tools may edit the site's source with the system in one
+  change. They protect its `package.json`, `package-lock.json`,
+  `timds.consumer.json`, `.timds/`, build output and local state (`dist/`,
+  `.astro/`, `.wrangler/`, `.emdash/`) and secrets (`.env*` except
+  `.env.example`, `.dev.vars*`); `describe_workspace` lists them.
+  `run_check` checks the system only.
+- `submit` carries the site with the system (in the embedded layout it also
+  stages the two consumer skills). A change confined to the site needs no
+  note under `## Unreleased` in the system's `CHANGELOG.md`; any change to the
+  system still does.
+- `shoot` never copies the parent's site: an offshoot is a new system and
+  starts without one.
+- A hosted session carries the site's source, never its dependencies, build
+  output, local state or secrets, which its `.gitignore` excludes.
+
+Not handled yet: the stock merge workflow still cuts a system release for a
+merge that changed only the site.
+
+### What a build uploads
+
+`npm run build` in `site/` writes the Worker (`dist/server/`, with the
+deploy configuration Wrangler reads in `dist/server/wrangler.json`) and its
+static files (`dist/client/`, the system's stylesheets, scripts and assets
+included). `npm run worker` runs `astro build && wrangler deploy --dry-run
+--outdir dist/worker`, which bundles the Worker with no Cloudflare account and
+prints its bindings and size. The bundle is about 5 MB gzipped, above the
+Workers Free plan's limit.
+
+`wrangler.jsonc` commits the Worker's name (`<system id>-site`), its entry,
+the compatibility date `2026-02-24` with `nodejs_compat`, a cron trigger
+every minute, and the bindings by name only: `DB` (D1), `MEDIA` (R2) and
+`SESSION` (KV, Astro's sessions). No resource name or id and no site URL is
+committed: whoever deploys attaches the resources, and the origin is
+`EMDASH_SITE_URL` at run time, else the request's origin.
+
+`src/worker.ts` keeps the `scheduled` handler and also runs the scheduled
+work (publishing scheduled entries, maintenance) on `POST /_scheduled` for a
+caller that sends `Authorization: Bearer <SCHEDULED_TASKS_SECRET>`, answering
+`{"published": N}`. Anything else, including every request while the secret
+is unset, gets 404. The entry is the shared `site-cloudflare/src/worker.ts`,
+so a Cloudflare site from `--existing` has the path too.
+
+The site's `docs/emdash-handover.md` covers the rest: bindings, variables and
+secrets, applying migrations with `npx emdash migrate --d1`, the setup
+checklist, Cloudflare Access and caching.
+
+### The record
+
+`site/.timds/emdash.json`:
+
+```json
+{
+  "template": 1,
+  "platform": "cloudflare",
+  "mode": "workspace",
+  "files": { "astro.config.mjs": "<sha256>", "src/worker.ts": "<sha256>" },
+  "workspaceFiles": { ".agents/skills/timds-consume-design-system/SKILL.md": "<sha256>" },
+  "workspaceSections": { "AGENTS.md": { "marker": "timds:emdash-site", "sha256": "<sha256>" } }
+}
+```
+
+`files` maps every template file written, relative to the site, to its
+SHA-256; `package.json`, `package-lock.json` and `timds.consumer.json` are
+left out on purpose (generated, or edited by npm). `workspaceFiles` maps each
+consumer skill file, relative to the repository root, and
+`workspaceSections` names the `AGENTS.md` section by its path, marker and
+hash. There is no template update command yet; the record is what a later
+one will read to refuse files that were edited. Everything in `site/` is
+product source, and the root skills and section sit outside the Design
+System's managed set and release metadata: `upgrade` neither writes nor
+reports them. No `.claude/launch.json` entry is added.
+
+### Not verified
+
+No real deploy, resource provisioning or `npx emdash migrate` against a D1
+database was run for this mode; the handover's statements about them are
+read from EmDash 1.4 and Wrangler, not exercised.

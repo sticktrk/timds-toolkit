@@ -138,6 +138,33 @@ Public assets stay in the pin and are exposed through relative symlinks in
 the site's `public/`; the links and their descendants are protected paths.
 Refuse collisions with generated public files instead of replacing them.
 
+`consumer scaffold emdash --workspace` writes a system's own site into `site/`
+of its Design System workspace, with no pin: the shared template set with
+`templates/emdash/site-workspace/` over it, a generated `package.json`, the
+shipped lockfile, `site/timds.consumer.json` in the workspace form
+(`designSystem: { "workspace": true, "systemId" }`) and
+`site/.timds/emdash.json`. It runs no generator and asks nothing, so one
+release writes the same bytes for the same workspace. Everything in `site/` is
+product source that no upgrade touches. The site is its own package, never an
+npm workspace of the root, and declares no toolkit. The two consumer skills it
+installs in the repository root's `.agents/skills/` and the delimited
+`<!-- timds:emdash-site -->` section it adds to the system's `AGENTS.md` sit
+outside the Design System's managed set and release metadata on purpose: they
+are rendered for the site's manifest, which `upgrade` at the root does not
+read, so `upgrade` neither writes nor reports them; the record keeps their
+hashes (`workspaceFiles`, `workspaceSections`) for a later template update
+command. The site's integration compiles tokens by the same `--group-name`
+rule as `src/viewer.mjs`; change them together. Two builds share one
+repository: any command that walks the Design System root (build, check,
+extract, doctor, upgrade, the bundle walk, offshoots, the MCP guard) must
+skip the workspace site (`src/workspace-site.mjs` locates it), and
+`src/workspace-site.test.mjs`, which proves the system's results are the same
+with and without `site/`, must keep passing. `package.json` `emdashTemplate`
+publishes the template version beside `hostContract` and must equal
+`templates/emdash/site.json` `version`: a template change an installed site
+would need to receive raises `version` in both places and adds a `history`
+entry saying what changed.
+
 `upgrade --version VERSION` selects one exact tested resolution, restores the
 bounded requirement, runs `npm ci`, synchronizes adopted managed files with the
 selected CLI, and validates the graph and workspace. Explicit `--own-runtime`

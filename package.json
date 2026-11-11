@@ -4,6 +4,18 @@
   "description": "Versioned CLI, contracts, templates, and AI skill for repository-owned TimDS design systems.",
   "type": "module",
   "hostContract": 2,
+  "emdashTemplate": {
+    "version": 1,
+    "history": [
+      {
+        "version": 1,
+        "changes": [
+          "The first template set: the articles collection and topic taxonomy in the seed, the article, topic and feed routes, the Portable Text serializer, the content contract and the handover checklist.",
+          "Installs into a Design System workspace as site/ with no pin, a secret-gated path for scheduled work beside the scheduled handler, bindings named without resource identifiers, and a hash of every installed file in .timds/emdash.json."
+        ]
+      }
+    ]
+  },
   "bin": {
     "timds": "bin/timds.mjs",
     "timds-publish-artifact": "scripts/publish-artifact.mjs"
@@ -73,6 +85,8 @@
     "src/consumer-init.mjs",
     "src/consumer-install.mjs",
     "src/consumer-scaffold.mjs",
+    "src/consumer-scaffold-workspace.mjs",
+    "src/consumer-workspace-check.mjs",
     "src/consumer-notes.mjs",
     "src/consumer-sync.mjs",
     "src/consumer-migrate.mjs",
@@ -141,6 +155,8 @@
     "src/brand-kit.mjs",
     "src/brand-kit.d.mts",
     "src/viewer.mjs",
+    "src/site-proxy.mjs",
+    "src/workspace-site.mjs",
     "src/starter-steps.mjs",
     "src/release-resources.mjs",
     "src/release-metadata.mjs",

@@ -1,0 +1,26 @@
+---
+/**
+ * The page a missing address shows: the website design's /404 page when the
+ * design has one, else a heading inside the design's shell. Rendered on
+ * request, so the article and topic routes can rewrite to it.
+ */
+import { pages } from "virtual:timds/design-system";
+
+import DesignPage from "../components/DesignPage.astro";
+import Base from "../layouts/Base.astro";
+
+export const prerender = false;
+
+const page = pages.find((candidate) => candidate.route === "/404");
+Astro.response.status = 404;
+---
+
+{
+	page ? (
+		<DesignPage page={page} />
+	) : (
+		<Base title="Not found">
+			<h1>We could not find that page</h1>
+		</Base>
+	)
+}

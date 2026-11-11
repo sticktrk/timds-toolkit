@@ -51,29 +51,50 @@ interface EmDashLocals {
 type SiteLocals = object;
 const emdashLocals = (locals: SiteLocals): EmDashLocals => locals;
 
-// Typed as string so the comparison below stays valid whatever the scaffold writes here.
+// Typed as string so the comparison below stays valid whatever the scaffold
+// writes here: an origin, the example origin, or nothing.
 const CONFIGURED_SITE_URL: string = "__SITE_URL__";
 const UNKNOWN_SITE_URL: string = "https://example.com";
 const INTERNAL_MEDIA_PREFIX = "/_emdash/api/media/file/";
 const SAFE_STORAGE_KEY = /^[A-Za-z0-9._-]+$/;
 const TRAILING_SLASHES = /\/+$/;
 
+// Astro's `base` without its trailing slash: "" at the root, "/site" under a prefix.
+const BASE = import.meta.env.BASE_URL.replace(TRAILING_SLASHES, "");
+
+/** A path of this site (`/articles/`) as a link, under Astro's `base`. */
+export function sitePath(path: string): string {
+	return `${BASE}${path}`;
+}
+
 export function articlePath(slug: string): string {
-	return `/articles/${encodeURIComponent(slug)}/`;
+	return sitePath(`/articles/${encodeURIComponent(slug)}/`);
 }
 
 export function topicPath(slug: string): string {
-	return `/topics/${encodeURIComponent(slug)}/`;
+	return sitePath(`/topics/${encodeURIComponent(slug)}/`);
+}
+
+/** EMDASH_SITE_URL from the runtime environment (process.env on Node, and on Workers with nodejs_compat). */
+function environmentOrigin(): string {
+	const value = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.EMDASH_SITE_URL;
+	if (!value) return "";
+	try {
+		return new URL(value).origin;
+	} catch {
+		return "";
+	}
 }
 
 /**
  * The production origin. Astro's `site` wins, then the origin the scaffold
- * recorded, then the request's own origin (local development, previews).
+ * recorded, then EMDASH_SITE_URL at run time, then the request's own origin
+ * (local development, previews).
  */
 export function siteOrigin(url: URL, site?: URL): string {
 	if (site) return site.origin;
-	if (CONFIGURED_SITE_URL !== UNKNOWN_SITE_URL) return CONFIGURED_SITE_URL.replace(TRAILING_SLASHES, "");
-	return url.origin;
+	if (CONFIGURED_SITE_URL && CONFIGURED_SITE_URL !== UNKNOWN_SITE_URL) return CONFIGURED_SITE_URL.replace(TRAILING_SLASHES, "");
+	return environmentOrigin() || url.origin;
 }
 
 export function absoluteUrl(pathOrUrl: string, origin: string): string {

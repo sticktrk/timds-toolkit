@@ -1100,3 +1100,44 @@ test("--base reuses the checked-out Design System for the base worktree without 
   assert.equal(worktreeCount(path.join(repoRoot, "design-system")), 1, "the linked Design System worktree is removed");
   assert.equal(await portAnswers(port), false);
 });
+
+test("--base previews a workspace site with no pin: the base is the same workspace, and system files read from the site", async (t) => {
+  const repoRoot = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "timds-workspace-compare-")));
+  t.after(() => fs.rm(repoRoot, { recursive: true, force: true }));
+  const port = await freePort();
+  git(repoRoot, "init", "-q", "-b", "main");
+  git(repoRoot, "config", "user.email", "test@example.com");
+  git(repoRoot, "config", "user.name", "Test");
+  git(repoRoot, "config", "commit.gpgsign", "false");
+  await writeFile(repoRoot, "timds.json", `${JSON.stringify({ schemaVersion: 2, systemId: "acme/core", name: "Acme" })}\n`);
+  await writeFile(repoRoot, "src/styles/system.css", ":root { --brand: #111111; }\n");
+  await writeFile(repoRoot, "site/timds.consumer.json", `${JSON.stringify({
+    schemaVersion: 1,
+    designSystem: { workspace: true, systemId: "acme/core" },
+    apps: { site: { cwd: ".", preview: { serve: ["node", "server.mjs", String(port), "relative"], port, routes: ["/"] }, designSurface: ["src/**"] } },
+  }, null, 2)}\n`);
+  await writeFile(repoRoot, "site/server.mjs", PAGES_SERVER);
+  await writeFile(repoRoot, "site/src/pages/index.html", page("Home", "<p>Old</p>"));
+  git(repoRoot, "add", ".");
+  git(repoRoot, "commit", "-q", "-m", "base");
+  git(repoRoot, "checkout", "-q", "-b", "design/x");
+  await writeFile(repoRoot, "site/src/pages/index.html", page("Home", "<p>New</p>", "#c0007a"));
+  await writeFile(repoRoot, "src/styles/system.css", ":root { --brand: #222222; }\n");
+  git(repoRoot, "add", "-A");
+  git(repoRoot, "commit", "-q", "-m", "head");
+  const site = path.join(repoRoot, "site");
+
+  const { preview } = await runConsumerPreview(["--root", site, "--app", "site", "--base", "main", "--no-install"], {
+    env: cleanEnv(),
+    launchBrowser: renderingBrowser(),
+    output: () => {},
+  });
+  assert.equal(preview.compare.status, "ready", preview.compare.reason);
+  assert.deepEqual(preview.compare.changedFiles, ["../src/styles/system.css", "src/pages/index.html"]);
+  assert.deepEqual(preview.designSystem, { systemId: "acme/core", commit: git(repoRoot, "rev-parse", "HEAD"), workspace: true });
+  const home = preview.routes.find((route) => route.path === "/");
+  assert.equal(home.change, "changed");
+  assert.deepEqual(home.affectedBy, ["src/pages/index.html"]);
+  assert.equal(await portAnswers(port), false, "the port is free afterwards");
+  assert.equal(git(repoRoot, "worktree", "list").includes("base-checkout"), false, "the base worktree is removed");
+});

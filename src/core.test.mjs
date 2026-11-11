@@ -2029,3 +2029,28 @@ test("the upgrade write boundary covers the managed boundary, both starters' syn
   assert.ok(embedded.files.includes("package.json") && embedded.files.includes("design-system/.timds/installation.json"));
   assert.ok(!embedded.files.includes(".timds/installation.json"));
 });
+
+test("timds upgrade refuses a workspace site and points at the workspace root, which is not a consumer", async (t) => {
+  const { findConsumerManifestRoot } = await import("./consumer.mjs");
+  const repoRoot = await temporaryDirectory(t);
+  gitInit(repoRoot);
+  await writeJson(path.join(repoRoot, "timds.json"), { schemaVersion: 2, systemId: "acme/core", name: "Acme" });
+  await fs.mkdir(path.join(repoRoot, "site", "src"), { recursive: true });
+  await writeJson(path.join(repoRoot, "site", "timds.consumer.json"), {
+    schemaVersion: 1,
+    designSystem: { workspace: true, systemId: "acme/core" },
+    apps: { site: { cwd: ".", preview: { build: ["npm", "run", "build"], output: "dist" }, designSurface: ["src/styles/**"] } },
+  });
+  commitAll(repoRoot, "Workspace with a site");
+  const site = path.join(repoRoot, "site");
+  for (const root of [site, path.join(site, "src")]) {
+    await assert.rejects(runCli(["upgrade", "--root", root]), (error) => {
+      assert.match(error.message, /is a site inside a Design System workspace \(designSystem\.workspace in site\/timds\.consumer\.json\)/);
+      assert.match(error.message, new RegExp(`Run timds upgrade at the workspace root \\(${repoRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\) instead`));
+      assert.match(error.message, /site\/\.timds\/emdash\.json/);
+      return true;
+    });
+  }
+  // The workspace root is not a consumer, so its upgrade is the Design System's.
+  assert.equal(await findConsumerManifestRoot(repoRoot), null);
+});

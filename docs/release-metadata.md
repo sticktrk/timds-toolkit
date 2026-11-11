@@ -186,6 +186,28 @@ remove files and move catalog fields, and a system below the floor is refused
 rather than upgraded. A new operation or requirement raises it, so a host that
 does not know it holds the release instead of guessing.
 
+`package.json` `emdashTemplate` names the EmDash template set this release
+installs (`consumer scaffold emdash --existing` and `--workspace`, see
+[EmDash sites](emdash.md)):
+
+```json
+"emdashTemplate": {
+  "version": 1,
+  "history": [{ "version": 1, "changes": ["The first template set: ..."] }]
+}
+```
+
+`version` equals `templates/emdash/site.json` `version`, the `template` a
+site records in `.timds/emdash.json`; `history` has one entry per version from
+1, each with a short list of what that version changed. Like `hostContract`
+it is in the registry document, so `npm view @dtconcepts/timds emdashTemplate`
+reads it without unpacking the package. It is not part of the
+`release-metadata` export: the site's files are product source, outside the
+managed resources above. For maintainers: a template change an installed site
+would need to receive raises `version` in both places and adds a `history`
+entry; `src/emdash-template-metadata.test.mjs` fails when the two disagree or
+a version has no entry.
+
 ## Compatibility and verification
 
 Schema 1 fixes the data shapes and policy meanings above. Package releases may

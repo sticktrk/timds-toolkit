@@ -2,8 +2,9 @@
 /**
  * The article body: EmDash's Portable Text component, with the elements an
  * article uses mapped onto plain markup that the Design System's `.prose`
- * styles. Links, strong, emphasis, inline code and lists keep EmDash's own
- * plain renderers. Other block types EmDash ships renderers for (embeds,
+ * styles. Links keep EmDash's link markup with the site's base path in
+ * front of a root-relative href; strong, emphasis, inline code and lists keep
+ * EmDash's own plain renderers. Other block types EmDash ships renderers for (embeds,
  * galleries, video and the like) keep those renderers; a type nobody knows
  * renders nothing.
  *
@@ -18,6 +19,7 @@ import BlockquoteGroup from "./portable-text/BlockquoteGroup.astro";
 import Break from "./portable-text/Break.astro";
 import Code from "./portable-text/Code.astro";
 import Image from "./portable-text/Image.astro";
+import Link from "./portable-text/Link.astro";
 import ListFallback from "./portable-text/ListFallback.astro";
 import ListItemFallback from "./portable-text/ListItemFallback.astro";
 import Nothing from "./portable-text/Nothing.astro";
@@ -33,6 +35,7 @@ const components = {
 	block: Block,
 	unknownBlock: Block,
 	type: { image: Image, code: Code, table: Table, blockquoteGroup: BlockquoteGroup, break: Break },
+	mark: { link: Link },
 	unknownType: Nothing,
 	unknownMark: Passthrough,
 	unknownList: ListFallback,

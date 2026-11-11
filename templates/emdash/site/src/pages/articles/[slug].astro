@@ -23,6 +23,7 @@ import {
 	imageFieldUrl,
 	isSignedIn,
 	siteOrigin,
+	sitePath,
 	topicsOf,
 	type ArticleData,
 } from "../../lib/articles/index";
@@ -110,6 +111,6 @@ const structuredData = JSON.stringify({
 	</article>
 
 	<div class="section">
-		<a class="button button--secondary" href="/articles/">Back to all articles</a>
+		<a class="button button--secondary" href={sitePath("/articles/")}>Back to all articles</a>
 	</div>
 </Layout>

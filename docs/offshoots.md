@@ -33,7 +33,11 @@ The signed-in principal must be allowed to export the parent source.
 `GET /api/timds/design-systems/{system}/releases/{label}/source` supplies
 `{apiVersion:1,parent:{systemId,sourceId,version,commit},files:[...]}`.
 Files use canonical paths, Git modes and base64 content. `latest` is the
-default and resolves once to the publication's exact commit.
+default and resolves once to the publication's exact commit. A parent's
+workspace site (`site/` with a workspace-form `timds.consumer.json`, see
+[EmDash sites](emdash.md#a-site-in-its-design-systems-workspace)) is the
+parent's own website: neither mode carries it, so an offshoot starts without
+one.
 
 A local parent is read from its committed Git tree, ignoring worktree edits:
 

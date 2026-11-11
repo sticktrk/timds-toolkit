@@ -7,7 +7,7 @@
  */
 import { getEmDashCollection, getTaxonomyTerms } from "emdash";
 
-import { ARTICLES, TOPIC, absoluteUrl, articlePath, topicPath, type ArticleData } from "./index";
+import { ARTICLES, TOPIC, absoluteUrl, articlePath, sitePath, topicPath, type ArticleData } from "./index";
 
 export interface SitemapEntry {
 	url: string;
@@ -18,7 +18,7 @@ const PAGE_SIZE = 100;
 
 /** Every published article, then every topic that has at least one published article. */
 export async function getArticleSitemapEntries(origin: string): Promise<SitemapEntry[]> {
-	const entries: SitemapEntry[] = [{ url: absoluteUrl("/articles/", origin) }];
+	const entries: SitemapEntry[] = [{ url: absoluteUrl(sitePath("/articles/"), origin) }];
 
 	let cursor: string | undefined;
 	do {
