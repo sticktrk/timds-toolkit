@@ -62,12 +62,17 @@ jobs:
         env:
           EXPECTED_TARGET: ${{ matrix.target }}
         run: node -e 'if (`${process.platform}-${process.arch}` !== process.env.EXPECTED_TARGET) throw new Error("Native runner does not match target")'
-      # Chrome Headless Shell prerequisites from Remotion's Ubuntu 24.04 list.
+      # Chrome Headless Shell prerequisites from Remotion's Ubuntu 24.04 list,
+      # with its two -dev packages replaced by the runtime libraries they pull
+      # in (libxkbcommon0, libgbm1): the browser loads the shared objects and
+      # never the headers. The runner image already has every package named
+      # here, so the step downloads nothing and a package mirror that cannot be
+      # reached no longer fails the build.
       - name: Install Linux browser libraries
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libnss3 libdbus-1-3 libatk1.0-0 libasound2t64 libxrandr2 libxkbcommon-dev libxfixes3 libxcomposite1 libxdamage1 libgbm-dev libcups2 libcairo2 libpango-1.0-0 libatk-bridge2.0-0
+          sudo apt-get update || echo "::warning::apt-get update failed; installing from the package lists already on the runner"
+          sudo apt-get install -y libnss3 libdbus-1-3 libatk1.0-0 libasound2t64 libxrandr2 libxkbcommon0 libxfixes3 libxcomposite1 libxdamage1 libgbm1 libcups2 libcairo2 libpango-1.0-0 libatk-bridge2.0-0
       - run: npm ci
       - run: npm test
       - run: npm run pack:check
