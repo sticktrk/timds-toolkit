@@ -133,7 +133,9 @@ npm run timds -- doctor
 npm run timds -- dev
 ```
 
-`dev` starts the framework authoring server declared in `timds.json`. Use
+`dev` starts the framework authoring server declared in `timds.json`; the
+stock starter's server also serves a [workspace site](docs/emdash.md#one-dev-server)
+under `/site/` on the same port. Use
 `npm run timds -- preview` to inspect the exact static artifact that TimDS will
 serve. Make ordinary changes in authored source, tokens, docs, components, and
 small optimized assets. Never hand-edit generated `dist/`.
@@ -155,7 +157,9 @@ npm run timds -- submit --message "Describe the design-system change"
 This validates the artifact, creates or uses a `design-system/<change>` branch,
 pushes it, and opens a draft pull request against the default branch. It does
 not merge or publish without separate authorization, and it refuses a change
-whose `CHANGELOG.md` has no note under `## Unreleased`.
+whose `CHANGELOG.md` has no note under `## Unreleased`, unless every change is
+inside the system's [workspace site](docs/emdash.md#two-builds-in-one-repository)
+(`site/`), which it carries with the system.
 
 ## Agent skills
 
@@ -631,7 +635,12 @@ The guard is enforced, not requested. The tools refuse `.git/`, `.timds/`,
 `scripts/release.sh`, `scripts/check-versions.mjs`,
 `scripts/prepare-merge-release.mjs`, `scripts/prepare-merge-release.test.mjs`),
 symbolic links, and anything outside the authored surface. Build, dev, and
-check scripts stay editable. In
+check scripts stay editable. A workspace site (`site/` with a workspace-form
+`timds.consumer.json`) is editable with the system, except its
+`package.json`, `package-lock.json`, `timds.consumer.json`, `.timds/`, build
+output and local state (`dist/`, `.astro/`, `.wrangler/`, `.emdash/`) and
+secrets (`.env*` but `.env.example`, `.dev.vars*`); `run_check` checks the
+system only. In
 the embedded layout the authored surface is `design-system/**` only. stdout
 carries only the protocol; build output and progress go to stderr or into the
 `run_check` result.
@@ -691,7 +700,10 @@ reported gap.
 A product that uses a Design System (a website, an app) pins it and
 declares, once, in `timds.consumer.json` at its root, how to preview each app
 and which paths a designer pull request may touch. TimDS never builds the
-product itself; it runs the commands the manifest declares.
+product itself; it runs the commands the manifest declares. A system's own
+EmDash site inside its workspace is the exception with no pin
+(`designSystem: { "workspace": true, "systemId": ... }`); see
+[EmDash sites](#emdash-sites).
 
 The pin takes one of two forms. A **published pin** names a version:
 
@@ -807,7 +819,13 @@ Declared `routes` always come first and always stay.
   CSS. Missing definitions, empty values, and unresolved aliases in the same
   selector or document scope fail the check. This checks token availability;
   verify product stylesheet imports, browser cascade, and contrast in the
-  actual product preview. With `--base`, it
+  actual product preview. In a workspace site the check also runs the other
+  way: a color or `font-family` literal equal to exactly one system token is
+  rewritten to it (`--no-fix` reports it instead), and a literal with no
+  token, an ambiguous one, a site override of a system token, or a class no
+  system stylesheet declares fails the check until the style is added to the
+  system in the same change (`workspaceCheck` in `--json`; see
+  [the two-way check](docs/emdash.md#the-check-runs-both-ways)). With `--base`, it
   fails when the branch or working tree changes anything outside a declared
   design surface or inside a protected path, or moves the Design System pin
   (the gitlink, or `designSystem` in the manifest),
@@ -866,6 +884,9 @@ Declared `routes` always come first and always stay.
 - `timds consumer scaffold emdash --root PATH --design-system GIT_URL` creates
   a new EmDash CMS site repository that consumes a Design System (see
   **EmDash sites** below), then adopts it the way `consumer init` does.
+  `--existing` is withdrawn: it refuses and writes nothing. With `--workspace
+  [--root PATH]`, run in a Design System workspace, it writes a complete site with no
+  pin into the system's `site/`.
 
 The designer-change workflow (`.github/workflows/timds-designer-change.yml`)
 lets a designer start a change with no setup. An issue labeled
@@ -923,7 +944,31 @@ npx --yes @dtconcepts/timds@0.1.x consumer scaffold emdash \
   --site-url https://www.client.example
 ```
 
-What the scaffold writes, the hosting platforms and the deploy workflow are described in [docs/emdash.md](docs/emdash.md).
+`--existing`, which added EmDash's articles to an Astro site in its own
+repository, is withdrawn: the command refuses the flag and writes nothing.
+
+A system's own website lives in the system's workspace, with no pin:
+
+```bash
+npm run timds -- consumer scaffold emdash --workspace
+```
+
+Run at the root of a Design System workspace, it writes a complete EmDash
+site for Cloudflare Workers into `site/` (`design-system/site/` when
+embedded): its own package with exact versions and a lockfile, the Astro and
+Worker configuration, and pages built from the system's website design, with
+its stylesheets and tokens read from source, so a change to the system is a
+change to the site at its next build. It asks nothing and runs no generator.
+`npm run timds -- consumer check --root site` checks the site both ways and
+rewrites a literal that equals one system token; `npm run timds -- dev`
+serves the system at `/` and the site at `/site/` on one port; `npm run
+worker` in `site/` bundles an uploadable Worker with no credentials. The
+system's `build`, `check` and `upgrade` give the same results with and
+without the site.
+
+What each mode writes, the hosting platforms, the deploy workflow, and the
+workspace mode's dev server, check and upload output are described in
+[docs/emdash.md](docs/emdash.md).
 
 ## Offshoots follow a parent release
 
@@ -932,7 +977,8 @@ What the scaffold writes, the hosting platforms and the deploy workflow are desc
 Full mode keeps authored layers; structure keeps verified toolkit plumbing,
 catalogs, placeholder tokens and any exact files the parent's designer listed
 in `.timds/stock.json`. Both write `.timds/parent.json` and pass the workspace
-check before creation completes.
+check before creation completes. Neither carries the parent's workspace site
+(`site/`): an offshoot starts without one.
 
 `timds feed` merges the next parent release against that record: unchanged
 catalog fields advance, missing entries are added as planned pages, and local

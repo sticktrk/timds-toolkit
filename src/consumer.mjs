@@ -8,9 +8,16 @@
 // sync` (consumer-sync.mjs) fetches that version's published bundle into the
 // gitignored `designSystem.path`, and no Design System bytes enter the
 // repository. In submodule mode the same path is a git submodule at an exact
-// commit, the form the first consumers adopted. This module reads and
-// validates the manifest, resolves the pin either way (gitlink commit or the
-// sync record), and guards the design-surface scope of a branch diff for
+// commit, the form the first consumers adopted. A third form has no pin at
+// all: `designSystem: { "workspace": true, "systemId": ... }` is a site inside
+// its Design System's own workspace (`site/timds.consumer.json`, written by
+// `consumer scaffold emdash --workspace`), and the system is the nearest
+// folder above the site that holds `timds.json` (workspace-site.mjs). Such a
+// site reads the workspace's source directly, so nothing syncs or moves, and
+// a branch change outside the site folder is the system's own (status
+// `system`), judged by the system's check. This module reads and
+// validates the manifest, resolves the pin (gitlink commit, the sync record,
+// or the workspace above), and guards the design-surface scope of a branch diff for
 // `timds consumer check`. The check also confirms that git carries what a
 // clone needs (the manifest, the root package and lockfile, the installed
 // files): a root file an ignore pattern excludes passes locally and is absent
@@ -33,6 +40,7 @@ import { isDeepStrictEqual } from "node:util";
 import { consumerToolkitLockRemedy, planConsumerToolkitLock, PUBLISHED_CONSUMER_MINIMUM_VERSION, toolkitVersionOlderThan } from "./consumer-install.mjs";
 import { parseCssTokens, resolveTokens } from "./tokens.mjs";
 import { assertBinaryInstallation, readBinaryInstallation } from "./binary-installation.mjs";
+import { WORKSPACE_PIN_MODE, findDesignSystemAbove, isWorkspaceDesignSystem } from "./workspace-site.mjs";
 
 export const CONSUMER_MANIFEST_FILE = "timds.consumer.json";
 /** The record `consumer sync` leaves in the bundle directory: which version is there and which files. */
@@ -76,7 +84,7 @@ export const CONSUMER_ALWAYS_ALLOWED = Object.freeze([
 ]);
 
 const CONSUMER_HELP = `Usage:
-  timds consumer check [--root PATH] [--app NAME] [--base REF] [--allow-pin-update LABEL] [--require-token=--NAME]... [--json]
+  timds consumer check [--root PATH] [--app NAME] [--base REF] [--allow-pin-update LABEL] [--require-token=--NAME]... [--no-fix] [--json]
   timds consumer register [--portal-url URL] [--repository OWNER/REPO] [--base-branch REF] [--delivery auto|approve] [--notify] [--surface PATH]... [--root PATH] [--json]
   timds consumer updates [LABEL] [--portal-url URL] [--consumer-id UUID] [--root PATH] [--json]
   timds consumer sync [--root PATH]
@@ -85,6 +93,7 @@ const CONSUMER_HELP = `Usage:
   timds consumer preview --app NAME [--root PATH] [--output DIR] [--base REF] [--publish] [--pull-request N]
   timds consumer init [--root PATH] [--system ID] [--version VERSION] [--url URL] [--force] [--skip-install] [--portal-url URL]
   timds consumer scaffold emdash --root PATH --design-system GIT_URL [--stylesheet PATH]... [--site-url URL] [--portal-url URL] [--skip-install]
+  timds consumer scaffold emdash --workspace [--root PATH] [--skip-install]
   timds consumer notes [--root PATH] [--app NAME] [--pull-request N] [--all] [--json] [--portal-url URL]
   timds consumer notes resolve ID [ID...] [--commit SHA] [--dismiss]`;
 
@@ -227,33 +236,64 @@ const publishedUrl = z.string().refine((value) => {
   }
 }, { message: "designSystem.url must be the HTTP or HTTPS prefix the Design System is published at, without a query or credentials" }).transform((value) => value.replace(/\/+$/, ""));
 
-const manifestSchema = z.object({
-  $schema: z.string().optional(),
-  schemaVersion: z.literal(1, { error: `${CONSUMER_MANIFEST_FILE} schemaVersion must be 1` }),
-  designSystem: z.object({
-    path: relativePath("designSystem.path").default("design-system"),
-    systemId: z.string({ error: "designSystem.systemId is required (the Design System's systemId from its timds.json)" })
-      .regex(/^[a-zA-Z0-9][a-zA-Z0-9._/-]{1,159}$/, "designSystem.systemId must use letters, numbers, dots, slashes, underscores, or hyphens"),
-    // Published mode: the version the product is built against (or `current`
-    // to follow every release at the next install) and, optionally, where the
-    // system is published. Absent, the path is a git submodule.
-    version: z.string().regex(/^(?:current|[A-Za-z0-9][A-Za-z0-9._-]{0,99})$/, 'designSystem.version must be a published version label such as "1.4.0", or "current"').optional(),
-    url: publishedUrl.optional(),
-  }, { error: "designSystem must be an object with path and systemId" }).strict().superRefine((designSystem, context) => {
-    if (designSystem.url && !designSystem.version) {
-      context.addIssue({ code: "custom", path: ["url"], message: "designSystem.url applies to a published pin; add designSystem.version" });
+const systemIdSchema = z.string({ error: "designSystem.systemId is required (the Design System's systemId from its timds.json)" })
+  .regex(/^[a-zA-Z0-9][a-zA-Z0-9._/-]{1,159}$/, "designSystem.systemId must use letters, numbers, dots, slashes, underscores, or hyphens");
+
+// A pinned system: a published version, or (without one) a git submodule at `path`.
+const pinnedDesignSystemSchema = z.object({
+  path: relativePath("designSystem.path").default("design-system"),
+  systemId: systemIdSchema,
+  // Published mode: the version the product is built against (or `current`
+  // to follow every release at the next install) and, optionally, where the
+  // system is published. Absent, the path is a git submodule.
+  version: z.string().regex(/^(?:current|[A-Za-z0-9][A-Za-z0-9._-]{0,99})$/, 'designSystem.version must be a published version label such as "1.4.0", or "current"').optional(),
+  url: publishedUrl.optional(),
+}, { error: "designSystem must be an object with path and systemId" }).strict().superRefine((designSystem, context) => {
+  if (designSystem.url && !designSystem.version) {
+    context.addIssue({ code: "custom", path: ["url"], message: "designSystem.url applies to a published pin; add designSystem.version" });
+  }
+});
+
+// A site inside its Design System's workspace: no path, no version, no url,
+// because the system is the nearest folder above the site holding timds.json.
+const WORKSPACE_REFUSED_KEYS = Object.freeze({
+  path: "the Design System is the nearest folder above the site that holds timds.json",
+  version: "a workspace site reads the system's source directly, so there is no version to pin",
+  url: "a workspace site reads the system's source directly, so nothing is fetched from a published prefix",
+});
+const workspaceDesignSystemSchema = z.object({
+  workspace: z.literal(true, { error: 'designSystem.workspace must be true (a site inside its Design System\'s workspace); remove it to pin the system with designSystem.version or a submodule at designSystem.path' }),
+  systemId: systemIdSchema,
+  path: z.unknown().optional(),
+  version: z.unknown().optional(),
+  url: z.unknown().optional(),
+}, { error: "designSystem must be an object with workspace and systemId" }).strict().superRefine((designSystem, context) => {
+  for (const [key, reason] of Object.entries(WORKSPACE_REFUSED_KEYS)) {
+    if (designSystem[key] !== undefined) {
+      context.addIssue({ code: "custom", path: [key], message: `designSystem.${key} does not apply with designSystem.workspace: ${reason}. Remove it.` });
     }
-  }),
-  apps: z.record(z.string(), appSchema, { error: "apps must be an object keyed by app name" }).superRefine((apps, context) => {
-    const names = Object.keys(apps);
-    if (!names.length) context.addIssue({ code: "custom", message: "apps must declare at least one app" });
-    for (const name of names) {
-      if (!APP_NAME.test(name)) {
-        context.addIssue({ code: "custom", path: [name], message: `app name "${name}" must start with a letter or digit and use only letters, digits, dots, underscores, or hyphens` });
+  }
+}).transform(({ workspace, systemId }) => ({ workspace, systemId }));
+
+function manifestSchema(designSystemSchema) {
+  return z.object({
+    $schema: z.string().optional(),
+    schemaVersion: z.literal(1, { error: `${CONSUMER_MANIFEST_FILE} schemaVersion must be 1` }),
+    designSystem: designSystemSchema,
+    apps: z.record(z.string(), appSchema, { error: "apps must be an object keyed by app name" }).superRefine((apps, context) => {
+      const names = Object.keys(apps);
+      if (!names.length) context.addIssue({ code: "custom", message: "apps must declare at least one app" });
+      for (const name of names) {
+        if (!APP_NAME.test(name)) {
+          context.addIssue({ code: "custom", path: [name], message: `app name "${name}" must start with a letter or digit and use only letters, digits, dots, underscores, or hyphens` });
+        }
       }
-    }
-  }),
-}, { error: `${CONSUMER_MANIFEST_FILE} must be a JSON object` }).strict();
+    }),
+  }, { error: `${CONSUMER_MANIFEST_FILE} must be a JSON object` }).strict();
+}
+
+const pinnedManifestSchema = manifestSchema(pinnedDesignSystemSchema);
+const workspaceManifestSchema = manifestSchema(workspaceDesignSystemSchema);
 
 function issuePath(issue) {
   return (issue.path || []).map((segment) => (typeof segment === "number" ? `[${segment}]` : segment)).join(".").replace(/\.\[/g, "[");
@@ -271,7 +311,11 @@ function formatIssues(issues) {
 
 /** Validate a parsed `timds.consumer.json` and return it with defaults applied. Throws an actionable Error. */
 export function validateConsumerManifest(value) {
-  const result = manifestSchema.safeParse(value);
+  // Any `workspace` key selects the workspace form, so `workspace: false`
+  // is refused there rather than read as an unknown field of a pin.
+  const designSystem = value && typeof value === "object" ? value.designSystem : null;
+  const workspaceForm = Boolean(designSystem && typeof designSystem === "object" && !Array.isArray(designSystem) && Object.hasOwn(designSystem, "workspace"));
+  const result = (workspaceForm ? workspaceManifestSchema : pinnedManifestSchema).safeParse(value);
   if (!result.success) {
     throw new Error(`${CONSUMER_MANIFEST_FILE} is invalid:\n${formatIssues(result.error.issues)}`);
   }
@@ -284,8 +328,9 @@ export function consumerPreviewMode(preview) {
   return preview.serve || preview.routes ? "crawl" : "static";
 }
 
-/** `published` when the manifest pins a version, else `submodule`. */
+/** `workspace` for a site inside its Design System's workspace, `published` when the manifest pins a version, else `submodule`. */
 export function consumerPinMode(designSystem) {
+  if (isWorkspaceDesignSystem(designSystem)) return WORKSPACE_PIN_MODE;
   return designSystem?.version ? "published" : "submodule";
 }
 
@@ -300,7 +345,12 @@ export function publishedBaseUrl(designSystem) {
 function run(command, args, cwd, { input = null } = {}) {
   return new Promise((resolve) => {
     const child = spawn(command, args, { cwd, shell: false, stdio: [input === null ? "ignore" : "pipe", "pipe", "pipe"] });
-    if (input !== null) child.stdin.end(input);
+    if (input !== null) {
+      // A child that exits before reading its input (git outside a work tree)
+      // closes the pipe; without a listener that write is an unhandled EPIPE.
+      child.stdin.on("error", () => {});
+      child.stdin.end(input);
+    }
     let stdout = "";
     let stderr = "";
     child.stdout.setEncoding("utf8");
@@ -347,46 +397,85 @@ export async function gitTrackedPaths(repoRoot, paths) {
   return new Set(result.stdout.split("\0").filter(Boolean));
 }
 
-/**
- * The root of the consumer repository containing `start`, or null when it is
- * not one: the git toplevel when it holds `timds.consumer.json`; outside git,
- * the nearest ancestor that holds it. Inside git the search never climbs past
- * the toplevel, so a Design System submodule checked out inside a product is
- * still its own repository. `timds upgrade` uses this to route consumers away
- * from the design-system workspace loader.
- */
-export async function findConsumerManifestRoot(start = process.cwd()) {
-  const resolved = path.resolve(start);
-  if (!existsSync(resolved)) return null;
-  const result = await git(["rev-parse", "--show-toplevel"], resolved);
-  if (result.code === 0 && result.stdout.trim()) {
-    const top = await fs.realpath(path.resolve(result.stdout.trim()));
-    return existsSync(path.join(top, CONSUMER_MANIFEST_FILE)) ? top : null;
-  }
-  let current = resolved;
+/** The realpath of the git top level containing `start`, or null outside a work tree. */
+async function gitTopLevel(start) {
+  const result = await git(["rev-parse", "--show-toplevel"], start);
+  if (result.code !== 0 || !result.stdout.trim()) return null;
+  return fs.realpath(path.resolve(result.stdout.trim())).catch(() => path.resolve(result.stdout.trim()));
+}
+
+/** The nearest folder at or above `from` holding the manifest, never above `top` (when given). */
+function nearestManifestFolder(from, top) {
+  let current = from;
   while (true) {
     if (existsSync(path.join(current, CONSUMER_MANIFEST_FILE))) return current;
+    if (top && current === top) return null;
     const parent = path.dirname(current);
     if (parent === current) return null;
     current = parent;
   }
 }
 
+/**
+ * The root of the consumer repository containing `start`, or null when it is
+ * not one: the nearest folder at or above `start` that holds
+ * `timds.consumer.json`. Inside git the search never climbs past the
+ * toplevel, so a Design System submodule checked out inside a product is
+ * still its own repository; it may stop below it, which is where a workspace
+ * site keeps its manifest (`site/timds.consumer.json`). The search only goes
+ * up, so a Design System workspace root with a site below it is not a
+ * consumer root. `timds upgrade` uses this to route consumers away from the
+ * design-system workspace loader.
+ */
+export async function findConsumerManifestRoot(start = process.cwd()) {
+  const resolved = path.resolve(start);
+  if (!existsSync(resolved)) return null;
+  const top = await gitTopLevel(resolved);
+  if (top) return nearestManifestFolder(await fs.realpath(resolved), top);
+  return nearestManifestFolder(resolved, null);
+}
+
 async function findConsumerRoot(start) {
   const resolved = path.resolve(start);
-  const result = await git(["rev-parse", "--show-toplevel"], resolved);
-  if (result.code === 0 && result.stdout.trim()) {
-    const top = path.resolve(result.stdout.trim());
-    if (existsSync(path.join(top, CONSUMER_MANIFEST_FILE))) return top;
+  const top = existsSync(resolved) ? await gitTopLevel(resolved) : null;
+  if (top) return nearestManifestFolder(await fs.realpath(resolved), top) ?? top;
+  return nearestManifestFolder(resolved, null) ?? resolved;
+}
+
+/**
+ * The parsed manifest at `consumerRoot` when it declares the workspace form,
+ * else null (absent, unreadable, or a pinned form). Unvalidated, so callers
+ * that only route (upgrade, binary adoption) can refuse with the right advice
+ * before `loadConsumer` would validate it.
+ */
+export async function readWorkspaceSiteManifest(consumerRoot) {
+  try {
+    const parsed = JSON.parse(await fs.readFile(path.join(consumerRoot, CONSUMER_MANIFEST_FILE), "utf8"));
+    return isWorkspaceDesignSystem(parsed) ? parsed : null;
+  } catch {
+    return null;
   }
-  let current = resolved;
-  while (true) {
-    if (existsSync(path.join(current, CONSUMER_MANIFEST_FILE))) return current;
-    const parent = path.dirname(current);
-    if (parent === current) break;
-    current = parent;
-  }
-  return result.code === 0 && result.stdout.trim() ? path.resolve(result.stdout.trim()) : resolved;
+}
+
+/**
+ * Why a repository-level command (`timds upgrade`, `installation adopt
+ * --binary`, `consumer init`) refuses a workspace site at `siteRoot`, and
+ * where to run it instead: the workspace root, whose toolkit the site uses.
+ */
+export function workspaceSiteRefusal(siteRoot, command) {
+  const systemRoot = findDesignSystemAbove(siteRoot);
+  const site = systemRoot ? path.relative(systemRoot, siteRoot).split(path.sep).join("/") : path.basename(siteRoot);
+  return `${siteRoot} is a site inside a Design System workspace (designSystem.workspace in ${site}/${CONSUMER_MANIFEST_FILE}); it has no toolkit, pin, or consumer installation of its own. Run ${command} at the workspace root${systemRoot ? ` (${systemRoot})` : ""} instead: the site uses that workspace's toolkit. The site's templates are recorded in ${site}/.timds/emdash.json.`;
+}
+
+/**
+ * Where the toolkit installation record of the consumer at `consumerRoot`
+ * lives: the consumer itself, or for a workspace site the Design System
+ * above it, whose toolkit the site uses (the site declares none).
+ */
+export async function consumerInstallationRoot(consumerRoot) {
+  if (!(await readWorkspaceSiteManifest(consumerRoot))) return consumerRoot;
+  return findDesignSystemAbove(consumerRoot) ?? consumerRoot;
 }
 
 /**
@@ -433,6 +522,13 @@ async function readBundleRecord(root) {
  */
 async function consumerCommittedFiles(repoRoot, mode, binary = false) {
   const lockFile = existsSync(path.join(repoRoot, "npm-shrinkwrap.json")) ? "npm-shrinkwrap.json" : "package-lock.json";
+  if (mode === WORKSPACE_PIN_MODE) {
+    // A workspace site is its own package (not an npm workspace of the root)
+    // that a clone installs from its own lockfile. It has no installation
+    // record: the workspace's toolkit and managed files serve it, and the
+    // Design System's own check judges those.
+    return { files: [CONSUMER_MANIFEST_FILE, "package.json", lockFile], required: new Set(["package.json", lockFile]) };
+  }
   const files = new Set([CONSUMER_MANIFEST_FILE, "package.json", lockFile, CONSUMER_INSTALLATION_PATH]);
   const required = new Set(binary ? [CONSUMER_INSTALLATION_PATH] : mode === "published" ? ["package.json", lockFile] : []);
   let record = null;
@@ -453,11 +549,17 @@ async function consumerCommittedFiles(repoRoot, mode, binary = false) {
  * Load the consumer repo at or above `repoRootInput`: the validated manifest
  * and the pinned Design System (`root`, `mode`, gitlink `commit` or null, the
  * sync `record` or null, `present`). In published mode `present` means the
- * bundle has been synced; in submodule mode, that the checkout exists.
+ * bundle has been synced; in submodule mode, that the checkout exists. In the
+ * workspace form `repoRoot` is the site folder and the system is the nearest
+ * folder above it holding `timds.json`: `{ mode: "workspace", workspace:
+ * true, systemId, root, path }` with `path` relative to the site (`..`),
+ * `root` and `path` null when no folder above holds one, `present` whether
+ * it does, and no version, url, commit, or record. `binaryInstallation` is
+ * that workspace's, whose toolkit the site uses.
  */
 export async function loadConsumer(repoRootInput = process.cwd()) {
   const repoRoot = await findConsumerRoot(repoRootInput);
-  await assertBinaryInstallation(repoRoot);
+  await assertBinaryInstallation(await consumerInstallationRoot(repoRoot));
   const manifestPath = path.join(repoRoot, CONSUMER_MANIFEST_FILE);
   let text;
   try {
@@ -475,8 +577,25 @@ export async function loadConsumer(repoRootInput = process.cwd()) {
     throw new Error(`${CONSUMER_MANIFEST_FILE} is not valid JSON: ${error.message}`);
   }
   const manifest = validateConsumerManifest(parsed);
-  const designSystemRoot = path.resolve(repoRoot, manifest.designSystem.path);
   const mode = consumerPinMode(manifest.designSystem);
+  if (mode === WORKSPACE_PIN_MODE) {
+    const root = findDesignSystemAbove(repoRoot);
+    const designSystem = {
+      mode,
+      workspace: true,
+      systemId: manifest.designSystem.systemId,
+      root,
+      path: root ? path.relative(repoRoot, root).split(path.sep).join("/") || "." : null,
+      version: null,
+      url: null,
+      commit: null,
+      record: null,
+      linked: false,
+      present: Boolean(root) && existsSync(path.join(root, "timds.json")),
+    };
+    return { repoRoot, manifestPath, manifest, rawManifest: parsed, apps: manifest.apps, designSystem, binaryInstallation: root ? await readBinaryInstallation(root) : null };
+  }
+  const designSystemRoot = path.resolve(repoRoot, manifest.designSystem.path);
   const linked = mode === "published" && await fs.lstat(designSystemRoot).then((info) => info.isSymbolicLink(), () => false);
   const record = mode === "published" && !linked ? await readBundleRecord(designSystemRoot) : null;
   const designSystem = {
@@ -600,7 +719,7 @@ async function changedPaths(repoRoot, base, designSystemPath) {
     const filePath = entry.slice(3);
     // An unstaged change at the Design System path is a checkout that drifted
     // from the pin (reported as a warning), not a change to the pin.
-    if (filePath === designSystemPath && entry[0] === " ") continue;
+    if (designSystemPath && filePath === designSystemPath && entry[0] === " ") continue;
     paths.add(filePath);
   }
   return [...paths].sort();
@@ -609,12 +728,14 @@ async function changedPaths(repoRoot, base, designSystemPath) {
 /**
  * The manifest the scope is judged against: the one at the merge base, so a
  * branch cannot widen its own design surface. `null` when the base has no
- * manifest (the branch adopts TimDS) or an unreadable one.
+ * manifest (the branch adopts TimDS) or an unreadable one. `prefix` is the
+ * consumer's folder below the git top level (`site/` for a workspace site,
+ * empty at the top), so the manifest is read at its real path.
  */
-async function manifestAtBase(repoRoot, base) {
+async function manifestAtBase(repoRoot, base, prefix = "") {
   const mergeBase = await git(["merge-base", base, "HEAD"], repoRoot);
   if (mergeBase.code !== 0 || !mergeBase.stdout.trim()) return { manifest: null, missing: false };
-  const shown = await git(["show", `${mergeBase.stdout.trim()}:${CONSUMER_MANIFEST_FILE}`], repoRoot);
+  const shown = await git(["show", `${mergeBase.stdout.trim()}:${prefix}${CONSUMER_MANIFEST_FILE}`], repoRoot);
   if (shown.code !== 0) return { manifest: null, missing: true };
   try {
     const rawManifest = JSON.parse(shown.stdout);
@@ -624,11 +745,73 @@ async function manifestAtBase(repoRoot, base) {
   }
 }
 
+/** The consumer folder's path below the git top level, with a trailing slash (`site/`), or empty at the top or outside git. */
+async function gitPrefix(repoRoot) {
+  const result = await git(["rev-parse", "--show-prefix"], repoRoot);
+  return result.code === 0 ? result.stdout.trim() : "";
+}
+
+const validRequiredTokens = (required) => Array.isArray(required) && required.every((name) => typeof name === "string" && /^--[a-zA-Z_][a-zA-Z0-9_-]*$/.test(name));
+const INVALID_REQUIRED_TOKENS = "Required tokens must be CSS custom property names, such as --focus-ring";
+
+/** The errors for `required` against resolved token records: `missing(name)` words a token none declares. */
+function requiredTokenErrors(tokens, required, missing) {
+  const errors = [];
+  for (const name of [...new Set(required)]) {
+    const matches = tokens.filter((token) => token.name === name);
+    if (!matches.length) errors.push(missing(name));
+    else {
+      const unresolved = [...new Set(matches.flatMap((token) => token.unresolved || (token.resolved.includes("var(") ? token.references : [])))];
+      if (unresolved.length) errors.push(`Required Design System token ${name} has unresolved aliases: ${unresolved.join(", ")}`);
+      if (matches.some((token) => !token.resolved)) errors.push(`Required Design System token ${name} has an empty definition`);
+    }
+  }
+  return errors;
+}
+
+/**
+ * Required tokens in the workspace form, answered from what each selected
+ * app loads (`workspaceTokenInventory`, the two-way check's index: the
+ * stylesheets the site's website design links, the compiled tokens when it
+ * links /tokens.css, and the system stylesheets the site imports), never
+ * from every stylesheet in the system.
+ */
+async function checkWorkspaceRequiredTokens(consumer, designSystem, required, selected) {
+  if (!validRequiredTokens(required)) return [INVALID_REQUIRED_TOKENS];
+  if (!required.length) return [];
+  const { workspaceTokenInventory } = await import("./consumer-workspace-check.mjs");
+  const errors = [];
+  for (const name of selected) {
+    const app = resolveConsumerApp(consumer, name);
+    if (!existsSync(app.cwd)) continue;
+    let inventory;
+    try {
+      inventory = await workspaceTokenInventory({ siteRoot: app.cwd, designSystemRoot: designSystem.root, designSurface: app.designSurface, protected: app.protected });
+    } catch (error) {
+      errors.push(`App "${name}": the required tokens could not be read from the workspace Design System: ${error.message}`);
+      continue;
+    }
+    const design = inventory.design;
+    const loads = inventory.stylesheets.length || inventory.tokensJson
+      ? [...(inventory.tokensJson ? ["/tokens.css (the compiled tokens)"] : []), ...inventory.stylesheets].join(", ")
+      : "no Design System stylesheet";
+    errors.push(...requiredTokenErrors(inventory.tokens, required, (token) => {
+      const declared = inventory.unloaded.get(token);
+      if (declared) {
+        const fix = declared.startsWith("tokens")
+          ? `link /tokens.css from ${design?.shell ?? "the design's layout"} (the system must run the starter build to serve it)`
+          : `link /${declared.replace(/^src\//, "")} from ${design?.shell ?? "the design's layout"}`;
+        return `Required Design System token ${token} is declared in the workspace Design System (${declared}), but app "${name}" does not load it: the site loads ${loads}${design ? ` through the website design "${design.id}"` : ""}. Either ${fix}, or require a token the site loads.`;
+      }
+      return `Missing required Design System token ${token}: neither what app "${name}" loads (${loads}) nor any other stylesheet or token of the workspace Design System declares it. Add it to the Design System in this change, in a stylesheet the site loads or its tokens (tokens/ or tokens.json, served as /tokens.css), then rerun.`;
+    }));
+  }
+  return errors;
+}
+
 /** Read only local Design System CSS; never follow a bundle path outside its root. */
 async function checkRequiredTokens(designSystem, required) {
-  if (!Array.isArray(required) || required.some((name) => typeof name !== "string" || !/^--[a-zA-Z_][a-zA-Z0-9_-]*$/.test(name))) {
-    return ["Required tokens must be CSS custom property names, such as --focus-ring"];
-  }
+  if (!validRequiredTokens(required)) return [INVALID_REQUIRED_TOKENS];
   if (!required.length) return [];
   let paths;
   if (designSystem.mode === "published" && !designSystem.linked) {
@@ -657,19 +840,20 @@ async function checkRequiredTokens(designSystem, required) {
   const effective = new Map();
   for (const record of records) effective.set(JSON.stringify([record.condition, record.selector, record.name]), record);
   const tokens = resolveTokens([...effective.values()]);
-  for (const name of [...new Set(required)]) {
-    const matches = tokens.filter((token) => token.name === name);
-    if (!matches.length) errors.push(`Missing required Design System token ${name}. Report the gap to the designer, then sync the updated draft or release.`);
-    else {
-      const unresolved = [...new Set(matches.flatMap((token) => token.unresolved || (token.resolved.includes("var(") ? token.references : [])))];
-      if (unresolved.length) errors.push(`Required Design System token ${name} has unresolved aliases: ${unresolved.join(", ")}`);
-      if (matches.some((token) => !token.resolved)) errors.push(`Required Design System token ${name} has an empty definition`);
-    }
-  }
+  errors.push(...requiredTokenErrors(tokens, required, (name) => `Missing required Design System token ${name}. Report the gap to the designer, then sync the updated draft or release.`));
   return errors;
 }
 
-/** Validate the consumer pin, required tokens, app paths, and optional branch scope. */
+/**
+ * Validate the consumer pin, required tokens, app paths, and optional branch
+ * scope. In the workspace form there is no pin: the check confirms a Design
+ * System sits above the site, and with `base` each change carries `sitePath`
+ * (relative to the site, the folder the manifest's globs are relative to) and
+ * `path` (relative to the repository top level, as git names it); a change
+ * outside the site folder has status `system` and is left to the system's
+ * own check. `options.fix === false` (`--no-fix`) asks the workspace check
+ * to report without rewriting.
+ */
 export async function checkConsumer(repoRootInput = process.cwd(), options = {}) {
   const errors = [];
   const warnings = [];
@@ -683,12 +867,35 @@ export async function checkConsumer(repoRootInput = process.cwd(), options = {})
     return { status: "failed", errors: [error.message], warnings, apps: [], repoRoot: null, designSystem: null, changes: [], previewApps: null };
   }
   const { designSystem, manifest, repoRoot } = consumer;
+  const workspace = designSystem.mode === WORKSPACE_PIN_MODE;
+  if (workspace && options.allowPinUpdate !== undefined) {
+    throw new Error(`--allow-pin-update applies to a published pin, and this site has none: ${CONSUMER_MANIFEST_FILE} declares designSystem.workspace, so the site reads its Design System's workspace directly and a system change reaches it at the next build. Run timds consumer check --base ${options.base} without --allow-pin-update.`);
+  }
   const binary = Boolean(consumer.binaryInstallation);
   const invocation = binary ? "timds-cli" : "npm run timds --";
+  // How messages name the system: a pin's path, or the workspace the site sits in.
+  const systemLabel = workspace ? "the workspace Design System" : designSystem.path;
   const selected = options.app ? [resolveConsumerApp(consumer, options.app).name] : Object.keys(manifest.apps);
-  errors.push(...await checkRequiredTokens(designSystem, options.requireTokens ?? []));
+  if (!workspace) errors.push(...await checkRequiredTokens(designSystem, options.requireTokens ?? []));
+  else if (designSystem.present) errors.push(...await checkWorkspaceRequiredTokens(consumer, designSystem, options.requireTokens ?? [], selected));
 
-  if (designSystem.mode === "published") {
+  if (workspace) {
+    // No pin, no bundle record, no gitlink, and no toolkit lock: the site
+    // uses the workspace's toolkit and reads the system's source directly.
+    if (!designSystem.present) {
+      errors.push(`No folder above ${repoRoot} holds timds.json. ${CONSUMER_MANIFEST_FILE} declares designSystem.workspace, so this site must sit inside its Design System's workspace (as site/ beside timds.json, where timds consumer scaffold emdash --workspace puts it). Move the folder there, or pin the system instead with designSystem.version (timds consumer init --system ${designSystem.systemId}).`);
+    } else {
+      try {
+        const dsManifest = JSON.parse(await fs.readFile(path.join(designSystem.root, "timds.json"), "utf8"));
+        const dsId = String(dsManifest.systemId || dsManifest.system_id || dsManifest.client || "").trim();
+        if (dsId && dsId !== designSystem.systemId) {
+          warnings.push(`${CONSUMER_MANIFEST_FILE} designSystem.systemId is ${designSystem.systemId} but the workspace's timds.json (${designSystem.root}) declares ${dsId}`);
+        }
+      } catch {
+        warnings.push(`${designSystem.root}/timds.json could not be read as JSON`);
+      }
+    }
+  } else if (designSystem.mode === "published") {
     try {
       const locked = binary ? { version: null } : await planConsumerToolkitLock(repoRoot);
       if (locked.version && toolkitVersionOlderThan(locked.version, PUBLISHED_CONSUMER_MINIMUM_VERSION)) {
@@ -753,7 +960,7 @@ export async function checkConsumer(repoRootInput = process.cwd(), options = {})
   const committed = await consumerCommittedFiles(repoRoot, designSystem.mode, binary);
   const present = committed.files.filter((file) => existsSync(path.join(repoRoot, file)));
   for (const file of committed.required) {
-    if (!present.includes(file)) errors.push(binary ? `${file} is missing. Commit the exact binary installation record before using this consumer.` : `${file} is missing. A published pin is fetched by npm install (postinstall timds consumer sync), so the root package.json and its lockfile must be committed. Run timds consumer init --system ${designSystem.systemId} and commit what it writes.`);
+    if (!present.includes(file)) errors.push(workspace ? `${file} is missing. A workspace site is its own package, installed from its own lockfile by a clone and by a platform build: run npm install in ${repoRoot} and commit package.json and the lockfile.` : binary ? `${file} is missing. Commit the exact binary installation record before using this consumer.` : `${file} is missing. A published pin is fetched by npm install (postinstall timds consumer sync), so the root package.json and its lockfile must be committed. Run timds consumer init --system ${designSystem.systemId} and commit what it writes.`);
   }
   const ignored = await gitIgnoredPaths(repoRoot, present);
   for (const entry of ignored) {
@@ -783,7 +990,7 @@ export async function checkConsumer(repoRootInput = process.cwd(), options = {})
       try {
         designCatalog = await readDesignCatalog(designSystem.root);
       } catch (error) {
-        warnings.push(`${designSystem.path} website designs could not be read: ${error.message}`);
+        warnings.push(`${systemLabel} website designs could not be read: ${error.message}`);
       }
     }
   }
@@ -798,9 +1005,9 @@ export async function checkConsumer(repoRootInput = process.cwd(), options = {})
         const { design: designId, route: designRoute } = parseDesignReference(reference);
         const design = designCatalog.designs.find((entry) => entry.id === designId);
         if (!designCatalog.exists) {
-          errors.push(`App "${name}": preview.designs pairs ${route} with ${reference}, but ${designSystem.path} has no src/designs/`);
+          errors.push(`App "${name}": preview.designs pairs ${route} with ${reference}, but ${systemLabel} has no src/designs/`);
         } else if (!design) {
-          errors.push(`App "${name}": preview.designs pairs ${route} with ${reference}, but ${designSystem.path} has no design ${designId} (designs: ${designCatalog.designs.map((entry) => entry.id).join(", ") || "none"})`);
+          errors.push(`App "${name}": preview.designs pairs ${route} with ${reference}, but ${systemLabel} has no design ${designId} (designs: ${designCatalog.designs.map((entry) => entry.id).join(", ") || "none"})`);
         } else if (!design.pages.some((page) => page.route === designRoute)) {
           errors.push(`App "${name}": preview.designs pairs ${route} with ${reference}, but design ${designId} has no route ${designRoute} (routes: ${design.pages.map((page) => page.route).join(", ")})`);
         }
@@ -814,24 +1021,36 @@ export async function checkConsumer(repoRootInput = process.cwd(), options = {})
   if (options.base) {
     // Scope is judged against every app, so a designer PR may touch any app's surface;
     // `--app` only narrows which apps' cwd and preview are checked.
-    const paths = await changedPaths(repoRoot, options.base, designSystem.path);
-    const atBase = await manifestAtBase(repoRoot, options.base);
+    // A workspace site's diff is the whole repository's: git names paths from
+    // the top level, the manifest's globs are relative to the site.
+    const prefix = workspace ? await gitPrefix(repoRoot) : "";
+    const paths = await changedPaths(repoRoot, options.base, workspace ? null : designSystem.path);
+    const atBase = await manifestAtBase(repoRoot, options.base, prefix);
     const scopeManifest = atBase.manifest || manifest;
     const withoutVersion = value => ({ ...value, designSystem: Object.fromEntries(Object.entries(value.designSystem).filter(([key]) => key !== "version")) });
-    const pinUpdateAllowed = options.allowPinUpdate !== undefined && Boolean(atBase.manifest?.designSystem.version) && designSystem.mode === "published"
+    const pinUpdateAllowed = !workspace && options.allowPinUpdate !== undefined && Boolean(atBase.manifest?.designSystem.version) && designSystem.mode === "published"
       && manifest.designSystem.version === options.allowPinUpdate
       && isDeepStrictEqual(withoutVersion(atBase.rawManifest), withoutVersion(consumer.rawManifest));
     if (options.allowPinUpdate !== undefined && !pinUpdateAllowed) errors.push("The approved pin update requires an existing published pin, the exact requested release label, and unchanged manifest metadata outside designSystem.version (including the Design System path, systemId and URL).");
-    const pinMoved = Boolean(atBase.manifest) && JSON.stringify(atBase.manifest.designSystem) !== JSON.stringify(manifest.designSystem);
+    // A workspace site has no pin, so nothing is ever a pin move.
+    const pinMoved = !workspace && Boolean(atBase.manifest) && JSON.stringify(atBase.manifest.designSystem) !== JSON.stringify(manifest.designSystem);
     if (atBase.manifest && JSON.stringify(atBase.manifest) !== JSON.stringify(manifest)) {
       warnings.push(`${CONSUMER_MANIFEST_FILE} changed on this branch; the design surface is judged against the manifest at ${options.base}. Changing the manifest needs a developer.`);
     }
     // A branch that adopts TimDS adds the submodule, or the manifest with a
     // published pin; afterwards the pin only moves by a developer decision.
     // In published mode the pin is a manifest field, so a moved version shows
-    // as the manifest path with the pin status.
-    const adoption = atBase.missing ? new Set([".gitmodules", designSystem.path]) : new Set();
+    // as the manifest path with the pin status. A branch that adds a
+    // workspace site adds the whole site folder.
+    const adoption = atBase.missing && !workspace ? new Set([".gitmodules", designSystem.path]) : new Set();
     changes = paths.map((filePath) => {
+      if (workspace) {
+        // Outside the site folder is the Design System itself: its own check judges it.
+        if (!filePath.startsWith(prefix)) return { path: filePath, sitePath: null, status: "system", app: null };
+        const sitePath = filePath.slice(prefix.length);
+        if (atBase.missing) return { path: filePath, sitePath, status: "allowed", app: null };
+        return { path: filePath, sitePath, ...classifyConsumerPath(sitePath, scopeManifest) };
+      }
       if (adoption.has(filePath)) return { path: filePath, status: "allowed", app: null };
       if (filePath === designSystem.path) return { path: filePath, status: "pin", app: null };
       if (filePath === CONSUMER_MANIFEST_FILE && pinMoved) return { path: filePath, status: "pin", app: null };
@@ -856,10 +1075,48 @@ export async function checkConsumer(repoRootInput = process.cwd(), options = {})
     }
     // The apps whose look this branch can change, which is what a preview is
     // for: an app whose design surface changed, or every app when the Design
-    // System pin or the manifest (routes, commands, the surface itself) moved.
-    const everyApp = atBase.missing || changes.some((change) => change.status === "pin" || change.path === CONSUMER_MANIFEST_FILE);
+    // System pin or the manifest (routes, commands, the surface itself) moved,
+    // or, for a workspace site, when the Design System itself changed.
+    const manifestPath = (change) => (workspace ? change.sitePath : change.path) === CONSUMER_MANIFEST_FILE;
+    const everyApp = atBase.missing || changes.some((change) => change.status === "pin" || change.status === "system" || manifestPath(change));
     const touched = new Set(changes.filter((change) => change.status === "allowed" && change.app).map((change) => change.app));
     previewApps = Object.keys(manifest.apps).filter((name) => everyApp || touched.has(name));
+  }
+
+  // The other direction, only where the site and its system are edited
+  // together: a site style the system does not have. A literal that equals
+  // exactly one token is rewritten to it (unless --no-fix); everything else is
+  // a finding to resolve in the same change by adding to the system, so a
+  // finding fails the check and a second run after the addition is clean.
+  let workspaceCheck = null;
+  if (workspace && designSystem.present) {
+    const { checkWorkspaceSite, formatWorkspaceFindings, WORKSPACE_CHECK_SCHEMA_VERSION } = await import("./consumer-workspace-check.mjs");
+    workspaceCheck = { schemaVersion: WORKSPACE_CHECK_SCHEMA_VERSION, fix: options.fix !== false, rewrites: [], findings: [], changedFiles: [], scanned: [], system: null };
+    for (const name of selected) {
+      const app = resolveConsumerApp(consumer, name);
+      if (!existsSync(app.cwd)) continue;
+      const inApp = (file) => (app.cwdRelative === "." ? file : `${app.cwdRelative}/${file}`);
+      try {
+        const found = await checkWorkspaceSite({
+          siteRoot: app.cwd,
+          designSystemRoot: designSystem.root,
+          designSurface: app.designSurface,
+          protected: app.protected,
+          fix: options.fix !== false,
+        });
+        workspaceCheck.system ||= found.system;
+        workspaceCheck.rewrites.push(...found.rewrites.map((rewrite) => ({ ...rewrite, file: inApp(rewrite.file), app: name })));
+        workspaceCheck.findings.push(...found.findings.map((finding) => ({ ...finding, file: inApp(finding.file), app: name })));
+        workspaceCheck.changedFiles.push(...found.changedFiles.map(inApp));
+        workspaceCheck.scanned.push(...found.scanned.map(inApp));
+      } catch (error) {
+        errors.push(`App "${name}": the two-way check against the Design System could not run: ${error.message}`);
+      }
+    }
+    const pending = workspaceCheck.rewrites.filter((rewrite) => !rewrite.applied);
+    if (pending.length || workspaceCheck.findings.length) {
+      errors.push(formatWorkspaceFindings({ ...workspaceCheck, rewrites: pending }));
+    }
   }
 
   return {
@@ -871,13 +1128,14 @@ export async function checkConsumer(repoRootInput = process.cwd(), options = {})
     designSystem,
     changes,
     previewApps,
+    ...(workspaceCheck ? { workspaceCheck } : {}),
   };
 }
 
 // ---------------------------------------------------------------------------
 // CLI
 
-const CHECK_BOOLEAN_FLAGS = new Set(["help", "json"]);
+const CHECK_BOOLEAN_FLAGS = new Set(["help", "json", "noFix"]);
 const CHECK_VALUE_FLAGS = new Set(["app", "base", "root", "requireToken", "allowPinUpdate"]);
 
 // Strict on purpose: a mistyped or empty --base would otherwise skip the scope check and pass.
@@ -915,16 +1173,28 @@ function checkReport(result) {
   if (result.repoRoot) lines.push(`Consumer: ${result.repoRoot}`);
   if (result.designSystem) {
     const ds = result.designSystem;
-    lines.push(ds.mode === "published"
+    lines.push(ds.mode === WORKSPACE_PIN_MODE
+      ? `Design System: ${ds.systemId} in the workspace ${ds.present ? `at ${ds.root}` : "(no folder above the site holds timds.json)"} (no pin; the site reads its source)`
+      : ds.mode === "published"
       ? `Design System: ${ds.systemId} at ${ds.path} (published, pinned ${ds.version}${ds.record?.version && ds.record.version !== ds.version ? `, synced ${ds.record.version}` : ""}${ds.present ? "" : ", not synced"})`
       : `Design System: ${ds.systemId} at ${ds.path} (${ds.commit ? `pinned ${ds.commit.slice(0, 12)}` : "not pinned"}${ds.present ? "" : ", not checked out"})`);
   }
   for (const app of result.apps) lines.push(`App ${app.name}: ${app.cwd} (${app.mode} preview)${app.cwdExists ? "" : " — missing"}`);
   if (result.changes.length) {
     const allowed = result.changes.filter((change) => change.status === "allowed").length;
-    lines.push(`Changes: ${result.changes.length} (${allowed} inside the design surface)`);
+    const system = result.changes.filter((change) => change.status === "system").length;
+    lines.push(`Changes: ${result.changes.length} (${allowed} inside the design surface${system ? `, ${system} to the Design System, judged by its own check` : ""})`);
   }
   if (result.previewApps) lines.push(`Preview: ${result.previewApps.join(", ") || "no app's design surface, Design System pin, or manifest changed"}`);
+  if (result.workspaceCheck) {
+    const applied = result.workspaceCheck.rewrites.filter((rewrite) => rewrite.applied);
+    if (applied.length) {
+      lines.push(`Rewrote ${applied.length} literal${applied.length === 1 ? "" : "s"} to the Design System token with the same value (review and commit):`);
+      for (const rewrite of applied) lines.push(`  ${rewrite.file}:${rewrite.line}:${rewrite.column} ${rewrite.property}: ${rewrite.from} -> ${rewrite.to}`);
+    } else if (!result.workspaceCheck.findings.length && !result.workspaceCheck.rewrites.length) {
+      lines.push(`Two-way check: ${result.workspaceCheck.scanned.length} site file${result.workspaceCheck.scanned.length === 1 ? "" : "s"} use only what the Design System declares.`);
+    }
+  }
   for (const warning of result.warnings) lines.push(`Warning: ${warning}`);
   for (const error of result.errors) lines.push(`Error: ${error}`);
   lines.push(result.status === "passed" ? "TimDS consumer check passed." : "TimDS consumer check failed.");
@@ -947,7 +1217,7 @@ export async function runConsumerCli(args = [], { env = process.env, output = de
     const root = rootFlag === -1 ? process.cwd() : inlineRoot ?? rest[rootFlag + 1];
     if (root && !root.startsWith("--")) {
       const consumerRoot = await findConsumerManifestRoot(root);
-      if (consumerRoot) await assertBinaryInstallation(consumerRoot, { allowNpm: subcommand === "init" });
+      if (consumerRoot) await assertBinaryInstallation(await consumerInstallationRoot(consumerRoot), { allowNpm: subcommand === "init" });
     }
   }
   if (subcommand === "register" || subcommand === "updates") {
@@ -984,7 +1254,7 @@ export async function runConsumerCli(args = [], { env = process.env, output = de
     output(CONSUMER_HELP);
     return;
   }
-  const result = await checkConsumer(options.root || process.cwd(), { app: options.app, base: options.base, requireTokens: options.requireTokens, allowPinUpdate: options.allowPinUpdate });
+  const result = await checkConsumer(options.root || process.cwd(), { app: options.app, base: options.base, requireTokens: options.requireTokens, allowPinUpdate: options.allowPinUpdate, fix: !options.noFix });
   if (options.json) output(JSON.stringify(result, null, 2));
   else output(checkReport(result));
   // The stock workflow previews only these apps; written before a scope failure throws.

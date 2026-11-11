@@ -1,0 +1,22 @@
+// The Worker. Only the bindings' names are committed, never a resource name
+// or id: whoever deploys the Worker attaches a D1 database to DB, an R2
+// bucket to MEDIA and a KV namespace to SESSION (Astro's sessions, which
+// EmDash's sign-in uses), and sets the variables and secrets listed in
+// docs/emdash-handover.md. `wrangler deploy` creates and attaches the three
+// itself on a first deploy.
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "__WORKER_NAME__",
+	"main": "./src/worker.ts",
+	"compatibility_date": "2026-02-24",
+	// EmDash needs Node.js APIs. With a compatibility date on or after
+	// 2025-04-01 this also fills process.env, where EmDash reads its secrets.
+	"compatibility_flags": ["nodejs_compat"],
+	"d1_databases": [{ "binding": "DB" }],
+	"r2_buckets": [{ "binding": "MEDIA" }],
+	"kv_namespaces": [{ "binding": "SESSION" }],
+	// Scheduled publishing and maintenance. A platform that gives the Worker
+	// no Cron Trigger calls POST /_scheduled instead (see src/worker.ts).
+	"triggers": { "crons": ["* * * * *"] },
+	// No "worker_loaders" (LOADER) binding: the site uses no sandboxed plugins.
+}

@@ -24,6 +24,8 @@
 // `git submodule update`, a hook that guards the gitlink, a README that
 // explains the checkout: those are listed at the end for a developer. The
 // working tree must be clean so the whole migration is one diff to review.
+// A site inside its Design System's workspace (`designSystem.workspace`) has
+// neither a submodule nor a pin, so migrate refuses it.
 
 import { existsSync, promises as fs } from "node:fs";
 import path from "node:path";
@@ -32,6 +34,7 @@ import process from "node:process";
 import { spawn } from "node:child_process";
 
 import { CONSUMER_MANIFEST_FILE, loadConsumer, publishedBaseUrl, validateConsumerManifest } from "./consumer.mjs";
+import { WORKSPACE_PIN_MODE } from "./workspace-site.mjs";
 import { applyConsumerInstallation, planConsumerInstallation, prepareConsumerInstallation } from "./consumer-init.mjs";
 import { syncConsumerBundle } from "./consumer-sync.mjs";
 
@@ -250,6 +253,9 @@ async function submoduleMentions(repoRoot, designSystemPath) {
  */
 export async function migrateConsumerToPublished(rootInput = process.cwd(), { version = null, url = null, force = false, skipSync = false, fetchImpl = fetch, runNpm, output = () => {} } = {}) {
   const consumer = await loadConsumer(rootInput);
+  if (consumer.designSystem.mode === WORKSPACE_PIN_MODE) {
+    throw new Error(`${CONSUMER_MANIFEST_FILE} at ${consumer.repoRoot} declares designSystem.workspace: the site sits inside its Design System's workspace and reads it directly, with no submodule to migrate. Nothing to do.`);
+  }
   const { designSystem, manifestPath, repoRoot } = consumer;
   if (designSystem.mode === "published") {
     throw new Error(`${CONSUMER_MANIFEST_FILE} already pins a published version (${designSystem.version}); nothing to migrate. Run timds consumer sync.`);

@@ -33,7 +33,18 @@ The signed-in principal must be allowed to export the parent source.
 `GET /api/timds/design-systems/{system}/releases/{label}/source` supplies
 `{apiVersion:1,parent:{systemId,sourceId,version,commit},files:[...]}`.
 Files use canonical paths, Git modes and base64 content. `latest` is the
-default and resolves once to the publication's exact commit.
+default and resolves once to the publication's exact commit. A parent's
+workspace site (`site/` with a workspace-form `timds.consumer.json`, see
+[EmDash sites](emdash.md#a-site-in-its-design-systems-workspace)) is the
+parent's own website: neither mode carries it, so an offshoot starts without
+one. Nor does an offshoot carry the guidance the site's scaffold wrote outside
+`site/`: the two root consumer skills and the `<!-- timds:emdash-site -->`
+section of `AGENTS.md` are removed while their bytes still match the hashes in
+the site's record (`site/.timds/emdash.json`). Anything edited since, added
+beside them, or present without a workspace record is kept, listed in the
+result's `siteGuidance` and printed, so it can be removed before the offshoot
+runs `timds consumer scaffold emdash --workspace`, which refuses a skill
+folder it did not write.
 
 A local parent is read from its committed Git tree, ignoring worktree edits:
 

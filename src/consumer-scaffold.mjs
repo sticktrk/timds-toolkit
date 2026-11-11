@@ -28,12 +28,37 @@
 //
 // then hands over to `initializeConsumer` for the consumer-managed files.
 //
+// `--existing` is withdrawn: `runConsumerScaffold` refuses the flag with
+// `EXISTING_WITHDRAWN` and writes nothing, because a Design System's own site
+// lives in its workspace (`--workspace`, consumer-scaffold-workspace.mjs).
+// The mode's function is still here, with its tests, until its code and
+// templates are removed. `scaffoldExistingEmdashSite` installs the shared EmDash
+// template set into an Astro consumer that already has timds.consumer.json:
+// the files under templates/emdash/site/ and site-<platform>/ at their paths
+// relative to the site root (placeholders filled, never over an existing
+// path), the dependencies and package.json keys templates/emdash/site.json
+// lists, the article routes and design pairs in the app's preview, and the
+// template version in `.timds/emdash.json`. `planEmdashTemplates` and
+// `applyWritesWithRollback` are the installer both modes are meant to share.
+// The astro.config, wrangler.jsonc and .gitignore changes are printed, never
+// made. A site page at a route a template page takes, by Astro's file routing
+// (`articles.astro` and `articles/index.astro`, `[id]` and `[slug]`), is
+// refused like an existing path, and a dynamic or catch-all page the template
+// routes now outrank is reported. Every refusal comes before the first write,
+// and a failed write restores the site.
+//
+// `--workspace` (`scaffoldWorkspaceEmdashSite` in
+// consumer-scaffold-workspace.mjs) writes a complete site into `site/` of a
+// Design System workspace through the same planner, with
+// templates/emdash/site-workspace/ laid over the shared set (`overlay`).
+//
 // Boundary: nothing is copied out of the Design System; the site reads the
 // pin at build time, so moving the pin is what changes the brand. Everything
 // written here is product source from then on: `upgrade` refreshes only the
-// consumer-managed files `initializeConsumer` records. The Design System is
-// inspected before the site is generated, and a failure before the managed
-// files are in place removes what the scaffold created.
+// consumer-managed files `initializeConsumer` records, and never reads or
+// writes `.timds/emdash.json`. The Design System is inspected before the site
+// is generated, and a failure before the managed files are in place removes
+// what the scaffold created.
 
 import { spawn } from "node:child_process";
 import { existsSync, promises as fs } from "node:fs";
@@ -42,7 +67,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-import { CONSUMER_MANIFEST_FILE, validateConsumerManifest } from "./consumer.mjs";
+import { CONSUMER_MANIFEST_FILE, consumerPinMode, publishedBaseUrl, validateConsumerManifest } from "./consumer.mjs";
 import { CONSUMER_MCP_PATH, consumerMcpServers, initializeConsumer, rootAppName } from "./consumer-init.mjs";
 import { BRAND_ROLES, importReferences, normalizeBrandRoles, parseCssTokens, resolveBrandRoles, resolveTokens } from "./tokens.mjs";
 
@@ -52,6 +77,10 @@ const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "
 export const EMDASH_GENERATOR = "create-emdash@1";
 export const EMDASH_MCP_SERVER_NAME = "emdash";
 export const EMDASH_PLATFORMS = Object.freeze(["cloudflare", "node"]);
+/** Where the template set lives in the package; the installer takes another root for tests. */
+export const EMDASH_TEMPLATES_ROOT = path.join(packageRoot, "templates", "emdash");
+/** The site's record of the template set it came from: `{ "template": N, "platform": "..." }`. */
+export const EMDASH_RECORD_PATH = ".timds/emdash.json";
 
 const DESIGN_SYSTEM_PATH = "design-system";
 const DEFAULT_PORTAL_URL = "https://timds.com";
@@ -78,6 +107,7 @@ const SCAFFOLD_HELP = `Usage:
   timds consumer scaffold emdash --root PATH --design-system GIT_URL
       [--platform cloudflare|node] [--stylesheet PATH]... [--site-url URL]
       [--portal-url URL] [--skip-install]
+  timds consumer scaffold emdash --workspace [--root PATH] [--skip-install]
 
 Creates a new EmDash CMS site repository at --root (which must not exist, or
 be empty) that consumes a TimDS Design System: the Design System is pinned as
@@ -95,7 +125,30 @@ or node (a Node.js server with SQLite and local file storage).
 site imports from the submodule; repeat it for several. It defaults to
 ${STARTER_STYLESHEET} when the system has one. --site-url is the deployed
 site's origin; with it, .mcp.json also gets the EmDash MCP server for content
-editing.`;
+editing.
+
+--existing is withdrawn: it refuses and writes nothing. A Design System's own
+site lives in its workspace (--workspace, below), not in a separate
+repository that reads the system through a pin.
+
+--workspace writes a complete EmDash site for Cloudflare Workers into site/
+of the Design System workspace at --root (default: the current folder; an
+embedded system's design-system/ folder is used the way the workspace
+commands use it). The site has no pin: it reads the system's stylesheets and
+tokens from their source paths, and builds every page of the system's
+website design that is not an article, topic or list route from the design
+file, with the article routes inside the design's layout, so a change to the
+system is a change to the site on its next build. site/ is its own package
+(package.json and package-lock.json with exact versions, not an npm
+workspace of the root); its manifest is site/${CONSUMER_MANIFEST_FILE} with
+designSystem { "workspace": true, "systemId": ... }, and ${EMDASH_RECORD_PATH}
+records the template version and a sha256 of every template file written. It
+asks nothing and runs no generator, so one toolkit release writes the same
+files for the same workspace. It refuses a folder that is not in a Design
+System workspace, a site/ that exists and is not empty, and a system with no
+website design, before writing anything; then, unless --skip-install, it
+runs npm ci in site/. Article routes whose classes the system's stylesheets
+do not declare are listed as having no port yet.`;
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -157,14 +210,20 @@ function isSafeRelativePath(value) {
 // ---------------------------------------------------------------------------
 // The Design System as the site reads it
 
-/** tokens.json as the `:root` block the starter build writes to tokens.css (`--group-name`). */
+/**
+ * tokens.json as the `:root` block the starter build writes to tokens.css:
+ * `--group-name` declarations, with each `{group.name}` reference in a value
+ * compiled to `var(--group-name)`, the rule of `compileTokens` in viewer.mjs
+ * (the site template's integration mirrors it; a test holds the three equal).
+ */
 export function compileTokenCss(tokens) {
   const declarations = [];
   for (const [group, entries] of Object.entries(tokens)) {
     if (!entries || typeof entries !== "object" || Array.isArray(entries)) continue;
     for (const [name, token] of Object.entries(entries)) {
       if (typeof token?.value !== "string" || !token.value.trim()) continue;
-      declarations.push(`  ${`--${group}-${name}`.replace(/[^a-z0-9-]/gi, "-").toLowerCase()}: ${token.value};`);
+      const value = token.value.replace(/\{([a-zA-Z0-9_.-]+)\}/g, (_match, reference) => `var(--${reference.replace(/[^a-z0-9-]/gi, "-").toLowerCase()})`);
+      declarations.push(`  ${`--${group}-${name}`.replace(/[^a-z0-9-]/gi, "-").toLowerCase()}: ${value};`);
     }
   }
   return `:root {\n${declarations.sort().join("\n")}\n}\n`;
@@ -577,6 +636,723 @@ export async function scaffoldEmdashSite(rootInput, {
   };
 }
 
+// ---------------------------------------------------------------------------
+// The shared EmDash template set (templates/emdash/site*, site.json)
+
+const EMDASH_HANDOVER_DOC = "docs/emdash-handover.md";
+const EXAMPLE_SITE_URL = "https://example.com";
+const PLACEHOLDER = /__[A-Z][A-Z0-9_]*__/g;
+const TEMPLATE_GROUPS = ["all", ...EMDASH_PLATFORMS];
+
+const templateDefect = (detail) => new Error(`templates/emdash/site.json is malformed: ${detail}. The EmDash templates in this TimDS release are broken; report it to TimDS.`);
+
+const isRoute = (value) => typeof value === "string" && value.startsWith("/") && !/\s|\0/.test(value);
+const normalizeRoute = (value) => (value.length > 1 ? `/${value.replace(/^\/+|\/+$/g, "")}` : "/");
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function exactKeys(value, keys, where) {
+  if (!isPlainObject(value)) throw templateDefect(`${where} must be an object`);
+  const extra = Object.keys(value).filter((key) => !keys.includes(key));
+  const missing = keys.filter((key) => !Object.hasOwn(value, key));
+  if (extra.length || missing.length) throw templateDefect(`${where} must have exactly ${keys.join(", ")}${extra.length ? ` (unexpected ${extra.join(", ")})` : ""}${missing.length ? ` (missing ${missing.join(", ")})` : ""}`);
+}
+
+/**
+ * Validate the parsed `site.json`. It is toolkit data, so a defect is
+ * reported as a TimDS bug, never as something the developer fixes.
+ */
+export function validateEmdashTemplateSet(value) {
+  exactKeys(value, ["version", "dependencies", "devDependencies", "package", "preview", "gitignore", "workspace", "manual"], "the top level");
+  if (!Number.isInteger(value.version) || value.version < 1) throw templateDefect("version must be a positive whole number");
+  for (const block of ["dependencies", "devDependencies"]) {
+    exactKeys(value[block], TEMPLATE_GROUPS, block);
+    for (const group of TEMPLATE_GROUPS) {
+      if (!isPlainObject(value[block][group])) throw templateDefect(`${block}.${group} must be an object of package versions`);
+      for (const [name, version] of Object.entries(value[block][group])) {
+        if (!name || typeof version !== "string" || !version.trim()) throw templateDefect(`${block}.${group}.${name} must be a version string`);
+      }
+    }
+  }
+  if (!isPlainObject(value.package)) throw templateDefect("package must be an object of package.json keys");
+  const { preview } = value;
+  exactKeys(preview, ["ready", "routes", "designs", "discoverExclude"], "preview");
+  if (!isRoute(preview.ready)) throw templateDefect("preview.ready must be a URL path");
+  if (!Array.isArray(preview.routes) || !preview.routes.length || !preview.routes.every(isRoute)) throw templateDefect("preview.routes must be a list of URL paths");
+  if (new Set(preview.routes.map(normalizeRoute)).size !== preview.routes.length) throw templateDefect("preview.routes repeats a route");
+  if (!isPlainObject(preview.designs)) throw templateDefect("preview.designs must be an object of site route to design route");
+  const declared = new Set(preview.routes.map(normalizeRoute));
+  for (const [route, designRoute] of Object.entries(preview.designs)) {
+    if (!isRoute(route) || !isRoute(designRoute)) throw templateDefect(`preview.designs ${route} must map a URL path to a URL path`);
+    if (!declared.has(normalizeRoute(route))) throw templateDefect(`preview.designs pairs ${route}, which preview.routes does not list`);
+  }
+  if (!Array.isArray(preview.discoverExclude) || !preview.discoverExclude.every(isRoute)) throw templateDefect("preview.discoverExclude must be a list of URL path globs");
+  exactKeys(value.gitignore, TEMPLATE_GROUPS, "gitignore");
+  for (const group of TEMPLATE_GROUPS) {
+    if (!Array.isArray(value.gitignore[group]) || !value.gitignore[group].every((line) => typeof line === "string" && line.trim())) throw templateDefect(`gitignore.${group} must be a list of lines`);
+  }
+  exactKeys(value.workspace, ["dependencies", "devDependencies", "scripts", "renames"], "workspace");
+  for (const block of ["dependencies", "devDependencies", "scripts"]) {
+    if (!isPlainObject(value.workspace[block])) throw templateDefect(`workspace.${block} must be an object`);
+    for (const [name, entry] of Object.entries(value.workspace[block])) {
+      if (!name || typeof entry !== "string" || !entry.trim()) throw templateDefect(`workspace.${block}.${name} must be a string`);
+    }
+  }
+  if (!isPlainObject(value.workspace.renames)) throw templateDefect("workspace.renames must be an object of template file to site path");
+  for (const [from, to] of Object.entries(value.workspace.renames)) {
+    if (!isSafeRelativePath(from) || typeof to !== "string" || !isSafeRelativePath(to)) throw templateDefect(`workspace.renames ${from} must map a relative path to a relative path`);
+  }
+  exactKeys(value.manual, [...EMDASH_PLATFORMS], "manual");
+  for (const platform of EMDASH_PLATFORMS) {
+    if (!Array.isArray(value.manual[platform])) throw templateDefect(`manual.${platform} must be a list`);
+    for (const [index, entry] of value.manual[platform].entries()) {
+      exactKeys(entry, ["file", "summary", "snippet"], `manual.${platform}[${index}]`);
+      for (const key of ["file", "summary", "snippet"]) {
+        if (typeof entry[key] !== "string" || !entry[key].trim()) throw templateDefect(`manual.${platform}[${index}].${key} must be a string`);
+      }
+      if (!isSafeRelativePath(entry.snippet) || !isSafeRelativePath(entry.file)) throw templateDefect(`manual.${platform}[${index}] must name relative paths`);
+    }
+  }
+  return value;
+}
+
+/** Every file under `directory` as sorted POSIX paths relative to it; an absent directory has none. */
+async function templateFiles(directory, prefix = "") {
+  const entries = await fs.readdir(path.join(directory, prefix), { withFileTypes: true }).catch((caught) => {
+    if (caught?.code === "ENOENT") return null;
+    throw caught;
+  });
+  if (entries === null) return prefix ? [] : null;
+  const files = [];
+  for (const entry of entries) {
+    const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) files.push(...await templateFiles(directory, relative));
+    else if (entry.isFile()) files.push(relative);
+    else throw templateDefect(`${path.basename(directory)}/${relative} is not a regular file`);
+  }
+  return files.sort();
+}
+
+/** The template set: the validated site.json and its directory. */
+export async function readEmdashTemplateSet(templatesRoot = EMDASH_TEMPLATES_ROOT) {
+  let text;
+  try {
+    text = await fs.readFile(path.join(templatesRoot, "site.json"), "utf8");
+  } catch (caught) {
+    if (caught?.code === "ENOENT") throw templateDefect("the file is missing");
+    throw caught;
+  }
+  let value;
+  try {
+    value = JSON.parse(text);
+  } catch (caught) {
+    throw templateDefect(`it is not JSON (${caught.message})`);
+  }
+  return { root: templatesRoot, ...validateEmdashTemplateSet(value) };
+}
+
+/** `../layouts/Base.astro` from `src/pages/articles/index.astro`: always `./` or `../` first, POSIX separators. */
+export function layoutImport(fromFile, layout) {
+  const relative = path.posix.relative(path.posix.dirname(fromFile), layout);
+  return relative.startsWith("../") ? relative : `./${relative}`;
+}
+
+function substitute(text, { file, layout, siteUrl, siteName, placeholders = {} }) {
+  let result = text;
+  for (const [name, value] of Object.entries(placeholders)) result = result.replaceAll(name, () => value);
+  return result
+    .replaceAll("__LAYOUT_IMPORT__", () => layoutImport(file, layout))
+    .replaceAll("__SITE_URL__", () => siteUrl)
+    .replaceAll("__SITE_NAME__", () => siteName);
+}
+
+/**
+ * Plan the template files for one site: every file of `site/` and of
+ * `site-<platform>/` at its path relative to the site root, text files with
+ * their placeholders substituted. Nothing is written. Returns the template
+ * set, the planned files, the paths that already exist (files, directories,
+ * or a file where a directory has to be), the files that received the
+ * example origin, and the manual changes with their snippet text. Refuses a
+ * template defect (a file in both directories, a placeholder left over).
+ *
+ * `overlay` names one more template directory whose files are added on top
+ * (the workspace mode's `site-workspace/`): a file there replaces the shared
+ * file at the same path, and `renames` maps a template file name to the
+ * path it is written at (files npm would not publish under their own name).
+ * `placeholders` fills further placeholders before the standard ones.
+ */
+export async function planEmdashTemplates(siteRoot, { platform, layout, siteUrl = "", siteName, templatesRoot = EMDASH_TEMPLATES_ROOT, overlay = null, renames = {}, placeholders = {} } = {}) {
+  const set = await readEmdashTemplateSet(templatesRoot);
+  const shared = await templateFiles(path.join(templatesRoot, "site"));
+  if (shared === null) throw templateDefect("templates/emdash/site/ is missing");
+  const own = (await templateFiles(path.join(templatesRoot, `site-${platform}`))) ?? [];
+  const both = own.filter((file) => shared.includes(file));
+  if (both.length) throw templateDefect(`${both.join(", ")} is in both site/ and site-${platform}/`);
+  const origin = siteUrl || EXAMPLE_SITE_URL;
+  const values = { layout, siteUrl: origin, siteName, placeholders };
+  const layers = [["site", shared], [`site-${platform}`, own]];
+  if (overlay) {
+    const extra = await templateFiles(path.join(templatesRoot, overlay));
+    if (extra === null) throw templateDefect(`templates/emdash/${overlay}/ is missing`);
+    layers.push([overlay, extra]);
+  }
+  const planned = new Map();
+  const exampleOrigin = [];
+  const leftover = [];
+  for (const [directory, list] of layers) {
+    for (const template of list) {
+      const file = directory === overlay && Object.hasOwn(renames, template) ? renames[template] : template;
+      const bytes = await fs.readFile(path.join(templatesRoot, directory, ...template.split("/")));
+      let content = bytes;
+      if (!bytes.includes(0)) {
+        const text = bytes.toString("utf8");
+        if (!siteUrl && !Object.hasOwn(placeholders, "__SITE_URL__") && text.includes("__SITE_URL__")) exampleOrigin.push(file);
+        content = substitute(text, { ...values, file });
+        const left = content.match(PLACEHOLDER);
+        if (left) leftover.push(`${directory}/${template} (${[...new Set(left)].join(", ")})`);
+      }
+      planned.set(file, { path: file, content, template: `${directory}/${template}` });
+    }
+  }
+  const files = [...planned.values()];
+  if (leftover.length) throw new Error(`The EmDash templates in this TimDS release use placeholders the installer does not fill: ${leftover.join("; ")}. Nothing was written; report it to TimDS.`);
+  files.sort((left, right) => left.path.localeCompare(right.path));
+  const templateRoutes = new Map();
+  for (const file of files) {
+    const route = file.path.startsWith(`${ASTRO_PAGES}/`) ? astroRoute(file.path.slice(ASTRO_PAGES.length + 1)) : null;
+    if (!route) continue;
+    if (templateRoutes.has(route.key)) throw new Error(`The EmDash templates in this TimDS release put ${templateRoutes.get(route.key)} and ${file.path} at one Astro route (${route.route}). Nothing was written; report it to TimDS.`);
+    templateRoutes.set(route.key, file.path);
+  }
+
+  const collisions = new Set();
+  for (const file of files) {
+    const segments = file.path.split("/");
+    for (let depth = 1; depth <= segments.length; depth += 1) {
+      const relative = segments.slice(0, depth).join("/");
+      // A linked directory on the way is followed; the destination itself is never.
+      const inspect = depth < segments.length ? fs.stat : fs.lstat;
+      const info = await inspect(path.join(siteRoot, ...segments.slice(0, depth))).catch((caught) => {
+        if (caught?.code === "ENOENT" || caught?.code === "ENOTDIR") return null;
+        throw caught;
+      });
+      if (!info) break;
+      // A directory on the way is expected; anything else in the way collides.
+      if (depth < segments.length && info.isDirectory()) continue;
+      collisions.add(relative);
+      break;
+    }
+  }
+
+  const manual = [];
+  for (const entry of overlay ? [] : set.manual[platform]) {
+    let text;
+    try {
+      text = await fs.readFile(path.join(templatesRoot, ...entry.snippet.split("/")), "utf8");
+    } catch (caught) {
+      if (caught?.code === "ENOENT") throw templateDefect(`manual.${platform} names ${entry.snippet}, which is missing`);
+      throw caught;
+    }
+    manual.push({ file: entry.file, summary: entry.summary, snippet: entry.snippet, text: substitute(text, { ...values, file: entry.file }) });
+  }
+  return {
+    set,
+    files,
+    collisions: [...collisions].sort(),
+    exampleOrigin,
+    manual,
+    gitignore: [...set.gitignore.all, ...set.gitignore[platform]],
+    dependencies: { ...set.dependencies.all, ...set.dependencies[platform] },
+    devDependencies: { ...set.devDependencies.all, ...set.devDependencies[platform] },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Writing with rollback
+
+/** The indentation unit, line ending and final newline of a JSON file, so a rewrite keeps them. */
+function jsonStyle(text) {
+  const indent = text.match(/^[ \t]+(?=")/m)?.[0] ?? "  ";
+  const newline = text.includes("\r\n") ? "\r\n" : "\n";
+  return { indent, newline, final: /\r?\n$/.test(text) };
+}
+
+function formatJson(value, { indent, newline, final }) {
+  const text = JSON.stringify(value, null, indent).replaceAll("\n", newline);
+  return final ? `${text}${newline}` : text;
+}
+
+async function defaultWrite(filePath, content) {
+  await fs.writeFile(filePath, content);
+}
+
+/**
+ * Write `writes` (`{ path, content }`, relative to `root`) as one change: a
+ * failure part-way removes the files and directories this call created and
+ * puts every replaced file back to its earlier bytes, then rethrows.
+ */
+export async function applyWritesWithRollback(root, writes, { writeFile: write = defaultWrite } = {}) {
+  const created = [];
+  const createdDirectories = [];
+  const replaced = [];
+  try {
+    for (const file of writes) {
+      const target = path.join(root, ...file.path.split("/"));
+      const missing = [];
+      for (let directory = path.dirname(target); !existsSync(directory); directory = path.dirname(directory)) missing.push(directory);
+      for (const directory of missing.reverse()) {
+        await fs.mkdir(directory);
+        createdDirectories.push(directory);
+      }
+      const before = await fs.readFile(target).catch((caught) => {
+        if (caught?.code === "ENOENT") return null;
+        throw caught;
+      });
+      if (before === null) created.push(target);
+      else replaced.push({ target, before });
+      await write(target, file.content);
+    }
+  } catch (caught) {
+    for (const { target, before } of replaced.reverse()) await fs.writeFile(target, before).catch(() => {});
+    for (const target of created.reverse()) await fs.rm(target, { force: true }).catch(() => {});
+    for (const directory of createdDirectories.reverse()) await fs.rmdir(directory).catch(() => {});
+    throw caught;
+  }
+  return writes.map((file) => file.path);
+}
+
+// ---------------------------------------------------------------------------
+// Existing-site mode
+
+/**
+ * The website designs of the pinned system as `[{ id, routes }]`: for a
+ * published pin the designs summary of that exact version's bundle (the same
+ * record `consumer sync` keeps and `consumer check` reads), for a submodule
+ * pin the checkout. The current release never stands in for the pinned one:
+ * a pair it added would name a design the pin does not have, and `consumer
+ * check` would refuse it. Throws when the designs cannot be read; the caller
+ * then pairs nothing.
+ */
+export async function readPinnedDesigns({ repoRoot, manifest, fetchImpl = fetch }) {
+  if (consumerPinMode(manifest.designSystem) === "published") {
+    const { resolvePublishedBundle } = await import("./consumer-sync.mjs");
+    const { version } = manifest.designSystem;
+    const bundle = await resolvePublishedBundle({ url: publishedBaseUrl(manifest.designSystem), version, fetchImpl, withDesigns: true });
+    if (!bundle.designs) throw new Error(`the bundle of the pinned version ${bundle.version} records no website designs`);
+    return bundle.designs.map((design) => ({ id: design.id, routes: Array.isArray(design.routes) ? design.routes : [] }));
+  }
+  const checkout = path.join(repoRoot, manifest.designSystem.path);
+  if (!existsSync(path.join(checkout, "timds.json"))) throw new Error(`${manifest.designSystem.path} is not checked out`);
+  const { readDesignCatalog } = await import("./designs.mjs");
+  const catalog = await readDesignCatalog(checkout);
+  if (!catalog.exists) throw new Error(`${manifest.designSystem.path} has no src/designs/`);
+  return catalog.designs.map((design) => ({ id: design.id, routes: design.pages.map((page) => page.route) }));
+}
+
+// ---------------------------------------------------------------------------
+// Astro routes
+
+/** Astro's pages folder, relative to the site root. */
+const ASTRO_PAGES = "src/pages";
+/** The extensions Astro routes under src/pages/: pages (Astro, Markdown, MDX, HTML) and endpoints (JavaScript, TypeScript). */
+const ASTRO_ROUTE_EXTENSIONS = new Set([".astro", ".md", ".markdown", ".mdown", ".mkdn", ".mkd", ".mdwn", ".mdx", ".html", ".js", ".ts"]);
+const MAX_PAGES_DEPTH = 32;
+
+/**
+ * The route Astro gives the file at `file`, a POSIX path relative to
+ * src/pages/, or null when Astro does not route it (a file or folder whose
+ * name starts with `_`, or another extension). `route` is the address as
+ * written (`/articles/[slug]`; `index` names its folder, and an endpoint keeps
+ * the rest of its name, `rss.xml.ts` at `/rss.xml`); `key` compares routes by
+ * shape, with every `[param]` as `[]` and every `[...rest]` as `[...]`, so
+ * `[id]` and `[slug]` at one position are the same route. `segments` is the
+ * key's path segments.
+ */
+export function astroRoute(file) {
+  const parts = String(file).split("/").filter(Boolean);
+  if (!parts.length || parts.some((part) => part.startsWith("_"))) return null;
+  const name = parts.pop();
+  const extension = path.posix.extname(name);
+  if (!ASTRO_ROUTE_EXTENSIONS.has(extension)) return null;
+  const base = name.slice(0, -extension.length);
+  if (base !== "index") parts.push(base);
+  const segments = parts.map((part) => part.replace(/\[\.\.\.[^\]]*\]/g, "[...]").replace(/\[(?!\.\.\.\])[^\]]*\]/g, "[]"));
+  return { route: `/${parts.join("/")}`, key: `/${segments.join("/")}`, segments };
+}
+
+/**
+ * Whether an address the route `general` answers covers every address
+ * `specific` answers: `[]` takes any one segment, `[...]` any number,
+ * anything else only itself.
+ */
+function routeCovers(general, specific) {
+  if (!general.length) return !specific.length;
+  const [head, ...rest] = general;
+  if (head === "[...]") {
+    for (let taken = 0; taken <= specific.length; taken += 1) if (routeCovers(rest, specific.slice(taken))) return true;
+    return false;
+  }
+  if (!specific.length || specific[0] === "[...]") return false;
+  return (head === "[]" || head === specific[0]) && routeCovers(rest, specific.slice(1));
+}
+
+/** Every file Astro routes under the site's src/pages/, as `{ file, route, key, segments }` with `file` relative to the site root. */
+async function existingAstroRoutes(siteRoot) {
+  const found = [];
+  const visit = async (relative, depth) => {
+    if (depth > MAX_PAGES_DEPTH) return;
+    const entries = await fs.readdir(path.join(siteRoot, ...ASTRO_PAGES.split("/"), ...relative.split("/").filter(Boolean)), { withFileTypes: true }).catch((caught) => {
+      if (caught?.code === "ENOENT" || caught?.code === "ENOTDIR") return [];
+      throw caught;
+    });
+    for (const entry of entries) {
+      if (entry.name.startsWith("_")) continue;
+      const child = relative ? `${relative}/${entry.name}` : entry.name;
+      const info = entry.isSymbolicLink() ? await fs.stat(path.join(siteRoot, ...ASTRO_PAGES.split("/"), ...child.split("/"))).catch(() => null) : entry;
+      if (info?.isDirectory()) await visit(child, depth + 1);
+      else if (info?.isFile()) {
+        const route = astroRoute(child);
+        if (route) found.push({ file: `${ASTRO_PAGES}/${child}`, ...route });
+      }
+    }
+  };
+  await visit("", 0);
+  return found;
+}
+
+/**
+ * The template pages against the site's own, by Astro's routing: `clashes`
+ * pairs a template file with a different existing file at the same route
+ * (one of them could never be reached), and `shadowed` an existing dynamic
+ * or catch-all page with a template route it used to be able to answer and
+ * that Astro now gives to the template, because the template's route is more
+ * specific. Only routes with no more segments than the template's are
+ * reported as shadowed: Astro ranks a route with more segments first, and
+ * that case is left alone rather than guessed at.
+ */
+export async function planAstroRouteChecks(siteRoot, templatePaths) {
+  const existing = await existingAstroRoutes(siteRoot);
+  const clashes = [];
+  const shadowed = [];
+  for (const templateFile of templatePaths) {
+    if (!templateFile.startsWith(`${ASTRO_PAGES}/`)) continue;
+    const template = astroRoute(templateFile.slice(ASTRO_PAGES.length + 1));
+    if (!template) continue;
+    for (const page of existing) {
+      if (page.file === templateFile) continue; // The same path is a file collision, reported as one.
+      if (page.key === template.key) clashes.push({ route: template.route, template: templateFile, existing: page.file });
+      else if (page.segments.length <= template.segments.length && routeCovers(page.segments, template.segments)) shadowed.push({ route: template.route, template: templateFile, existing: page.file });
+    }
+  }
+  return { clashes, shadowed };
+}
+
+/** The app the templates install into: the only app, or the one at the repository root. */
+function selectEmdashApp(manifest) {
+  const names = Object.keys(manifest.apps);
+  if (names.length === 1) return names[0];
+  const root = names.filter((name) => manifest.apps[name].cwd === ".");
+  if (root.length === 1) return root[0];
+  throw new Error(`${CONSUMER_MANIFEST_FILE} declares ${names.length} apps (${names.map((name) => `${name} in ${manifest.apps[name].cwd}`).join(", ")}) and none at the repository root (cwd "."). The existing-site mode installs the EmDash files at the site root, the folder of the only app or of the root app, so it cannot tell which app is the site. Run it in a repository whose site is that app.`);
+}
+
+/**
+ * Merge `template` into `target` (package.json keys): absent keys are added,
+ * equal values kept; a different value is a collision, named by its dotted path.
+ */
+function mergePackageKeys(target, template, prefix, collisions) {
+  for (const [key, value] of Object.entries(template)) {
+    const where = prefix ? `${prefix}.${key}` : key;
+    if (!Object.hasOwn(target, key)) {
+      target[key] = structuredClone(value);
+    } else if (isPlainObject(value) && isPlainObject(target[key])) {
+      mergePackageKeys(target[key], value, where, collisions);
+    } else if (JSON.stringify(target[key]) !== JSON.stringify(value)) {
+      collisions.push(`package.json ${where} is ${JSON.stringify(target[key])}; the templates need ${JSON.stringify(value)}`);
+    }
+  }
+}
+
+/**
+ * The manifest change for the app: routes, design pairs, the discovery
+ * exclusions, and the ready route, against the raw manifest so no default
+ * is written out. Returns the new raw manifest and what changed.
+ */
+function planManifestPreview(raw, appName, { preview, designs }) {
+  const next = structuredClone(raw);
+  const app = next.apps[appName];
+  const result = { routesAdded: [], designsAdded: {}, unpaired: [], excludeAdded: [], ready: "unchanged", crawl: Boolean(app.preview?.serve) };
+  if (!result.crawl) return { manifest: next, ...result };
+  const target = app.preview;
+  const listed = new Set((target.routes ?? []).map(normalizeRoute));
+  for (const route of preview.routes) {
+    if (listed.has(normalizeRoute(route))) continue;
+    target.routes = [...(target.routes ?? []), route];
+    listed.add(normalizeRoute(route));
+    result.routesAdded.push(route);
+  }
+  const paired = new Set(Object.keys(target.designs ?? {}).map(normalizeRoute));
+  // A design the site already pairs with comes first, then the catalog order.
+  const preferred = Object.values(target.designs ?? {}).map((reference) => String(reference).split(":")[0]);
+  const ordered = designs ? [...designs].sort((left, right) => {
+    const rank = (design) => (preferred.includes(design.id) ? preferred.indexOf(design.id) : preferred.length);
+    return rank(left) - rank(right);
+  }) : [];
+  for (const [route, designRoute] of Object.entries(preview.designs)) {
+    if (paired.has(normalizeRoute(route))) continue;
+    if (!designs) continue;
+    const design = ordered.find((candidate) => candidate.routes.map(normalizeRoute).includes(normalizeRoute(designRoute)));
+    if (!design) {
+      result.unpaired.push(route);
+      continue;
+    }
+    target.designs = { ...(target.designs ?? {}), [route]: `${design.id}:${normalizeRoute(designRoute)}` };
+    result.designsAdded[route] = target.designs[route];
+  }
+  if (target.discover) {
+    const present = new Set(target.discover.exclude ?? []);
+    for (const glob of preview.discoverExclude) {
+      if (present.has(glob)) continue;
+      target.discover.exclude = [...(target.discover.exclude ?? []), glob];
+      present.add(glob);
+      result.excludeAdded.push(glob);
+    }
+  }
+  if (target.ready === undefined || target.ready === "/") {
+    target.ready = preview.ready;
+    result.ready = "set";
+  }
+  return { manifest: next, ...result };
+}
+
+async function readSiteJson(filePath, label) {
+  let text;
+  try {
+    text = await fs.readFile(filePath, "utf8");
+  } catch (caught) {
+    if (caught?.code === "ENOENT") return null;
+    throw caught;
+  }
+  let value;
+  try {
+    value = JSON.parse(text);
+  } catch (caught) {
+    throw new Error(`${label} is not valid JSON (${caught.message}); fix it, then rerun`);
+  }
+  if (!isPlainObject(value)) throw new Error(`${label} is not a JSON object; fix it, then rerun`);
+  return { text, value };
+}
+
+/**
+ * `timds consumer scaffold emdash --existing`: install the shared EmDash
+ * template set into an Astro consumer that already has `timds.consumer.json`,
+ * so the site gains an articles section fed through EmDash's API.
+ *
+ * Everything is decided before anything is written: a refusal leaves the site
+ * untouched, and a failure part-way through the writes removes what this run
+ * created and restores package.json and the manifest. Writes the template
+ * files (never over an existing path), the dependencies and package keys the
+ * templates need in package.json, the article routes, design pairs,
+ * discovery exclusions and seed-loading ready route in the app's preview, and
+ * the template version in `.timds/emdash.json`. Configuration it cannot
+ * change safely (astro.config, wrangler.jsonc, .gitignore) is printed.
+ */
+export async function scaffoldExistingEmdashSite(rootInput, {
+  platform = "cloudflare",
+  layout: layoutInput = "",
+  siteUrl = "",
+  skipInstall = false,
+  templatesRoot = EMDASH_TEMPLATES_ROOT,
+  readDesigns = readPinnedDesigns,
+  fetchImpl = fetch,
+  writeFile: write = defaultWrite,
+  runInstall = (cwd) => run("npm", ["install", "--no-audit", "--no-fund"], cwd),
+  output = () => {},
+} = {}) {
+  if (!rootInput) throw new Error(`--root is required: the folder of the Astro site that holds ${CONSUMER_MANIFEST_FILE}\n${SCAFFOLD_HELP}`);
+  if (!EMDASH_PLATFORMS.includes(platform)) throw new Error(`--platform ${platform} must be one of ${EMDASH_PLATFORMS.join(", ")}`);
+  let origin = "";
+  if (siteUrl) {
+    emdashMcpUrl(siteUrl); // The same HTTP(S) rule and messages as the fresh scaffold.
+    origin = new URL(String(siteUrl)).origin;
+  }
+  const requested = path.resolve(rootInput);
+  const rootInfo = await fs.stat(requested).catch(() => null);
+  if (!rootInfo?.isDirectory()) throw new Error(`--root ${rootInput} is not a directory. The existing-site mode installs into an Astro site that is already there; to create a new site, run timds consumer scaffold emdash without --existing.`);
+  const repoRoot = await fs.realpath(requested);
+
+  const manifestFile = await readSiteJson(path.join(repoRoot, CONSUMER_MANIFEST_FILE), CONSUMER_MANIFEST_FILE);
+  if (!manifestFile) throw new Error(`${repoRoot} has no ${CONSUMER_MANIFEST_FILE}. The existing-site mode installs into a site that already consumes a Design System: adopt TimDS first with timds consumer init (--system ID for a published pin), then rerun. To create a new EmDash site instead, run timds consumer scaffold emdash without --existing.`);
+  const manifest = validateConsumerManifest(manifestFile.value);
+  const appName = selectEmdashApp(manifest);
+  const appCwd = manifest.apps[appName].cwd;
+  const appRoot = path.join(repoRoot, ...(appCwd === "." ? [] : appCwd.split("/")));
+  const inApp = (relative) => (appCwd === "." ? relative : `${appCwd}/${relative}`);
+
+  const packageFile = await readSiteJson(path.join(appRoot, "package.json"), inApp("package.json"));
+  if (!packageFile) throw new Error(`${inApp("package.json")} does not exist. The existing-site mode installs into an Astro site; app "${appName}" in ${CONSUMER_MANIFEST_FILE} must be one.`);
+  const packageJson = packageFile.value;
+  const declared = (name) => packageJson.dependencies?.[name] ?? packageJson.devDependencies?.[name];
+  if (!declared("astro")) throw new Error(`${inApp("package.json")} does not depend on astro. EmDash runs inside an Astro site, so the existing-site mode installs only into one; to create a new EmDash site, run timds consumer scaffold emdash without --existing.`);
+
+  let layout;
+  if (layoutInput) {
+    const normalized = String(layoutInput).replace(/\\/g, "/");
+    if (!isSafeRelativePath(normalized) || !normalized.endsWith(".astro")) throw new Error(`--layout ${layoutInput} must be an .astro path relative to the site root (${appCwd === "." ? "the repository root" : appCwd})`);
+    if (!(await fs.stat(path.join(appRoot, ...normalized.split("/"))).catch(() => null))?.isFile()) throw new Error(`--layout ${layoutInput} does not exist in the site (${inApp(normalized)})`);
+    layout = path.posix.normalize(normalized);
+  } else if ((await fs.stat(path.join(appRoot, ...BASE_LAYOUT.split("/"))).catch(() => null))?.isFile()) {
+    layout = BASE_LAYOUT;
+  } else {
+    throw new Error(`The site has no ${inApp(BASE_LAYOUT)}, so the article pages have no layout to render in. Name the site's layout component with --layout PATH (an .astro file relative to the site root), then rerun.`);
+  }
+
+  const siteName = String(packageJson.name || path.basename(appRoot));
+  const plan = await planEmdashTemplates(appRoot, { platform, layout, siteUrl: origin, siteName, templatesRoot });
+  const collisions = plan.collisions.map(inApp);
+  if (existsSync(path.join(repoRoot, ...EMDASH_RECORD_PATH.split("/")))) collisions.push(EMDASH_RECORD_PATH);
+
+  const nextPackage = structuredClone(packageJson);
+  const packageCollisions = [];
+  mergePackageKeys(nextPackage, plan.set.package, "", packageCollisions);
+  const dependencies = { added: [], kept: [] };
+  for (const [block, wanted] of [["dependencies", plan.dependencies], ["devDependencies", plan.devDependencies]]) {
+    for (const [name, version] of Object.entries(wanted)) {
+      const current = declared(name);
+      if (current !== undefined) {
+        dependencies.kept.push({ name, declared: current, template: version, dev: block === "devDependencies" });
+        continue;
+      }
+      nextPackage[block] = { ...(nextPackage[block] ?? {}), [name]: version };
+      dependencies.added.push({ name, version, dev: block === "devDependencies" });
+    }
+  }
+
+  if (collisions.length || packageCollisions.length) {
+    const liveConfig = collisions.includes(inApp("src/live.config.ts"))
+      ? `\n${inApp("src/live.config.ts")} is the site's own content configuration. EmDash reads its entries through an _emdash live collection that the templates' src/live.config.ts defines: move the site's file aside, rerun to install the rest, then add the collections the site had to the installed file.`
+      : "";
+    throw new Error(`The existing-site mode never overwrites a file or edits an existing page, and these already exist:\n${[...collisions.map((entry) => `  ${entry}`), ...packageCollisions.map((entry) => `  ${entry}`)].join("\n")}${liveConfig}\nMove or rename them (or remove an earlier EmDash install), then rerun. Nothing was written.`);
+  }
+  // Two files at one Astro route (articles.astro and articles/index.astro,
+  // [id] and [slug]) leave one of them unreachable, so they are refused too.
+  const routes = await planAstroRouteChecks(appRoot, plan.files.map((file) => file.path));
+  if (routes.clashes.length) {
+    throw new Error(`The existing-site mode never edits an existing page, and the site already has a page at a route the templates need:\n${routes.clashes.map(({ route, template, existing }) => `  ${route}: the site's ${inApp(existing)} and the template's ${inApp(template)}`).join("\n")}\nAstro gives a route to one file only, so one of each pair could never be reached. Move or remove the site's page (merge it into the template's by hand afterwards if it should stay), then rerun. Nothing was written.`);
+  }
+  const shadowedBy = new Map();
+  for (const { route, existing } of routes.shadowed) shadowedBy.set(existing, [...(shadowedBy.get(existing) ?? []), route]);
+
+  // The pinned system's designs decide which routes are paired; unreadable designs pair nothing.
+  let designs = null;
+  let designsError = null;
+  try {
+    designs = await readDesigns({ repoRoot, manifest, fetchImpl });
+    if (!Array.isArray(designs)) {
+      designs = null;
+      designsError = "the system reports no website designs";
+    }
+  } catch (caught) {
+    designsError = caught instanceof Error ? caught.message : String(caught);
+  }
+  const previewPlan = planManifestPreview(manifestFile.value, appName, { preview: plan.set.preview, designs });
+  const nextManifest = validateConsumerManifest(previewPlan.manifest);
+
+  const record = { template: plan.set.version, platform };
+  const packageText = formatJson(nextPackage, jsonStyle(packageFile.text));
+  const manifestText = formatJson(previewPlan.manifest, jsonStyle(manifestFile.text));
+  const writes = [
+    ...plan.files.map((file) => ({ path: inApp(file.path), content: file.content })),
+    ...(packageText !== packageFile.text ? [{ path: inApp("package.json"), content: packageText }] : []),
+    ...(manifestText !== manifestFile.text ? [{ path: CONSUMER_MANIFEST_FILE, content: manifestText }] : []),
+    { path: EMDASH_RECORD_PATH, content: toJson(record) },
+  ];
+  output(`Installing the EmDash template set (version ${plan.set.version}, ${platform}) into ${appCwd === "." ? repoRoot : `${repoRoot}/${appCwd}`}...`);
+  const written = await applyWritesWithRollback(repoRoot, writes, { writeFile: write });
+
+  const handover = plan.files.some((file) => file.path === EMDASH_HANDOVER_DOC);
+  const todos = [
+    ...(handover ? [`The handover checklist (first deploy and setup, the writer's token, the encryption key backup, deploy on push) is in ${inApp(EMDASH_HANDOVER_DOC)}`] : []),
+    ...(skipInstall ? ["Run npm install and commit the lockfile; the preview installs from it"] : []),
+    ...dependencies.kept.map(({ name, declared: current, template: version }) => `package.json already declares ${name} ${current}, kept as it is; the templates were written for ${version}, so compare the two`),
+    ...(plan.manual.length ? [`Make the configuration changes printed above in ${[...new Set(plan.manual.map((entry) => inApp(entry.file)))].join(", ")}; the scaffold does not edit configuration it cannot change safely`] : []),
+    ...(plan.gitignore.length ? [`Add the .gitignore lines printed above`] : []),
+    ...(plan.exampleOrigin.length ? [`No --site-url was given, so ${plan.exampleOrigin.map(inApp).join(", ")} use ${EXAMPLE_SITE_URL} as the site's origin; replace it with the production origin`] : []),
+    ...(!previewPlan.crawl ? [`App "${appName}" previews a static build, and the article routes are rendered on request; give its preview serve, port and routes, then add ${plan.set.preview.routes.join(", ")} to them`] : []),
+    ...(previewPlan.crawl && previewPlan.ready === "unchanged" ? [`preview.ready stays ${manifest.apps[appName].preview.ready}; the article routes need the seed loaded, so make sure the preview opens ${plan.set.preview.ready} before it captures them`] : []),
+    ...(previewPlan.crawl && designsError ? [`The Design System's designs could not be read (${designsError}), so no preview.designs pairs were added; pair ${Object.keys(plan.set.preview.designs).join(", ")} with their designs by hand once they can be`] : []),
+    ...previewPlan.unpaired.map((route) => `${route} has no design yet in the pinned Design System version: move the pin to a release that has it, or author it in the Design System, then pair it in preview.designs`),
+    ...[...shadowedBy].map(([existing, list]) => `${inApp(existing)} may have answered ${list.join(", ")}; Astro now gives ${list.length === 1 ? "that route" : "those routes"} to the template pages, which are more specific, so check nothing the site linked there is lost`),
+    ...(previewPlan.crawl ? [`Rerun timds consumer init so the consumer skill and the launch entries match the edited ${CONSUMER_MANIFEST_FILE}`] : []),
+    `Review the diff, commit it, and run npm run timds -- consumer check`,
+  ];
+
+  // The files are in place from here on, so the changes only this run prints
+  // go out before npm install: a failed install must not take them with it.
+  output(`Installed the EmDash template set into app ${appName}:`);
+  for (const file of written) output(`  ${file}`);
+  if (dependencies.added.length) {
+    output("");
+    output("Dependencies added:");
+    for (const { name, version, dev } of dependencies.added) output(`  ${name} ${version}${dev ? " (dev)" : ""}`);
+  }
+  if (dependencies.kept.length) {
+    output("");
+    output("Dependencies kept as the site declares them:");
+    for (const { name, declared: current, template: version } of dependencies.kept) output(`  ${name} ${current} (templates written for ${version})`);
+  }
+  for (const entry of plan.manual) {
+    output("");
+    output(`Change ${inApp(entry.file)} by hand: ${entry.summary}`);
+    output(entry.text.replace(/\s+$/, ""));
+  }
+  if (plan.gitignore.length) {
+    output("");
+    output("Add to .gitignore:");
+    for (const line of plan.gitignore) output(`  ${line}`);
+  }
+  if (!skipInstall) {
+    output("");
+    output("Running npm install...");
+    const installed = await runInstall(appRoot);
+    if (installed.code !== 0) {
+      throw new Error(`npm install failed in ${appRoot}:\n${tail(installed)}\nThe EmDash files are already in place and the configuration changes printed above still apply. Fix the error and run npm install; do not rerun the scaffold, which refuses paths that exist. The same changes are listed in ${inApp(EMDASH_HANDOVER_DOC)}.`);
+    }
+  }
+
+  output("");
+  output("For the developer to confirm:");
+  for (const item of todos) output(`- ${item}`);
+
+  return {
+    repoRoot,
+    appName,
+    appCwd,
+    platform,
+    template: plan.set.version,
+    record: EMDASH_RECORD_PATH,
+    layout: inApp(layout),
+    siteUrl: origin || null,
+    written,
+    dependencies,
+    preview: {
+      routesAdded: previewPlan.routesAdded,
+      designsAdded: previewPlan.designsAdded,
+      unpaired: previewPlan.unpaired,
+      excludeAdded: previewPlan.excludeAdded,
+      ready: previewPlan.ready,
+      designsError,
+    },
+    manual: plan.manual.map((entry) => ({ ...entry, file: inApp(entry.file) })),
+    gitignore: plan.gitignore,
+    shadowed: routes.shadowed.map(({ route, template, existing }) => ({ route, template: inApp(template), existing: inApp(existing) })),
+    todos,
+    manifest: nextManifest,
+  };
+}
+
 function parseScaffoldArguments(argv) {
   const options = { stylesheets: [] };
   const positional = [];
@@ -588,11 +1364,11 @@ function parseScaffoldArguments(argv) {
     }
     const [rawName, inlineValue] = value.replace(/^--?/, "").split("=", 2);
     const name = rawName.replace(/-([a-z])/g, (_match, letter) => letter.toUpperCase());
-    if (["help", "h", "skipInstall"].includes(name)) {
+    if (["help", "h", "skipInstall", "existing", "workspace"].includes(name)) {
       options[name === "h" ? "help" : name] = true;
       continue;
     }
-    if (!["root", "designSystem", "platform", "stylesheet", "siteUrl", "portalUrl"].includes(name)) throw new Error(`Unknown option --${rawName}\n${SCAFFOLD_HELP}`);
+    if (!["root", "designSystem", "platform", "stylesheet", "siteUrl", "portalUrl", "layout"].includes(name)) throw new Error(`Unknown option --${rawName}\n${SCAFFOLD_HELP}`);
     const next = inlineValue ?? argv[index + 1];
     if (next === undefined || String(next).startsWith("-")) throw new Error(`--${rawName} requires a value`);
     if (name === "stylesheet") options.stylesheets.push(next);
@@ -602,14 +1378,38 @@ function parseScaffoldArguments(argv) {
   return { options, positional };
 }
 
-/** `timds consumer scaffold emdash --root PATH --design-system GIT_URL [...]` */
-export async function runConsumerScaffold(args = [], { output = (message = "") => process.stdout.write(`${message}\n`) } = {}) {
+/**
+ * What `--existing` answers. The mode is withdrawn: a Design System's own
+ * site lives in its workspace (`--workspace`), not in a separate repository
+ * that reads the system through a pin. The flag is still parsed so that it
+ * refuses with this message and writes nothing; `scaffoldExistingEmdashSite`
+ * stays for its tests until the mode's code and templates are removed.
+ */
+export const EXISTING_WITHDRAWN = "--existing is withdrawn and nothing was written: TimDS no longer adds EmDash to a site in its own repository that reads its Design System through a pin. A Design System's own site lives in its workspace instead: run timds consumer scaffold emdash --workspace in the Design System workspace (the folder that holds timds.json), which writes the site into site/ with no pin.";
+
+/** `timds consumer scaffold emdash --root PATH --design-system GIT_URL [...]` or `--workspace [--root PATH]`; `--existing` refuses. */
+export async function runConsumerScaffold(args = [], { output = (message = "") => process.stdout.write(`${message}\n`), workspaceOptions = {} } = {}) {
   const { options, positional } = parseScaffoldArguments(args);
   if (options.help || !positional.length) {
     output(SCAFFOLD_HELP);
     return null;
   }
   if (positional.length > 1 || positional[0] !== "emdash") throw new Error(`Unknown site kind ${positional.join(" ")}; timds consumer scaffold creates emdash sites\n${SCAFFOLD_HELP}`);
+  if (options.existing) throw new Error(EXISTING_WITHDRAWN);
+  if (options.workspace) {
+    const foreign = [
+      ...(options.designSystem ? ["--design-system"] : []),
+      ...(options.stylesheets.length ? ["--stylesheet"] : []),
+      ...(options.portalUrl ? ["--portal-url"] : []),
+      ...(options.layout ? ["--layout"] : []),
+      ...(options.siteUrl ? ["--site-url"] : []),
+    ];
+    if (foreign.length) throw new Error(`${foreign.join(", ")} ${foreign.length === 1 ? "belongs" : "belong"} to the other scaffold modes, not --workspace: a workspace site reads the Design System it sits in, writes its own layout, and takes its origin from EMDASH_SITE_URL when it runs, so it needs none of them. Rerun without ${foreign.length === 1 ? "it" : "them"}.`);
+    if (options.platform && options.platform !== "cloudflare") throw new Error(`--platform ${options.platform} is not available with --workspace: a workspace site runs on Cloudflare Workers only. Rerun without --platform.`);
+    const { scaffoldWorkspaceEmdashSite } = await import("./consumer-scaffold-workspace.mjs");
+    return scaffoldWorkspaceEmdashSite(options.root, { skipInstall: Boolean(options.skipInstall), output, ...workspaceOptions });
+  }
+  if (options.layout) throw new Error(`--layout belonged to the withdrawn --existing mode: the fresh scaffold generates its own ${BASE_LAYOUT}. Rerun without it.`);
   return scaffoldEmdashSite(options.root, {
     designSystem: options.designSystem,
     ...(options.platform ? { platform: options.platform } : {}),

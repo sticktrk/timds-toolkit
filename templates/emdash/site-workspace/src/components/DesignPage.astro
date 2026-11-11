@@ -1,0 +1,22 @@
+---
+/**
+ * One page of the Design System's website design as a whole document, as the
+ * design system integration read it from the design file.
+ */
+import type { pages } from "virtual:timds/design-system";
+
+interface Props {
+	page: (typeof pages)[number];
+}
+
+const { page } = Astro.props;
+---
+
+<html {...page.htmlAttributes}>
+	<head>
+		<Fragment set:html={page.head} />
+	</head>
+	<body {...page.bodyAttributes}>
+		<Fragment set:html={page.body} />
+	</body>
+</html>

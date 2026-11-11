@@ -31,6 +31,7 @@ import { readDerivedLayer, summarizeBrandKit } from "./derived.mjs";
 import { readMediaCatalog } from "./media.mjs";
 import { runHostedCommand, sessionIgnoredMatcher } from "./hosted.mjs";
 import { STOCK_RECORD_PATH_KINDS, isDesignerRecordPath, isLineagePath } from "./offshoot-contract.mjs";
+import { WORKSPACE_SITE_DIRECTORY, findWorkspaceSite } from "./workspace-site.mjs";
 
 export const DESIGN_SYSTEM_MCP_SERVER_NAME = "timds-design-system";
 export const EDITING_GUIDE_URI = "timds://guide";
@@ -58,6 +59,14 @@ const RELEASE_AUTOMATION_FILES = [
 // Protected wherever they appear.
 const PROTECTED_SEGMENTS = new Set([".git", "node_modules"]);
 const PROTECTED_BASENAMES = new Set([".gitignore"]);
+// A workspace site (site/, see workspace-site.mjs) is authored source: an
+// agent edits the site and the system in one change. Its package records,
+// manifest, template record, build output, local state and secrets stay out
+// of reach, the way the system's own are. Relative to the site folder.
+const SITE_PROTECTED_DIRECTORIES = [".timds", ".astro", ".wrangler", ".emdash", "dist"];
+const SITE_PROTECTED_FILES = ["package.json", "package-lock.json", "timds.consumer.json"];
+const SITE_SECRET_FILE = /^(?:\.dev\.vars|\.env)(?:\..*)?$/i;
+const SITE_DIRECTORY_PURPOSE = "The workspace's website: its own package (package.json, lockfile, astro.config) reading this system's styles from source";
 
 const DIRECTORY_PURPOSES = {
   assets: "Lightweight tracked assets: optimized logos, icons, fonts",
@@ -123,6 +132,13 @@ change. Work only in the Design System the user gave you.
   \`.timds/\`: schemaVersion 1 and a \`paths\` array naming exact existing
   ${STOCK_RECORD_PATH_KINDS.map((kind) => `\`${kind}\``).join(", ")}
   files. Globs and symbolic links are refused by \`run_check\`.
+- A workspace site (\`site/\` with a \`timds.consumer.json\` of the workspace
+  form) is editable with the system in one change: its pages, layouts and
+  configuration. Its \`package.json\`, \`package-lock.json\`,
+  \`timds.consumer.json\`, \`.timds/\`, build output and local state
+  (\`dist/\`, \`.astro/\`, \`.wrangler/\`, \`.emdash/\`) and secrets (\`.env\`,
+  \`.dev.vars\`) are protected. \`run_check\` checks the system only; the
+  site's own build and \`timds consumer check\` run in \`site/\`.
 - Edit authored tokens, source, documentation, components, navigation, and
   lightweight assets. Preserve the framework and visual language unless the
   user asks for a migration or redesign.
@@ -272,8 +288,26 @@ function designSystemRelative(workspace, repoRelative) {
   return repoRelative.slice(surface.length + 1);
 }
 
+const workspaceSites = new WeakMap();
+/** The workspace site's folder relative to the Design System root, or null; looked up once per workspace object. */
+function workspaceSiteDirectory(workspace) {
+  if (!workspace || typeof workspace !== "object") return null;
+  if (!workspaceSites.has(workspace)) workspaceSites.set(workspace, workspace.designSystemRoot && findWorkspaceSite(workspace.designSystemRoot) ? WORKSPACE_SITE_DIRECTORY : null);
+  return workspaceSites.get(workspace);
+}
+
+function protectedInSite(siteRelative) {
+  const segments = siteRelative.split("/");
+  if (SITE_PROTECTED_DIRECTORIES.includes(segments[0].toLowerCase())) return true;
+  if (SITE_PROTECTED_FILES.includes(siteRelative)) return true;
+  const name = segments.at(-1);
+  return SITE_SECRET_FILE.test(name) && name.toLowerCase() !== ".env.example";
+}
+
 function protectedByPattern(workspace, dsRelative) {
   if (!dsRelative) return true; // the Design System root itself is not a file
+  const site = workspaceSiteDirectory(workspace);
+  if (site && dsRelative.startsWith(`${site}/`) && protectedInSite(dsRelative.slice(site.length + 1))) return true;
   if (isLineagePath(dsRelative)) return true;
   const segments = dsRelative.split("/");
   if (segments.some((segment) => PROTECTED_SEGMENTS.has(segment))) return true;
@@ -553,8 +587,10 @@ async function describe(workspace) {
         if (video[key] && video[key].split("/")[0] === name && name !== "video") return label;
       }
     }
+    if (name === workspaceSiteDirectory(workspace)) return SITE_DIRECTORY_PURPOSE;
     return DIRECTORY_PURPOSES[name] ?? "Authored files";
   };
+  const site = workspaceSiteDirectory(workspace);
   const prefix = surface === "." ? "" : `${surface}/`;
   const derived = await readDerivedLayer(workspace.designSystemRoot, workspace.manifest, {parentRecord: workspace.parentRecord});
   return {
@@ -581,6 +617,11 @@ async function describe(workspace) {
       "**/.gitignore",
       "any symbolic link",
       ...(surface === "." ? [] : [`everything outside ${surface}/`]),
+      ...(site ? [
+        ...SITE_PROTECTED_DIRECTORIES.map((name) => `${prefix}${site}/${name}/**`),
+        ...SITE_PROTECTED_FILES.map((name) => `${prefix}${site}/${name}`),
+        `${prefix}${site}/.env and .dev.vars files (except .env.example)`,
+      ] : []),
     ],
     workspaceCommands: Object.fromEntries(Object.entries(workspace.manifest.workspace).filter(([, command]) => command)),
     artifact: { entry: workspace.manifest.artifact.entry, publishRef: workspace.manifest.artifact.publishRef || null },

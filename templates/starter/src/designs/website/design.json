@@ -1,8 +1,11 @@
 {
   "title": "Marketing site",
-  "summary": "The public website: a home page and a contact page with its sent state, composed from the system's layout pieces and components. Starter pages; replace them with the client's.",
+  "summary": "The public website: home, about, contact with its sent state, privacy, terms, and the page a missing address shows, plus the article templates (the article list with its empty state, an article, and a topic) that CMS entries render into. Composed from the system's layout pieces and components. Starter pages; replace them with the client's.",
   "pages": {
-    "/": { "title": "Home" }
+    "/": { "title": "Home" },
+    "/404": { "title": "Not found" },
+    "/articles/example-article": { "title": "Article" },
+    "/topics/example-topic": { "title": "Topic" }
   },
   "journeys": [
     {
@@ -23,6 +26,37 @@
           "screens": [
             { "page": "/contact" },
             { "page": "/contact", "state": "sent", "label": "Message sent", "note": "The thanks and the way back home." }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "read-an-article",
+      "title": "Reading an article",
+      "summary": "A visitor opens the article list, reads an article, and follows its topic to more like it. The list, the article, and the topic are templates: the design is here, and the content is CMS entries.",
+      "steps": [
+        {
+          "title": "Browse",
+          "summary": "The published articles, newest first.",
+          "screens": [
+            { "page": "/articles" }
+          ],
+          "branches": [
+            { "page": "/articles", "state": "empty", "label": "No articles yet", "note": "What the list shows before anything is published." }
+          ]
+        },
+        {
+          "title": "Read",
+          "summary": "The article: its header, then the body.",
+          "screens": [
+            { "page": "/articles/example-article", "label": "Article", "note": "One of every element an article body may contain." }
+          ]
+        },
+        {
+          "title": "Follow a topic",
+          "summary": "A topic link leads to the articles that share it.",
+          "screens": [
+            { "page": "/topics/example-topic", "label": "Topic" }
           ]
         }
       ]

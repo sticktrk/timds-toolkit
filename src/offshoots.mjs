@@ -1,6 +1,11 @@
 // Local offshoot creation mirrors the host's version-1 source transform.
 // Source is an immutable release or Git tree; writing is confined to a new,
-// empty destination. Host provisioning, grants and catalog lineage stay there.
+// empty destination. Host provisioning, grants and catalog lineage stay
+// there. A parent's workspace site (site/) is never carried: it is the
+// parent's own website, not part of the system; nor is the guidance its
+// scaffold wrote outside site/ (the root consumer skills and the AGENTS.md
+// section), removed by the site's record while unedited and otherwise kept
+// and reported, since it names the parent's system.
 // The parent record names the stock the release shipped, by hash, so feed can
 // later refresh it while the child's own edits (grafts) stay. The child keeps
 // its parent's toolkit pin, and a CLI older than the running release rejects
@@ -19,12 +24,102 @@ import { readBlobs } from './git-blobs.mjs';
 import { compareDesignSystemVersions } from './changelog.mjs';
 import { runtimeIdentity } from './runtime.mjs';
 import { belowFloorError, starterBelowFloor } from './starter.mjs';
+import {WORKSPACE_SITE_DIRECTORY, WORKSPACE_SITE_MANIFEST, WORKSPACE_SITE_RECORD, WORKSPACE_SITE_SKILL_NAMES, isWorkspaceDesignSystem, WORKSPACE_SITE_AGENTS_MARKER} from './workspace-site.mjs';
 
 const exec = promisify(execFile);
 const json = value => `${JSON.stringify(value, null, 2)}\n`;
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const MAX_FILE = 10 * 1024 * 1024, MAX_SOURCE = 50 * 1024 * 1024, MAX_FILES = 4000;
 const encode = (file, bytes, mode = '100644') => ({path: file, mode, encoding: 'base64', content: Buffer.from(bytes).toString('base64')});
+// The marker of the site's section in the system's AGENTS.md, shared with the
+// scaffold that writes it (workspace-site.mjs).
+const SITE_AGENTS_MARKER = WORKSPACE_SITE_AGENTS_MARKER;
+const SITE_AGENTS_FILE = 'AGENTS.md';
+const SCAFFOLD_COMMAND = 'timds consumer scaffold emdash --workspace';
+
+/** The site's section in `text` as `[start, end)`, by the scaffold's rule
+ * (`agentsSection` in consumer-scaffold-workspace.mjs): from the opening
+ * marker through the closing one and its newline, or to the end of the text
+ * when it is not closed. Null when there is none. */
+function siteSectionRange(text) {
+  const start = text.indexOf(`<!-- ${SITE_AGENTS_MARKER} -->`);
+  if (start === -1) return null;
+  const closing = `<!-- /${SITE_AGENTS_MARKER} -->`, end = text.indexOf(closing, start);
+  if (end === -1) return [start, text.length];
+  const after = end + closing.length;
+  return [start, text[after] === '\n' ? after + 1 : after];
+}
+
+/** `text` without `[start, end)` and the blank lines the scaffold put before
+ * it; empty when the section was all there was. */
+function withoutSiteSection(text, [start, end]) {
+  const before = text.slice(0, start).replace(/\n+$/, ''), after = text.slice(end).replace(/^\n+/, '');
+  if (!before) return after;
+  return after ? `${before}\n\n${after}` : `${before}\n`;
+}
+
+/**
+ * Remove from `result` the guidance a dropped workspace site's scaffold wrote
+ * outside `site/`: the two consumer skills at the repository root and the
+ * site's section of the system's AGENTS.md, rendered for the parent's system.
+ * The site's record (`site/.timds/emdash.json`, `mode: "workspace"`) names
+ * them with their hashes: a skill file whose parent bytes still hash to the
+ * recorded value is removed, and the section is cut out while its bytes still
+ * match. An edited file or section, a file the record does not list, and any
+ * guidance a missing or foreign record cannot vouch for are kept and
+ * reported, since the child's scaffold refuses a skill folder it did not
+ * write. Record paths are relative to the repository root; the source is the
+ * Design System root, so the section's recorded path gives the prefix
+ * between them (`design-system/` when embedded), and a path outside the
+ * system (the root skills of an embedded system) is not in the source.
+ */
+function dropSiteGuidance(original, result, parentId) {
+  const removed = [], kept = [], notes = [];
+  const folders = WORKSPACE_SITE_SKILL_NAMES.map(name => `.agents/skills/${name}/`);
+  const inSkillFolder = file => folders.some(folder => file.startsWith(folder));
+  let record = null;
+  const recordBytes = original.get(`${WORKSPACE_SITE_DIRECTORY}/${WORKSPACE_SITE_RECORD}`);
+  try { record = recordBytes && recordBytes.mode !== '120000' ? JSON.parse(recordBytes.toString('utf8')) : null; } catch { record = null; }
+  const isMap = value => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+  if (!isMap(record) || record.mode !== 'workspace') {
+    const present = [...result.keys()].filter(inSkillFolder);
+    const agents = result.get(SITE_AGENTS_FILE);
+    if (agents && agents.mode !== '120000' && siteSectionRange(agents.toString('utf8'))) present.push(SITE_AGENTS_FILE);
+    for (const file of present.sort()) kept.push({path: file, reason: 'no workspace record'});
+    if (present.length) notes.push(`The parent's site/ was not carried, but its record (${WORKSPACE_SITE_DIRECTORY}/${WORKSPACE_SITE_RECORD}) is missing or not a workspace record, so the site guidance outside site/ was kept: ${present.sort().join(', ')}. It may name the parent's system (${parentId}). Remove the consumer skill folders and the <!-- ${SITE_AGENTS_MARKER} --> section before running ${SCAFFOLD_COMMAND} in the offshoot, which refuses a skill folder it did not write.`);
+    return {removed, kept, notes};
+  }
+  const sections = isMap(record.workspaceSections) ? record.workspaceSections : {};
+  const agentsKey = Object.keys(sections).find(file => file === SITE_AGENTS_FILE || file.endsWith(`/${SITE_AGENTS_FILE}`));
+  const prefix = agentsKey ? agentsKey.slice(0, -SITE_AGENTS_FILE.length) : '';
+  const local = file => typeof file === 'string' && file.startsWith(prefix) ? file.slice(prefix.length) : null;
+  const recorded = new Map();
+  for (const [file, digest] of Object.entries(isMap(record.workspaceFiles) ? record.workspaceFiles : {})) {
+    const key = local(file);
+    if (key && inSkillFolder(key) && typeof digest === 'string') recorded.set(key, digest);
+  }
+  for (const [file, digest] of recorded) {
+    const bytes = original.get(file);
+    if (!result.has(file) || !bytes) continue;
+    if (bytes.mode !== '120000' && sha256(bytes) === digest) { result.delete(file); removed.push(file); }
+  }
+  for (const file of [...result.keys()].filter(inSkillFolder).sort()) kept.push({path: file, reason: recorded.has(file) ? 'edited' : 'not in the record'});
+  const section = agentsKey && isMap(sections[agentsKey]) ? sections[agentsKey] : null;
+  const agentsFile = agentsKey && local(agentsKey), agents = agentsFile && result.get(agentsFile);
+  if (section?.marker === SITE_AGENTS_MARKER && agents && agents.mode !== '120000') {
+    const text = agents.toString('utf8'), range = siteSectionRange(text);
+    if (range && sha256(text.slice(...range)) === section.sha256) {
+      const rest = withoutSiteSection(text, range);
+      if (rest) { const bytes = Buffer.from(rest); bytes.mode = agents.mode; result.set(agentsFile, bytes); }
+      else result.delete(agentsFile);
+      removed.push(`${agentsFile} (the <!-- ${SITE_AGENTS_MARKER} --> section)`);
+    } else if (range) kept.push({path: agentsFile, reason: 'edited section'});
+  }
+  const files = kept.filter(entry => entry.reason !== 'edited section').map(entry => entry.path);
+  if (files.length) notes.push(`The parent's site/ was not carried, but these consumer skill files its scaffold installed for ${parentId} were kept because they changed since or were added beside it: ${files.join(', ')}. Remove them (or reconcile their folders) before running ${SCAFFOLD_COMMAND} in the offshoot, which refuses a skill folder it did not write.`);
+  if (kept.some(entry => entry.reason === 'edited section')) notes.push(`The parent's site/ was not carried, but the edited <!-- ${SITE_AGENTS_MARKER} --> section of ${agentsFile} was kept. ${SCAFFOLD_COMMAND} leaves an existing section as it is, so remove it (or rewrite it for the offshoot's own site) before or after scaffolding.`);
+  return {removed, kept, notes};
+}
 
 function sourcePath(file) {
   if (typeof file !== 'string' || !file || file.includes('\\') || /[\x00-\x1f\x7f]/.test(file) || path.posix.isAbsolute(file) || /^[a-z]:/i.test(file) || file.split('/').some(part => !part || part === '.' || part === '..' || ['.git', 'node_modules', 'dist'].includes(part.toLowerCase()) || (/^\.env(?:\.|$)/i.test(part) && part !== '.env.example')) || /^\.timds\/(?:session|auth|start)(?:[./]|$)/i.test(file) || /\.(pem|key|p12|pfx)$/i.test(file)) throw new Error(`Unsafe offshoot source path: ${file}`);
@@ -173,6 +268,14 @@ async function transformDecodedOffshoot(source, {mode = 'full', systemId, name} 
   if (manifest.systemId !== parent.systemId || manifest.version !== parent.version) throw new Error('The parent source identity or version disagrees with its release');
   const stock = await declaredStock(original);
   let result = new Map(original);
+  // A workspace site (site/ with a workspace-form consumer manifest) is the
+  // parent's own website, a separate package that names the parent's system:
+  // an offshoot is a new system and starts without it.
+  const siteManifest = original.get(`${WORKSPACE_SITE_DIRECTORY}/${WORKSPACE_SITE_MANIFEST}`);
+  let parsedSiteManifest = null;
+  try { parsedSiteManifest = siteManifest && siteManifest.mode !== '120000' ? JSON.parse(siteManifest.toString('utf8')) : null; } catch { parsedSiteManifest = null; }
+  const dropsSite = isWorkspaceDesignSystem(parsedSiteManifest);
+  if (dropsSite) for (const file of [...result.keys()]) if (file.startsWith(`${WORKSPACE_SITE_DIRECTORY}/`)) result.delete(file);
   const set = (file, bytes) => { const content = Buffer.from(bytes); content.mode = '100644'; result.set(file, content); };
   if (mode === 'structure') {
     const starter = parse(original, '.timds/starter.json');
@@ -204,6 +307,9 @@ async function transformDecodedOffshoot(source, {mode = 'full', systemId, name} 
     set('.timds/starter.json', original.get('.timds/starter.json'));
     set('timds.json', json({schemaVersion: manifest.schemaVersion, systemId, name: name || `${manifest.name} offshoot`, description: 'Design System structure with placeholder foundations.', version: manifest.version, artifact: manifest.artifact, workspace: {dev: ['node', 'scripts/dev.mjs'], build: ['node', 'scripts/build.mjs'], check: ['node', 'scripts/check.mjs']}, bundle: {include: ['dist/tokens.css', 'dist/styles/system.css']}, brand: {roles: manifest.brand?.roles || {}}}));
   }
+  // The site's guidance outside site/ names the parent's system too; it goes
+  // with the site unless edited (structure has already left it out).
+  const siteGuidance = dropsSite ? dropSiteGuidance(original, result, parent.systemId) : null;
   const current = parse(result, 'timds.json');
   current.systemId = systemId; current.name = name || `${manifest.name} offshoot`; current.provider = {kind: 'local'};
   delete current.sourceId;
@@ -225,7 +331,7 @@ async function transformDecodedOffshoot(source, {mode = 'full', systemId, name} 
   // whose selected toolkit reads that key receives it.
   if (!predatesRunningToolkit(selectedToolkitVersion(result))) parent.files = stockHashes(original, stock);
   set('.timds/parent.json', json(parent));
-  return {parent, files: validateSourceFiles(result)};
+  return {parent, files: validateSourceFiles(result), ...(siteGuidance ? {siteGuidance} : {})};
 }
 
 /** Public transforms retain the wire export shape; creation keeps native bytes. */
@@ -306,7 +412,7 @@ export async function loadOffshootSource(systemOrPath, options = {}, {decoded = 
 }
 
 /** Create all files only after validation, and remove the new tree on failure. */
-export async function shootOffshoot({destination, source, mode = 'full', systemId, name, check}) {
+export async function shootOffshoot({destination, source, mode = 'full', systemId, name, check, output}) {
   const target = path.resolve(destination);
   const existing = await fs.lstat(target).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
   if (existing && (!existing.isDirectory() || existing.isSymbolicLink() || (await fs.readdir(target)).length)) throw new Error('Shoot requires a new or empty --root destination');
@@ -328,7 +434,9 @@ export async function shootOffshoot({destination, source, mode = 'full', systemI
     if (existing) await fs.mkdir(target);
     throw error;
   }
-  return {designSystemRoot: target, parent: transformed.parent, files: [...transformed.files.keys()]};
+  // Guidance a dropped site left behind is reported, never silently kept.
+  if (output) for (const note of transformed.siteGuidance?.notes || []) output(note);
+  return {designSystemRoot: target, parent: transformed.parent, files: [...transformed.files.keys()], ...(transformed.siteGuidance ? {siteGuidance: transformed.siteGuidance} : {})};
 }
 
 export async function severOffshoot(root, {confirmed = false} = {}) {

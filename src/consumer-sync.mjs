@@ -22,6 +22,11 @@
 // version read from the provenance stamp, then syncs. A pin of `current`
 // follows every release at the next install instead; `sync` records which
 // version that resolved to.
+//
+// A site inside its Design System's workspace (`designSystem.workspace`) has
+// no pin: it reads the workspace's source directly. `sync` there does nothing
+// and says so (a script that runs it everywhere still passes); `update`, with
+// a version or a draft, refuses, because there is nothing to move.
 
 import { createHash } from "node:crypto";
 import { existsSync, promises as fs } from "node:fs";
@@ -30,6 +35,7 @@ import process from "node:process";
 
 import { BUNDLE_MANIFEST_FILE, BUNDLE_OUTPUT_DIRECTORY, BUNDLE_VERSION_PREFIX, bundleOutputDirectory } from "./bundle.mjs";
 import { CONSUMER_BUNDLE_RECORD_FILE, CONSUMER_MANIFEST_FILE, loadConsumer, publishedBaseUrl } from "./consumer.mjs";
+import { WORKSPACE_PIN_MODE } from "./workspace-site.mjs";
 import { PROVENANCE_FILE } from "./derived.mjs";
 
 export const BUNDLE_RECORD_SCHEMA_VERSION = 1;
@@ -42,7 +48,14 @@ const SYNC_HELP = `Usage:
 sync fetches the Design System bundle the product pins (designSystem.version in
 ${CONSUMER_MANIFEST_FILE}) into designSystem.path, verifying every file's digest;
 it runs from npm's postinstall. update moves the pin to VERSION, or to the
-current published version, then syncs.`;
+current published version, then syncs. A site inside its Design System's
+workspace (designSystem.workspace) has no pin: sync has nothing to fetch and
+update nothing to move.`;
+
+/** Why `update` cannot run for a workspace site, and what does the job instead. */
+function workspaceUpdateRefusal(consumer, what) {
+  return `${CONSUMER_MANIFEST_FILE} at ${consumer.repoRoot} declares designSystem.workspace: the site reads its Design System's workspace${consumer.designSystem.root ? ` (${consumer.designSystem.root})` : ""} directly, so there is no pin to ${what}. A change to the system reaches the site at its next build; to try a draft, check out the draft's branch of the workspace.`;
+}
 
 const sha256Of = (data) => createHash("sha256").update(data).digest("hex");
 const defaultOutput = (message = "") => process.stdout.write(`${message}\n`);
@@ -170,6 +183,10 @@ async function gitignoreCovers(repoRoot, designSystemPath) {
 export async function syncConsumerBundle(rootInput = process.cwd(), { fetchImpl = fetch, output = () => {} } = {}) {
   const consumer = await loadConsumer(rootInput);
   const { designSystem, manifest, repoRoot } = consumer;
+  if (designSystem.mode === WORKSPACE_PIN_MODE) {
+    output(`Nothing to sync: ${CONSUMER_MANIFEST_FILE} declares designSystem.workspace, so the site reads its Design System's workspace${designSystem.root ? ` (${designSystem.root})` : ""} directly.`);
+    return { status: "workspace", version: null, pin: null, location: designSystem.root, downloaded: 0, unchanged: 0, removed: 0, files: 0 };
+  }
   if (designSystem.mode !== "published") {
     throw new Error(`${CONSUMER_MANIFEST_FILE} pins the Design System as a git submodule at ${designSystem.path}; sync applies to a published pin (designSystem.version). See timds consumer init --system.`);
   }
@@ -259,6 +276,7 @@ export async function syncConsumerBundle(rootInput = process.cwd(), { fetchImpl 
 export async function updateConsumerPin(rootInput = process.cwd(), { version = null, fetchImpl = fetch, output = () => {} } = {}) {
   const consumer = await loadConsumer(rootInput);
   const { designSystem, manifest, manifestPath } = consumer;
+  if (designSystem.mode === WORKSPACE_PIN_MODE) throw new Error(workspaceUpdateRefusal(consumer, "move"));
   if (designSystem.mode !== "published") {
     throw new Error(`${CONSUMER_MANIFEST_FILE} pins the Design System as a git submodule at ${designSystem.path}; update applies to a published pin (designSystem.version).`);
   }
@@ -331,6 +349,7 @@ export async function runConsumerUpdate(args = [], { output = defaultOutput } = 
 export async function updateConsumerDraft(rootInput, { draft, portalUrl, token, credentialsPath, fetchImpl = fetch, build, output = defaultOutput } = {}) {
   const consumer = await loadConsumer(rootInput);
   const { designSystem } = consumer;
+  if (designSystem.mode === WORKSPACE_PIN_MODE) throw new Error(workspaceUpdateRefusal(consumer, "override with a draft"));
   if (designSystem.mode !== "published" || designSystem.linked || designSystem.commit) throw new Error("Draft integration requires a published consumer with an ordinary bundle directory");
   const { prepareDraftSource } = await import("./draft-source.mjs");
   const prepared = await prepareDraftSource({ systemId: designSystem.systemId, draft, portalUrl, token, credentialsPath, fetchImpl, build });

@@ -111,10 +111,33 @@ Ordinary designer checks continue to reject pin moves. Keep registration, the sh
 its CLI help and the developer update skill compatible in one release.
 
 `consumer scaffold emdash` creates a new EmDash site repository that consumes
-a Design System. It runs EmDash's own generator, never a vendored template;
+a Design System. It runs EmDash's own generator, never a vendored copy of
+EmDash's template;
 everything it writes beyond the consumer-managed boundary above (the theme,
 the token module, public asset symlinks, `timds.consumer.json`,
 `DESIGN_SYSTEM.md`) is product source from then on, so no upgrade may touch it.
+`consumer scaffold emdash --existing` is withdrawn: `runConsumerScaffold`
+refuses the flag with `EXISTING_WITHDRAWN` and writes nothing, since a
+system's own site lives in its workspace. Its function
+(`scaffoldExistingEmdashSite`), tests and templates stay until they are
+removed, and the rest of this paragraph describes that function, which no
+command reaches. It installs the toolkit's own article
+templates (`templates/emdash/site*`, described by `templates/emdash/site.json`:
+the seed's content model, the article routes, the serializer, the writer's
+contract) into an Astro consumer that already has `timds.consumer.json`. Those
+templates are TimDS's port of the starter's article designs, not EmDash's
+template; keep their markup in step with
+`templates/starter/src/designs/website/`. The mode never overwrites a path or
+edits an existing page, and it refuses a site page at a route a template page
+takes by Astro's file routing (`articles.astro` beside `articles/index.astro`,
+`[id]` beside `[slug]`), naming any dynamic or catch-all page the article
+routes now outrank: it changes only `package.json` and
+`timds.consumer.json`, prints every configuration change it cannot make
+safely, and records the template version in `.timds/emdash.json`. What it
+writes is product source too; a template fix reaches an installed site by
+hand, and the recorded version says how far behind it is. The collection,
+field and taxonomy slugs in the seed are a contract external writers target:
+renaming one is a breaking change.
 The site reads the pinned submodule at build time: never copy stylesheets,
 tokens, or media out of it. The token module mirrors the starter build's
 `--group-name` rule in
@@ -122,6 +145,48 @@ tokens, or media out of it. The token module mirrors the starter build's
 Public assets stay in the pin and are exposed through relative symlinks in
 the site's `public/`; the links and their descendants are protected paths.
 Refuse collisions with generated public files instead of replacing them.
+
+`consumer scaffold emdash --workspace` writes a system's own site into `site/`
+of its Design System workspace, with no pin: the shared template set with
+`templates/emdash/site-workspace/` over it, a generated `package.json`, the
+shipped lockfile, `site/timds.consumer.json` in the workspace form
+(`designSystem: { "workspace": true, "systemId" }`) and
+`site/.timds/emdash.json`. It runs no generator and asks nothing, so one
+release writes the same bytes for the same workspace. Everything in `site/` is
+product source that no upgrade touches. The site is its own package, never an
+npm workspace of the root, and declares no toolkit. The two consumer skills it
+installs in the repository root's `.agents/skills/` and the delimited
+`<!-- timds:emdash-site -->` section it adds to the system's `AGENTS.md` sit
+outside the Design System's managed set and release metadata on purpose: they
+are rendered for the site's manifest, which `upgrade` at the root does not
+read, so `upgrade` neither writes nor reports them; the record keeps their
+hashes (`workspaceFiles`, `workspaceSections`) for a later template update
+command. The site's integration compiles tokens by the same rule as
+`compileTokens` in `src/viewer.mjs` (`--group-name`, `{group.name}` references
+to `var()`), as does `compileTokenCss` in `src/consumer-scaffold.mjs`, and
+names design pages by the catalog's default-state rule in `src/designs.mjs`;
+`src/emdash-workspace-integration.test.mjs` holds them equal, so change them
+together. A posting form in a design renders disabled until the site has a
+handler under `src/forms/`; the template never ships one. Two builds share one
+repository: any command that walks the Design System root (build, check,
+extract, doctor, upgrade, the bundle walk, offshoots, the MCP guard) must
+skip the workspace site (`src/workspace-site.mjs` locates it), and
+`src/workspace-site.test.mjs`, which proves the system's results are the same
+with and without `site/`, must keep passing. An embedded system's `submit`
+carries the two root consumer skills only while the site's record lists them
+in `workspaceFiles` and the repository root is not itself a consumer
+(`workspaceSiteSkillFolders`); a product's own consumer skills never enter a
+system submission. The two-way check and `--require-token` index only what
+the site loads, from source: the stylesheets the selected website design
+links (`designShellStylesheets`, shared with the scaffold's port report), the
+compiled tokens when it links `/tokens.css`, and system sheets a site file
+imports; never `bundle.include`, an unlinked sheet or anything under `dist/`.
+A shoot that drops a workspace site also drops the unedited guidance its
+scaffold wrote outside `site/`, by the hashes in the site's record. `package.json` `emdashTemplate`
+publishes the template version beside `hostContract` and must equal
+`templates/emdash/site.json` `version`: a template change an installed site
+would need to receive raises `version` in both places and adds a `history`
+entry saying what changed.
 
 `upgrade --version VERSION` selects one exact tested resolution, restores the
 bounded requirement, runs `npm ci`, synchronizes adopted managed files with the

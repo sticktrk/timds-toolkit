@@ -367,6 +367,9 @@ npm run timds -- consumer updates 2026.10.27-2 --portal-url https://host.example
 
 Registration requires `timds.consumer.json` at the Git repository root; a
 manifest found only in a subdirectory is refused before contacting the host.
+A site inside its Design System's workspace (`designSystem.workspace`) is
+refused by `register` and `updates`: it follows its system in the same
+change, so there is nothing for a host to follow.
 It reads that manifest, resolves its system ID in the
 signed-in host's catalogue, discovers the GitHub repository from `origin`, and
 posts one source-scoped follower. It prints the signed GitHub App installation
@@ -451,7 +454,11 @@ preview hostname, call `installDraftPreview` from
 fetches an authenticated snapshot, checks an isolated local build and installs
 its digest-verified bundle into the ignored consumer directory. It leaves the
 tracked production version pin untouched. `consumer check` identifies the
-local draft override; `consumer sync` restores the exact published pin.
+local draft override; `consumer sync` restores the exact published pin. A
+workspace site has no pin to override and refuses `--draft`; check out the
+draft's branch of the workspace instead. A hosted session of a system with a
+workspace site carries the site's source and never its dependencies, build
+output, local state or secrets.
 
 `timds mcp read --draft spring-refresh --system-id example/core --portal-url
 https://timds.com` serves the checked draft’s derived layer; every read refreshes

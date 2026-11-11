@@ -1,0 +1,133 @@
+{
+  "version": 1,
+  "dependencies": {
+    "all": {
+      "emdash": "1.4.0",
+      "@astrojs/react": "7.0.0",
+      "react": "19.2.4",
+      "react-dom": "19.2.4"
+    },
+    "cloudflare": {
+      "@emdash-cms/cloudflare": "1.4.0",
+      "@astrojs/cloudflare": "14.3.1"
+    },
+    "node": {
+      "@astrojs/node": "11.1.5"
+    }
+  },
+  "devDependencies": {
+    "all": {},
+    "cloudflare": {
+      "wrangler": "4.125.0",
+      "@cloudflare/workers-types": "5.20260820.1"
+    },
+    "node": {}
+  },
+  "package": {
+    "emdash": {
+      "seed": "seed/seed.json"
+    }
+  },
+  "preview": {
+    "ready": "/_emdash/api/setup/dev-bypass?redirect=/",
+    "routes": ["/articles", "/articles/example-article", "/topics/example-topic"],
+    "designs": {
+      "/articles": "/articles",
+      "/articles/example-article": "/articles/example-article",
+      "/topics/example-topic": "/topics/example-topic"
+    },
+    "discoverExclude": ["/_emdash/**"]
+  },
+  "gitignore": {
+    "all": [".emdash/migrations.json", ".env", ".env.*", "!.env.example"],
+    "cloudflare": [".wrangler", ".dev.vars", ".dev.vars.*"],
+    "node": ["data.db", "data.db-*", "uploads"]
+  },
+  "workspace": {
+    "dependencies": {
+      "astro": "7.4.10"
+    },
+    "devDependencies": {},
+    "scripts": {
+      "dev": "astro dev",
+      "build": "astro build",
+      "preview": "astro preview",
+      "worker": "astro build && wrangler deploy --dry-run --outdir dist/worker"
+    },
+    "renames": {
+      "gitignore": ".gitignore",
+      "env.example": ".env.example"
+    }
+  },
+  "manual": {
+    "cloudflare": [
+      {
+        "file": "astro.config.mjs",
+        "summary": "Add the Cloudflare adapter with imageService \"passthrough\", output \"server\", react() and emdash() with D1, R2, migrations check, MCP on and registry off.",
+        "snippet": "manual/astro.config.cloudflare.mjs"
+      },
+      {
+        "file": "wrangler.jsonc",
+        "summary": "Point main at src/worker.ts and add nodejs_compat, the DB and MEDIA bindings, the EMDASH_SITE_URL var and a cron trigger; no LOADER binding.",
+        "snippet": "manual/wrangler.jsonc"
+      },
+      {
+        "file": "src/pages/**/*.astro",
+        "summary": "Add export const prerender = true to every existing page that should stay static now that output is \"server\".",
+        "snippet": "manual/prerender.astro"
+      },
+      {
+        "file": "src/pages/sitemap.xml.ts",
+        "summary": "If the site has a sitemap, add the article and topic URLs from src/lib/articles/sitemap.ts and serve it on request.",
+        "snippet": "manual/sitemap.xml.ts"
+      },
+      {
+        "file": ".env",
+        "summary": "Generate EMDASH_ENCRYPTION_KEY with npx emdash secrets generate --write .env, store it with wrangler secret put, and back it up.",
+        "snippet": "manual/env.example"
+      },
+      {
+        "file": "src/live.config.ts",
+        "summary": "If the site already had this file, add the _emdash live collection to its exported collections.",
+        "snippet": "manual/live.config.ts"
+      },
+      {
+        "file": "tsconfig.json",
+        "summary": "Include emdash-env.d.ts and worker-configuration.d.ts (from npx wrangler types).",
+        "snippet": "manual/tsconfig.json"
+      }
+    ],
+    "node": [
+      {
+        "file": "astro.config.mjs",
+        "summary": "Add the Node adapter, output \"server\", react() and emdash() with SQLite, local storage, MCP on and registry off.",
+        "snippet": "manual/astro.config.node.mjs"
+      },
+      {
+        "file": "src/pages/**/*.astro",
+        "summary": "Add export const prerender = true to every existing page that should stay static now that output is \"server\".",
+        "snippet": "manual/prerender.astro"
+      },
+      {
+        "file": "src/pages/sitemap.xml.ts",
+        "summary": "If the site has a sitemap, add the article and topic URLs from src/lib/articles/sitemap.ts and serve it on request.",
+        "snippet": "manual/sitemap.xml.ts"
+      },
+      {
+        "file": ".env",
+        "summary": "Generate EMDASH_ENCRYPTION_KEY with npx emdash secrets generate --write .env, set it and EMDASH_SITE_URL in the host's environment, and back the key up.",
+        "snippet": "manual/env.example"
+      },
+      {
+        "file": "src/live.config.ts",
+        "summary": "If the site already had this file, add the _emdash live collection to its exported collections.",
+        "snippet": "manual/live.config.ts"
+      },
+      {
+        "file": "tsconfig.json",
+        "summary": "Include emdash-env.d.ts, which astro dev generates from the content model.",
+        "snippet": "manual/tsconfig.json"
+      }
+    ]
+  }
+}

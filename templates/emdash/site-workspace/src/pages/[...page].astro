@@ -1,0 +1,40 @@
+---
+/**
+ * Every page of the Design System's website design that is not an article,
+ * topic or list route (home, about, contact, privacy, terms, ...), built from
+ * the design file itself: there is one copy, in the system, and editing the
+ * design is editing the page. Any other address gets the 404 page.
+ *
+ * The pages are rendered on request from what the build read out of the
+ * design, not prerendered: EmDash's middleware runs for prerendered routes
+ * too, and with `migrations.runtime: "check"` it answers 503 on a build
+ * machine whose local database has no migrations, which would become the
+ * page. They change only with a deploy, so shared caches may keep them.
+ *
+ * A page is read with GET or HEAD. A POST to an address with a handler under
+ * src/forms/ never reaches this route: the integration's middleware
+ * (src/integrations/form-dispatch.mjs) answers it first. Any other method,
+ * and a POST with no handler, gets 405 with the methods the address accepts,
+ * so nothing sent to it is taken in silently.
+ */
+import { pages } from "virtual:timds/design-system";
+
+import DesignPage from "../components/DesignPage.astro";
+
+export const prerender = false;
+
+const route = `/${Astro.params.page ?? ""}`.replace(/\/+$/, "") || "/";
+const page = route === "/404" ? undefined : pages.find((candidate) => candidate.route === route);
+const method = Astro.request.method;
+if (method !== "GET" && method !== "HEAD") {
+	if (!page) return new Response("Not found", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+	return new Response(`${method} is not accepted at this address.`, {
+		status: 405,
+		headers: { Allow: "GET, HEAD", "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
+	});
+}
+if (!page) return Astro.rewrite("/404");
+Astro.response.headers.set("Cache-Control", "public, max-age=300");
+---
+
+<DesignPage page={page} />

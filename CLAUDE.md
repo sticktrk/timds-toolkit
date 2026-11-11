@@ -184,8 +184,21 @@ to the running release without lifecycle scripts, restores the bounded root
 requirement, and includes the lock in the installation's writes and rollback.
 Published-mode init runs `npm ci` so the postinstall uses that resolution;
 `--skip-install` refuses older locks before writing. `consumer.mjs` reports a
-lock that predates published-pin support and resolves either pin mode (published
-record or submodule gitlink) for `check`. `derived.mjs` is the
+lock that predates published-pin support and resolves the pin for `check`:
+the published record, the submodule gitlink, or, in the workspace form
+(`designSystem: { workspace: true, systemId }`, a site in `site/` of its own
+Design System), no pin at all: `workspace-site.mjs` holds the locator and
+constants (the system is the nearest folder above the site holding
+`timds.json`; `findConsumerManifestRoot` looks only up, so the workspace root
+stays a plain Design System), `sync` there does nothing, `update`, `migrate`,
+`register`, `updates`, `init`, `upgrade` and binary adoption refuse, and with
+`--base` a change outside the site has status `system`.
+`consumer-workspace-check.mjs` is that form's two-way check, which `check`
+runs (`--no-fix`, `workspaceCheck` in `--json`): a color or `font-family`
+literal equal to exactly one document-scope token is rewritten to it, and a
+literal with no token, an ambiguous one, a token override or an undeclared
+class is a finding to resolve by adding to the system; it never writes the
+system. `derived.mjs` is the
 read side: `readDerivedLayer` (local) and `fetchDerivedLayer` (published URL)
 return the same shape. `artifact.mjs` publishes that layer to the portal CDN
 via `extract --publish`. Everything downstream (MCP read server, video brand
@@ -267,7 +280,8 @@ lifecycle belong to the host.
 
 `src/offshoot-contract.mjs` validates `.timds/parent.json` and the designer's
 exact-file `.timds/stock.json` declarations. `src/offshoots.mjs` implements
-local `shoot` from immutable hosted or Git source and confirmed `sever`;
+local `shoot` from immutable hosted or Git source (never carrying a
+workspace site) and confirmed `sever`;
 `src/feed.mjs` reuses the starter's catalog merges with parent stock,
 dirty-file guards and rollback; it carries no code and never writes plumbing.
 While a parent record exists, ordinary starter sync updates plumbing only and
@@ -277,7 +291,22 @@ Public lineage appears in derived readers and publication stamps;
 session edits cannot change the parent record. See `docs/offshoots.md`.
 
 `templates/` is copied verbatim (with `__PLACEHOLDER__` substitution) by `init`
-and `video init`. `templates/starter/` is the standalone repo scaffold including
+and `video init`. `templates/emdash/` holds the EmDash scaffold's files: the
+fresh scaffold's theme, docs and deploy workflow, and the shared template set
+the workspace mode installs and the withdrawn `--existing` mode installed
+(the CLI refuses `--existing` with `EXISTING_WITHDRAWN` and writes nothing;
+`scaffoldExistingEmdashSite` stays with its tests until removed) (`site/` for both platforms,
+`site-cloudflare/` and `site-node/`, the printed `manual/` snippets, and
+`site.json` with the dependencies, package keys, preview routes and design
+pairs, `.gitignore` lines and manual changes; its `version` is the template
+version a site records, equal to `package.json` `emdashTemplate.version`).
+`templates/emdash/site-workspace/` and `AGENTS-workspace-site.md` are the
+workspace mode's overlay and the system `AGENTS.md` section; the site's
+`src/integrations/design-system.mjs` mirrors the starter build's token rule
+(`--group-name`, `{group.name}` references to `var()`) and the designs
+catalog's default-state rule, held equal by
+`src/emdash-workspace-integration.test.mjs`, and renders a posting form
+disabled until the site has a handler under `src/forms/`. `templates/starter/` is the standalone repo scaffold including
 its release scripts; `templates/*.yml` are the stock workflows.
 `templates/brand-kit/` overlays only the second starter's catalogs, token and
 copy samples, stock declaration, styles, layout, pages and empty Designs
@@ -292,7 +321,13 @@ The starter is client-owned once copied, except the plumbing and catalogs
 `@dtconcepts/timds/viewer` (`src/viewer.mjs`) with the system's root, falling
 back to the running CLI's renderer (`TIMDS_VIEWER_MODULE`, set for workspace
 commands) before the first install, and the build then runs
-`timds.json` `workspace.after.build` commands. `src/viewer.mjs` renders
+`timds.json` `workspace.after.build` commands. Its `dev` builds once and
+serves `dist/`; when `site/timds.consumer.json` declares the workspace form it
+also starts the site's `preview.serve` with `TIMDS_SITE_BASE=/site` and
+`TIMDS_SITE_PORT` and proxies `/site/**`, EmDash's and Vite's reserved root
+routes, `/src/**` and every websocket to it (`src/site-proxy.mjs`, whose
+module comment is the routing table), serving the system alone when the site
+is not installed or fails. `src/viewer.mjs` renders
 `src/site.json` (views and pages, authored or `planned`), `src/layout.html`,
 and the fragments under `src/pages/` into `dist/`, filling `{{tokens:GROUP}}`
 tables from `tokens.json` and `{{formats:GROUP}}` tables and `{{canvas:ID}}`
@@ -329,9 +364,15 @@ of ideas, not a mirror. Planned pages are never built, so a fresh scaffold
 keeps its two expected brand warnings. The kit instead authors its Voice page,
 reports the assumed sample voice, and reports no logo until its media is filled.
 Its template formats render in Minimal, Accent, Bold and Photo treatments.
-The ordinary starter's sample design uses the site layout
-block in `src/styles/system.css` (between its marker comments), which
+The ordinary starter's sample design (`website`: home, the default About,
+Contact, Privacy, Terms and 404 pages, and the article list, article and topic
+designs, 9 pages, 11 states, 2 journeys) uses the site layout
+block in `src/styles/system.css` (between its marker comments, the article's
+`prose` wrapper included), which
 `designs init` appends to a migrating system that kept the starter tokens.
+`/articles/example-article` and `/topics/example-topic` are fixed sample
+routes, since designs have no dynamic routes; a site that seeds an entry at
+each slug pairs the route with its design in a preview.
 `templates/design-system-AGENTS.md`, `design-system-CLAUDE.md`, and
 `design-system-README.md` are the scaffolded agent and human entry points;
 they are written once and then client-owned, so keep them accurate for a fresh
@@ -385,7 +426,20 @@ behavior.
   `consumer-register.mjs` (`register`, `updates`), `consumer-notes.mjs`
   (`notes`), `consumer-preview.mjs` with `consumer-browser.mjs` and
   `consumer-png.mjs` (`preview`), `consumer-scaffold.mjs` (`scaffold
-  emdash`), and `consumer-draft-preview.mjs` with `draft-source.mjs` (the
+  emdash`; `--existing` is withdrawn and refused; its function installs the shared EmDash template set,
+  `templates/emdash/site/`, `site-<platform>/` and `site.json`, into an Astro
+  consumer and records `.timds/emdash.json`, which `upgrade` never touches),
+  `consumer-scaffold-workspace.mjs` (`scaffold emdash --workspace`: the
+  shared set with `templates/emdash/site-workspace/` laid over it (renames in
+  `site.json` `workspace`), a generated `package.json`, the workspace-form
+  manifest and a record with a hash per template file, `workspaceFiles` and
+  `workspaceSections`; the consumer skills go in the repository root's
+  `.agents/skills/` and a `<!-- timds:emdash-site -->` section from
+  `templates/emdash/AGENTS-workspace-site.md` in the system's `AGENTS.md`;
+  refusals before the first write, one rollback, then `npm ci`),
+  `consumer-workspace-check.mjs` (the two-way check), `workspace-site.mjs`
+  (the locator the system's commands import to skip `site/`), `site-proxy.mjs`
+  (the dev proxy), and `consumer-draft-preview.mjs` with `draft-source.mjs` (the
   browser module and local draft source of `init --draft-preview`).
 - Video runtime: `src/video-transport.mjs` (Zod 3 wire schemas),
   `video-runtime.mjs` and `video-component-loader.mjs` (loading a client's

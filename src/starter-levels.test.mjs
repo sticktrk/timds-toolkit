@@ -324,7 +324,7 @@ test("the stub scripts resolve the renderer from an installed package without an
   await fs.rm(path.join(system.root, "dist"), { recursive: true, force: true });
   const out = execFileSync(process.execPath, ["scripts/build.mjs"], { cwd: system.root, env, encoding: "utf8" });
   assert.match(out, /Built starter viewer with \d+ pages/);
-  assert.match(out, /Built 2 design pages/);
+  assert.match(out, /Built 9 design pages \(11 states\)/);
   assert.match(execFileSync(process.execPath, ["scripts/check.mjs"], { cwd: system.root, env, encoding: "utf8" }), /Validated \d+ token groups/);
   // Before the first install a direct run says what is missing.
   await fs.rm(path.join(system.root, "node_modules"), { recursive: true });

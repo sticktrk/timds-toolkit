@@ -26,6 +26,7 @@ import {
   workspaceCommandEnvironment,
 } from "./core.mjs";
 import { VIDEO_HELP } from "./video.mjs";
+import { byTag, classList, findAll, findOne, hasClass, parseHtml, textOf } from "./html.mjs";
 import { describeStarterSync, forceReplaceable, starterManagedFragments, starterPlumbingFiles } from "./starter.mjs";
 import { prepareMergeRelease } from "../templates/starter/scripts/prepare-merge-release.mjs";
 import {
@@ -50,6 +51,20 @@ const templatesRoot = fileURLToPath(new URL("../templates/", import.meta.url));
 // A scaffold in a temporary folder has no node_modules: the stub scripts find
 // the renderer the way they do under timds check before the first install.
 const viewerEnv = workspaceCommandEnvironment();
+// The starter's sample website design: every route with its states, in the
+// order designs.json lists them. The article and topic slugs are fixed sample
+// routes a site scaffold seeds, so a preview pairs each with its design.
+const STARTER_DESIGN_ROUTES = [
+  ["/", ["default"]],
+  ["/404", ["default"]],
+  ["/about", ["default"]],
+  ["/articles", ["default", "empty"]],
+  ["/articles/example-article", ["default"]],
+  ["/contact", ["default", "sent"]],
+  ["/privacy", ["default"]],
+  ["/terms", ["default"]],
+  ["/topics/example-topic", ["default"]],
+];
 
 
 function gitInit(repoRoot) {
@@ -784,6 +799,90 @@ test("refuses submit from a branch containing unrelated committed changes", asyn
   );
 });
 
+/**
+ * An embedded system, committed, whose product root holds a consumer skill;
+ * the skill is then edited and the system gains a release note, so the only
+ * question left for submit is whether the skill is the system's to carry.
+ * `site` writes a workspace site with that record before the commit.
+ */
+async function embeddedSubmitWithRootConsumerSkill(t, { site = null, rootConsumer = false } = {}) {
+  const repoRoot = await createDesignSystemRepo(t);
+  await initializeRepository(repoRoot);
+  const skill = path.join(repoRoot, ".agents", "skills", "timds-consume-design-system", "SKILL.md");
+  await fs.mkdir(path.dirname(skill), { recursive: true });
+  await fs.writeFile(skill, "# Consume the Design System\n", "utf8");
+  if (rootConsumer) await writeJson(path.join(repoRoot, "timds.consumer.json"), { schemaVersion: 1 });
+  if (site) {
+    await writeJson(path.join(repoRoot, "design-system", "site", "timds.consumer.json"), { schemaVersion: 1, designSystem: { workspace: true, systemId: "test/core" } });
+    await writeJson(path.join(repoRoot, "design-system", "site", ".timds", "emdash.json"), site);
+  }
+  execFileSync("git", ["add", "--all"], { cwd: repoRoot });
+  execFileSync("git", ["commit", "-m", "Initialize TimDS"], { cwd: repoRoot, stdio: "ignore" });
+  await fs.appendFile(skill, "\nA local note.\n", "utf8");
+  const changelogPath = path.join(repoRoot, "design-system", "CHANGELOG.md");
+  await fs.writeFile(changelogPath, (await fs.readFile(changelogPath, "utf8")).replace("## Unreleased\n", "## Unreleased\n\n- Guidance: a consumer skill note.\n"));
+  return repoRoot;
+}
+
+const SITE_SKILL = ".agents/skills/timds-consume-design-system";
+const siteRecord = (workspaceFiles) => ({ template: 1, platform: "cloudflare", mode: "workspace", files: {}, workspaceFiles, workspaceSections: {} });
+
+test("submit in an embedded system without a workspace site keeps the product's consumer skills out", async (t) => {
+  const repoRoot = await embeddedSubmitWithRootConsumerSkill(t);
+  await assert.rejects(
+    submitWorkspace(repoRoot, "Edit the consumer skill", { dryRun: true, noBuild: true }),
+    /outside the TimDS scope[\s\S]*timds-consume-design-system\/SKILL\.md/,
+  );
+  // The system's own change is carried, and the staging command never names the product's skill.
+  await fs.writeFile(path.join(repoRoot, SITE_SKILL, "SKILL.md"), "# Consume the Design System\n", "utf8");
+  await writeJson(path.join(repoRoot, "design-system", "tokens.json"), { color: { gold: "#a8863f" } });
+  const result = await submitWorkspace(repoRoot, "Darken the gold", { dryRun: true, noBuild: true });
+  const add = result.commands.find((command) => command[1] === "add");
+  assert.ok(!add.includes(SITE_SKILL), add.join(" "));
+});
+
+test("submit in an embedded system carries the consumer skills its workspace site's record owns", async (t) => {
+  const repoRoot = await embeddedSubmitWithRootConsumerSkill(t, { site: siteRecord({ [`${SITE_SKILL}/SKILL.md`]: "0".repeat(64) }) });
+  const result = await submitWorkspace(repoRoot, "Edit the consumer skill", { dryRun: true, noBuild: true });
+  const add = result.commands.find((command) => command[1] === "add");
+  assert.ok(add.includes(SITE_SKILL), add.join(" "));
+  assert.ok(!add.includes(".agents/skills/timds-update-design-system"), "a skill the record does not list is not staged");
+});
+
+test("submit stages the deletion of an owned consumer skill folder and leaves out an owned one that was never there", async (t) => {
+  const UPDATE_SKILL = ".agents/skills/timds-update-design-system";
+  const repoRoot = await embeddedSubmitWithRootConsumerSkill(t, {
+    site: siteRecord({ [`${SITE_SKILL}/SKILL.md`]: "0".repeat(64), [`${UPDATE_SKILL}/SKILL.md`]: "0".repeat(64) }),
+  });
+  await fs.rm(path.join(repoRoot, SITE_SKILL), { recursive: true, force: true });
+  const planned = await submitWorkspace(repoRoot, "Remove the consumer skill", { dryRun: true, noBuild: true });
+  const add = planned.commands.find((command) => command[1] === "add");
+  assert.ok(add.includes(SITE_SKILL), `a deleted, tracked owned folder is staged: ${add.join(" ")}`);
+  assert.ok(!add.includes(UPDATE_SKILL), "an owned folder that neither exists nor is tracked would make git add fail");
+
+  const result = await submitWorkspace(repoRoot, "Remove the consumer skill", { noBuild: true, noPush: true });
+  assert.equal(result.dryRun, false);
+  const removed = execFileSync("git", ["show", "--name-status", "--format=", "HEAD"], { cwd: repoRoot, encoding: "utf8" });
+  assert.match(removed, new RegExp(`^D\\t${SITE_SKILL}/SKILL\\.md$`, "m"), removed);
+  assert.match(removed, /^M\tdesign-system\/CHANGELOG\.md$/m, removed);
+  assert.equal(execFileSync("git", ["status", "--porcelain", "--untracked-files=all"], { cwd: repoRoot, encoding: "utf8" }), "");
+});
+
+test("submit refuses the root consumer skills when the workspace site's record does not own them, or the root is a consumer", async (t) => {
+  for (const [label, options] of [
+    ["record without the skill", { site: siteRecord({ ".agents/skills/timds-update-design-system/SKILL.md": "0".repeat(64) }) }],
+    ["record of another mode", { site: { ...siteRecord({ [`${SITE_SKILL}/SKILL.md`]: "0".repeat(64) }), mode: "existing" } }],
+    ["root consumer", { site: siteRecord({ [`${SITE_SKILL}/SKILL.md`]: "0".repeat(64) }), rootConsumer: true }],
+  ]) {
+    const repoRoot = await embeddedSubmitWithRootConsumerSkill(t, options);
+    await assert.rejects(
+      submitWorkspace(repoRoot, "Edit the consumer skill", { dryRun: true, noBuild: true }),
+      /outside the TimDS scope[\s\S]*timds-consume-design-system\/SKILL\.md/,
+      label,
+    );
+  }
+});
+
 test("preview server resolves entry, assets, and static routes", async (t) => {
   const repoRoot = await createDesignSystemRepo(t);
   await fs.mkdir(path.join(repoRoot, "design-system", "dist", "brand"), { recursive: true });
@@ -1140,7 +1239,7 @@ test("the starter viewer renders its site model, and its build guards pages, pla
   assert.match(changelogPage, /<p class="td-changelog-agents">AI agents: start at <a href="\/llms\.txt">\/llms\.txt<\/a>\.<\/p>\n  <\/body>/);
   // The sample website design is listed by the viewer and built by TimDS as whole pages, states beside them.
   assert.match(overview, /<a class="appbar__view" href="\/designs\/"><b>Designs<\/b>/);
-  assert.match(overview, /<a href="\/designs\/website\/">Marketing site<\/a><\/td><td>Designs<\/td>[\s\S]*?<td>2 pages<\/td>/);
+  assert.match(overview, /<a href="\/designs\/website\/">Marketing site<\/a><\/td><td>Designs<\/td>[\s\S]*?<td>9 pages<\/td>/);
   assert.match(await read("dist/designs/index.html"), /<a href="\/designs\/website\/contact\/sent\.html">sent<\/a>/);
   const contact = await read("dist/designs/website/contact/index.html");
   assert.match(contact, /<a class="site-header__brand" href="\/designs\/website\/">Client &amp; Co<\/a>/, "site routes point at the design's place in the artifact");
@@ -1165,8 +1264,8 @@ test("the starter viewer renders its site model, and its build guards pages, pla
   assert.deepEqual(machine.warnings.map((warning) => warning.split(":")[0]), ["guidance group voice is empty", 'no asset is annotated data-timds-role="logo"; the brand kit has no logo']);
   assert.equal(machine.formats.count, 48);
   assert.ok(machine.formats.groups.flatMap((group) => group.formats).every((format) => format.planned === true && !format.pageUrl));
-  assert.deepEqual(designs, { enabled: true, designCount: 1, pageCount: 2, stateCount: 3, journeyCount: 1, warnings: [] }, "the sample journey covers the sample's pages, so a fresh scaffold has no journey warning");
-  assert.deepEqual(machine.index.designs, { url: "/designs.json", count: 1, pages: 2, states: 3, journeys: 1 });
+  assert.deepEqual(designs, { enabled: true, designCount: 1, pageCount: 9, stateCount: 11, journeyCount: 2, warnings: [] }, "the sample journeys cover the sample's pages with states, so a fresh scaffold has no journey warning");
+  assert.deepEqual(machine.index.designs, { url: "/designs.json", count: 1, pages: 9, states: 11, journeys: 2 });
   assert.match(await read("dist/designs/index.html"), /<a class="td-directory-journey" href="\/designs\/website\/journeys\/get-in-touch\/">/);
   assert.match(await read("dist/designs/index.html"), /<link rel="llms-txt" type="text\/plain" href="\/llms\.txt">[\s\S]*<p class="td-directory-agents">AI agents: start at <a href="\/llms\.txt">\/llms\.txt<\/a>\.<\/p>\n  <\/body>/, "the designs directory points at the entry point");
   assert.doesNotMatch(await read("dist/designs/website/contact/index.html"), /llms-txt|class="agents"/, "a design is the page as authored");
@@ -1174,21 +1273,23 @@ test("the starter viewer renders its site model, and its build guards pages, pla
   assert.match(await read("dist/robots.txt"), /entry point is \/llms\.txt/);
   assert.match(await read("dist/designs/website/journeys/get-in-touch/index.html"), /<iframe src="\/designs\/website\/contact\/sent\.html" title="Message sent"/);
   const designsDocument = JSON.parse(await read("dist/designs.json"));
-  assert.deepEqual(designsDocument.designs[0].pages.map((page) => [page.route, page.title, page.states.map((state) => state.name)]), [["/", "Home", ["default"]], ["/contact", "Contact", ["default", "sent"]]]);
+  assert.deepEqual(designsDocument.designs[0].pages.map((page) => [page.route, page.states.map((state) => state.name)]), STARTER_DESIGN_ROUTES);
+  assert.deepEqual(designsDocument.designs[0].pages.slice(0, 1).map((page) => [page.route, page.title]), [["/", "Home"]]);
 
   // JavaScript survives the complete build/check/extraction path without running on the build host.
-  await fs.writeFile(path.join(repoRoot, "src/designs/website/pages/about.html"), '<section class="hero"><h1>About</h1><button onclick="this.textContent=\'Done\'">Try</button><script src="/assets/interactions.js"></script></section>\n');
+  // The route is one the starter does not ship, so the stock pages stay as they are.
+  await fs.writeFile(path.join(repoRoot, "src/designs/website/pages/pricing.html"), '<section class="hero"><h1>Pricing</h1><button onclick="this.textContent=\'Done\'">Try</button><script src="/assets/interactions.js"></script></section>\n');
   await fs.mkdir(path.join(repoRoot, "src/assets"), { recursive: true });
   await fs.writeFile(path.join(repoRoot, "src/assets/interactions.js"), 'document.body.dataset.ready = "true";');
-  assert.equal((await checkWorkspace(repoRoot)).designs.pageCount, 3);
-  assert.match(await read("dist/designs/website/about/index.html"), /<script src="\/assets\/interactions\.js"><\/script>/);
+  assert.equal((await checkWorkspace(repoRoot)).designs.pageCount, STARTER_DESIGN_ROUTES.length + 1);
+  assert.match(await read("dist/designs/website/pricing/index.html"), /<script src="\/assets\/interactions\.js"><\/script>/);
   assert.equal(await read("dist/assets/interactions.js"), 'document.body.dataset.ready = "true";');
 
   // A design may use only what the system defines; check names the file and what it reached for.
-  await fs.writeFile(path.join(repoRoot, "src/designs/website/pages/about.html"), '<section class="hero fancy"><h1>About</h1><p style="color:red">x</p><script>1</script></section>\n');
-  await assert.rejects(checkWorkspace(repoRoot), (error) => /src\/designs\/website\/pages\/about\.html: uses classes the linked stylesheets do not declare \(fancy\)/.test(error.message)
-    && /about\.html: 1 element has a style attribute/.test(error.message));
-  await fs.rm(path.join(repoRoot, "src/designs/website/pages/about.html"));
+  await fs.writeFile(path.join(repoRoot, "src/designs/website/pages/pricing.html"), '<section class="hero fancy"><h1>Pricing</h1><p style="color:red">x</p><script>1</script></section>\n');
+  await assert.rejects(checkWorkspace(repoRoot), (error) => /src\/designs\/website\/pages\/pricing\.html: uses classes the linked stylesheets do not declare \(fancy\)/.test(error.message)
+    && /pricing\.html: 1 element has a style attribute/.test(error.message));
+  await fs.rm(path.join(repoRoot, "src/designs/website/pages/pricing.html"));
   // A state without its default page, and a view that would collide with the designs output, both stop the build.
   await fs.writeFile(path.join(repoRoot, "src/designs/website/pages/orders.empty.html"), "<h1>No orders</h1>\n");
   // The stock build renders the designs itself; a captured run carries its error output.
@@ -1247,6 +1348,83 @@ test("the starter viewer renders its site model, and its build guards pages, pla
 });
 
 
+test("the starter's sample website design ships the default pages and the article designs", async (t) => {
+  const repoRoot = await temporaryDirectory(t);
+  await initializeRepository(repoRoot, { standalone: true, name: "Client & Co" });
+  const read = (relative) => fs.readFile(path.join(repoRoot, relative), "utf8");
+  const { designs, machine } = await checkWorkspace(repoRoot);
+  const stateCount = STARTER_DESIGN_ROUTES.reduce((count, [, states]) => count + states.length, 0);
+  assert.deepEqual([STARTER_DESIGN_ROUTES.length, stateCount], [9, 11]);
+  assert.deepEqual(designs, { enabled: true, designCount: 1, pageCount: 9, stateCount: 11, journeyCount: 2, warnings: [] });
+  // A fresh scaffold keeps its two expected brand warnings; the new pages add none.
+  assert.deepEqual(machine.warnings.map((warning) => warning.split(":")[0]), ["guidance group voice is empty", 'no asset is annotated data-timds-role="logo"; the brand kit has no logo']);
+
+  // Every route and state is built under the design's place in the artifact.
+  for (const [route, states] of STARTER_DESIGN_ROUTES) {
+    const directory = path.join("dist/designs/website", route === "/" ? "" : route);
+    for (const state of states) {
+      assert.match(await read(path.join(directory, state === "default" ? "index.html" : `${state}.html`)), /class="site-header/, `${route} ${state}`);
+    }
+  }
+
+  const document = JSON.parse(await read("dist/designs.json"));
+  assert.deepEqual([document.pageCount, document.stateCount, document.journeyCount], [9, 11, 2]);
+  const [website] = document.designs;
+  assert.deepEqual([website.id, website.title], ["website", "Marketing site"]);
+  assert.deepEqual(website.pages.map((page) => [page.route, page.states.map((state) => state.name)]), STARTER_DESIGN_ROUTES);
+
+  // Two journeys: getting in touch, and reading an article from the list (its empty state a branch) to the topic.
+  assert.deepEqual(website.journeys.map((journey) => [journey.id, journey.title]), [["get-in-touch", "Getting in touch"], ["read-an-article", "Reading an article"]]);
+  const reading = website.journeys[1];
+  const screens = reading.steps.flatMap((step) => step.screens.map((screen) => [screen.route, screen.state]));
+  const branches = reading.steps.flatMap((step) => step.branches.map((screen) => [screen.route, screen.state]));
+  assert.deepEqual(screens, [["/articles", "default"], ["/articles/example-article", "default"], ["/topics/example-topic", "default"]]);
+  assert.deepEqual(branches, [["/articles", "empty"]]);
+  assert.equal(reading.url, "/designs/website/journeys/read-an-article/");
+  const storyboard = await read("dist/designs/website/journeys/read-an-article/index.html");
+  for (const url of ["/designs/website/articles/", "/designs/website/articles/empty.html", "/designs/website/articles/example-article/", "/designs/website/topics/example-topic/"]) {
+    assert.ok(storyboard.includes(`<iframe src="${url}"`), `the storyboard shows ${url}`);
+  }
+  assert.match(await read("dist/designs/index.html"), /<a class="td-directory-journey" href="\/designs\/website\/journeys\/read-an-article\/">/);
+
+  // Every page carries the header navigation (Home, Articles, About, Contact) and a footer linking Privacy and Terms.
+  for (const [route] of STARTER_DESIGN_ROUTES) {
+    const page = parseHtml(await read(path.join("dist/designs/website", route === "/" ? "" : route, "index.html")));
+    const nav = findOne(page, (node) => hasClass(node, "site-nav"));
+    assert.ok(nav, `${route} has the site navigation`);
+    assert.deepEqual(byTag(nav, "a").map((link) => [textOf(link).trim(), link.attrs.href]), [
+      ["Home", "/designs/website/"],
+      ["Articles", "/designs/website/articles/"],
+      ["About", "/designs/website/about/"],
+      ["Contact", "/designs/website/contact/"],
+    ], `${route} navigation`);
+    const footer = findOne(page, (node) => hasClass(node, "site-footer"));
+    assert.ok(footer, `${route} has the site footer`);
+    const footerLinks = byTag(footer, "a").map((link) => link.attrs.href);
+    for (const href of ["/designs/website/privacy/", "/designs/website/terms/"]) assert.ok(footerLinks.includes(href), `${route} footer links ${href}`);
+  }
+
+  // The article body is one prose wrapper of plain semantic elements, so a site styles rendered rich text with one class.
+  const article = parseHtml(await read("dist/designs/website/articles/example-article/index.html"));
+  const proses = findAll(article, (node) => hasClass(node, "prose"));
+  assert.equal(proses.length, 1, "one prose wrapper");
+  const [prose] = proses;
+  for (const tag of ["h2", "h3", "p", "strong", "em", "code", "ul", "ol", "li", "blockquote", "pre", "figure", "figcaption", "table"]) {
+    assert.ok(byTag(prose, tag).length, `the prose holds a ${tag}`);
+  }
+  assert.ok(byTag(prose, "a").some((link) => link.attrs.href), "the prose holds a link");
+  const insidePre = new Set(byTag(prose, "pre").flatMap((pre) => byTag(pre, "code")));
+  assert.ok(byTag(prose, "code").some((code) => !insidePre.has(code)), "the prose holds inline code outside the pre");
+  assert.ok(byTag(prose, "figure").some((figure) => byTag(figure, "figcaption").length), "a figure carries its caption");
+  // Its elements are styled by the prose wrapper, not by classes of their own.
+  const classed = [...byTag(prose, "h2"), ...byTag(prose, "p"), ...byTag(prose, "blockquote"), ...byTag(prose, "table")].filter((node) => classList(node).length);
+  assert.deepEqual(classed, [], "the prose elements are plain");
+  // A table keeps its semantics and scrolls inside the one classed wrapper a body holds.
+  const scrollers = findAll(prose, (node) => hasClass(node, "table-scroll"));
+  assert.equal(scrollers.length, 1, "one table wrapper");
+  assert.equal(byTag(scrollers[0], "table").length, 1, "the table sits inside its scroll wrapper");
+});
+
 test("designs init adopts website designs in a system scaffolded without them", async (t) => {
   const repoRoot = await temporaryDirectory(t);
   await initializeRepository(repoRoot, { standalone: true });
@@ -1260,13 +1438,17 @@ test("designs init adopts website designs in a system scaffolded without them", 
   await fs.appendFile(path.join(repoRoot, "scripts/build.mjs"), "// client change\n");
 
   const result = await initializeDesigns(repoRoot);
-  await fs.access(path.join(repoRoot, "src/designs/website/pages/contact.sent.html"));
+  for (const relative of ["contact.sent.html", "about.html", "privacy.html", "terms.html", "404.html", "articles/example-article.html", "topics/example-topic.html"]) {
+    await fs.access(path.join(repoRoot, "src/designs/website/pages", relative));
+  }
   assert.equal(result.stylesheet, "appended", "the stock token names let the layout block be restored");
-  assert.deepEqual(result.missingClasses, []);
-  assert.match(await read("src/styles/system.css"), /\/\* ---- site layout ---- \*\/[\s\S]*\.site-footer/);
+  assert.deepEqual(result.missingClasses, [], "the appended block declares every class the default pages and the article designs use");
+  const appended = (await read("src/styles/system.css")).split("/* ---- site layout ---- */")[1] ?? "";
+  assert.match(appended, /\.site-footer\b/);
+  assert.match(appended, /\.prose\b/, "the article's prose wrapper is part of the layout block");
   assert.match(await read("scripts/build.mjs"), /client change/, "designs init never touches a script");
   const checked = await checkWorkspace(repoRoot);
-  assert.equal(checked.designs.pageCount, 2);
+  assert.deepEqual([checked.designs.pageCount, checked.designs.stateCount, checked.designs.journeyCount, checked.designs.warnings], [9, 11, 2, []]);
   await assert.rejects(initializeDesigns(repoRoot), /src\/designs\/ already exists/);
 
   // A system that renamed its tokens is told which classes the sample needs rather than given a block that would not resolve.
@@ -1278,7 +1460,15 @@ test("designs init adopts website designs in a system scaffolded without them", 
   await fs.rename(path.join(repoRoot, "tokens/space.json"), path.join(repoRoot, "tokens/spacing.json"));
   const renamed = await initializeDesigns(repoRoot);
   assert.equal(renamed.stylesheet, "untouched");
-  assert.deepEqual(renamed.missingClasses, ["form", "hero", "notice", "section", "site-footer", "site-header", "site-header__brand", "site-nav", "wrap"]);
+  // The list is the layout block's own classes the sample uses: the original pieces and the article's prose among them.
+  const starterStylesheet = await fs.readFile(path.join(templatesRoot, "starter/src/styles/system.css"), "utf8");
+  const block = starterStylesheet.slice(starterStylesheet.indexOf("/* ---- site layout ---- */"), starterStylesheet.indexOf("/* ---- end site layout ---- */"));
+  const blockClasses = new Set([...block.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/\.(-?[_a-zA-Z][\w-]*)/g)].map((match) => match[1]));
+  for (const className of ["form", "hero", "notice", "prose", "section", "site-footer", "site-header", "site-header__brand", "site-nav", "wrap"]) {
+    assert.ok(renamed.missingClasses.includes(className), `${className} is named as missing`);
+  }
+  assert.deepEqual(renamed.missingClasses.filter((className) => !blockClasses.has(className)), [], "only classes the stock block declares are named");
+  assert.deepEqual(renamed.missingClasses, [...renamed.missingClasses].sort());
   assert.equal(await read("src/styles/system.css"), stripped);
 
   // --force rewrites the sample and nothing else.
@@ -1446,7 +1636,7 @@ test("starter sync and upgrade bring a system to a later scaffold, refuse dirty 
   assert.deepEqual([jsonReport.starter.level, jsonReport.starter.current, jsonReport.starter.floor, jsonReport.starter.belowFloor, jsonReport.starter.behind, jsonReport.starter.pending], [1, 1, 1, false, 0, []]);
   assert.deepEqual(jsonReport.starter.site, { addedPages: [], addedViews: [], advanced: [], kept: [] });
   assert.deepEqual([jsonReport.starter.check, jsonReport.check], [null, null]);
-  assert.deepEqual(jsonReport.designs, { setUp: true, designs: 1, pages: 2 });
+  assert.deepEqual(jsonReport.designs, { setUp: true, designs: 1, pages: 9 });
 
   // A sync that fails its check runs before the managed files are touched, so the upgrade aborts with the repository as it was and a plain rerun is not refused.
   const manifest = JSON.parse(await read("timds.json"));
@@ -1922,4 +2112,29 @@ test("the upgrade write boundary covers the managed boundary, both starters' syn
   const embedded = upgradeWriteBoundary({ designSystemPrefix: "design-system/" });
   assert.ok(embedded.files.includes("package.json") && embedded.files.includes("design-system/.timds/installation.json"));
   assert.ok(!embedded.files.includes(".timds/installation.json"));
+});
+
+test("timds upgrade refuses a workspace site and points at the workspace root, which is not a consumer", async (t) => {
+  const { findConsumerManifestRoot } = await import("./consumer.mjs");
+  const repoRoot = await temporaryDirectory(t);
+  gitInit(repoRoot);
+  await writeJson(path.join(repoRoot, "timds.json"), { schemaVersion: 2, systemId: "acme/core", name: "Acme" });
+  await fs.mkdir(path.join(repoRoot, "site", "src"), { recursive: true });
+  await writeJson(path.join(repoRoot, "site", "timds.consumer.json"), {
+    schemaVersion: 1,
+    designSystem: { workspace: true, systemId: "acme/core" },
+    apps: { site: { cwd: ".", preview: { build: ["npm", "run", "build"], output: "dist" }, designSurface: ["src/styles/**"] } },
+  });
+  commitAll(repoRoot, "Workspace with a site");
+  const site = path.join(repoRoot, "site");
+  for (const root of [site, path.join(site, "src")]) {
+    await assert.rejects(runCli(["upgrade", "--root", root]), (error) => {
+      assert.match(error.message, /is a site inside a Design System workspace \(designSystem\.workspace in site\/timds\.consumer\.json\)/);
+      assert.match(error.message, new RegExp(`Run timds upgrade at the workspace root \\(${repoRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\) instead`));
+      assert.match(error.message, /site\/\.timds\/emdash\.json/);
+      return true;
+    });
+  }
+  // The workspace root is not a consumer, so its upgrade is the Design System's.
+  assert.equal(await findConsumerManifestRoot(repoRoot), null);
 });

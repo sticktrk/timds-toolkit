@@ -1,5 +1,7 @@
 // Register the current product with the selected TimDS host. Durable
 // registration identity lives in git metadata, outside the tracked product.
+// A site inside its Design System's workspace has no pin to follow and is
+// refused by both register and updates.
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createHash, randomUUID } from "node:crypto";
@@ -8,6 +10,7 @@ import path from "node:path";
 import { resolveAccessToken, savedPortalUrl } from "./auth.mjs";
 import { createHostProvider } from "./hosted.mjs";
 import { CONSUMER_MANIFEST_FILE, loadConsumer } from "./consumer.mjs";
+import { WORKSPACE_PIN_MODE } from "./workspace-site.mjs";
 
 const execute = promisify(execFile);
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
@@ -78,6 +81,9 @@ export function registrationSurface(manifest, supplied) {
 }
 async function context(root, options) {
   const consumer = await loadConsumer(root);
+  // A workspace site changes with its system in one repository; there is no
+  // release for a host to bring in and no pin for it to move.
+  if (consumer.designSystem.mode === WORKSPACE_PIN_MODE) throw new Error(`${CONSUMER_MANIFEST_FILE} at ${consumer.repoRoot} declares designSystem.workspace: the site sits inside its Design System's repository and follows it in the same change, so there is nothing for a host to follow. Register a product in its own repository that pins the system (designSystem.version) instead.`);
   const top = await fs.realpath(await git(consumer.repoRoot, ["rev-parse", "--show-toplevel"]));
   if (await fs.realpath(consumer.repoRoot) !== top) throw new Error("Hosted followers require timds.consumer.json at the Git repository root");
   const portal = origin(options.portalUrl || process.env.TIMDS_PORTAL_URL || await savedPortalUrl(options));
