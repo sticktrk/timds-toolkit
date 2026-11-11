@@ -171,8 +171,13 @@ with and without `site/`, must keep passing. An embedded system's `submit`
 carries the two root consumer skills only while the site's record lists them
 in `workspaceFiles` and the repository root is not itself a consumer
 (`workspaceSiteSkillFolders`); a product's own consumer skills never enter a
-system submission. The two-way check reads the system from source only and
-must never index anything under its `dist/`. `package.json` `emdashTemplate`
+system submission. The two-way check and `--require-token` index only what
+the site loads, from source: the stylesheets the selected website design
+links (`designShellStylesheets`, shared with the scaffold's port report), the
+compiled tokens when it links `/tokens.css`, and system sheets a site file
+imports; never `bundle.include`, an unlinked sheet or anything under `dist/`.
+A shoot that drops a workspace site also drops the unedited guidance its
+scaffold wrote outside `site/`, by the hashes in the site's record. `package.json` `emdashTemplate`
 publishes the template version beside `hostContract` and must equal
 `templates/emdash/site.json` `version`: a template change an installed site
 would need to receive raises `version` in both places and adds a `history`

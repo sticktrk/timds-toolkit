@@ -12,6 +12,6 @@ declare module "virtual:timds/design-system" {
 	export const pages: Array<DesignDocument & { route: string; title: string; body: string }>;
 	export const shell: DesignDocument & { before: string; after: string; describes: boolean };
 	export const titleMarker: string;
-	/** The site's form handlers by the address they handle: the modules under src/forms/ that export POST. */
-	export const forms: Record<string, () => Promise<{ POST: (context: import("astro").APIContext) => Response | Promise<Response> }>>;
+	/** The site's form handlers by the address they handle: the modules under src/forms/ that export POST, by file (relative to the site) and loader. */
+	export const forms: Record<string, { file: string; load: () => Promise<{ POST?: unknown }> }>;
 }

@@ -1885,9 +1885,17 @@ export async function submitWorkspace(repoRootInput, message, options = {}) {
   const plannedBranch = branch && branch !== baseBranch ? branch : `design-system/${slug(message)}`;
   const commands = [];
   if (!branch || branch === baseBranch) commands.push(["git", "switch", "-c", plannedBranch]);
+  // An owned site skill folder is staged while it exists or Git still tracks
+  // files under it (so a deleted folder's removals are staged); with neither,
+  // its pathspec would match nothing and abort the whole `git add`.
+  const stagedSiteSkills = [];
+  for (const folder of checked.layout === "standalone" ? [] : siteSkillFolders) {
+    if (existsSync(path.join(checked.repoRoot, folder))
+      || (await git(["ls-files", "--", folder], checked.repoRoot)).stdout.trim()) stagedSiteSkills.push(folder);
+  }
   commands.push(checked.layout === "standalone"
     ? ["git", "add", "--all"]
-    : ["git", "add", "--", "design-system", ...designSystemSkillNames.map((name) => `.agents/skills/${name}`), ...siteSkillFolders.filter((folder) => existsSync(path.join(checked.repoRoot, folder))), ".claude/skills", ".github/workflows/timds-design-system.yml"]);
+    : ["git", "add", "--", "design-system", ...designSystemSkillNames.map((name) => `.agents/skills/${name}`), ...stagedSiteSkills, ".claude/skills", ".github/workflows/timds-design-system.yml"]);
   commands.push(["git", "commit", "-m", message]);
   if (!options.noPush) commands.push(["git", "push", "--set-upstream", "origin", plannedBranch]);
   if (!options.noPr && !options.noPush) {
@@ -2145,7 +2153,11 @@ export async function runCli(argv) {
       return checkWorkspace(destination);
     }});
     if (options.json) output(JSON.stringify(result, null, 2));
-    else output(`Created ${result.parent.mode} offshoot at ${result.designSystemRoot} from ${result.parent.systemId}: ${result.parent.version}. Review and commit the source; creation does not publish it.`);
+    else {
+      output(`Created ${result.parent.mode} offshoot at ${result.designSystemRoot} from ${result.parent.systemId}: ${result.parent.version}. Review and commit the source; creation does not publish it.`);
+      // Site guidance of the parent's that was kept (edited, or with no record); --json carries it as siteGuidance.
+      for (const note of result.siteGuidance?.notes || []) output(note);
+    }
     return result;
   }
   if (command === "feed") {

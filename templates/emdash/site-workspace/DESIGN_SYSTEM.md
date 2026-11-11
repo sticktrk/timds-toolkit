@@ -71,8 +71,20 @@ To wire a form up:
 
 The integration decides which forms have a handler from the files in
 `src/forms/` each time it builds the pages, in development and in the build
-alike; a module that does not export `POST` handles nothing. Two modules
-for one address (`contact.ts` and `contact/index.ts`) are an error. A design
+alike. It parses each module and reads its exports, so `export async
+function POST`, `export const POST = ...`, `export { handler as POST }` and
+`export { POST } from "./elsewhere"` count, and a comment or a string that
+mentions POST does not; `export * from` does not either, so name `POST`.
+A module that does not export `POST` handles nothing, and one whose `POST`
+is not a function when the request comes is treated the same: the address
+answers 405 and the server log names the module. Two modules for one
+address (`contact.ts` and `contact/index.ts`) are an error.
+
+A form's POSTs are its own (with `method="post"`) and each submit button's
+with a `formmethod="post"` or a `formaction` of its own; any of them that
+reaches an address of this site with no handler disables the whole form.
+Under the workspace's `/site` mount the form's `action` and a button's
+`formaction` get the prefix like every other link, quoted or not. A design
 page that needs more than a POST handler, such as server data on GET, is
 ported into an Astro route by hand instead (see the rules below).
 

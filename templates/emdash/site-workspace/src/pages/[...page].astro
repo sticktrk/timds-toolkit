@@ -13,9 +13,10 @@
  *
  * A page is read with GET or HEAD. A POST goes to the site's handler for the
  * address, a module under src/forms/ that exports POST (src/forms/contact.ts
- * for /contact; see DESIGN_SYSTEM.md, "Forms"). Without one, and for every
- * other method, the answer is 405 with the methods the address accepts, so
- * nothing sent to it is taken in silently.
+ * for /contact; see DESIGN_SYSTEM.md, "Forms"), once it is checked to be a
+ * function. Without one, and for every other method, the answer is 405 with
+ * the methods the address accepts, so nothing sent to it is taken in
+ * silently.
  */
 import type { APIContext } from "astro";
 import { forms, pages } from "virtual:timds/design-system";
@@ -28,11 +29,17 @@ const route = `/${Astro.params.page ?? ""}`.replace(/\/+$/, "") || "/";
 const page = route === "/404" ? undefined : pages.find((candidate) => candidate.route === route);
 const method = Astro.request.method;
 if (method !== "GET" && method !== "HEAD") {
-	const handler = Object.hasOwn(forms, route) ? forms[route] : undefined;
-	if (handler && method === "POST") {
-		const { POST } = await handler();
-		return POST(Astro as unknown as APIContext);
+	// The integration found a POST export in the module; it must also be a
+	// function. One that is not is no handler: the address answers 405 and
+	// the server log names the module.
+	const entry = Object.hasOwn(forms, route) ? forms[route] : undefined;
+	let handler: ((context: APIContext) => Response | Promise<Response>) | undefined;
+	if (entry) {
+		const { POST } = await entry.load();
+		if (typeof POST === "function") handler = POST as typeof handler;
+		else console.error(`${entry.file} handles the forms that post to ${route}, but its POST export is not a function (it is ${POST === null ? "null" : typeof POST}), so a POST there answers 405. Export POST as a function.`);
 	}
+	if (handler && method === "POST") return handler(Astro as unknown as APIContext);
 	if (!handler && !page) return new Response("Not found", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } });
 	const allow = [...(page ? ["GET", "HEAD"] : []), ...(handler ? ["POST"] : [])].join(", ");
 	return new Response(`${method} is not accepted at this address.`, {

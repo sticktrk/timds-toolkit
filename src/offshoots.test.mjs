@@ -8,6 +8,7 @@ import test from 'node:test';
 import { checkWorkspace, initializeRepository, runCli, runWithOutputSink, syncStarterWorkspace } from './core.mjs';
 import { decodeOffshootSource, loadOffshootSource, severOffshoot, shootOffshoot, structureSite, transformOffshoot } from './offshoots.mjs';
 import { packageRoot } from './executable.mjs';
+import { scaffoldWorkspaceEmdashSite } from './consumer-scaffold-workspace.mjs';
 
 const sourceId = '11111111-1111-4111-8111-111111111111';
 const json = value => `${JSON.stringify(value, null, 2)}\n`;
@@ -407,4 +408,117 @@ test('structure offshoots retain Landing layout without copying authored summari
   const result = structureSite({views: [{id: 'use', label: 'Use', summary: 'Client copy', pages: [{slug: '', title: 'Start', layout: 'landing', summary: 'Client copy'}, {slug: 'compose', title: 'Compose', promote: 'Start making'}]}]});
   assert.deepEqual(result.views[0].pages, [{slug: '', title: 'Start', layout: 'landing', planned: true}, {slug: 'compose', title: 'Compose', promote: 'Start making', planned: true}]);
   assert.equal(result.views[0].summary, undefined);
+});
+
+// A parent with a workspace site: the site, its two root consumer skills and
+// its AGENTS.md section, committed. Returns the AGENTS.md bytes from before the
+// scaffold and the record it wrote.
+async function siteFixture(t) {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'timds-offshoot-site-'));
+  t.after(() => fs.rm(directory, {force: true, recursive: true}));
+  const root = path.join(directory, 'parent');
+  await fs.mkdir(root);
+  git(root, 'init', '-q', '-b', 'main'); git(root, 'config', 'user.email', 'test@example.com'); git(root, 'config', 'user.name', 'Test');
+  await runWithOutputSink(() => {}, () => initializeRepository(root, {standalone: true, systemId: 'example/core', name: 'Example Core'}));
+  git(root, 'add', '--all'); git(root, 'commit', '-qm', 'Parent');
+  const agentsBefore = await fs.readFile(path.join(root, 'AGENTS.md'));
+  await scaffoldWorkspaceEmdashSite(root, {skipInstall: true});
+  git(root, 'add', '--all'); git(root, 'commit', '-qm', 'Parent site');
+  const record = JSON.parse(await fs.readFile(path.join(root, 'site/.timds/emdash.json'), 'utf8'));
+  return {root, directory, agentsBefore, record};
+}
+const skillFolders = ['.agents/skills/timds-consume-design-system', '.agents/skills/timds-update-design-system'];
+const decoded = file => Buffer.from(file.content, 'base64').toString('utf8');
+
+test('a full offshoot drops the site guidance its parent scaffold wrote, so the child scaffolds its own site', async t => {
+  const {root, directory, agentsBefore, record} = await siteFixture(t);
+  assert.ok(Object.keys(record.workspaceFiles).length > 0);
+  assert.match(await fs.readFile(path.join(root, skillFolders[0], 'SKILL.md'), 'utf8'), /example\/core/, 'the parent skills are rendered for the parent');
+  const destination = path.join(directory, 'child'), lines = [];
+  const source = await loadOffshootSource(root, {sourceId});
+  const result = await runWithOutputSink(() => {}, () => shootOffshoot({destination, source, systemId: 'example/child', check: checkWorkspace, output: line => lines.push(line)}));
+  const shotAgents = await fs.readFile(path.join(destination, 'AGENTS.md'));
+  const shotSkills = await Promise.all(skillFolders.map(folder => fs.access(path.join(destination, folder)).then(() => true, () => false)));
+  // The reviewer's scenario: the child's own workspace scaffold succeeds.
+  const scaffolded = await scaffoldWorkspaceEmdashSite(destination, {skipInstall: true});
+  assert.equal(scaffolded.systemId, 'example/child');
+  for (const folder of skillFolders) {
+    const skill = await fs.readFile(path.join(destination, folder, 'SKILL.md'), 'utf8');
+    assert.match(skill, /example\/child/);
+    assert.doesNotMatch(skill, /example\/core/);
+  }
+  const agents = await fs.readFile(path.join(destination, 'AGENTS.md'), 'utf8');
+  assert.equal(agents.split('<!-- timds:emdash-site -->').length, 2, 'one section, the child scaffold\'s own');
+  assert.equal(JSON.parse(await fs.readFile(path.join(destination, 'site/timds.consumer.json'), 'utf8')).designSystem.systemId, 'example/child');
+  // What the shoot itself left: no parent skills, the section cut with the
+  // rest byte-identical, the system's own skills kept, and a report.
+  assert.deepEqual(shotSkills, [false, false]);
+  assert.deepEqual(shotAgents, agentsBefore, 'the section is cut and the rest is byte-identical');
+  await fs.access(path.join(destination, '.agents/skills/timds-edit-design-system/SKILL.md'));
+  assert.deepEqual(result.siteGuidance.kept, []);
+  assert.deepEqual(lines, []);
+  assert.deepEqual(result.siteGuidance.removed.sort(), [...Object.keys(record.workspaceFiles), 'AGENTS.md (the <!-- timds:emdash-site --> section)'].sort());
+});
+
+test('a shoot keeps and reports edited site guidance, and guidance no workspace record vouches for', async t => {
+  const {root, record} = await siteFixture(t);
+  const edited = `${skillFolders[0]}/SKILL.md`, added = `${skillFolders[1]}/NOTES.md`;
+  await fs.appendFile(path.join(root, edited), '\nA local note.\n');
+  await fs.writeFile(path.join(root, added), 'Extra.\n');
+  const agentsPath = path.join(root, 'AGENTS.md'), agents = await fs.readFile(agentsPath, 'utf8');
+  await fs.writeFile(agentsPath, agents.replace('<!-- timds:emdash-site -->\n', '<!-- timds:emdash-site -->\nAn edited line.\n'));
+  git(root, 'add', '--all'); git(root, 'commit', '-qm', 'Edit the site guidance');
+  const source = await loadOffshootSource(root, {sourceId});
+  for (const mode of ['full', 'structure']) {
+    const {files, siteGuidance} = await transformOffshoot(source, {mode, systemId: `example/${mode}`});
+    const paths = files.map(file => file.path);
+    if (mode === 'structure') {
+      // Structure never carries root guidance; nothing is left to report.
+      assert.equal(paths.some(file => file.startsWith('.agents/') || file === 'AGENTS.md'), false);
+      assert.deepEqual(siteGuidance.kept, []);
+      continue;
+    }
+    assert.deepEqual(siteGuidance.kept, [{path: edited, reason: 'edited'}, {path: added, reason: 'not in the record'}, {path: 'AGENTS.md', reason: 'edited section'}]);
+    for (const file of Object.keys(record.workspaceFiles)) assert.equal(paths.includes(file), file === edited, file);
+    assert.ok(paths.includes(added));
+    assert.match(decoded(files.find(file => file.path === 'AGENTS.md')), /An edited line\./);
+    assert.equal(siteGuidance.notes.length, 2);
+    assert.match(siteGuidance.notes[0], new RegExp(`kept because they changed since or were added beside it: ${edited}, ${added}\\. Remove them`));
+    assert.match(siteGuidance.notes[0], /timds consumer scaffold emdash --workspace in the offshoot, which refuses/);
+    assert.match(siteGuidance.notes[1], /the edited <!-- timds:emdash-site --> section of AGENTS\.md was kept/);
+  }
+  // Without the record nothing beyond site/ is removed, and what is left is named.
+  const unrecorded = {...source, files: source.files.filter(file => file.path !== 'site/.timds/emdash.json')};
+  const {files, siteGuidance} = await transformOffshoot(unrecorded, {mode: 'full', systemId: 'example/unrecorded'});
+  assert.equal(files.some(file => file.path.startsWith('site/')), false);
+  for (const file of source.files.filter(file => file.path.startsWith('.agents/skills/timds-') || file.path === 'AGENTS.md')) assert.equal(files.find(entry => entry.path === file.path)?.content, file.content, file.path);
+  assert.ok(siteGuidance.kept.every(entry => entry.reason === 'no workspace record'));
+  assert.ok(siteGuidance.kept.some(entry => entry.path === 'AGENTS.md'));
+  assert.match(siteGuidance.notes[0], /is missing or not a workspace record, so the site guidance outside site\/ was kept: .*AGENTS\.md/);
+  // An embedded system's record names its AGENTS.md under design-system/ and
+  // the skills at the repository root, which an export of the system does not
+  // carry: the section is still found and cut.
+  const embeddedRecord = {...record, workspaceFiles: {}, workspaceSections: {'design-system/AGENTS.md': record.workspaceSections['AGENTS.md']}};
+  const pristine = {...source, files: source.files.map(file => file.path === 'AGENTS.md' ? {...file, content: Buffer.from(agents).toString('base64')} : file.path === 'site/.timds/emdash.json' ? {...file, content: Buffer.from(json(embeddedRecord)).toString('base64')} : file)};
+  const embedded = await transformOffshoot(pristine, {mode: 'full', systemId: 'example/embedded'});
+  assert.doesNotMatch(decoded(embedded.files.find(file => file.path === 'AGENTS.md')), /timds:emdash-site/);
+  assert.ok(embedded.siteGuidance.removed.includes('AGENTS.md (the <!-- timds:emdash-site --> section)'));
+});
+
+test('a parent with no workspace site is shot exactly as before, root consumer skills and a site section included', async t => {
+  const {root, source} = await fixture(t);
+  await fs.mkdir(path.join(root, skillFolders[0]), {recursive: true});
+  await fs.writeFile(path.join(root, skillFolders[0], 'SKILL.md'), 'A product skill.\n');
+  await fs.appendFile(path.join(root, 'AGENTS.md'), '\n<!-- timds:emdash-site -->\nA section.\n<!-- /timds:emdash-site -->\n');
+  git(root, 'add', '--all'); git(root, 'commit', '-qm', 'Guidance without a site');
+  const withGuidance = await loadOffshootSource(root, {sourceId});
+  for (const parent of [source, withGuidance]) {
+    const result = await transformOffshoot(parent, {mode: 'full', systemId: 'example/child'});
+    assert.equal('siteGuidance' in result, false);
+    const out = new Map(result.files.map(file => [file.path, file]));
+    const rewritten = new Set(['timds.json', 'package.json', 'package-lock.json', '.timds/parent.json']);
+    for (const file of parent.files) if (!rewritten.has(file.path)) assert.deepEqual(out.get(file.path), file, file.path);
+    assert.deepEqual([...out.keys()].filter(file => !parent.files.some(entry => entry.path === file) && file !== '.timds/parent.json'), [], 'no file is added beyond the parent record');
+    assert.equal(out.size, parent.files.length + (parent.files.some(file => file.path === '.timds/parent.json') ? 0 : 1), 'no file is removed');
+  }
 });

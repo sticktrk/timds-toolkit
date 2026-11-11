@@ -6,6 +6,7 @@
 // toolkit's own output, and cover the static-file copy and the posting forms.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { createRequire, stripTypeScriptTypes } from "node:module";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -22,7 +23,12 @@ const {
   FORM_NOT_CONNECTED,
   compileTokenCss,
   defaultPageFiles,
+  applyBase,
   disableUnconnectedForms,
+  exportsPost,
+  htmlTags,
+  loadModuleParser,
+  parseAttributes,
   formHandlers,
   formTarget,
   listStaticFiles,
@@ -293,25 +299,128 @@ test("a posting form with no handler is rendered disabled, and one with a handle
   assert.equal(formTarget("", null), null);
 });
 
+// An ESTree parser for the tests, standing in for Vite's parseAst (which the
+// site has and the toolkit does not): Node strips the TypeScript, and acorn,
+// reached through the toolkit's own dependencies, parses the rest.
+const acorn = (() => {
+  let require = createRequire(import.meta.url);
+  for (const name of ["@remotion/cli", "@remotion/bundler", "webpack"]) require = createRequire(require.resolve(`${name}/package.json`));
+  return require("acorn");
+})();
+const parse = (code, file) => acorn.parse(file.endsWith(".ts") ? stripTypeScriptTypes(code) : code, { ecmaVersion: "latest", sourceType: "module" });
+const exportsPostIn = (code, file = "handler.ts") => exportsPost(parse(code, file));
+
+test("a module handles a form only when it really exports POST, never when a comment or string mentions it", () => {
+  // The reviewer's draft: a TODO that spells the export out, and no export.
+  assert.equal(exportsPostIn("// TODO: export async function POST({ request }) { ... }\nexport async function GET() { return new Response(null); }\n"), false);
+  assert.equal(exportsPostIn("/* export const POST = handler; */\nexport {};\n"), false);
+  assert.equal(exportsPostIn("const note = \"export async function POST\";\nconst other = `export { POST }`;\nexport { note };\n"), false);
+  assert.equal(exportsPostIn("const pattern = /export const POST/;\nexport default pattern;\n"), false);
+  assert.equal(exportsPostIn("export default { POST: () => new Response(null) };\n"), false);
+  assert.equal(exportsPostIn("export * from \"./elsewhere\";\n"), false);
+  assert.equal(exportsPostIn("export const POST = undefined;\n"), false);
+  assert.equal(exportsPostIn("export let POST;\n"), false);
+  assert.equal(exportsPostIn("export const POST = \"soon\";\n"), false);
+  assert.equal(exportsPostIn("export const POST = { later: true };\n"), false);
+  assert.equal(exportsPostIn("export async function GET() {}\nexport const POSTED = 1;\n"), false);
+
+  // Every real way to export it.
+  assert.equal(exportsPostIn("import type { APIContext } from \"astro\";\nexport async function POST({ request }: APIContext): Promise<Response> { return new Response(null); }\n"), true);
+  assert.equal(exportsPostIn("export const POST = async () => new Response(null);\n"), true);
+  assert.equal(exportsPostIn("export const POST = makeHandler();\n"), true);
+  assert.equal(exportsPostIn("async function handler() { return new Response(null); }\nexport { handler as POST };\n"), true);
+  assert.equal(exportsPostIn("export { POST } from \"./shared\";\n"), true);
+  assert.equal(exportsPostIn("export { send as POST, GET } from \"./shared\";\n"), true);
+  assert.equal(exportsPostIn("export const { POST } = handlers;\n"), true);
+  assert.equal(exportsPostIn("export class POST {}\n"), true);
+
+  // TypeScript-only exports, as Vite's parser reports them, are not values.
+  assert.equal(exportsPost({ type: "Program", body: [{ type: "ExportNamedDeclaration", exportKind: "type", specifiers: [{ exported: { type: "Identifier", name: "POST" } }] }] }), false);
+  assert.equal(exportsPost({ type: "Program", body: [{ type: "ExportNamedDeclaration", exportKind: "value", specifiers: [{ exportKind: "type", exported: { type: "Identifier", name: "POST" } }] }] }), false);
+  assert.equal(exportsPost({ type: "Program", body: [{ type: "ExportNamedDeclaration", declaration: { type: "FunctionDeclaration", declare: true, id: { type: "Identifier", name: "POST" } }, specifiers: [] }] }), false);
+});
+
 test("form handlers are the modules under src/forms/ that export POST, by address", async (t) => {
   const site = await temporaryDirectory(t);
-  assert.deepEqual([...formHandlers(site)], []);
+  assert.deepEqual([...formHandlers(site, { parse })], []);
   await write(path.join(site, "src/forms/contact.ts"), "import type { APIContext } from \"astro\";\nexport async function POST({ request }: APIContext) { return new Response(null, { status: 204 }); }\n");
   await write(path.join(site, "src/forms/index.mjs"), "const POST = () => new Response(null);\nexport { POST };\n");
   await write(path.join(site, "src/forms/support/request/index.js"), "export const POST = () => new Response(null);\n");
-  await write(path.join(site, "src/forms/drafts.ts"), "// Not wired yet: export async function GET\nexport async function GET() { return new Response(null); }\n");
+  await write(path.join(site, "src/forms/drafts.ts"), "// TODO: export async function POST({ request }) once the store exists\nexport async function GET() { return new Response(null); }\n");
   await write(path.join(site, "src/forms/types.d.ts"), "export declare function POST(): Response;\n");
   await write(path.join(site, "src/forms/notes.md"), "export const POST\n");
-  const handlers = formHandlers(site);
+  await write(path.join(site, "src/forms/broken.ts"), "export const POST = (\n");
+  const warnings = [];
+  const handlers = formHandlers(site, { parse, warn: (message) => warnings.push(message) });
   assert.deepEqual([...handlers.keys()].sort(), ["/", "/contact", "/support/request"]);
   assert.equal(handlers.get("/contact"), path.join(site, "src/forms/contact.ts"));
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /^src\/forms\/broken\.ts does not parse, so it handles no form until it does/);
 
-  const source = virtualModuleSource({ system: {}, design: {}, pages: [], shell: {} }, handlers);
-  assert.match(source, new RegExp(`"/contact": \\(\\) => import\\(${JSON.stringify(path.join(site, "src/forms/contact.ts").split(path.sep).join("/")).replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}\\),`));
-  assert.match(virtualModuleSource({ system: {}, design: {}, pages: [], shell: {} }, new Map()), /export const forms = \{\n\};$/);
+  const source = virtualModuleSource({ system: {}, design: {}, pages: [], shell: {} }, handlers, site);
+  const absolute = JSON.stringify(path.join(site, "src/forms/contact.ts").split(path.sep).join("/"));
+  assert.ok(source.includes(`"/contact": { file: "src/forms/contact.ts", load: () => import(${absolute}) },`), source);
+  assert.match(virtualModuleSource({ system: {}, design: {}, pages: [], shell: {} }, new Map(), site), /export const forms = \{\n\};$/);
 
   await write(path.join(site, "src/forms/contact/index.ts"), "export const POST = () => new Response(null);\n");
-  assert.throws(() => formHandlers(site), /both handle POST \/contact; keep one/);
+  assert.throws(() => formHandlers(site, { parse }), /both handle POST \/contact; keep one/);
+});
+
+test("the module parser is the Vite of the site's own Astro, and its absence is explained", async (t) => {
+  const site = await temporaryDirectory(t);
+  await write(path.join(site, "package.json"), { name: "sample-site", private: true });
+  await assert.rejects(loadModuleParser(site), /found no astro install in .*Run npm ci in/);
+  // A Vite installed beside the site, but not Astro's, is not used.
+  await write(path.join(site, "node_modules/astro/package.json"), { name: "astro", version: "0.0.0" });
+  await write(path.join(site, "node_modules/astro/node_modules/vite/package.json"), { name: "vite", version: "0.0.0", type: "module", exports: { ".": "./index.js" } });
+  await write(path.join(site, "node_modules/astro/node_modules/vite/index.js"), "export const parseAst = (code, options, file) => ({ type: \"Program\", body: [], seen: [code, options, file] });\n");
+  await write(path.join(site, "node_modules/vite/package.json"), { name: "vite", version: "0.0.0", type: "module", exports: { ".": "./index.js" } });
+  await write(path.join(site, "node_modules/vite/index.js"), "export const parseAst = () => { throw new Error(\"the hoisted vite\"); };\n");
+  const parseWith = await loadModuleParser(site);
+  assert.deepEqual(parseWith("export {}", "/x/contact.ts").seen, ["export {}", { lang: "ts" }, "/x/contact.ts"]);
+  assert.deepEqual(parseWith("export {}", "/x/contact.mjs").seen[1], { lang: "js" });
+});
+
+const BASED = (html) => applyBase(html, "/site");
+
+test("one tag parser reads and rebases every URL attribute, quoted or not", () => {
+  // Unquoted, single- and double-quoted values of every URL attribute.
+  assert.equal(BASED("<form method=post action=/contact><button formaction=/other>Go</button></form>"), "<form method=post action=/site/contact><button formaction=/site/other>Go</button></form>");
+  assert.equal(BASED("<a href=/about>a</a><img src=/assets/a.png><video poster='/p.jpg'></video><link href=\"/styles/system.css\">"), "<a href=/site/about>a</a><img src=/site/assets/a.png><video poster='/site/p.jpg'></video><link href=\"/site/styles/system.css\">");
+  assert.equal(BASED("<img srcset=\"/a.png 1x, /b.png 2x\"><img srcset='/c.png 1x'>"), "<img srcset=\"/site/a.png 1x, /site/b.png 2x\"><img srcset='/site/c.png 1x'>");
+  // Already based, external, protocol-relative, fragment, query and relative references stay.
+  const kept = "<a href=/site/about>1</a><a href=/site>2</a><a href=https://elsewhere.test/x>3</a><a href=//cdn.test/x>4</a><a href=#top>5</a><a href=?q=1>6</a><a href=about>7</a>";
+  assert.equal(BASED(kept), kept);
+  // URL-looking text in another attribute's value, comments and raw-text bodies is not a reference.
+  const text = "<a title=\"action=/x href=/y\" data-note='src=/z' href=/about>t</a><!-- <a href=/c> --><textarea><a href=/raw></textarea><script>const a = '<a href=/s>';</script><style>a[href=\"/q\"] { color: red; }</style><title>see href=/t</title>";
+  assert.equal(BASED(text), text.replace("href=/about>", "href=/site/about>"));
+  // An unquoted value is quoted only when the rebased one could not stay unquoted (never, for a plain path).
+  assert.equal(BASED("<a href=/a&amp;b>x</a>"), "<a href=/site/a&amp;b>x</a>");
+  assert.equal(applyBase("<a href=/x>", "/"), "<a href=/x>");
+
+  // The same parser reads attributes for the document's parts.
+  assert.deepEqual(parseAttributes(" lang=en class='page wide' data-x=\"a &amp; b\" hidden"), { lang: "en", class: "page wide", "data-x": "a & b", hidden: "" });
+  assert.deepEqual(htmlTags("<p title='a>b'>x</p>").map((tag) => [tag.type, tag.name]), [["start", "p"], ["end", "p"]]);
+});
+
+test("forms are judged by the same parser, unquoted actions and submit buttons included", () => {
+  const handled = new Set(["/contact"]);
+  // The reviewer's form: unquoted, handled, enabled, and posting under the base.
+  const unquoted = "<form method=post action=/contact><input name=email><button>Send</button></form>";
+  assert.equal(disableUnconnectedForms(unquoted, { route: "/contact", handled }), unquoted);
+  assert.equal(BASED(disableUnconnectedForms(unquoted, { route: "/contact", handled })), "<form method=post action=/site/contact><input name=email><button>Send</button></form>");
+  assert.match(disableUnconnectedForms(unquoted, { route: "/contact", handled: new Set() }), /^<form method=post action=\/contact data-timds-form="not-connected"><p role="note">[^<]+<\/p><input name=email disabled><button disabled>Send<\/button><\/form>$/);
+  // A submit button that posts elsewhere is judged by its own formaction and formmethod.
+  assert.match(disableUnconnectedForms("<form method=post action=/contact><button>Send</button><button formaction=/unhandled>Other</button></form>", { route: "/", handled }), /not-connected/);
+  assert.match(disableUnconnectedForms("<form action=/search><button formmethod=post formaction=/unhandled>Save</button></form>", { route: "/", handled }), /not-connected/);
+  assert.doesNotMatch(disableUnconnectedForms("<form action=/search><button formmethod=post formaction=/contact>Save</button></form>", { route: "/", handled }), /not-connected/);
+  // The form's own submission (Enter in a field) still posts to its action.
+  assert.match(disableUnconnectedForms("<form method=post action=/unhandled><button formaction=/contact>Only this</button></form>", { route: "/", handled }), /not-connected/);
+  assert.doesNotMatch(disableUnconnectedForms("<form method=post action=/contact><button type=button formaction=/unhandled>Not a submitter</button></form>", { route: "/", handled }), /not-connected/);
+  assert.doesNotMatch(disableUnconnectedForms("<form action=/search><button>Search</button></form>", { route: "/", handled: new Set() }), /not-connected/);
+  // An action in another attribute's text, or in a raw-text body, is not the form's.
+  assert.match(disableUnconnectedForms("<form title=\"action=/contact\" method=post><button>Go</button></form>", { route: "/about", handled }), /not-connected/);
+  assert.doesNotMatch(disableUnconnectedForms("<textarea><form method=post action=/x></form></textarea><script>'<form method=post>'</script>", { route: "/", handled: new Set() }), /not-connected/);
 });
 
 test("the starter's contact form renders disabled until the site handles it", () => {
@@ -333,7 +442,9 @@ test("the catch-all route answers 405 to a POST it has no handler for and passes
   assert.match(route, /if \(method !== "GET" && method !== "HEAD"\)/);
   assert.match(route, /status: 405/);
   assert.match(route, /Allow: allow/);
-  assert.match(route, /return POST\(/);
+  assert.match(route, /typeof POST === "function"/);
+  assert.match(route, /if \(handler && method === "POST"\) return handler\(/);
+  assert.match(route, /console\.error\(`\$\{entry\.file\} handles the forms that post to/);
   const types = await fs.readFile(path.join(SITE_TEMPLATE, "src/design-system.d.ts"), "utf8");
   assert.match(types, /export const forms: Record<string,/);
   for (const doc of ["AGENTS.md", "DESIGN_SYSTEM.md", "docs/emdash-handover.md"]) {

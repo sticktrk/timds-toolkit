@@ -752,15 +752,67 @@ async function gitPrefix(repoRoot) {
   return result.code === 0 ? result.stdout.trim() : "";
 }
 
-/**
- * Read only local Design System CSS; never follow a bundle path outside its
- * root. A workspace site's own stylesheets sit inside the system's folder, so
- * `exclude` (the site's path relative to the system) keeps them out.
- */
-async function checkRequiredTokens(designSystem, required, { exclude = null } = {}) {
-  if (!Array.isArray(required) || required.some((name) => typeof name !== "string" || !/^--[a-zA-Z_][a-zA-Z0-9_-]*$/.test(name))) {
-    return ["Required tokens must be CSS custom property names, such as --focus-ring"];
+const validRequiredTokens = (required) => Array.isArray(required) && required.every((name) => typeof name === "string" && /^--[a-zA-Z_][a-zA-Z0-9_-]*$/.test(name));
+const INVALID_REQUIRED_TOKENS = "Required tokens must be CSS custom property names, such as --focus-ring";
+
+/** The errors for `required` against resolved token records: `missing(name)` words a token none declares. */
+function requiredTokenErrors(tokens, required, missing) {
+  const errors = [];
+  for (const name of [...new Set(required)]) {
+    const matches = tokens.filter((token) => token.name === name);
+    if (!matches.length) errors.push(missing(name));
+    else {
+      const unresolved = [...new Set(matches.flatMap((token) => token.unresolved || (token.resolved.includes("var(") ? token.references : [])))];
+      if (unresolved.length) errors.push(`Required Design System token ${name} has unresolved aliases: ${unresolved.join(", ")}`);
+      if (matches.some((token) => !token.resolved)) errors.push(`Required Design System token ${name} has an empty definition`);
+    }
   }
+  return errors;
+}
+
+/**
+ * Required tokens in the workspace form, answered from what each selected
+ * app loads (`workspaceTokenInventory`, the two-way check's index: the
+ * stylesheets the site's website design links, the compiled tokens when it
+ * links /tokens.css, and the system stylesheets the site imports), never
+ * from every stylesheet in the system.
+ */
+async function checkWorkspaceRequiredTokens(consumer, designSystem, required, selected) {
+  if (!validRequiredTokens(required)) return [INVALID_REQUIRED_TOKENS];
+  if (!required.length) return [];
+  const { workspaceTokenInventory } = await import("./consumer-workspace-check.mjs");
+  const errors = [];
+  for (const name of selected) {
+    const app = resolveConsumerApp(consumer, name);
+    if (!existsSync(app.cwd)) continue;
+    let inventory;
+    try {
+      inventory = await workspaceTokenInventory({ siteRoot: app.cwd, designSystemRoot: designSystem.root, designSurface: app.designSurface, protected: app.protected });
+    } catch (error) {
+      errors.push(`App "${name}": the required tokens could not be read from the workspace Design System: ${error.message}`);
+      continue;
+    }
+    const design = inventory.design;
+    const loads = inventory.stylesheets.length || inventory.tokensJson
+      ? [...(inventory.tokensJson ? ["/tokens.css (the compiled tokens)"] : []), ...inventory.stylesheets].join(", ")
+      : "no Design System stylesheet";
+    errors.push(...requiredTokenErrors(inventory.tokens, required, (token) => {
+      const declared = inventory.unloaded.get(token);
+      if (declared) {
+        const fix = declared.startsWith("tokens")
+          ? `link /tokens.css from ${design?.shell ?? "the design's layout"} (the system must run the starter build to serve it)`
+          : `link /${declared.replace(/^src\//, "")} from ${design?.shell ?? "the design's layout"}`;
+        return `Required Design System token ${token} is declared in the workspace Design System (${declared}), but app "${name}" does not load it: the site loads ${loads}${design ? ` through the website design "${design.id}"` : ""}. Either ${fix}, or require a token the site loads.`;
+      }
+      return `Missing required Design System token ${token}: neither what app "${name}" loads (${loads}) nor any other stylesheet or token of the workspace Design System declares it. Add it to the Design System in this change, in a stylesheet the site loads or its tokens (tokens/ or tokens.json, served as /tokens.css), then rerun.`;
+    }));
+  }
+  return errors;
+}
+
+/** Read only local Design System CSS; never follow a bundle path outside its root. */
+async function checkRequiredTokens(designSystem, required) {
+  if (!validRequiredTokens(required)) return [INVALID_REQUIRED_TOKENS];
   if (!required.length) return [];
   let paths;
   if (designSystem.mode === "published" && !designSystem.linked) {
@@ -768,8 +820,7 @@ async function checkRequiredTokens(designSystem, required, { exclude = null } = 
   } else {
     const listed = await git(["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "*.css"], designSystem.root);
     if (listed.code !== 0) return ["Could not read Design System stylesheets for required tokens"];
-    paths = listed.stdout.split("\0").filter(Boolean)
-      .filter((file) => !exclude || !(file === exclude || file.startsWith(`${exclude}/`)));
+    paths = listed.stdout.split("\0").filter(Boolean);
   }
   const records = [];
   const errors = [];
@@ -790,15 +841,7 @@ async function checkRequiredTokens(designSystem, required, { exclude = null } = 
   const effective = new Map();
   for (const record of records) effective.set(JSON.stringify([record.condition, record.selector, record.name]), record);
   const tokens = resolveTokens([...effective.values()]);
-  for (const name of [...new Set(required)]) {
-    const matches = tokens.filter((token) => token.name === name);
-    if (!matches.length) errors.push(`Missing required Design System token ${name}. Report the gap to the designer, then sync the updated draft or release.`);
-    else {
-      const unresolved = [...new Set(matches.flatMap((token) => token.unresolved || (token.resolved.includes("var(") ? token.references : [])))];
-      if (unresolved.length) errors.push(`Required Design System token ${name} has unresolved aliases: ${unresolved.join(", ")}`);
-      if (matches.some((token) => !token.resolved)) errors.push(`Required Design System token ${name} has an empty definition`);
-    }
-  }
+  errors.push(...requiredTokenErrors(tokens, required, (name) => `Missing required Design System token ${name}. Report the gap to the designer, then sync the updated draft or release.`));
   return errors;
 }
 
@@ -834,10 +877,8 @@ export async function checkConsumer(repoRootInput = process.cwd(), options = {})
   // How messages name the system: a pin's path, or the workspace the site sits in.
   const systemLabel = workspace ? "the workspace Design System" : designSystem.path;
   const selected = options.app ? [resolveConsumerApp(consumer, options.app).name] : Object.keys(manifest.apps);
-  if (!workspace || designSystem.present) {
-    const exclude = workspace ? path.relative(designSystem.root, repoRoot).split(path.sep).join("/") : null;
-    errors.push(...await checkRequiredTokens(designSystem, options.requireTokens ?? [], { exclude }));
-  }
+  if (!workspace) errors.push(...await checkRequiredTokens(designSystem, options.requireTokens ?? []));
+  else if (designSystem.present) errors.push(...await checkWorkspaceRequiredTokens(consumer, designSystem, options.requireTokens ?? [], selected));
 
   if (workspace) {
     // No pin, no bundle record, no gitlink, and no toolkit lock: the site

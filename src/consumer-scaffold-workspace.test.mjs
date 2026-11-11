@@ -218,6 +218,38 @@ test("--workspace installs into an embedded workspace's design-system/ folder an
   assert.ok(!existsSync(path.join(repository, "site")));
 });
 
+test("--workspace outside Git resolves a --root reached through a symlink before computing the site's folder", async (t) => {
+  const root = await temporaryDirectory(t);
+  // Standalone: the system is the folder --root names, through a link.
+  const standalone = await starterWorkspace(path.join(root, "standalone"));
+  await fs.rm(path.join(standalone, ".git"), { recursive: true, force: true });
+  await fs.symlink(standalone, path.join(root, "standalone-link"), "dir");
+  const result = await scaffoldWorkspaceEmdashSite(path.join(root, "standalone-link"), { skipInstall: true, output: quiet });
+  assert.equal(result.layout, "standalone");
+  assert.equal(result.designSystemRoot, standalone);
+  assert.ok(result.written.length && result.written.every((file) => file.startsWith("site/")), "the site's files are written under site/");
+  assert.ok(result.workspaceFiles.includes("AGENTS.md"), result.workspaceFiles.join(", "));
+  assert.ok(result.workspaceFiles.every((file) => !file.startsWith("../")));
+  assert.ok(existsSync(path.join(standalone, "site", "timds.consumer.json")));
+  const record = JSON.parse(await fs.readFile(path.join(standalone, "site", EMDASH_RECORD_PATH), "utf8"));
+  assert.ok(Object.keys(record.workspaceFiles).every((file) => !file.startsWith("../")));
+
+  // Embedded: the system is design-system/ of the folder --root names, through a link.
+  const repository = path.join(root, "product");
+  await fs.mkdir(repository, { recursive: true });
+  await initializeRepository(repository, { name: "Acme", systemId: "acme/core" });
+  await fs.rm(path.join(repository, ".git"), { recursive: true, force: true });
+  await fs.symlink(repository, path.join(root, "product-link"), "dir");
+  const embedded = await scaffoldWorkspaceEmdashSite(path.join(root, "product-link"), { skipInstall: true, output: quiet });
+  assert.equal(embedded.layout, "embedded");
+  assert.equal(embedded.designSystemRoot, path.join(repository, "design-system"));
+  assert.ok(embedded.written.length && embedded.written.every((file) => file.startsWith("site/")), "the site's files are written under the system's site/");
+  // Paths from the repository root name the system's folder, never a way around a link.
+  assert.ok(embedded.workspaceFiles.includes("design-system/AGENTS.md"), embedded.workspaceFiles.join(", "));
+  assert.ok(embedded.workspaceFiles.every((file) => !file.startsWith("../")));
+  assert.ok(existsSync(path.join(repository, "design-system", "site", "timds.consumer.json")));
+});
+
 test("--workspace builds a system's own design and lists the article routes with no port yet", async (t) => {
   const root = await temporaryDirectory(t);
   const workspace = await ownDesignWorkspace(path.join(root, "ws"));

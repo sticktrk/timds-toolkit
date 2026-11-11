@@ -335,16 +335,22 @@ dev` serves and while `astro build` builds, never in the Worker:
   (`/articles`, `/articles/...`, `/topics/...`) is a page of the site, filled
   the way the system's own renderer fills it (`layout.html` around the page,
   the `{{name}}`, `{{description}}`, `{{version}}` and `{{title}}`
-  placeholders), with Astro's `base` in front of root-relative links. Only a
-  page's default state is served: `about.html` or `about.default.html` (one
-  of them, as the designs catalog requires); named states
+  placeholders), with Astro's `base` in front of root-relative `href`, `src`,
+  `action`, `formaction`, `poster` and `srcset` values, quoted or not (text
+  in other attributes, comments, scripts, styles and textareas is never
+  rewritten). Only a page's default state is served: `about.html` or
+  `about.default.html` (one of them, as the designs catalog requires); named
+  states
   (`contact.sent.html`) stay references in the system.
 - A form in the design that posts (`<form method="post">`) is rendered
   disabled, with its controls disabled and a line saying it is not connected
   yet, until the site has a handler for the address it posts to. A POST to a
   design page with no handler answers 405 with an `Allow` header, so no
-  submission is taken in and dropped. Forms that read with GET, and forms
-  that post to another origin, are left as the design wrote them.
+  submission is taken in and dropped. A form's POSTs are its own
+  (`method="post"`) and those of each submit button with its own
+  `formmethod="post"` or `formaction`; any of them that reaches an address of
+  the site with no handler disables the whole form. Forms that read with GET,
+  and forms that post to another origin, are left as the design wrote them.
 - The article, topic and 404 routes render inside the design's layout, or,
   for a design without `layout.html`, inside its home page with the content
   of its `<main>` taken out.
@@ -363,7 +369,13 @@ The catch-all route passes each POST to that address to it, a GET still
 renders the design's page, and the form renders enabled on the next build (at
 once under `astro dev`) with no change to the design. The integration decides
 which forms have a handler from the site's files each time it builds the
-pages, in development and in the build alike. The template ships no handler:
+pages, in development and in the build alike. It reads each module's exports
+with the parser of the Vite the site's Astro runs on, so `export async
+function POST`, `export const POST = …`, `export { handler as POST }` and
+`export { POST } from "./elsewhere"` count, and a comment or string that
+mentions POST does not; `export *` does not either, so name `POST`. When a
+request comes, the route checks that `POST` is a function; if it is not, the
+address answers 405 and the server log names the module. The template ships no handler:
 what a submission does (mail, a queue, a CRM) is the site's decision.
 
 Editing a design or a token changes the site on the next request in
@@ -386,25 +398,36 @@ npm run timds -- consumer check --root site --no-fix   # report without rewritin
 ```
 
 In a workspace site, `consumer check` also scans the site's design surface
-for styles the system lacks. What the system has: the stylesheets
-`timds.json` `bundle.include` names, `src/styles/system.css` when it exists,
-every system stylesheet a site file imports, and their `@import`s; the custom
-properties they declare plus, on the starter build, the compiled tokens (read
-directly from the `tokens/` groups when the system keeps them, so a token
-added to a group is seen without a system build); and every class those
-stylesheets declare. The system is read from source only: nothing under its
-`dist/` is ever read, by any of those routes, so a check run after a token
-change matches the new value whether or not the system was rebuilt, and a
-stylesheet that exists only in `dist/` contributes no token and no class. What is scanned: site files in the design surface or
-the protected globs, skipping `node_modules`, `dist`, `.astro`, `.wrangler`,
-dot-directories and git-ignored paths (outside a Git work tree nothing is
-ignored); `.css` files whole, and in `.astro`,
-`.html`, `.jsx`, `.tsx`, `.vue` and `.svelte` files the `<style>` blocks,
-static `style` attributes and static class names. Each start tag's
-attributes are parsed whole, so CSS-looking text inside another attribute, a
-comment or a `<script>` is never read or rewritten. Dynamic expressions are
-never guessed at. The module comment of `src/consumer-workspace-check.mjs`
-has the full rules.
+for styles the system lacks. What the system has is what the site loads, read
+from source: the stylesheets linked by the website design the site renders
+inside (the one `astro.config.mjs` names as `designSystem({ design })`,
+served from the system's `src/styles/`), that shell's inline `<style>`
+blocks, the compiled tokens when the design links `/tokens.css` and the
+system runs the starter build (read directly from the `tokens/` groups when
+the system keeps them, so a token added to a group is seen without a system
+build), the system stylesheets a site file imports, and the `@import`s of all
+of these; then the custom properties and the classes they declare. It never
+reads `timds.json` `bundle.include`, a stylesheet the design does not link,
+or anything under the system's `dist/`, so a literal is never rewritten to a
+token the page would not have, and a check run after a token change matches
+the new value whether or not the system was rebuilt. A site whose
+`astro.config.mjs` names a design the system lacks, or a system with no
+website design, fails the check with what to do. `--require-token` answers
+from the same set: a token the system declares in a stylesheet the design
+does not link fails, and the message names the file to link.
+
+What is scanned: site files in the design surface or the protected globs,
+skipping `node_modules`, `dist`, `.astro`, `.wrangler`, dot-directories and
+git-ignored paths (outside a Git work tree nothing is ignored); `.css` files
+whole, and in `.astro`, `.html`, `.jsx`, `.tsx`, `.vue` and `.svelte` files
+the `<style>` blocks, static `style` attributes and static class names. Each
+start tag's attributes are parsed whole, so CSS-looking text inside another
+attribute or a comment is never read or rewritten. The bodies of `<script>`,
+`<textarea>`, `<title>`, `<xmp>` and `<plaintext>` are text, and a `{…}`
+expression is read as JavaScript: its strings, template literals and
+comments are passed over, and JSX inside it is still read as markup. Dynamic
+expressions are never guessed at. The module comment of
+`src/consumer-workspace-check.mjs` has the full rules.
 
 - A color literal (hex, the color functions, a named color in a color
   property) or a `font-family` stack equal to exactly one document-scope
@@ -516,11 +539,15 @@ other:
   (`site/.timds/emdash.json`, `mode: "workspace"`) lists in `workspaceFiles`,
   and only when the repository root is not itself a consumer
   (`timds.consumer.json`, or `consumer` in `.timds/installation.json`): a
-  product's own consumer skills never enter a system submission. A change confined to the site needs no
-  note under `## Unreleased` in the system's `CHANGELOG.md`; any change to the
-  system still does.
+  product's own consumer skills never enter a system submission. Deleting
+  an owned skill folder whole is staged too. A change confined to the site
+  needs no note under `## Unreleased` in the system's `CHANGELOG.md`; any
+  change to the system still does.
 - `shoot` never copies the parent's site: an offshoot is a new system and
-  starts without one.
+  starts without one. The site's consumer skills and `AGENTS.md` section stay
+  behind with it while they are unedited, so the offshoot can scaffold a site
+  of its own; edited ones are kept and reported
+  ([Offshoots](offshoots.md)).
 - A hosted session carries the site's source, never its dependencies, build
   output, local state or secrets, which its `.gitignore` excludes.
 

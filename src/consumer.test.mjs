@@ -559,6 +559,10 @@ async function workspaceFixture(t, { systemId = "acme/core" } = {}) {
   await write(root, "timds.json", { schemaVersion: 2, systemId, name: "Acme" });
   await write(root, "tokens.json", {});
   await write(root, "src/styles/system.css", ":root { --color-brand: #123456; --focus-ring: var(--color-brand); }\n");
+  // The website design the site renders inside; its layout links the system's stylesheet, as a scaffold's does.
+  await write(root, "src/designs/website/design.json", { title: "Website" });
+  await write(root, "src/designs/website/layout.html", "<!doctype html>\n<html><head><link rel=\"stylesheet\" href=\"/styles/system.css\"></head><body>{{content}}</body></html>\n");
+  await write(root, "src/designs/website/pages/index.html", "<main><h1>Home</h1></main>\n");
   await write(root, "site/timds.consumer.json", workspaceManifest());
   await write(root, "site/package.json", { name: "site", private: true });
   await write(root, "site/package-lock.json", { name: "site", lockfileVersion: 3, packages: {} });
@@ -627,6 +631,33 @@ test("checkConsumer passes a workspace site with no bundle, gitlink, or toolkit 
   assert.match(unlocked.errors.join("\n"), /package-lock\.json is missing\. A workspace site is its own package/);
 });
 
+test("--require-token in a workspace site answers from what the site loads, compiled token groups included", async (t) => {
+  const { root, site } = await workspaceFixture(t);
+  // A starter-build system keeping tokens/ groups, whose design links the compiled /tokens.css.
+  await write(root, "timds.json", { schemaVersion: 2, systemId: "acme/core", name: "Acme", workspace: { build: ["node", "scripts/build.mjs"] } });
+  await write(root, ".timds/contract-layout.json", { schemaVersion: 1 });
+  await write(root, "tokens/color.json", { ink: { value: "#222222" } });
+  await write(root, "media/brand.json", {});
+  await write(root, "src/designs/website/layout.html", "<!doctype html>\n<html><head><link rel=\"stylesheet\" href=\"/tokens.css\"><link rel=\"stylesheet\" href=\"/styles/system.css\"></head><body>{{content}}</body></html>\n");
+  await write(root, "src/styles/stock.css", ":root { --stock-only: #eeeeee; }\n");
+  const passed = await checkConsumer(site, { requireTokens: ["--color-ink", "--focus-ring"] });
+  assert.deepEqual(passed.errors, []);
+  assert.equal(passed.status, "passed");
+
+  const missing = await checkConsumer(site, { requireTokens: ["--color-missing"] });
+  assert.equal(missing.status, "failed");
+  assert.match(missing.errors.join("\n"), /Missing required Design System token --color-missing: neither what app "site" loads \(\/tokens\.css \(the compiled tokens\), src\/styles\/system\.css\) nor any other stylesheet or token of the workspace Design System declares it\. Add it to the Design System in this change/);
+
+  // In the system, but in a stylesheet the design does not link.
+  const unloaded = await checkConsumer(site, { requireTokens: ["--stock-only"] });
+  assert.match(unloaded.errors.join("\n"), /--stock-only is declared in the workspace Design System \(src\/styles\/stock\.css\), but app "site" does not load it: .*through the website design "website"\. Either link \/styles\/stock\.css from src\/designs\/website\/layout\.html/);
+
+  // Without the /tokens.css link the compiled groups are not the site's.
+  await write(root, "src/designs/website/layout.html", "<!doctype html>\n<html><head><link rel=\"stylesheet\" href=\"/styles/system.css\"></head><body>{{content}}</body></html>\n");
+  const unlinked = await checkConsumer(site, { requireTokens: ["--color-ink"] });
+  assert.match(unlinked.errors.join("\n"), /--color-ink is declared in the workspace Design System \(tokens\/\), but app "site" does not load it.*link \/tokens\.css from src\/designs\/website\/layout\.html/);
+});
+
 test("checkConsumer refuses a workspace site with no Design System above it and warns on another systemId", async (t) => {
   const lonely = await temporaryDirectory(t);
   initRepo(lonely);
@@ -688,6 +719,9 @@ test("checkConsumer reads a workspace site's base manifest at its real path and 
   const fresh = await temporaryDirectory(t);
   initRepo(fresh);
   await write(fresh, "timds.json", { schemaVersion: 2, systemId: "acme/core" });
+  // The scaffold needs a website design; the site renders inside it.
+  await write(fresh, "src/designs/website/design.json", { title: "Website" });
+  await write(fresh, "src/designs/website/pages/index.html", "<main><h1>Home</h1></main>\n");
   git(fresh, "add", ".");
   git(fresh, "commit", "-q", "-m", "System");
   git(fresh, "checkout", "-q", "-b", "site");
@@ -748,8 +782,11 @@ test("checkConsumer pairs a workspace site's routes with the workspace's own des
   const manifest = workspaceManifest();
   manifest.apps.site.preview = { serve: ["npm", "run", "dev"], port: 4321, routes: ["/", "/about"], designs: { "/": "website:/", "/about": "website:/about" } };
   await write(root, "site/timds.consumer.json", manifest);
+  await fs.rm(path.join(root, "src", "designs"), { recursive: true });
   let result = await checkConsumer(site);
   assert.match(result.errors.join("\n"), /pairs \/ with website:\/, but the workspace Design System has no src\/designs\//);
+  // With no design the two-way check cannot say what the site loads, and says so.
+  assert.match(result.errors.join("\n"), /the Design System has none .*timds designs init/);
   await write(root, "src/designs/website/design.json", { title: "Site" });
   await write(root, "src/designs/website/pages/index.html", "<h1>Home</h1>");
   result = await checkConsumer(site);

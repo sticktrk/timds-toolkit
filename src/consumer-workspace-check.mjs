@@ -10,39 +10,50 @@
 // token, a new class). It never proposes changing an existing token's value
 // or an existing class's rules.
 //
-// What the system has, read from source as the site loads it now:
-//   - Its stylesheets: the `.css` files `timds.json bundle.include` names (what
-//     a website loads from the published system), `src/styles/system.css`
-//     when it exists (the starter's stylesheet, the one the website designs
-//     link and the EmDash scaffold imports), every stylesheet a scanned site
-//     file imports from inside the workspace but outside the site, and their
-//     relative `@import`s. The viewer's own chrome (`viewer.css`) and preview
-//     engine (`canvas.css`) count only when one of those names them. An
-//     explicit `stylesheets` list replaces the discovery. Nothing under the
-//     built output (`dist/`) is read by any of these routes, a symbolic link
-//     into it included: the site never loads it, and a built `tokens.css`
-//     holds the values of the last build, not the current ones. A system
-//     whose stylesheets exist only there offers no tokens or classes from
-//     them, so its literals are findings rather than rewrites.
-//   - Its tokens: the custom properties of those stylesheets plus, for a
-//     system on the starter build, its tokens (the `tokens/` groups when it
-//     keeps them, else `tokens.json`) compiled by the viewer's rule
-//     (`--group-name`, `{group.name}` references as `var()`), the `/tokens.css`
-//     the site template serves, resolved together. Only the document scope
-//     (`:root`/`html`, unconditional) offers a rewrite: a theme or
-//     media-scoped value would change what the other scopes render.
-//   - Its classes: every class a system stylesheet declares (`declaredClasses`,
+// What the system has, read from source as the site loads it now. The site
+// renders inside one website design of the system (its integration's
+// `design`): the design its astro.config passes as `designSystem({ design:
+// "<id>" })`, else the one the scaffold picks (`selectWebsiteDesign`); the
+// result's `system.design` names it and how it was chosen. A config naming a
+// design the system lacks, or a system with no design, is an error: the site
+// cannot render then either, and no stylesheet can be shown to load.
+//   - Its stylesheets: those the design's shell (its layout.html, else its
+//     home page; `designShellStylesheets`, the rule the scaffold's article
+//     route report uses) links, as the integration serves them
+//     (`/styles/x.css` is `src/styles/x.css`), its inline `<style>` blocks,
+//     every stylesheet a scanned site file imports from inside the workspace
+//     but outside the site, and the `@import`s of all of these (a
+//     root-relative one resolved the same way). `timds.json bundle.include`
+//     is not read: a workspace site loads no bundle. An explicit
+//     `stylesheets` list replaces the discovery (`/tokens.css` in it names
+//     the compiled tokens). Nothing under the built output (`dist/`) is read
+//     by any of these routes, a symbolic link into it included: the site
+//     never loads it, and a built `tokens.css` holds the values of the last
+//     build, not the current ones.
+//   - Its tokens: the custom properties of those stylesheets plus, when the
+//     design links `/tokens.css` and the system runs the starter build (the
+//     only case the integration serves it), its tokens (the `tokens/` groups
+//     when it keeps them, else `tokens.json`) compiled by the viewer's rule
+//     (`--group-name`, `{group.name}` references as `var()`), in link order
+//     and resolved together. Only the document scope (`:root`/`html`,
+//     unconditional) offers a rewrite: a theme or media-scoped value would
+//     change what the other scopes render. `workspaceTokenInventory` returns
+//     this index for `consumer check --require-token`.
+//   - Its classes: every class those stylesheets declare (`declaredClasses`,
 //     the rule the website-designs check uses).
 //
 // What is scanned: site files that match the app's design surface or its
 // protected globs (protected wins), skipping node_modules, dist, .astro,
 // .wrangler, dot-directories and git-ignored paths (git is asked only inside
-// a work tree). `.css` files whole; in `.astro`, `.html`, `.jsx`, `.tsx`,
-// `.vue` and `.svelte` files, read tag by tag with each attribute parsed
-// whole (so markup or CSS inside another attribute's value, a comment or a
-// `<script>` body is never taken for a tag or a style), the `<style>` blocks
-// (not those with a non-CSS `lang` or an expression body), static `style`
-// attributes and static class names: quoted `class`/`className` values (Svelte/Vue
+// a work tree). `.css` files whole; `.astro`, `.html`, `.jsx`, `.tsx`, `.vue`
+// and `.svelte` files are read by one scanner (`scanMarkup`): each tag's
+// attributes are parsed whole; comments, raw-text bodies (`<script>`,
+// `<style>`, `<textarea>`, `<title>`, `<xmp>`, `<plaintext>`) and attribute
+// values are passed over; a `{...}` expression (and a `.jsx`/`.tsx` file as
+// a whole) is read as JavaScript whose strings and comments are passed over,
+// with JSX read as markup where it can start. What is read there: the
+// `<style>` blocks (not those with a non-CSS `lang` or an expression body),
+// static `style` attributes and static class names: quoted `class`/`className` values (Svelte/Vue
 // `{...}` interpolations and any name touching one are skipped), a
 // `className`/`class:list` expression that is one string literal, and in a
 // `class:list` the string elements of an array and the keys of an object.
@@ -89,12 +100,11 @@ import { spawn } from "node:child_process";
 import { existsSync, promises as fs } from "node:fs";
 import path from "node:path";
 
-import { matchesPattern as matchesBundlePattern, normalizeBundleConfig } from "./bundle.mjs";
 import { matchesGlob } from "./consumer.mjs";
 import { applyWritesWithRollback, compileTokenCss } from "./consumer-scaffold.mjs";
-import { runsStarterBuild } from "./consumer-scaffold-workspace.mjs";
+import { designShellStylesheets, runsStarterBuild, selectWebsiteDesign } from "./consumer-scaffold-workspace.mjs";
 import { hasContractGroups, readContractGroups } from "./contract-groups.mjs";
-import { declaredClasses } from "./designs.mjs";
+import { declaredClasses, readDesignCatalog } from "./designs.mjs";
 import { classifyToken, importReferences, parseCssTokens, resolveTokens } from "./tokens.mjs";
 
 /** The version of the result and finding shapes `checkWorkspaceSite` returns. */
@@ -106,6 +116,11 @@ export const WORKSPACE_FINDING_KINDS = Object.freeze(["literal", "ambiguous-lite
 // The starter stylesheet, as `inspectDesignSystem` in consumer-scaffold.mjs
 // recognises it (that constant is not exported).
 const STARTER_STYLESHEET = "src/styles/system.css";
+// The compiled tokens, at the URL the site integration serves them from.
+const COMPILED_TOKENS = "/tokens.css";
+// The system's src/ folders the site integration serves at /<name>/.
+const SERVED_DIRECTORIES = ["assets", "scripts", "styles"];
+const ASTRO_CONFIGS = ["astro.config.mjs", "astro.config.js", "astro.config.ts", "astro.config.mts", "astro.config.cjs", "astro.config.cts"];
 const MAX_IMPORT_DEPTH = 8;
 // The system's built artifact (`timds check` and the starter build write it).
 // The workspace site never loads it: it reads src/styles/ and the tokens from
@@ -407,42 +422,39 @@ async function readText(file) {
   }
 }
 
-/** `.css` files under the Design System that a bundle include pattern names, never inside the site. */
-async function bundleStylesheets(designSystemRoot, siteRoot, manifest) {
-  let config;
-  try {
-    config = normalizeBundleConfig(manifest.bundle);
-  } catch {
-    return []; // the system's own check reports a malformed bundle
+/** The design id the site's astro.config passes to the integration (`designSystem({ design: "<id>" })`), with the file, or null. */
+async function configuredDesign(siteRoot) {
+  for (const file of ASTRO_CONFIGS) {
+    const text = await readText(path.join(siteRoot, file));
+    if (text === null) continue;
+    const call = /\bdesignSystem\s*\(\s*\{[^}]*?\bdesign\s*:\s*(["'`])([a-z0-9]+(?:-[a-z0-9]+)*)\1/.exec(text);
+    return call ? { id: call[2], file } : null;
   }
-  if (!config) return [];
-  const found = new Set();
-  const visit = async (relative) => {
-    const absolute = path.join(designSystemRoot, ...relative.split("/"));
-    if (isInside(siteRoot, absolute) || isBuiltOutput(relative)) return;
-    const stat = await fs.lstat(absolute).catch(() => null);
-    if (!stat) return;
-    if (stat.isFile()) {
-      if (relative.endsWith(".css") && config.include.some((pattern) => matchesBundlePattern(relative, pattern))
-        && !config.exclude.some((pattern) => matchesBundlePattern(relative, pattern))) found.add(relative);
-      return;
+  return null;
+}
+
+/**
+ * The website design the site renders inside: the one its astro.config names,
+ * else the one the scaffold would pick (`selectWebsiteDesign`). Throws when
+ * the config names a design the system lacks, or when there is none to pick:
+ * the site cannot render then either, and no sheet can be shown to load.
+ */
+async function selectDesign({ siteRoot, designSystemRoot }) {
+  const catalog = await readDesignCatalog(designSystemRoot);
+  const configured = await configuredDesign(siteRoot);
+  if (configured) {
+    const entry = catalog.designs.find((design) => design.id === configured.id);
+    if (!entry) {
+      const ids = catalog.designs.map((design) => design.id);
+      throw new Error(`The site's ${configured.file} renders the website design "${configured.id}", but the Design System has no src/designs/${configured.id}/design.json. Name one it has${ids.length ? ` (${ids.join(", ")})` : ""} in ${configured.file}, or add that design to the system.`);
     }
-    if (!stat.isDirectory()) return;
-    for (const entry of await fs.readdir(absolute)) {
-      if (entry.startsWith(".") || entry === "node_modules") continue;
-      await visit(relative ? `${relative}/${entry}` : entry);
-    }
-  };
-  for (const pattern of config.include) {
-    const segments = pattern.split("/");
-    const fixed = [];
-    for (const segment of segments) {
-      if (/[*?]/.test(segment)) break;
-      fixed.push(segment);
-    }
-    await visit(fixed.join("/"));
+    return { id: entry.id, entry, selectedBy: configured.file };
   }
-  return [...found].sort();
+  const entry = selectWebsiteDesign(catalog.designs);
+  if (!entry) {
+    throw new Error("The two-way check reads the styles the site loads from the website design it renders inside, and the Design System has none (src/designs/<id>/ with a layout.html or pages/index.html). Add one with timds designs init, then name it in the site's astro.config.mjs as designSystem({ design: \"<id>\" }).");
+  }
+  return { id: entry.id, entry, selectedBy: "catalog" };
 }
 
 /** The first tokens.json group whose values are of `kind`, for a suggestion; `fallback` when none is. */
@@ -468,49 +480,34 @@ async function readSystem({ designSystemRoot, siteRoot, siteImports, stylesheets
     throw new Error(`timds.json could not be read as JSON: ${caught.message}`);
   }
 
-  const entries = stylesheets
-    ? stylesheets.map((stylesheet) => path.posix.normalize(toPosix(stylesheet)))
-    : [...new Set([
-      ...await bundleStylesheets(designSystemRoot, siteRoot, manifest),
-      ...(existsSync(path.join(designSystemRoot, STARTER_STYLESHEET)) ? [STARTER_STYLESHEET] : []),
-      ...siteImports,
-    ])];
-
-  // Every route into the index (discovery, an explicit list, a site import, an
-  // `@import`) passes here, so nothing under the built output is ever read,
-  // not even through a symbolic link.
-  const builtRoot = path.join(await fs.realpath(designSystemRoot).catch(() => designSystemRoot), BUILT_OUTPUT);
-  const sheets = [];
-  const seen = new Set();
-  const load = async (relative, depth) => {
-    if (seen.has(relative) || depth > MAX_IMPORT_DEPTH || relative.startsWith("../") || isBuiltOutput(relative)) return;
-    seen.add(relative);
-    const absolute = path.join(designSystemRoot, ...relative.split("/"));
-    if (isInside(siteRoot, absolute)) return;
-    const real = await fs.realpath(absolute).catch(() => null);
-    if (real && isInside(builtRoot, real)) return;
-    const css = await readText(absolute);
-    if (css === null) return;
-    for (const reference of importReferences(css)) {
-      if (reference.startsWith("/")) continue;
-      await load(path.posix.normalize(path.posix.join(path.posix.dirname(relative), reference.split(/[?#]/, 1)[0])), depth + 1);
-    }
-    sheets.push({ path: relative, css });
-  };
-  for (const entry of entries) await load(entry, 0);
+  const starterBuild = runsStarterBuild(manifest);
+  let design = null;
+  let entries;
+  if (stylesheets) {
+    entries = stylesheets.map((stylesheet) => {
+      const normalized = path.posix.normalize(toPosix(stylesheet));
+      return normalized === COMPILED_TOKENS ? normalized : normalized.replace(/^\.\//, "");
+    });
+  } else {
+    design = await selectDesign({ siteRoot, designSystemRoot });
+    const shell = await designShellStylesheets(designSystemRoot, design.entry);
+    design.shell = shell.shell;
+    design.inline = shell.inline;
+    entries = [...shell.links.map((link) => (link.tokens ? COMPILED_TOKENS : link.path)), ...siteImports];
+  }
 
   // A starter-build system compiles its tokens to tokens.css at build time,
-  // and the site template serves the same compile from source as /tokens.css.
-  // The index compiles from source too, never reading the built copy. The
-  // authored source is the tokens/ groups when the system keeps them
-  // (tokens.json is then a generated view that only `timds check` refreshes),
-  // so a token an agent just added to a group is seen at once. A system off
-  // the starter build has no compiled tokens.css; its tokens are the custom
-  // properties of its source stylesheets alone.
-  const starterBuild = runsStarterBuild(manifest);
+  // and the site integration serves the same compile from source as
+  // /tokens.css, so the tokens count when the design links /tokens.css (or an
+  // explicit list names it), at that place in the order, and never from the
+  // built copy. The authored source is the tokens/ groups when the system
+  // keeps them (tokens.json is then a generated view that only `timds check`
+  // refreshes), so a token an agent just added to a group is seen at once. A
+  // system off the starter build has no compiled tokens.css; its tokens are
+  // the custom properties of its source stylesheets alone.
   let tokensJson = null;
   let tokenGroups = false;
-  if (starterBuild) {
+  const readTokenSource = async () => {
     if (await hasContractGroups(designSystemRoot)) {
       try {
         tokensJson = { ...(await readContractGroups(designSystemRoot)).tokens };
@@ -528,12 +525,53 @@ async function readSystem({ designSystemRoot, siteRoot, siteImports, stylesheets
         }
       }
     }
-  }
+  };
+
+  // Every route into the index (the design's links, an explicit list, a site
+  // import, an `@import`) passes here, so nothing under the built output is
+  // ever read, not even through a symbolic link. A root-relative `@import`
+  // resolves the way the site serves it: /styles/x.css is src/styles/x.css.
+  const builtRoot = path.join(await fs.realpath(designSystemRoot).catch(() => designSystemRoot), BUILT_OUTPUT);
+  const sources = [];
+  const seen = new Set();
+  const load = async (relative, depth) => {
+    if (seen.has(relative) || depth > MAX_IMPORT_DEPTH) return;
+    seen.add(relative);
+    if (relative === COMPILED_TOKENS) {
+      if (!starterBuild) return;
+      await readTokenSource();
+      if (tokensJson) sources.push({ path: COMPILED_TOKENS, css: compileTokenCss(tokensJson), compiled: true });
+      return;
+    }
+    if (relative.startsWith("../") || relative.startsWith("/") || isBuiltOutput(relative)) return;
+    const absolute = path.join(designSystemRoot, ...relative.split("/"));
+    if (isInside(siteRoot, absolute)) return;
+    const real = await fs.realpath(absolute).catch(() => null);
+    if (real && isInside(builtRoot, real)) return;
+    const css = await readText(absolute);
+    if (css === null) return;
+    for (const reference of importReferences(css)) {
+      const target = reference.split(/[?#]/, 1)[0];
+      if (target.startsWith("/")) {
+        const served = path.posix.normalize(target);
+        const directory = served.split("/")[1];
+        if (served === COMPILED_TOKENS) await load(served, depth + 1);
+        else if (SERVED_DIRECTORIES.includes(directory)) await load(`src${served}`, depth + 1);
+        continue;
+      }
+      await load(path.posix.normalize(path.posix.join(path.posix.dirname(relative), target)), depth + 1);
+    }
+    sources.push({ path: relative, css, linked: depth === 0 });
+  };
+  for (const entry of entries) await load(entry, 0);
+  for (const [index, css] of (design?.inline ?? []).entries()) sources.push({ path: `${design.shell} <style> ${index + 1}`, css, inline: true });
+  const sheets = sources.filter((source) => !source.compiled && !source.inline);
   const tokenFile = (group) => (tokenGroups ? `tokens/${String(group).replaceAll(".", "/")}.json` : "tokens.json");
 
   const records = [];
-  if (tokensJson) records.push(...parseCssTokens(compileTokenCss(tokensJson), { source: tokenGroups ? "tokens/" : "tokens.json" }));
-  for (const sheet of sheets) records.push(...parseCssTokens(sheet.css, { source: sheet.path }));
+  for (const source of sources) {
+    records.push(...parseCssTokens(source.css, { source: source.compiled ? (tokenGroups ? "tokens/" : "tokens.json") : source.path }));
+  }
   const resolved = resolveTokens(records);
 
   const tokenNames = new Set(resolved.map((record) => record.name));
@@ -556,10 +594,13 @@ async function readSystem({ designSystemRoot, siteRoot, siteImports, stylesheets
   }
 
   const classes = new Set();
-  for (const sheet of sheets) for (const name of declaredClasses(sheet.css)) classes.add(name);
+  for (const source of sources) if (!source.compiled) for (const name of declaredClasses(source.css)) classes.add(name);
 
   const tokenSheet = sheets.find((sheet) => parseCssTokens(sheet.css).some((record) => record.base));
-  const classSheet = sheets.find((sheet) => sheet.path === STARTER_STYLESHEET) ?? sheets.find((sheet) => declaredClasses(sheet.css).size) ?? sheets[0];
+  // A new class goes in the sheet the design links itself, the starter's first.
+  const classSheet = sheets.find((sheet) => sheet.path === STARTER_STYLESHEET)
+    ?? sheets.find((sheet) => sheet.linked && declaredClasses(sheet.css).size)
+    ?? sheets.find((sheet) => declaredClasses(sheet.css).size) ?? sheets[0];
   const where = {
     color: tokensJson
       ? { file: tokenFile(tokenGroupOf(tokensJson, "color", "color")), group: tokenGroupOf(tokensJson, "color", "color"), grouped: tokenGroups }
@@ -573,6 +614,8 @@ async function readSystem({ designSystemRoot, siteRoot, siteImports, stylesheets
   return {
     stylesheets: sheets.map((sheet) => sheet.path),
     tokensJson: Boolean(tokensJson),
+    design: design ? { id: design.id, selectedBy: design.selectedBy, shell: design.shell } : null,
+    resolved,
     tokenNames,
     colors,
     fonts,
@@ -699,103 +742,191 @@ function matchingBrace(text, open) {
 }
 
 const TAG_NAME = /<([a-zA-Z][\w:.-]*)/y;
+const CLOSING_TAG = /<\/([a-zA-Z][\w:.-]*)?\s*>/y;
 const ATTRIBUTE_NAME = /[^\s"'<>=/{}]+/y;
-
-/**
- * The start tag whose `<` is at `start`, parsed in full: `{ name, end,
- * selfClosing, attributes }`, where `end` is the index after `>` and each
- * attribute is `{ name, quote, valueStart, valueEnd }` (`quote` is `"`, `'`,
- * `{` for an expression, `""` unquoted, null without a value; the value span
- * excludes the quotes or braces). A spread or shorthand `{...}` is skipped.
- * Null when the text at `start` is not a complete start tag.
- */
-function parseStartTag(text, start) {
-  TAG_NAME.lastIndex = start;
-  const opened = TAG_NAME.exec(text);
-  if (!opened) return null;
-  const attributes = [];
-  let index = TAG_NAME.lastIndex;
-  while (index < text.length) {
-    const char = text[index];
-    if (/\s/.test(char)) {
-      index += 1;
-    } else if (char === ">") {
-      return { name: opened[1], end: index + 1, selfClosing: false, attributes };
-    } else if (char === "/" && text[index + 1] === ">") {
-      return { name: opened[1], end: index + 2, selfClosing: true, attributes };
-    } else if (char === "/") {
-      index += 1;
-    } else if (char === "{") {
-      const end = matchingBrace(text, index);
-      if (end === -1) return null;
-      index = end;
-    } else {
-      ATTRIBUTE_NAME.lastIndex = index;
-      const named = ATTRIBUTE_NAME.exec(text);
-      if (!named) return null;
-      const attribute = { name: named[0], quote: null, valueStart: -1, valueEnd: -1 };
-      attributes.push(attribute);
-      index = ATTRIBUTE_NAME.lastIndex;
-      let next = index;
-      while (next < text.length && /\s/.test(text[next])) next += 1;
-      if (text[next] !== "=") continue;
-      next += 1;
-      while (next < text.length && /\s/.test(text[next])) next += 1;
-      const open = text[next];
-      if (open === '"' || open === "'") {
-        const close = text.indexOf(open, next + 1);
-        if (close === -1) return null;
-        Object.assign(attribute, { quote: open, valueStart: next + 1, valueEnd: close });
-        index = close + 1;
-      } else if (open === "{") {
-        const close = matchingBrace(text, next);
-        if (close === -1) return null;
-        Object.assign(attribute, { quote: "{", valueStart: next + 1, valueEnd: close - 1 });
-        index = close;
-      } else {
-        const unquoted = /[^\s>]*/y;
-        unquoted.lastIndex = next;
-        unquoted.exec(text);
-        let end = unquoted.lastIndex;
-        if (text[end - 1] === "/" && text[end] === ">") end -= 1; // `<a b=c/>` closes the tag
-        Object.assign(attribute, { quote: "", valueStart: next, valueEnd: end });
-        index = end;
-      }
-    }
-  }
-  return null;
-}
+// Elements whose body is text, never markup: read to their closing tag and
+// passed over (`<style>` bodies are then read as CSS). `<noscript>` is markup
+// (what a browser without scripting renders), so it is read.
+const RAW_TEXT_ELEMENTS = new Set(["script", "style", "textarea", "title", "xmp", "plaintext"]);
+const VOID_ELEMENTS = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"]);
+// Formats whose `{...}` in markup is a JavaScript expression (Vue: `{{...}}`).
+const EXPRESSION_FORMATS = new Set([".astro", ".jsx", ".tsx", ".svelte", ".vue"]);
+// Formats whose whole file is JavaScript with JSX inside.
+const SCRIPT_FORMATS = new Set([".jsx", ".tsx"]);
+// The last significant character, or keyword, before a `<` that opens JSX rather than comparing.
+const JSX_AFTER = new Set(["", "(", ",", "=", ":", "?", "&", "|", "!", "{", "[", ";", ">", "}"]);
+const JSX_AFTER_WORDS = new Set(["return", "yield", "default", "await", "case", "else", "do", "in", "of", "typeof", "void"]);
 
 /**
  * Every `<style>` block, static class use and style attribute in a markup
- * file, read tag by tag from the start: a comment, a `<script>` or `<style>`
- * body and every attribute value are passed over whole, so markup-looking
- * text inside one of them is never taken for a tag or an attribute. Astro
- * frontmatter is blanked first. Blocks in a non-CSS `lang`, or whose body is
- * an expression, are marked `skipped`.
+ * file, read by one scanner from the start. Markup: a comment, a raw-text
+ * element's body (`<script>`, `<style>`, `<textarea>`, `<title>`, `<xmp>`,
+ * `<plaintext>`) and every attribute value are passed over whole, so
+ * markup-looking text inside one is never taken for a tag or an attribute.
+ * In `.astro`, `.svelte`, `.jsx`, `.tsx` and `.vue` (`{{...}}`) a `{...}`
+ * expression, and a `.jsx`/`.tsx` file as a whole, is JavaScript: its string
+ * literals (template literals and their `${...}` included) and comments are
+ * passed over, and markup is read only where JSX can start (after `(`, `=`,
+ * `return`, `&&` and the like); a JSX element that does not close is read as
+ * a comparison instead, and nothing inside it counts. Astro frontmatter is
+ * blanked first. Blocks in a non-CSS `lang`, or whose body is an expression,
+ * are marked `skipped`. Each tag is `{ name, end, selfClosing, attributes }`,
+ * each attribute `{ name, quote, valueStart, valueEnd }` (`quote` is `"`,
+ * `'`, `{` for an expression, `""` unquoted, null without a value; the span
+ * excludes quotes and braces).
  */
 function scanMarkup(text, extension) {
   const source = maskFrontmatter(text, extension);
+  const expressions = EXPRESSION_FORMATS.has(extension);
   const blocks = [];
   const classes = [];
   const styles = [];
-  let index = 0;
-  while (index < source.length) {
-    const lt = source.indexOf("<", index);
-    if (lt === -1) break;
-    if (source.startsWith("<!--", lt)) {
-      const close = source.indexOf("-->", lt + 4);
-      index = close === -1 ? source.length : close + 3;
-      continue;
+  const mark = () => [blocks.length, classes.length, styles.length];
+  const restore = ([b, c, s]) => {
+    blocks.length = b;
+    classes.length = c;
+    styles.length = s;
+  };
+  const opensExpression = (index) => expressions && source[index] === "{" && (extension !== ".vue" || source[index + 1] === "{");
+
+  const wordBefore = (index) => {
+    let end = index;
+    while (end > 0 && /\s/.test(source[end - 1])) end -= 1;
+    let start = end;
+    while (start > 0 && /[\w$]/.test(source[start - 1])) start -= 1;
+    return source.slice(start, end);
+  };
+
+  /** Index after the template literal whose backtick is at `start`, its `${...}` read as JavaScript, or -1. */
+  const templateEnd = (start) => {
+    for (let index = start + 1; index < source.length; index += 1) {
+      if (source[index] === "\\") index += 1;
+      else if (source[index] === "`") return index + 1;
+      else if (source[index] === "$" && source[index + 1] === "{") {
+        const end = scanScript(index + 2);
+        if (end === -1) return -1;
+        index = end - 1;
+      }
     }
-    const tag = parseStartTag(source, lt);
-    if (!tag) {
-      index = lt + 1;
-      continue;
+    return -1;
+  };
+
+  /**
+   * JavaScript from `index` to the `}` that closes the expression it is in:
+   * the index after that `}`, or -1 when it never closes. With `whole`, the
+   * rest of the file is JavaScript and the end of the file is returned.
+   */
+  function scanScript(index, { whole = false } = {}) {
+    let depth = 0;
+    let previous = whole ? "" : "{";
+    while (index < source.length) {
+      const char = source[index];
+      const next = source[index + 1];
+      if (char === "/" && next === "/") {
+        const newline = source.indexOf("\n", index);
+        index = newline === -1 ? source.length : newline;
+        continue;
+      }
+      if (char === "/" && next === "*") {
+        const close = source.indexOf("*/", index + 2);
+        index = close === -1 ? source.length : close + 2;
+        continue;
+      }
+      if (char === '"' || char === "'") {
+        index = stringEnd(source, index);
+        previous = char;
+        continue;
+      }
+      if (char === "`") {
+        const end = templateEnd(index);
+        if (end === -1) return whole ? source.length : -1;
+        index = end;
+        previous = char;
+        continue;
+      }
+      if (char === "<" && (JSX_AFTER.has(previous) || JSX_AFTER_WORDS.has(wordBefore(index)))) {
+        const saved = mark();
+        const end = scanElement(index);
+        if (end !== -1) {
+          index = end;
+          previous = ")";
+          continue;
+        }
+        restore(saved);
+      }
+      if (char === "{") depth += 1;
+      else if (char === "}") {
+        if (depth === 0 && !whole) return index + 1;
+        depth = Math.max(0, depth - 1);
+      }
+      if (!/\s/.test(char)) previous = /[\w$]/.test(char) ? "a" : char;
+      index += 1;
     }
-    index = tag.end;
-    for (const attribute of tag.attributes) {
-      const { name, quote, valueStart, valueEnd } = attribute;
+    return whole ? source.length : -1;
+  }
+
+  /** The start tag whose `<` is at `start`, parsed in full, or null. */
+  function parseStartTag(start) {
+    TAG_NAME.lastIndex = start;
+    const opened = TAG_NAME.exec(source);
+    if (!opened) return null;
+    const attributes = [];
+    const expressionEnd = (open) => (expressions ? scanScript(open + 1) : matchingBrace(source, open));
+    let index = TAG_NAME.lastIndex;
+    while (index < source.length) {
+      const char = source[index];
+      if (/\s/.test(char)) {
+        index += 1;
+      } else if (char === ">") {
+        return { name: opened[1], end: index + 1, selfClosing: false, attributes };
+      } else if (char === "/" && source[index + 1] === ">") {
+        return { name: opened[1], end: index + 2, selfClosing: true, attributes };
+      } else if (char === "/") {
+        index += 1;
+      } else if (char === "{") {
+        const end = expressionEnd(index);
+        if (end === -1) return null;
+        index = end;
+      } else {
+        ATTRIBUTE_NAME.lastIndex = index;
+        const named = ATTRIBUTE_NAME.exec(source);
+        if (!named) return null;
+        const attribute = { name: named[0], quote: null, valueStart: -1, valueEnd: -1 };
+        attributes.push(attribute);
+        index = ATTRIBUTE_NAME.lastIndex;
+        let next = index;
+        while (next < source.length && /\s/.test(source[next])) next += 1;
+        if (source[next] !== "=") continue;
+        next += 1;
+        while (next < source.length && /\s/.test(source[next])) next += 1;
+        const open = source[next];
+        if (open === '"' || open === "'") {
+          const close = source.indexOf(open, next + 1);
+          if (close === -1) return null;
+          Object.assign(attribute, { quote: open, valueStart: next + 1, valueEnd: close });
+          index = close + 1;
+        } else if (open === "{") {
+          const close = expressionEnd(next);
+          if (close === -1) return null;
+          Object.assign(attribute, { quote: "{", valueStart: next + 1, valueEnd: close - 1 });
+          index = close;
+        } else {
+          const unquoted = /[^\s>]*/y;
+          unquoted.lastIndex = next;
+          unquoted.exec(source);
+          let end = unquoted.lastIndex;
+          if (source[end - 1] === "/" && source[end] === ">") end -= 1; // `<a b=c/>` closes the tag
+          Object.assign(attribute, { quote: "", valueStart: next, valueEnd: end });
+          index = end;
+        }
+      }
+    }
+    return null;
+  }
+
+  /** Record the class and style attributes of a parsed tag. */
+  function takeAttributes(tag) {
+    for (const { name, quote, valueStart, valueEnd } of tag.attributes) {
       if (quote === null || !["class:list", "className", "class", "style"].includes(name)) continue;
       const value = text.slice(valueStart, valueEnd);
       if (quote === "{") {
@@ -806,11 +937,18 @@ function scanMarkup(text, extension) {
         classes.push(...staticClassTokens(value, valueStart));
       }
     }
+  }
+
+  /** Pass over a raw-text element's body: the index after its closing tag, the end of the file when it has none (or -1 with `strict`). */
+  function rawBody(tag, { strict }) {
     const raw = tag.name.toLowerCase();
-    if (tag.selfClosing || (raw !== "script" && raw !== "style")) continue;
-    const closing = new RegExp(`</${raw}\\s*>`, "gi");
-    closing.lastIndex = tag.end;
-    const close = closing.exec(source);
+    const closing = raw === "plaintext" ? null : new RegExp(`</${raw}\\s*>`, "gi");
+    let close = null;
+    if (closing) {
+      closing.lastIndex = tag.end;
+      close = closing.exec(source);
+    }
+    if (!close && strict) return -1;
     const bodyEnd = close ? close.index : source.length;
     if (raw === "style") {
       const lang = tag.attributes.find((attribute) => attribute.name.toLowerCase() === "lang" && attribute.quote !== null && attribute.quote !== "{");
@@ -818,7 +956,73 @@ function scanMarkup(text, extension) {
       const css = text.slice(tag.end, bodyEnd);
       blocks.push({ start: tag.end, css, skipped: Boolean(language && !/^(?:css|postcss)$/i.test(language)) || css.trim().startsWith("{") });
     }
-    index = close ? close.index + close[0].length : source.length;
+    return close ? close.index + close[0].length : source.length;
+  }
+
+  /** A JSX element (or fragment) whose `<` is at `start`, children included: the index after it, or -1 when it does not close. */
+  function scanElement(start) {
+    let tag;
+    if (source[start + 1] === ">") tag = { name: "", end: start + 2, selfClosing: false, attributes: [] };
+    else {
+      tag = parseStartTag(start);
+      if (!tag) return -1;
+    }
+    takeAttributes(tag);
+    if (tag.selfClosing || VOID_ELEMENTS.has(tag.name.toLowerCase())) return tag.end;
+    if (RAW_TEXT_ELEMENTS.has(tag.name.toLowerCase())) return rawBody(tag, { strict: true });
+    let index = tag.end;
+    while (index < source.length) {
+      const char = source[index];
+      if (opensExpression(index)) {
+        const end = scanScript(index + 1);
+        if (end === -1) return -1;
+        index = end;
+      } else if (char === "<" && source.startsWith("<!--", index)) {
+        const close = source.indexOf("-->", index + 4);
+        if (close === -1) return -1;
+        index = close + 3;
+      } else if (char === "<" && source[index + 1] === "/") {
+        CLOSING_TAG.lastIndex = index;
+        const closing = CLOSING_TAG.exec(source);
+        if (!closing || (closing[1] ?? "") !== tag.name) return -1;
+        return CLOSING_TAG.lastIndex;
+      } else if (char === "<") {
+        const end = scanElement(index);
+        if (end === -1) return -1;
+        index = end;
+      } else index += 1;
+    }
+    return -1;
+  }
+
+  if (SCRIPT_FORMATS.has(extension)) {
+    scanScript(0, { whole: true });
+    return { blocks, classes, styles };
+  }
+  let index = 0;
+  while (index < source.length) {
+    const char = source[index];
+    if (opensExpression(index)) {
+      const end = scanScript(index + 1);
+      index = end === -1 ? index + 1 : end;
+      continue;
+    }
+    if (char !== "<") {
+      index += 1;
+      continue;
+    }
+    if (source.startsWith("<!--", index)) {
+      const close = source.indexOf("-->", index + 4);
+      index = close === -1 ? source.length : close + 3;
+      continue;
+    }
+    const tag = parseStartTag(index);
+    if (!tag) {
+      index += 1;
+      continue;
+    }
+    takeAttributes(tag);
+    index = !tag.selfClosing && RAW_TEXT_ELEMENTS.has(tag.name.toLowerCase()) ? rawBody(tag, { strict: false }) : tag.end;
   }
   return { blocks, classes, styles };
 }
@@ -934,6 +1138,89 @@ function suggestedVar(where) {
   return where.group ? `--${where.group}-<name>` : "--<name>";
 }
 
+/** The site files on the surface (git-ignored ones left out) with their text, and the system stylesheets they import. */
+async function readSite({ siteRoot, designSystemRoot, designSurface, protectedGlobs }) {
+  const candidates = (await walkSite(siteRoot)).filter((relative) => protectedGlobs.some((glob) => matchesGlob(relative, glob))
+    || designSurface.some((glob) => matchesGlob(relative, glob)));
+  const ignored = await gitIgnoredSitePaths(siteRoot, candidates);
+  const texts = new Map();
+  for (const relative of candidates.filter((entry) => !ignored.has(entry))) {
+    const text = await readText(path.join(siteRoot, ...relative.split("/")));
+    if (text !== null) texts.set(relative, text);
+  }
+  const siteImports = new Set();
+  for (const [relative, text] of texts) for (const found of systemImports(relative, text, { siteRoot, designSystemRoot })) siteImports.add(found);
+  return { texts, siteImports: [...siteImports].sort() };
+}
+
+/** Custom properties declared anywhere in the system's source (its tokens and the stylesheets under src/), by name, with where. */
+async function declaredSystemTokens(designSystemRoot, siteRoot) {
+  const found = new Map();
+  const note = (records, source) => {
+    for (const record of records) if (!found.has(record.name)) found.set(record.name, source);
+  };
+  let tokens = null;
+  let source = "tokens.json";
+  if (await hasContractGroups(designSystemRoot)) {
+    tokens = await readContractGroups(designSystemRoot).then((groups) => groups.tokens).catch(() => null);
+    source = "tokens/";
+  } else {
+    const text = await readText(path.join(designSystemRoot, "tokens.json"));
+    try {
+      tokens = text === null ? null : JSON.parse(text);
+    } catch {
+      tokens = null;
+    }
+  }
+  if (tokens) note(parseCssTokens(compileTokenCss(tokens)), source);
+  const visit = async (relative) => {
+    const absolute = path.join(designSystemRoot, ...relative.split("/"));
+    if (isInside(siteRoot, absolute)) return;
+    const entries = await fs.readdir(absolute, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+      if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
+      const child = `${relative}/${entry.name}`;
+      if (entry.isDirectory()) await visit(child);
+      else if (entry.isFile() && entry.name.endsWith(".css")) note(parseCssTokens(await readText(path.join(absolute, entry.name)) ?? ""), child);
+    }
+  };
+  await visit("src");
+  return found;
+}
+
+/**
+ * The tokens a workspace site loads from its Design System, read the way the
+ * two-way check reads them (see the module comment): `tokens` are the
+ * resolved records (`resolveTokens` in tokens.mjs, every scope), `design` and
+ * `stylesheets` say where they came from, and `unloaded` maps a custom
+ * property the system declares in its source but the site does not load to
+ * the file that declares it. `consumer check --require-token` answers from
+ * this in the workspace form.
+ *
+ * @param {object} options
+ * @param {string} options.siteRoot absolute path of the site folder
+ * @param {string} options.designSystemRoot absolute path of the Design System (holds timds.json)
+ * @param {string[]} [options.designSurface] the app's design-surface globs (their files' system imports count as loaded)
+ * @param {string[]} [options.protected] the app's protected globs
+ * @param {string[]|null} [options.stylesheets] as for `checkWorkspaceSite`
+ */
+export async function workspaceTokenInventory({
+  siteRoot: siteRootInput,
+  designSystemRoot: designSystemRootInput,
+  designSurface = [],
+  protected: protectedGlobs = [],
+  stylesheets = null,
+} = {}) {
+  if (!siteRootInput || !designSystemRootInput) throw new Error("workspaceTokenInventory needs siteRoot and designSystemRoot");
+  const siteRoot = path.resolve(siteRootInput);
+  const designSystemRoot = path.resolve(designSystemRootInput);
+  const { siteImports } = await readSite({ siteRoot, designSystemRoot, designSurface, protectedGlobs });
+  const system = await readSystem({ designSystemRoot, siteRoot, siteImports, stylesheets });
+  const unloaded = new Map();
+  for (const [name, source] of await declaredSystemTokens(designSystemRoot, siteRoot)) if (!system.tokenNames.has(name)) unloaded.set(name, source);
+  return { design: system.design, stylesheets: system.stylesheets, tokensJson: system.tokensJson, tokens: system.resolved, unloaded };
+}
+
 /**
  * Check a site that lives in its Design System's workspace against the
  * system, rewriting each literal that equals exactly one system token and
@@ -946,7 +1233,7 @@ function suggestedVar(where) {
  * @param {string[]} [options.protected] the app's protected globs, relative to the site
  * @param {boolean} [options.fix] write the rewrites (default true)
  * @param {string[]|null} [options.files] site-relative paths to limit the scan to; null scans the whole surface
- * @param {string[]|null} [options.stylesheets] Design-System-relative stylesheets to treat as the system's instead of discovering them (any under dist/ is passed over)
+ * @param {string[]|null} [options.stylesheets] Design-System-relative stylesheets to treat as the system's instead of reading the design's links and the site's imports (`/tokens.css` names the compiled tokens; any under dist/ is passed over)
  * @param {(file: string, content: string) => Promise<void>} [options.writeFile] the writer (tests inject a failing one)
  */
 export async function checkWorkspaceSite({
@@ -963,19 +1250,8 @@ export async function checkWorkspaceSite({
   const siteRoot = path.resolve(siteRootInput);
   const designSystemRoot = path.resolve(designSystemRootInput);
 
-  const candidates = (await walkSite(siteRoot)).filter((relative) => protectedGlobs.some((glob) => matchesGlob(relative, glob))
-    || designSurface.some((glob) => matchesGlob(relative, glob)));
-  const ignored = await gitIgnoredSitePaths(siteRoot, candidates);
-  const readable = candidates.filter((relative) => !ignored.has(relative));
-  const texts = new Map();
-  for (const relative of readable) {
-    const text = await readText(path.join(siteRoot, ...relative.split("/")));
-    if (text !== null) texts.set(relative, text);
-  }
-
-  const siteImports = new Set();
-  for (const [relative, text] of texts) for (const found of systemImports(relative, text, { siteRoot, designSystemRoot })) siteImports.add(found);
-  const system = await readSystem({ designSystemRoot, siteRoot, siteImports: [...siteImports].sort(), stylesheets });
+  const { texts, siteImports } = await readSite({ siteRoot, designSystemRoot, designSurface, protectedGlobs });
+  const system = await readSystem({ designSystemRoot, siteRoot, siteImports, stylesheets });
 
   const only = files ? new Set(files.map((file) => path.posix.normalize(toPosix(file)).replace(/^\.\//, ""))) : null;
   const scanned = [...texts.keys()].filter((relative) => !only || only.has(relative));
@@ -1106,6 +1382,7 @@ export async function checkWorkspaceSite({
     changedFiles,
     scanned,
     system: {
+      design: system.design,
       stylesheets: system.stylesheets,
       tokensJson: system.tokensJson,
       tokenCount: system.tokenNames.size,

@@ -33,6 +33,14 @@ const read = (root, relative) => fs.readFile(path.join(root, ...relative.split("
 const STARTER_SHEET = "src/styles/system.css";
 const SURFACE = ["src/styles/**", "src/components/**", "src/pages/**", "src/layouts/**"];
 
+/** A website design whose layout links `links`, as `timds designs init` writes one, plus the site's astro.config naming it. */
+const websiteDesign = (links, { id = "website", config = true } = {}) => ({
+  [`src/designs/${id}/design.json`]: { title: "Website" },
+  [`src/designs/${id}/layout.html`]: `<!doctype html>\n<html>\n<head>\n${links.map((href) => `  <link rel="stylesheet" href="${href}">`).join("\n")}\n</head>\n<body>{{content}}</body>\n</html>\n`,
+  [`src/designs/${id}/pages/index.html`]: "<main><h1>Home</h1></main>\n",
+  ...(config ? { "site/astro.config.mjs": `import designSystem from "./src/integrations/design-system.mjs";\nexport default { integrations: [designSystem({ design: "${id}" })] };\n` } : {}),
+});
+
 /** A Design System whose tokens are CSS custom properties in src/styles/system.css, with a site in site/. */
 async function cssSystem(t, { systemCss, site = {} } = {}) {
   const root = await temporaryDirectory(t);
@@ -49,6 +57,7 @@ async function cssSystem(t, { systemCss, site = {} } = {}) {
 .card { background: var(--color-surface); }
 `,
     "src/styles/viewer.css": ".viewer-only { color: #123123; }\n",
+    ...websiteDesign(["/styles/system.css"]),
     ...Object.fromEntries(Object.entries(site).map(([relative, content]) => [`site/${relative}`, content])),
   });
   return { root, siteRoot: path.join(root, "site") };
@@ -69,6 +78,7 @@ async function starterSystem(t, { tokens, site = {} } = {}) {
       space: { "4": { value: "1rem" } },
     },
     "src/styles/system.css": "body { color: var(--color-ink); }\n.wrap { margin-inline: auto; }\n.prose { max-width: 40rem; }\n",
+    ...websiteDesign(["/tokens.css", "/styles/system.css"]),
     ...Object.fromEntries(Object.entries(site).map(([relative, content]) => [`site/${relative}`, content])),
   });
   return { root, siteRoot: path.join(root, "site") };
@@ -301,22 +311,25 @@ test("tokens.json references resolve like the viewer's compile", async (t) => {
   assert.deepEqual(result.findings.map((finding) => [finding.kind, finding.candidates]), [["ambiguous-literal", ["--color-accent", "--color-blue"]]]);
 });
 
-test("stylesheets the site imports from the workspace and bundle.include count as the system's", async (t) => {
+test("the stylesheets the design links, their @imports and the site's own imports count as the system's; bundle.include does not", async (t) => {
   const root = await temporaryDirectory(t);
   await write(root, {
-    "timds.json": { systemId: "acme/framework", workspace: { build: ["npm", "run", "build"] }, bundle: { include: ["styles/ds/**"], exclude: ["styles/ds/legacy.css"] } },
-    "styles/ds/core.css": "@import \"./parts/tokens.css\";\n.hero { display: block; }\n",
-    "styles/ds/parts/tokens.css": ":root { --ink: #333333; }\n",
-    "styles/ds/legacy.css": ".legacy { color: red; }\n",
+    "timds.json": { systemId: "acme/framework", workspace: { build: ["npm", "run", "build"] }, bundle: { include: ["src/styles/legacy.css"] } },
+    ...websiteDesign(["/styles/ds/core.css", "/styles/missing.css", "https://fonts.example.com/x.css"], { config: false }),
+    "src/styles/ds/core.css": "@import \"./parts/tokens.css\";\n@import \"/styles/ds/rooted.css\";\n.hero { display: block; }\n",
+    "src/styles/ds/parts/tokens.css": ":root { --ink: #333333; }\n",
+    "src/styles/ds/rooted.css": ".rooted { display: block; }\n",
+    "src/styles/legacy.css": ".legacy { color: red; }\n",
     "theme/extra.css": ".extra { color: var(--ink); }\n",
-    "site/src/layouts/Layout.astro": "---\nimport \"../../../theme/extra.css\";\n---\n<main class=\"hero extra legacy\"><slot /></main>\n",
+    "site/src/layouts/Layout.astro": "---\nimport \"../../../theme/extra.css\";\n---\n<main class=\"hero rooted extra legacy\"><slot /></main>\n",
     "site/src/styles/site.css": "p { color: #333; }\n",
   });
   const result = await checkWorkspaceSite({ siteRoot: path.join(root, "site"), designSystemRoot: root, designSurface: SURFACE });
-  assert.deepEqual(result.system.stylesheets, ["styles/ds/parts/tokens.css", "styles/ds/core.css", "theme/extra.css"]);
+  assert.deepEqual(result.system.design, { id: "website", selectedBy: "catalog", shell: "src/designs/website/layout.html" });
+  assert.deepEqual(result.system.stylesheets, ["src/styles/ds/parts/tokens.css", "src/styles/ds/rooted.css", "src/styles/ds/core.css", "theme/extra.css"]);
   assert.deepEqual(result.rewrites.map((rewrite) => rewrite.to), ["var(--ink)"]);
   assert.deepEqual(result.findings.map((finding) => finding.class), ["legacy"]);
-  assert.match(result.findings[0].suggestion, /styles\/ds\/core\.css/);
+  assert.match(result.findings[0].suggestion, /src\/styles\/ds\/core\.css/);
 });
 
 test("a protected path is reported, never rewritten", async (t) => {
@@ -437,7 +450,7 @@ test("the index is built from the source the site loads, never from a stale buil
   });
   await fs.symlink(path.join("..", "..", "dist", "tokens.css"), path.join(fixture.root, "src", "styles", "linked.css"));
 
-  for (const stylesheets of [null, ["dist/tokens.css", "./dist/styles/system.css", "src/styles/linked.css", STARTER_SHEET]]) {
+  for (const stylesheets of [null, ["dist/tokens.css", "./dist/styles/system.css", "src/styles/linked.css", "/tokens.css", STARTER_SHEET]]) {
     const result = await run(fixture, { fix: false, stylesheets });
     assert.deepEqual(result.system.stylesheets, [STARTER_SHEET], String(stylesheets));
     assert.deepEqual(result.rewrites.map((rewrite) => [rewrite.from, rewrite.to]), [["#222222", "var(--color-ink)"]]);
@@ -534,4 +547,123 @@ const note = '<p style="color: #ffffff">';
   const result = await run(fixture, { fix: false });
   assert.deepEqual(result.findings, []);
   assert.deepEqual(result.rewrites.map((rewrite) => [rewrite.line, rewrite.from]), [[4, "#1a1a1a"], [7, "#FFFFFF"]]);
+});
+
+test("the index holds what the selected design links: a token only in an unlinked stock sheet is never a rewrite target", async (t) => {
+  const root = await temporaryDirectory(t);
+  await write(root, {
+    "timds.json": { schemaVersion: 2, systemId: "acme/brand", name: "Brand", workspace: { build: ["node", "scripts/build.mjs"] } },
+    "tokens.json": { color: { ink: { value: "#222222" } } },
+    // The stock sheet the catalog's own pick would link; the site's layout does not.
+    "src/styles/system.css": ":root { --brand-ghost: #f5f5f5; }\n.stock { color: var(--brand-ghost); }\n",
+    "src/styles/site-brand.css": ":root { --brand-ink: #101820; }\n.brand-card { color: var(--brand-ink); }\n",
+    ...websiteDesign(["/tokens.css", "/styles/system.css"], { config: false }),
+    ...websiteDesign(["/styles/site-brand.css"], { id: "brand" }),
+    "site/src/styles/site.css": "p { color: #f5f5f5; background: #101820; border-color: #222222; }\n",
+    "site/src/components/Card.astro": "<div class=\"brand-card stock\"></div>\n",
+  });
+  const fixture = { root, siteRoot: path.join(root, "site") };
+  const result = await run(fixture, { fix: false });
+  assert.deepEqual(result.system.design, { id: "brand", selectedBy: "astro.config.mjs", shell: "src/designs/brand/layout.html" });
+  assert.deepEqual(result.system.stylesheets, ["src/styles/site-brand.css"]);
+  // The design does not link /tokens.css, so the compiled tokens are not the site's either.
+  assert.equal(result.system.tokensJson, false);
+  assert.deepEqual(result.rewrites.map((rewrite) => [rewrite.from, rewrite.to]), [["#101820", "var(--brand-ink)"]]);
+  assert.deepEqual(result.findings.map((finding) => [finding.kind, finding.value ?? finding.class, finding.candidates]), [
+    ["class", "stock", undefined],
+    ["literal", "#f5f5f5", []],
+    ["literal", "#222222", []],
+  ]);
+  assert.match(result.findings[0].suggestion, /src\/styles\/site-brand\.css/);
+
+  // An explicit list still overrides the design.
+  const explicit = await run(fixture, { fix: false, stylesheets: ["/tokens.css", STARTER_SHEET] });
+  assert.equal(explicit.system.design, null);
+  assert.deepEqual(explicit.rewrites.map((rewrite) => rewrite.to), ["var(--brand-ghost)", "var(--color-ink)"]);
+
+  // Without the config the scaffold's own pick (website) is used and said so.
+  await fs.rm(path.join(root, "site", "astro.config.mjs"));
+  const picked = await run(fixture, { fix: false });
+  assert.deepEqual(picked.system.design, { id: "website", selectedBy: "catalog", shell: "src/designs/website/layout.html" });
+  assert.deepEqual(picked.rewrites.map((rewrite) => rewrite.to), ["var(--brand-ghost)", "var(--color-ink)"]);
+});
+
+test("a design the system lacks, or no design at all, is an error that says what to do", async (t) => {
+  const fixture = await cssSystem(t, { site: { "src/styles/site.css": "a { color: #fff; }\n" } });
+  await write(fixture.root, { "site/astro.config.mjs": "export default { integrations: [designSystem({ design: \"gone\" })] };\n" });
+  await assert.rejects(run(fixture), /astro\.config\.mjs renders the website design "gone", but the Design System has no src\/designs\/gone\/design\.json\. Name one it has \(website\)/);
+  await fs.rm(path.join(fixture.root, "site", "astro.config.mjs"));
+  await fs.rm(path.join(fixture.root, "src", "designs"), { recursive: true });
+  await assert.rejects(run(fixture), /has none .*timds designs init/);
+});
+
+test("textarea and title bodies and other raw text are text, never markup", async (t) => {
+  const page = `<html><head><title><b style="color: #1a1a1a" class="in-title"></title></head>
+<body>
+<textarea name="css"><p style="color: #ffffff" class="in-textarea">default</p></textarea>
+<xmp><i style="color: #ffffff"></i></xmp>
+<p style="color: #1a1a1a">real</p>
+<noscript><p style="color: #ffffff">shown without scripts</p></noscript>
+</body></html>
+`;
+  const fixture = await cssSystem(t, { site: { "src/components/Form.html": page, "src/components/Form.astro": page } });
+  const result = await run(fixture, { fix: false });
+  assert.deepEqual(result.findings, []);
+  for (const file of ["src/components/Form.astro", "src/components/Form.html"]) {
+    assert.deepEqual(result.rewrites.filter((rewrite) => rewrite.file === file).map((rewrite) => [rewrite.line, rewrite.from]), [[5, "#1a1a1a"], [6, "#ffffff"]], file);
+  }
+});
+
+test(".astro expressions: strings, template literals and comments are JavaScript, real JSX inside is markup", async (t) => {
+  const astro = `---
+const html = '<p style="color: #ffffff">';
+---
+<div>{'<p style="color: #ffffff" class="in-single">'}</div>
+<div>{"<p style='color: #ffffff' class='in-double'>"}</div>
+<div>{\`<p style="color: #ffffff" class="in-template-\${{ a: { b: "}" } }.a}">\${'<i style="color: #ffffff">'}\`}</div>
+<div>{/* <p style="color: #ffffff" class="in-comment"> */}</div>
+<div>{
+  // <p style="color: #ffffff" class="in-line-comment">
+  items.map((item) => ({ key: item, label: "}" }))
+}</div>
+<div set:html={'<p style="color: #ffffff" class="in-attribute">'} />
+{show && <p style="color: #1a1a1a" class="card">Don't {"<b>"} stop</p>}
+{items.map((item) => { return <span style="background: #ffffff">{item}</span>; })}
+<Card icon={<b style="border-color: #0055ff">it's</b>} />
+<p style="color: #1a1a1a">after</p>
+`;
+  const fixture = await cssSystem(t, { site: { "src/pages/index.astro": astro } });
+  const result = await run(fixture);
+  assert.deepEqual(result.findings, []);
+  assert.deepEqual(result.rewrites.map((rewrite) => [rewrite.line, rewrite.from]), [[13, "#1a1a1a"], [14, "#ffffff"], [15, "#0055ff"], [16, "#1a1a1a"]]);
+  assert.equal(await read(fixture.siteRoot, "src/pages/index.astro"), astro
+    .replace('<p style="color: #1a1a1a" class="card">', '<p style="color: var(--color-ink)" class="card">')
+    .replace('<span style="background: #ffffff">', '<span style="background: var(--color-surface)">')
+    .replace('<b style="border-color: #0055ff">', '<b style="border-color: var(--color-accent)">')
+    .replace('<p style="color: #1a1a1a">after', '<p style="color: var(--color-ink)">after'));
+});
+
+test(".tsx and .svelte: markup in strings and comments is never read; a comparison is not a tag", async (t) => {
+  const fixture = await cssSystem(t, {
+    site: {
+      "src/components/A.tsx": `// <p style="color: #ffffff" class="in-comment">
+const html = '<p style="color: #ffffff" class="in-string">';
+const css = \`<p style="color: #ffffff" class="\${html}">\`;
+function List<T,>({ items }: { items: Array<T> }) {
+  for (let i = 0; i<items.length; i += 1) {}
+  return <ul className="card" style={{ color: "#abcdef" }}>{items.length > 0 && <li style="color: #1a1a1a">{"<b class='nope'>"}</li>}</ul>;
+}
+`,
+      "src/components/B.svelte": `<script>let tip = '<b style="color: #ffffff">';</script>
+<p title={tip}>{@html '<i style="color: #ffffff" class="in-html">'}</p>
+{#if open}<span style="color: #1a1a1a">open</span>{/if}
+`,
+    },
+  });
+  const result = await run(fixture, { fix: false });
+  assert.deepEqual(result.findings, []);
+  assert.deepEqual(result.rewrites.map((rewrite) => [rewrite.file, rewrite.line, rewrite.from]), [
+    ["src/components/A.tsx", 6, "#1a1a1a"],
+    ["src/components/B.svelte", 3, "#1a1a1a"],
+  ]);
 });

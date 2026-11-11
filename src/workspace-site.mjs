@@ -46,6 +46,12 @@ export const WORKSPACE_SITE_SKILL_NAMES = Object.freeze(["timds-consume-design-s
  * path as EMDASH_RECORD_PATH in consumer-scaffold.mjs.
  */
 export const WORKSPACE_SITE_RECORD = ".timds/emdash.json";
+/**
+ * The marker of the section the workspace scaffold adds to the system's
+ * AGENTS.md: `<!-- MARKER -->` opens it and `<!-- /MARKER -->` closes it.
+ * The scaffold writes it and a shoot cuts it out with the site.
+ */
+export const WORKSPACE_SITE_AGENTS_MARKER = "timds:emdash-site";
 
 function readJsonObject(filePath) {
   try {

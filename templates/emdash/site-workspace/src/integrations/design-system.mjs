@@ -37,7 +37,12 @@
 // handler is rendered disabled, with a line saying it is not connected yet,
 // so a visitor is never offered a Send button that sends nothing. Which forms
 // have a handler is decided from the site's files each time the module is
-// built, in development and in the build alike.
+// built, in development and in the build alike, by parsing each module with
+// the parser of the Vite the site's Astro runs on (`parseAst`) and reading
+// its real exports: a comment or a string that mentions POST is not one. The
+// catch-all route still checks that the POST it imports is a function.
+// Vite is loaded only when the integration runs, so this file imports in
+// plain Node with nothing installed.
 //
 // In development the files are served from disk on every request; the build
 // writes them into the client output, where the Worker's static assets serve
@@ -53,8 +58,9 @@
 
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const VIRTUAL_MODULE = "virtual:timds/design-system";
 const RESOLVED_MODULE = `\0${VIRTUAL_MODULE}`;
@@ -72,7 +78,6 @@ export const DEFAULT_STATE = "default";
 /** The folder of the site, under src/, whose modules handle the design's posting forms. */
 export const FORMS_DIRECTORY = "forms";
 const FORM_HANDLER_EXTENSIONS = [".ts", ".mjs", ".js"];
-const EXPORTS_POST = /\bexport\s+(?:async\s+)?(?:function\s*\*?|const|let|var)\s+POST\b|\bexport\s*\{[^}]*\bPOST\b[^}]*\}/;
 /** Shown inside a posting form that has no handler in the site yet. */
 export const FORM_NOT_CONNECTED = "This form is not connected yet, so it cannot send anything.";
 const CONTENT_TYPES = {
@@ -186,11 +191,134 @@ export function basePrefix(base) {
   return String(base || "/").replace(/\/+$/, "");
 }
 
+// Elements whose content is text, never markup: a tag-like string in them is
+// not a tag.
+const RAW_TEXT_ELEMENTS = new Set(["iframe", "noembed", "noframes", "plaintext", "script", "style", "textarea", "title", "xmp"]);
+
 /**
- * Put `base` in front of every root-relative reference in the markup (href,
- * src, action, poster, and each srcset candidate). External, protocol-relative,
+ * The tags of an HTML document, in order, the way a browser's tokenizer
+ * splits them: comments, doctypes and the bodies of raw-text elements
+ * (script, style, textarea, title, ...) are skipped, and each start tag's
+ * attributes carry their value as written (double-quoted, single-quoted or
+ * unquoted) with its offsets, so a caller can rewrite one value in place.
+ * Text inside another attribute's value is part of that value, never an
+ * attribute of its own.
+ */
+export function htmlTags(html) {
+  const tags = [];
+  const length = html.length;
+  let index = 0;
+  while (index < length) {
+    const open = html.indexOf("<", index);
+    if (open === -1) break;
+    if (html.startsWith("<!--", open)) {
+      const close = html.indexOf("-->", open + 4);
+      index = close === -1 ? length : close + 3;
+      continue;
+    }
+    const next = html[open + 1];
+    if (next === "!" || next === "?") {
+      const close = html.indexOf(">", open + 2);
+      index = close === -1 ? length : close + 1;
+      continue;
+    }
+    if (next === "/" && /[a-z]/i.test(html[open + 2] || "")) {
+      const close = html.indexOf(">", open + 2);
+      const name = html.slice(open + 2).match(/^[^\s/>]+/)[0].toLowerCase();
+      index = close === -1 ? length : close + 1;
+      tags.push({ type: "end", name, start: open, end: index });
+      continue;
+    }
+    if (!/[a-z]/i.test(next || "")) {
+      index = open + 1;
+      continue;
+    }
+    const name = html.slice(open + 1).match(/^[^\s/>]+/)[0];
+    let cursor = open + 1 + name.length;
+    const attributes = [];
+    let selfClosing = false;
+    while (cursor < length) {
+      while (cursor < length && /[\s/]/.test(html[cursor])) {
+        selfClosing = html[cursor] === "/";
+        cursor += 1;
+      }
+      if (cursor >= length || html[cursor] === ">") break;
+      selfClosing = false;
+      const nameMatch = html.slice(cursor).match(/^[^\s/>=]+|^=[^\s/>=]*/);
+      const attributeName = nameMatch[0];
+      const attribute = { name: attributeName.toLowerCase(), start: cursor, value: "", valueStart: -1, valueEnd: -1, quote: null };
+      cursor += attributeName.length;
+      let after = cursor;
+      while (after < length && /\s/.test(html[after])) after += 1;
+      if (html[after] === "=") {
+        after += 1;
+        while (after < length && /\s/.test(html[after])) after += 1;
+        const quote = html[after];
+        if (quote === '"' || quote === "'") {
+          const close = html.indexOf(quote, after + 1);
+          attribute.quote = quote;
+          attribute.valueStart = after + 1;
+          attribute.valueEnd = close === -1 ? length : close;
+          cursor = close === -1 ? length : close + 1;
+        } else {
+          const value = html.slice(after).match(/^[^\s>]*/)[0];
+          attribute.valueStart = after;
+          attribute.valueEnd = after + value.length;
+          cursor = attribute.valueEnd;
+        }
+        attribute.value = html.slice(attribute.valueStart, attribute.valueEnd);
+      }
+      attribute.end = cursor;
+      attributes.push(attribute);
+    }
+    const tagEnd = Math.min(length, cursor + 1);
+    const lower = name.toLowerCase();
+    tags.push({ type: "start", name: lower, start: open, end: tagEnd, attributes, selfClosing });
+    index = tagEnd;
+    if (RAW_TEXT_ELEMENTS.has(lower)) {
+      const closing = new RegExp(`</${lower}(?=[\\s/>]|$)`, "ig");
+      closing.lastIndex = index;
+      const found = closing.exec(html);
+      index = found ? found.index : length;
+    }
+  }
+  return tags;
+}
+
+/** The decoded value of a start tag's attribute, or undefined when it has none. */
+function attributeValue(tag, name) {
+  const attribute = tag.attributes.find((candidate) => candidate.name === name);
+  return attribute ? decodeEntities(attribute.value) : undefined;
+}
+
+/**
+ * Apply edits to the markup: each `{ start, end, text }` replaces that span.
+ * Edits never overlap; they are applied from the end so offsets hold.
+ */
+function applyEdits(html, edits) {
+  let result = html;
+  for (const edit of [...edits].sort((left, right) => right.start - left.start || right.end - left.end)) {
+    result = `${result.slice(0, edit.start)}${edit.text}${result.slice(edit.end)}`;
+  }
+  return result;
+}
+
+/** A replacement for one attribute's value, quoted when an unquoted value would no longer be one. */
+function valueEdit(attribute, value) {
+  if (attribute.quote || /^[^\s"'=<>`]+$/.test(value)) return { start: attribute.valueStart, end: attribute.valueEnd, text: value };
+  return { start: attribute.valueStart, end: attribute.valueEnd, text: `"${value.replaceAll('"', "&quot;")}"` };
+}
+
+/** The attributes holding one URL each that `applyBase` rewrites; srcset holds a list. */
+export const URL_ATTRIBUTES = ["action", "formaction", "href", "poster", "src"];
+
+/**
+ * Put `base` in front of every root-relative reference in the markup's start
+ * tags: the URL attributes (`URL_ATTRIBUTES`) and each srcset candidate,
+ * double-quoted, single-quoted or unquoted. External, protocol-relative,
  * fragment and query references are left as written, and so is a reference
- * that already starts with the base.
+ * that already starts with the base, text in comments and raw-text bodies
+ * (script, style, textarea, ...), and every other attribute's value.
  */
 export function applyBase(html, base) {
   const prefix = basePrefix(base);
@@ -200,26 +328,26 @@ export function applyBase(html, base) {
     if (value === prefix || value.startsWith(`${prefix}/`) || value.startsWith(`${prefix}?`) || value.startsWith(`${prefix}#`)) return value;
     return `${prefix}${value}`;
   };
-  return outsideScripts(html, (markup) => markup
-    .replace(/(\s(?:href|src|action|poster)\s*=\s*)("([^"]*)"|'([^']*)')/gi, (_match, name, _quoted, double, single) => {
-      const value = double ?? single;
-      const quote = double === undefined ? "'" : '"';
-      return `${name}${quote}${rebase(value)}${quote}`;
-    })
-    .replace(/(\ssrcset\s*=\s*)("([^"]*)"|'([^']*)')/gi, (_match, name, _quoted, double, single) => {
-      const value = double ?? single;
-      const quote = double === undefined ? "'" : '"';
-      const candidates = value.split(",").map((candidate) => candidate.replace(/^(\s*)(\S+)/, (_whole, space, url) => `${space}${rebase(url)}`));
-      return `${name}${quote}${candidates.join(",")}${quote}`;
-    }));
+  const edits = [];
+  for (const tag of htmlTags(html)) {
+    if (tag.type !== "start") continue;
+    for (const attribute of tag.attributes) {
+      if (attribute.valueStart === -1) continue;
+      let value = attribute.value;
+      if (URL_ATTRIBUTES.includes(attribute.name)) value = rebase(value.trim()) === value.trim() ? value : value.replace(value.trim(), rebase(value.trim()));
+      else if (attribute.name === "srcset") value = value.split(",").map((candidate) => candidate.replace(/^(\s*)(\S+)/, (_whole, space, url) => `${space}${rebase(url)}`)).join(",");
+      else continue;
+      if (value !== attribute.value) edits.push(valueEdit(attribute, value));
+    }
+  }
+  return applyEdits(html, edits);
 }
 
-/** The attributes of one start tag as an object, entities decoded so Astro escapes them once. */
+/** The attributes of one start tag (the text after its name) as an object, entities decoded so Astro escapes them once. */
 export function parseAttributes(source) {
+  const [tag] = htmlTags(`<x ${String(source || "")}>`);
   const attributes = {};
-  for (const match of String(source || "").matchAll(/([^\s=/>"']+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g)) {
-    attributes[match[1].toLowerCase()] = decodeEntities(match[2] ?? match[3] ?? match[4] ?? "");
-  }
+  for (const attribute of tag?.attributes ?? []) attributes[attribute.name] = decodeEntities(attribute.value);
   return attributes;
 }
 
@@ -285,13 +413,81 @@ export function defaultPageFiles(pagesDirectory) {
   return [...byRoute];
 }
 
+/** The names a binding pattern declares (`POST`, `{ POST }`, `[POST]`, `{ a: POST = x }`, `...POST`). */
+function patternNames(pattern) {
+  if (!pattern) return [];
+  switch (pattern.type) {
+    case "Identifier": return [pattern.name];
+    case "ObjectPattern": return pattern.properties.flatMap((property) => patternNames(property.type === "RestElement" ? property.argument : property.value));
+    case "ArrayPattern": return pattern.elements.flatMap((element) => patternNames(element));
+    case "AssignmentPattern": return patternNames(pattern.left);
+    case "RestElement": return patternNames(pattern.argument);
+    default: return [];
+  }
+}
+
+/** True for an initializer that is plainly not a function: none, a literal, a template, an object, an array, or undefined. */
+function plainValue(init) {
+  if (!init) return true;
+  if (init.type === "Identifier") return init.name === "undefined";
+  return ["ArrayExpression", "Literal", "ObjectExpression", "TemplateLiteral"].includes(init.type);
+}
+
 /**
- * The site's form handlers: every module under src/forms/ that exports POST,
- * by the address it handles (`contact.ts` and `contact/index.ts` are
- * /contact, `index.ts` is /). A module that does not export POST handles
- * nothing. Two modules for one address are refused.
+ * True when a parsed module (an ESTree Program, as Vite's `parseAst` or any
+ * ESTree parser returns it) exports a value named POST: `export function
+ * POST`, `export const POST = ...` (a destructured one too), `export {
+ * handler as POST }`, or `export { POST } from "./elsewhere"`. A type-only
+ * export, a `declare`, `export * from` (whose names this module does not
+ * spell out), a default export, and `export const POST` with a value that is
+ * plainly not a function (none, a literal, an object, ...) are not. What a
+ * re-export or a call returns is known only when the module runs, so the
+ * catch-all route checks that again before it calls POST.
  */
-export function formHandlers(siteRoot) {
+export function exportsPost(program) {
+  for (const node of program?.body ?? []) {
+    if (node.type !== "ExportNamedDeclaration" || node.exportKind === "type") continue;
+    const declaration = node.declaration;
+    if (declaration) {
+      if (declaration.declare) continue;
+      if ((declaration.type === "FunctionDeclaration" || declaration.type === "ClassDeclaration") && declaration.id?.name === "POST") return true;
+      if (declaration.type === "VariableDeclaration" && declaration.declarations.some((declarator) => patternNames(declarator.id).includes("POST") && !(declarator.id.type === "Identifier" && plainValue(declarator.init)))) return true;
+      continue;
+    }
+    for (const specifier of node.specifiers ?? []) {
+      if (specifier.exportKind === "type") continue;
+      if ((specifier.exported?.name ?? specifier.exported?.value) === "POST") return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * A module parser for `formHandlers`: `parseAst` of the Vite that the site's
+ * Astro depends on, resolved from the site's own `astro` (never from
+ * whatever else happens to be installed). Rejects with the fix when the
+ * site's dependencies are not installed.
+ */
+export async function loadModuleParser(siteRoot) {
+  let vite;
+  try {
+    const astro = createRequire(path.join(siteRoot, "package.json")).resolve("astro/package.json");
+    vite = createRequire(astro).resolve("vite");
+  } catch {
+    throw new Error(`The design system integration reads the site's form handlers with the Vite that Astro runs on, and found no astro install in ${siteRoot}. Run npm ci in ${siteRoot}.`);
+  }
+  const { parseAst } = await import(pathToFileURL(vite).href);
+  return (code, file) => parseAst(code, { lang: file.endsWith(".ts") ? "ts" : "js" }, file);
+}
+
+/**
+ * The site's form handlers: every module under src/forms/ that exports
+ * POST (`exportsPost` on the module as `parse` reads it), by the address it
+ * handles (`contact.ts` and `contact/index.ts` are /contact, `index.ts` is
+ * /). A module that does not export POST, or that does not parse (reported
+ * through `warn`), handles nothing. Two modules for one address are refused.
+ */
+export function formHandlers(siteRoot, { parse, warn = () => {} }) {
   const folder = path.join(siteRoot, "src", FORMS_DIRECTORY);
   const handlers = new Map();
   const walk = (directory, prefix) => {
@@ -304,7 +500,14 @@ export function formHandlers(siteRoot) {
       }
       const extension = FORM_HANDLER_EXTENSIONS.find((candidate) => entry.name.endsWith(candidate));
       if (!entry.isFile() || !extension || entry.name.endsWith(".d.ts")) continue;
-      if (!EXPORTS_POST.test(readFileSync(file, "utf8"))) continue;
+      let program;
+      try {
+        program = parse(readFileSync(file, "utf8"), file);
+      } catch (caught) {
+        warn(`${path.relative(siteRoot, file)} does not parse, so it handles no form until it does: ${String(caught?.message ?? caught).split("\n")[0]}`);
+        continue;
+      }
+      if (!exportsPost(program)) continue;
       const name = entry.name.slice(0, -extension.length);
       const route = `/${(name === "index" ? prefix : [...prefix, name]).join("/")}`;
       if (handlers.has(route)) throw new Error(`${path.relative(siteRoot, file)} and ${path.relative(siteRoot, handlers.get(route))} both handle POST ${route}; keep one`);
@@ -334,25 +537,72 @@ export function formTarget(action, route) {
   return url.pathname.replace(/\/+$/, "") || "/";
 }
 
+/** The method a submission uses: the submitter's formmethod, else the form's method, else GET. */
+function submissionMethod(value) {
+  return String(value ?? "").trim().toLowerCase() === "post" ? "post" : "get";
+}
+
+/** True for a control that submits its form: a button (submit unless typed otherwise), or an input of type submit or image. */
+function isSubmitter(tag) {
+  const type = String(attributeValue(tag, "type") ?? "").trim().toLowerCase();
+  if (tag.name === "button") return type === "" || type === "submit";
+  return tag.name === "input" && (type === "submit" || type === "image");
+}
+
+const FORM_CONTROLS = new Set(["button", "fieldset", "input", "select", "textarea"]);
+
 /**
- * Every `<form method="post">` in the markup whose address (`formTarget`)
- * has no handler in `handled`, rendered disabled: each control gets
- * `disabled`, the form `data-timds-form="not-connected"`, and a paragraph
- * says the form is not connected yet. Attributes and a plain paragraph only,
- * so the page uses no class the Design System does not declare. A form that
- * posts to another origin is the design's own wiring and is left alone.
+ * Every form in the markup that would POST to an address of this site with
+ * no handler in `handled`, rendered disabled: each control gets `disabled`,
+ * the form `data-timds-form="not-connected"`, and a paragraph says the form
+ * is not connected yet. A form's POSTs are its own submission when its
+ * method is post (Enter in a field, and each button without overrides) and
+ * each submit button's or image input's, with its `formmethod` and
+ * `formaction` in place of the form's; one that has no handler disables the
+ * whole form. Addresses are read with the same tag parser as `applyBase`
+ * (`formTarget`), from double-quoted, single-quoted or unquoted values. A
+ * POST to another origin is the design's own wiring and is left alone.
+ * Attributes and a plain paragraph only, so the page uses no class the
+ * Design System does not declare.
  */
 export function disableUnconnectedForms(html, { route = null, handled = new Set() } = {}) {
-  return outsideScripts(html, (markup) => markup.replace(/<form\b([^>]*)>([\s\S]*?)(<\/form\s*>|$)/gi, (whole, attributes, inner, close) => {
-    const parsed = parseAttributes(attributes);
-    if (String(parsed.method || "").trim().toLowerCase() !== "post") return whole;
-    const target = formTarget(parsed.action, route);
-    if (target === "external" || (target && handled.has(target))) return whole;
-    const disabled = inner.replace(/<(input|button|select|textarea|fieldset)\b([^>]*?)(\/?)>/gi, (tag, name, rest, selfClosing) => (
-      /(?:^|\s)disabled(?:\s|=|$)/i.test(rest) ? tag : `<${name}${rest} disabled${selfClosing}>`
-    ));
-    return `<form${attributes} data-timds-form="not-connected"><p role="note">${FORM_NOT_CONNECTED}</p>${disabled}${close}`;
-  }));
+  const edits = [];
+  let form = null;
+  const close = () => {
+    if (!form) return;
+    const unhandled = form.posts.some((target) => target !== "external" && !(target && handled.has(target)));
+    if (unhandled) {
+      edits.push({ start: form.tag.end - 1, end: form.tag.end - 1, text: ' data-timds-form="not-connected"' });
+      edits.push({ start: form.tag.end, end: form.tag.end, text: `<p role="note">${FORM_NOT_CONNECTED}</p>` });
+      for (const control of form.controls) {
+        if (control.attributes.some((attribute) => attribute.name === "disabled")) continue;
+        const at = control.selfClosing && html[control.end - 2] === "/" ? control.end - 2 : control.end - 1;
+        edits.push({ start: at, end: at, text: " disabled" });
+      }
+    }
+    form = null;
+  };
+  for (const tag of htmlTags(html)) {
+    if (tag.type === "end" && tag.name === "form") close();
+    if (tag.type !== "start") continue;
+    if (tag.name === "form") {
+      close();
+      const method = submissionMethod(attributeValue(tag, "method"));
+      const action = attributeValue(tag, "action");
+      form = { tag, method, action, controls: [], posts: method === "post" ? [formTarget(action, route)] : [] };
+      continue;
+    }
+    if (!form || !FORM_CONTROLS.has(tag.name)) continue;
+    form.controls.push(tag);
+    if (!isSubmitter(tag)) continue;
+    const formmethod = attributeValue(tag, "formmethod");
+    const method = formmethod === undefined || !formmethod.trim() ? form.method : submissionMethod(formmethod);
+    if (method !== "post") continue;
+    const formaction = attributeValue(tag, "formaction");
+    form.posts.push(formTarget(formaction === undefined ? form.action : formaction, route));
+  }
+  close();
+  return applyEdits(html, edits);
 }
 
 function pageTitle(html, fallback) {
@@ -499,9 +749,13 @@ export async function writeStaticFiles(systemRoot, clientDirectory, tokensCss) {
   return count;
 }
 
-/** The virtual module's source: the rendered design and the site's form handlers. */
-export function virtualModuleSource(rendered, handlers) {
-  const forms = [...handlers].map(([route, file]) => `  ${JSON.stringify(route)}: () => import(${JSON.stringify(file.split(path.sep).join("/"))}),`);
+/**
+ * The virtual module's source: the rendered design and the site's form
+ * handlers, each as the file the route's log names (relative to the site)
+ * and a loader.
+ */
+export function virtualModuleSource(rendered, handlers, siteRoot) {
+  const forms = [...handlers].map(([route, file]) => `  ${JSON.stringify(route)}: { file: ${JSON.stringify(path.relative(siteRoot, file).split(path.sep).join("/"))}, load: () => import(${JSON.stringify(file.split(path.sep).join("/"))}) },`);
   return [
     `export const system = ${JSON.stringify(rendered.system)};`,
     `export const design = ${JSON.stringify(rendered.design)};`,
@@ -522,11 +776,15 @@ export default function designSystem({ design }) {
   let base = "/";
   let clientDirectory;
   let tokensCss = false;
+  let parse;
+  let logger;
   return {
     name: "timds-design-system",
     hooks: {
-      "astro:config:setup": ({ config, updateConfig }) => {
+      "astro:config:setup": async ({ config, updateConfig, logger: integrationLogger }) => {
         siteRoot = fileURLToPath(config.root);
+        logger = integrationLogger;
+        parse = await loadModuleParser(siteRoot);
         systemRoot = findDesignSystem(siteRoot);
         if (!systemRoot) throw new Error(`No folder above ${siteRoot} holds timds.json. This site reads the Design System it sits in; keep it inside that Design System's folder.`);
         base = config.base || "/";
@@ -543,10 +801,10 @@ export default function designSystem({ design }) {
               },
               load(id) {
                 if (id !== RESOLVED_MODULE) return undefined;
-                const handlers = formHandlers(siteRoot);
+                const handlers = formHandlers(siteRoot, { parse, warn: (message) => logger.warn(message) });
                 const rendered = renderWorkspaceDesign(systemRoot, { design, base, forms: handlers.keys() });
                 for (const file of rendered.files) this.addWatchFile(file);
-                return virtualModuleSource(rendered, handlers);
+                return virtualModuleSource(rendered, handlers, siteRoot);
               },
               configureServer(server) {
                 // The design lives above the site's root, where Vite does not

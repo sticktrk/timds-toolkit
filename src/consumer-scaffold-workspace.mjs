@@ -53,7 +53,7 @@ import { existsSync, promises as fs } from "node:fs";
 import path from "node:path";
 
 import { CONSUMER_MANIFEST_FILE, CONSUMER_SKILL_NAMES, validateConsumerManifest } from "./consumer.mjs";
-import { WORKSPACE_SITE_DIRECTORY, WORKSPACE_SITE_MOUNT } from "./workspace-site.mjs";
+import { WORKSPACE_SITE_AGENTS_MARKER, WORKSPACE_SITE_DIRECTORY, WORKSPACE_SITE_MOUNT } from "./workspace-site.mjs";
 
 /** The template directory the workspace mode lays over the shared set. */
 export const WORKSPACE_TEMPLATE_DIRECTORY = "site-workspace";
@@ -77,7 +77,7 @@ const STATIC_DIRECTORIES = ["assets", "scripts", "styles"];
 /** The system's guidance file that gains the site's section, relative to the Design System root. */
 const AGENTS_FILE = "AGENTS.md";
 /** The marker of that section: `<!-- timds:emdash-site -->` opens it and `<!-- /timds:emdash-site -->` closes it. */
-export const WORKSPACE_AGENTS_MARKER = "timds:emdash-site";
+export const WORKSPACE_AGENTS_MARKER = WORKSPACE_SITE_AGENTS_MARKER;
 const AGENTS_SECTION_TEMPLATE = "AGENTS-workspace-site.md";
 
 const toJson = (value) => `${JSON.stringify(value, null, 2)}\n`;
@@ -122,9 +122,14 @@ export async function resolveWorkspaceRoot(rootInput) {
   const info = await fs.stat(requested).catch(() => null);
   if (!info?.isDirectory()) throw new Error(`--root ${rootInput || requested} is not a directory. Run the workspace mode in a Design System workspace (the folder that holds timds.json), or name it with --root PATH.`);
   const { findRepositoryRoot } = await import("./core.mjs");
-  const repoRoot = await findRepositoryRoot(requested);
+  // Both roots are canonical (symlinks resolved, as git reports its top
+  // level), so a path from one to the other never crosses a symlink: a
+  // --root spelled through /var on macOS must still put the site at site/.
+  const repoRoot = await fs.realpath(await findRepositoryRoot(requested));
   for (const candidate of [repoRoot, path.join(repoRoot, "design-system")]) {
-    if (existsSync(path.join(candidate, "timds.json"))) return { repoRoot, designSystemRoot: await fs.realpath(candidate), layout: candidate === repoRoot ? "standalone" : "embedded" };
+    if (!existsSync(path.join(candidate, "timds.json"))) continue;
+    const designSystemRoot = await fs.realpath(candidate);
+    return { repoRoot, designSystemRoot, layout: designSystemRoot === repoRoot ? "standalone" : "embedded" };
   }
   return null;
 }
@@ -135,6 +140,48 @@ export function selectWebsiteDesign(designs) {
   const withHome = designs.filter((design) => pageRoutes(design).includes("/"));
   const candidates = withHome.length ? withHome : designs.filter((design) => pageRoutes(design).length || design.layout);
   return candidates.find((design) => design.id === "website") ?? candidates[0] ?? null;
+}
+
+/**
+ * What a workspace site's pages load from the design they render inside: the
+ * design's shell (its layout.html, else its home page, as the site
+ * integration builds the article shell) and that shell's stylesheet links, in
+ * order. Each link is `{ href, path }` with `path` the system-relative file
+ * the integration serves for it (`/styles/x.css` is `src/styles/x.css`), or
+ * `{ href: "/tokens.css", tokens: true }` for the compiled tokens; a link the
+ * site does not serve is left out. `stylesheets` maps every served href,
+ * `@import`s included, to its text, and `inline` lists the shell's `<style>`
+ * blocks. A design with neither layout nor pages loads nothing.
+ */
+export async function designShellStylesheets(designSystemRoot, design) {
+  const { stylesheetReferences } = await import("./tokens.mjs");
+  const page = design.pages.find((entry) => entry.route === "/") ?? design.pages[0];
+  const shell = design.layout ?? page?.states[0]?.path ?? null;
+  const html = shell ? await fs.readFile(shell, "utf8") : "";
+  const references = stylesheetReferences(html);
+  const links = [];
+  for (const href of references.links.map((entry) => path.posix.normalize(entry.split(/[?#]/, 1)[0]))) {
+    if (href === "/tokens.css") links.push({ href, tokens: true });
+    else {
+      // An href is a URL: decode each segment once, as the site's dev server
+      // does, and keep the file inside its folder.
+      const [, directory, ...encoded] = href.split("/");
+      let rest;
+      try {
+        rest = encoded.map((segment) => decodeURIComponent(segment));
+      } catch {
+        continue;
+      }
+      if (rest.some((segment) => !segment || segment === "." || segment === ".." || /[\\/\0]/.test(segment))) continue;
+      if (STATIC_DIRECTORIES.includes(directory) && rest.length && existsSync(path.join(designSystemRoot, "src", directory, ...rest))) links.push({ href, path: ["src", directory, ...rest].join("/") });
+    }
+  }
+  return {
+    shell: shell && path.relative(designSystemRoot, shell).split(path.sep).join("/"),
+    links,
+    inline: references.inline,
+    stylesheets: await linkedStylesheets(designSystemRoot, html),
+  };
 }
 
 /** Stylesheet links in `html` that resolve to a file the site serves from the system's src/. */
@@ -180,10 +227,7 @@ async function templateClasses(templatesRoot, relative, seen = new Set()) {
  */
 export async function articleRoutePorts({ designSystemRoot, design, templatesRoot }) {
   const { declaredClasses } = await import("./designs.mjs");
-  const shell = design.layout
-    ? await fs.readFile(design.layout, "utf8")
-    : await fs.readFile((design.pages.find((page) => page.route === "/") ?? design.pages[0]).states[0].path, "utf8");
-  const sheets = await linkedStylesheets(designSystemRoot, shell);
+  const sheets = (await designShellStylesheets(designSystemRoot, design)).stylesheets;
   const declared = new Set();
   for (const css of sheets.values()) for (const name of declaredClasses(css)) declared.add(name);
   const routes = [];

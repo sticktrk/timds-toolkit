@@ -849,6 +849,25 @@ test("submit in an embedded system carries the consumer skills its workspace sit
   assert.ok(!add.includes(".agents/skills/timds-update-design-system"), "a skill the record does not list is not staged");
 });
 
+test("submit stages the deletion of an owned consumer skill folder and leaves out an owned one that was never there", async (t) => {
+  const UPDATE_SKILL = ".agents/skills/timds-update-design-system";
+  const repoRoot = await embeddedSubmitWithRootConsumerSkill(t, {
+    site: siteRecord({ [`${SITE_SKILL}/SKILL.md`]: "0".repeat(64), [`${UPDATE_SKILL}/SKILL.md`]: "0".repeat(64) }),
+  });
+  await fs.rm(path.join(repoRoot, SITE_SKILL), { recursive: true, force: true });
+  const planned = await submitWorkspace(repoRoot, "Remove the consumer skill", { dryRun: true, noBuild: true });
+  const add = planned.commands.find((command) => command[1] === "add");
+  assert.ok(add.includes(SITE_SKILL), `a deleted, tracked owned folder is staged: ${add.join(" ")}`);
+  assert.ok(!add.includes(UPDATE_SKILL), "an owned folder that neither exists nor is tracked would make git add fail");
+
+  const result = await submitWorkspace(repoRoot, "Remove the consumer skill", { noBuild: true, noPush: true });
+  assert.equal(result.dryRun, false);
+  const removed = execFileSync("git", ["show", "--name-status", "--format=", "HEAD"], { cwd: repoRoot, encoding: "utf8" });
+  assert.match(removed, new RegExp(`^D\\t${SITE_SKILL}/SKILL\\.md$`, "m"), removed);
+  assert.match(removed, /^M\tdesign-system\/CHANGELOG\.md$/m, removed);
+  assert.equal(execFileSync("git", ["status", "--porcelain", "--untracked-files=all"], { cwd: repoRoot, encoding: "utf8" }), "");
+});
+
 test("submit refuses the root consumer skills when the workspace site's record does not own them, or the root is a consumer", async (t) => {
   for (const [label, options] of [
     ["record without the skill", { site: siteRecord({ ".agents/skills/timds-update-design-system/SKILL.md": "0".repeat(64) }) }],
