@@ -436,18 +436,69 @@ test("the starter's contact form renders disabled until the site handles it", ()
   assert.match(enabled.body, /<form class="form" action="\/site\/contact" method="post">/);
 });
 
-test("the catch-all route answers 405 to a POST it has no handler for and passes one it has to the handler", async () => {
+test("the catch-all route answers 405 to a POST, and the handlers are dispatched ahead of it by middleware", async () => {
   const route = await fs.readFile(path.join(SITE_TEMPLATE, "src/pages/[...page].astro"), "utf8");
-  assert.match(route, /import \{ forms, pages \} from "virtual:timds\/design-system";/);
+  assert.match(route, /import \{ pages \} from "virtual:timds\/design-system";/);
   assert.match(route, /if \(method !== "GET" && method !== "HEAD"\)/);
   assert.match(route, /status: 405/);
-  assert.match(route, /Allow: allow/);
-  assert.match(route, /typeof POST === "function"/);
-  assert.match(route, /if \(handler && method === "POST"\) return handler\(/);
-  assert.match(route, /console\.error\(`\$\{entry\.file\} handles the forms that post to/);
+  assert.match(route, /Allow: "GET, HEAD"/);
+  assert.doesNotMatch(route, /import \{[^}]*\bforms\b|\bforms\[|\.load\(\)/, "the catch-all no longer dispatches a POST; the middleware does");
+  // The integration registers the dispatch ahead of page routing.
+  const source = await fs.readFile(path.join(SITE_TEMPLATE, "src/integrations/design-system.mjs"), "utf8");
+  assert.match(source, /addMiddleware\(\{ entrypoint: new URL\("\.\/forms-middleware\.mjs", import\.meta\.url\), order: "pre" \}\);/);
+  const middleware = await fs.readFile(path.join(SITE_TEMPLATE, "src/integrations/forms-middleware.mjs"), "utf8");
+  assert.match(middleware, /import \{ forms \} from "virtual:timds\/design-system";/);
+  assert.match(middleware, /export const onRequest = formDispatch\(forms, import\.meta\.env\.BASE_URL\);/);
   const types = await fs.readFile(path.join(SITE_TEMPLATE, "src/design-system.d.ts"), "utf8");
   assert.match(types, /export const forms: Record<string,/);
   for (const doc of ["AGENTS.md", "DESIGN_SYSTEM.md", "docs/emdash-handover.md"]) {
     assert.match(await fs.readFile(path.join(SITE_TEMPLATE, doc), "utf8"), /src\/forms\//, `${doc} says where a form handler goes`);
   }
+});
+
+const { formDispatch, formRoute } = await import(path.join(SITE_TEMPLATE, "src", "integrations", "form-dispatch.mjs"));
+
+/** A request context as Astro's middleware gets it, enough for the dispatch. */
+const requestContext = (method, url) => ({ request: new Request(url, { method }), url: new URL(url) });
+
+test("a POST to a handler's address reaches the handler before any page, at the root and under a base", async (t) => {
+  assert.equal(formRoute("/articles", "/"), "/articles");
+  assert.equal(formRoute("/articles/", "/"), "/articles");
+  assert.equal(formRoute("/", "/"), "/");
+  assert.equal(formRoute("/site/articles", "/site/"), "/articles");
+  assert.equal(formRoute("/site/articles/", "/site"), "/articles");
+  assert.equal(formRoute("/site", "/site/"), "/");
+  assert.equal(formRoute("/site/", "/site/"), "/");
+  // Astro's development server routes a path without the base to the same page.
+  assert.equal(formRoute("/articles", "/site/"), "/articles");
+  assert.equal(formRoute("/sitemap", "/site/"), "/sitemap");
+
+  const calls = [];
+  const forms = {
+    "/articles": { file: "src/forms/articles.mjs", load: async () => ({ POST: async (context) => { calls.push(context.url.pathname); return new Response("handled", { status: 201 }); } }) },
+    "/draft": { file: "src/forms/draft.mjs", load: async () => ({ POST: undefined }) },
+  };
+  const page = () => new Response("the article list", { status: 200 });
+  for (const base of ["/", "/site/"]) {
+    const dispatch = formDispatch(forms, base);
+    const prefix = base === "/" ? "" : "/site";
+    // The article list never answers a POST its address has a handler for.
+    const handled = await dispatch(requestContext("POST", `http://site.test${prefix}/articles`), page);
+    assert.equal(handled.status, 201);
+    assert.equal(await handled.text(), "handled");
+    assert.equal((await dispatch(requestContext("POST", `http://site.test${prefix}/articles/`), page)).status, 201);
+    // A GET, and a POST with no handler, go on to the site's routes.
+    assert.equal(await (await dispatch(requestContext("GET", `http://site.test${prefix}/articles`), page)).text(), "the article list");
+    assert.equal(await (await dispatch(requestContext("POST", `http://site.test${prefix}/privacy`), page)).text(), "the article list");
+  }
+  assert.deepEqual(calls, ["/articles", "/articles/", "/site/articles", "/site/articles/"]);
+
+  // A handler whose POST is not a function answers 405 and names its module, never the page.
+  const errors = [];
+  t.mock.method(console, "error", (message) => errors.push(message));
+  const refused = await formDispatch(forms, "/")(requestContext("POST", "http://site.test/draft"), page);
+  assert.equal(refused.status, 405);
+  assert.equal(refused.headers.get("Allow"), "GET, HEAD");
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /^src\/forms\/draft\.mjs handles the forms that post to \/draft, but its POST export is not a function \(it is undefined\)/);
 });

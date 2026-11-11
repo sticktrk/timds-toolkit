@@ -422,6 +422,21 @@ async function readText(file) {
   }
 }
 
+/**
+ * The `@import`s of a stylesheet with their condition: the media query,
+ * `supports()` or `layer()` after the URL, or null when there is none (or it
+ * is `all`). The same pattern and targets as `importReferences` in tokens.mjs.
+ */
+function conditionalImports(css) {
+  const found = [];
+  for (const match of css.matchAll(/@import\s+(?:url\(\s*)?["']?([^"')\s;]+)["']?\s*\)?([^;]*);/gi)) {
+    if (/^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(match[1])) continue;
+    const condition = match[2].trim();
+    found.push({ reference: match[1], condition: /^(?:all)?$/i.test(condition) ? null : `@import ${condition}` });
+  }
+  return found;
+}
+
 /** The design id the site's astro.config passes to the integration (`designSystem({ design: "<id>" })`), with the file, or null. */
 async function configuredDesign(siteRoot) {
   for (const file of ASTRO_CONFIGS) {
@@ -493,7 +508,7 @@ async function readSystem({ designSystemRoot, siteRoot, siteImports, stylesheets
     const shell = await designShellStylesheets(designSystemRoot, design.entry);
     design.shell = shell.shell;
     design.inline = shell.inline;
-    entries = [...shell.links.map((link) => (link.tokens ? COMPILED_TOKENS : link.path)), ...siteImports];
+    entries = [...shell.links.map((link) => ({ path: link.tokens ? COMPILED_TOKENS : link.path, condition: link.media ? `media ${link.media}` : null })), ...siteImports];
   }
 
   // A starter-build system compiles its tokens to tokens.css at build time,
@@ -532,15 +547,26 @@ async function readSystem({ designSystemRoot, siteRoot, siteImports, stylesheets
   // ever read, not even through a symbolic link. A root-relative `@import`
   // resolves the way the site serves it: /styles/x.css is src/styles/x.css.
   const builtRoot = path.join(await fs.realpath(designSystemRoot).catch(() => designSystemRoot), BUILT_OUTPUT);
+  //
+  // A sheet the shell links with a `media` other than `all`, or an `@import`
+  // with a media query, `supports()` or `layer()`, loads only under that
+  // condition, and so does everything it imports: its custom properties are
+  // indexed as conditional (never a rewrite target), its classes as declared.
+  // A sheet reached both ways counts as unconditional.
   const sources = [];
-  const seen = new Set();
-  const load = async (relative, depth) => {
-    if (seen.has(relative) || depth > MAX_IMPORT_DEPTH) return;
-    seen.add(relative);
+  const seen = new Map();
+  const load = async (relative, depth, condition = null) => {
+    if (depth > MAX_IMPORT_DEPTH) return;
+    if (seen.has(relative)) {
+      if (condition || !seen.get(relative)) return;
+      const earlier = sources.findIndex((source) => source.path === relative);
+      if (earlier !== -1) sources.splice(earlier, 1); // reached unconditionally after all
+    }
+    seen.set(relative, condition);
     if (relative === COMPILED_TOKENS) {
       if (!starterBuild) return;
       await readTokenSource();
-      if (tokensJson) sources.push({ path: COMPILED_TOKENS, css: compileTokenCss(tokensJson), compiled: true });
+      if (tokensJson) sources.push({ path: COMPILED_TOKENS, css: compileTokenCss(tokensJson), compiled: true, condition });
       return;
     }
     if (relative.startsWith("../") || relative.startsWith("/") || isBuiltOutput(relative)) return;
@@ -550,27 +576,29 @@ async function readSystem({ designSystemRoot, siteRoot, siteImports, stylesheets
     if (real && isInside(builtRoot, real)) return;
     const css = await readText(absolute);
     if (css === null) return;
-    for (const reference of importReferences(css)) {
+    for (const { reference, condition: imported } of conditionalImports(css)) {
       const target = reference.split(/[?#]/, 1)[0];
+      const under = condition ?? imported;
       if (target.startsWith("/")) {
         const served = path.posix.normalize(target);
         const directory = served.split("/")[1];
-        if (served === COMPILED_TOKENS) await load(served, depth + 1);
-        else if (SERVED_DIRECTORIES.includes(directory)) await load(`src${served}`, depth + 1);
+        if (served === COMPILED_TOKENS) await load(served, depth + 1, under);
+        else if (SERVED_DIRECTORIES.includes(directory)) await load(`src${served}`, depth + 1, under);
         continue;
       }
-      await load(path.posix.normalize(path.posix.join(path.posix.dirname(relative), target)), depth + 1);
+      await load(path.posix.normalize(path.posix.join(path.posix.dirname(relative), target)), depth + 1, under);
     }
-    sources.push({ path: relative, css, linked: depth === 0 });
+    sources.push({ path: relative, css, linked: depth === 0, condition });
   };
-  for (const entry of entries) await load(entry, 0);
+  for (const entry of entries) await load(typeof entry === "string" ? entry : entry.path, 0, typeof entry === "string" ? null : entry.condition);
   for (const [index, css] of (design?.inline ?? []).entries()) sources.push({ path: `${design.shell} <style> ${index + 1}`, css, inline: true });
   const sheets = sources.filter((source) => !source.compiled && !source.inline);
   const tokenFile = (group) => (tokenGroups ? `tokens/${String(group).replaceAll(".", "/")}.json` : "tokens.json");
 
   const records = [];
   for (const source of sources) {
-    records.push(...parseCssTokens(source.css, { source: source.compiled ? (tokenGroups ? "tokens/" : "tokens.json") : source.path }));
+    const parsed = parseCssTokens(source.css, { source: source.compiled ? (tokenGroups ? "tokens/" : "tokens.json") : source.path });
+    records.push(...(source.condition ? parsed.map((record) => ({ ...record, base: false, condition: [source.condition, ...record.condition] })) : parsed));
   }
   const resolved = resolveTokens(records);
 
@@ -596,7 +624,7 @@ async function readSystem({ designSystemRoot, siteRoot, siteImports, stylesheets
   const classes = new Set();
   for (const source of sources) if (!source.compiled) for (const name of declaredClasses(source.css)) classes.add(name);
 
-  const tokenSheet = sheets.find((sheet) => parseCssTokens(sheet.css).some((record) => record.base));
+  const tokenSheet = sheets.find((sheet) => !sheet.condition && parseCssTokens(sheet.css).some((record) => record.base));
   // A new class goes in the sheet the design links itself, the starter's first.
   const classSheet = sheets.find((sheet) => sheet.path === STARTER_STYLESHEET)
     ?? sheets.find((sheet) => sheet.linked && declaredClasses(sheet.css).size)

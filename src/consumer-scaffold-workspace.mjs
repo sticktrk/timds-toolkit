@@ -149,7 +149,8 @@ export function selectWebsiteDesign(designs) {
  * order. Each link is `{ href, path }` with `path` the system-relative file
  * the integration serves for it (`/styles/x.css` is `src/styles/x.css`), or
  * `{ href: "/tokens.css", tokens: true }` for the compiled tokens; a link the
- * site does not serve is left out. `stylesheets` maps every served href,
+ * site does not serve is left out. Each link also carries `media`: its
+ * `media` attribute, or null when it has none or it is `all`. `stylesheets` maps every served href,
  * `@import`s included, to its text, and `inline` lists the shell's `<style>`
  * blocks. A design with neither layout nor pages loads nothing.
  */
@@ -159,9 +160,18 @@ export async function designShellStylesheets(designSystemRoot, design) {
   const shell = design.layout ?? page?.states[0]?.path ?? null;
   const html = shell ? await fs.readFile(shell, "utf8") : "";
   const references = stylesheetReferences(html);
+  // The `media` of each link, in the order stylesheetReferences lists them
+  // (same filter), so a conditional sheet can be told apart.
+  const { attr, byTag, parseHtml } = await import("./html.mjs");
+  const medias = byTag(parseHtml(html), "link")
+    .filter((node) => String(attr(node, "rel") ?? "").toLowerCase().split(/\s+/).includes("stylesheet"))
+    .map((node) => ({ href: String(attr(node, "href") ?? "").trim(), media: String(attr(node, "media") ?? "").trim() }))
+    .filter((link) => link.href && !/^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(link.href))
+    .map((link) => (/^(?:all)?$/i.test(link.media) ? null : link.media));
   const links = [];
-  for (const href of references.links.map((entry) => path.posix.normalize(entry.split(/[?#]/, 1)[0]))) {
-    if (href === "/tokens.css") links.push({ href, tokens: true });
+  for (const [index, href] of references.links.map((entry) => path.posix.normalize(entry.split(/[?#]/, 1)[0])).entries()) {
+    const media = medias[index] ?? null;
+    if (href === "/tokens.css") links.push({ href, tokens: true, media });
     else {
       // An href is a URL: decode each segment once, as the site's dev server
       // does, and keep the file inside its folder.
@@ -173,7 +183,7 @@ export async function designShellStylesheets(designSystemRoot, design) {
         continue;
       }
       if (rest.some((segment) => !segment || segment === "." || segment === ".." || /[\\/\0]/.test(segment))) continue;
-      if (STATIC_DIRECTORIES.includes(directory) && rest.length && existsSync(path.join(designSystemRoot, "src", directory, ...rest))) links.push({ href, path: ["src", directory, ...rest].join("/") });
+      if (STATIC_DIRECTORIES.includes(directory) && rest.length && existsSync(path.join(designSystemRoot, "src", directory, ...rest))) links.push({ href, path: ["src", directory, ...rest].join("/"), media });
     }
   }
   return {

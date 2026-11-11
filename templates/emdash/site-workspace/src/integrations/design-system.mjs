@@ -31,16 +31,18 @@
 // A form in the design that posts (`<form method="post">`) needs a handler in
 // the site: a module under the site's src/forms/ named for the address it
 // posts to (src/forms/contact.ts for /contact, src/forms/index.ts for /)
-// that exports POST. The virtual module lists those handlers for the
-// catch-all route, which calls one for a POST to its address and answers 405
-// to any other method it does not serve. A posting form whose address has no
+// that exports POST. The virtual module lists those handlers, and the
+// middleware this integration registers (forms-middleware.mjs, the rule in
+// form-dispatch.mjs) calls one for a POST to its address before Astro picks
+// a page, so a site page at the same address (/articles) never takes it. The
+// catch-all route answers 405 to any other method it does not serve. A posting form whose address has no
 // handler is rendered disabled, with a line saying it is not connected yet,
 // so a visitor is never offered a Send button that sends nothing. Which forms
 // have a handler is decided from the site's files each time the module is
 // built, in development and in the build alike, by parsing each module with
 // the parser of the Vite the site's Astro runs on (`parseAst`) and reading
 // its real exports: a comment or a string that mentions POST is not one. The
-// catch-all route still checks that the POST it imports is a function.
+// middleware still checks that the POST it imports is a function.
 // Vite is loaded only when the integration runs, so this file imports in
 // plain Node with nothing installed.
 //
@@ -781,7 +783,7 @@ export default function designSystem({ design }) {
   return {
     name: "timds-design-system",
     hooks: {
-      "astro:config:setup": async ({ config, updateConfig, logger: integrationLogger }) => {
+      "astro:config:setup": async ({ config, updateConfig, addMiddleware, logger: integrationLogger }) => {
         siteRoot = fileURLToPath(config.root);
         logger = integrationLogger;
         parse = await loadModuleParser(siteRoot);
@@ -789,6 +791,9 @@ export default function designSystem({ design }) {
         if (!systemRoot) throw new Error(`No folder above ${siteRoot} holds timds.json. This site reads the Design System it sits in; keep it inside that Design System's folder.`);
         base = config.base || "/";
         tokensCss = runsStarterBuild(readJson(path.join(systemRoot, "timds.json")));
+        // Ahead of page routing, after EmDash's own middleware (registered
+        // earlier, also "pre"), so a handler sees the request as a page would.
+        addMiddleware({ entrypoint: new URL("./forms-middleware.mjs", import.meta.url), order: "pre" });
         updateConfig({
           vite: {
             // The design's files live above the site's root, which Vite serves

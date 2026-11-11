@@ -365,7 +365,9 @@ dev` serves and while `astro build` builds, never in the Worker:
 To wire a form up, add a module under the site's `src/forms/` named for the
 address the form posts to (`src/forms/contact.ts` for `/contact`,
 `src/forms/index.ts` for `/`) that exports `POST`, an Astro endpoint function.
-The catch-all route passes each POST to that address to it, a GET still
+Middleware the integration registers passes each POST to that address to it
+before Astro picks a page, so a page the site has at the same address (the
+article list at `/articles`) answers its GET but never the POST; a GET still
 renders the design's page, and the form renders enabled on the next build (at
 once under `astro dev`) with no change to the design. The integration decides
 which forms have a handler from the site's files each time it builds the
@@ -374,9 +376,12 @@ with the parser of the Vite the site's Astro runs on, so `export async
 function POST`, `export const POST = …`, `export { handler as POST }` and
 `export { POST } from "./elsewhere"` count, and a comment or string that
 mentions POST does not; `export *` does not either, so name `POST`. When a
-request comes, the route checks that `POST` is a function; if it is not, the
-address answers 405 and the server log names the module. The template ships no handler:
-what a submission does (mail, a queue, a CRM) is the site's decision.
+request comes, the middleware checks that `POST` is a function; if it is not,
+the address answers 405 and the server log names the module. EmDash turns
+Astro's cross-origin form check off, so a handler that should accept only the
+site's own form compares the request's `Origin` itself. The template ships no
+handler: what a submission does (mail, a queue, a CRM) is the site's
+decision.
 
 Editing a design or a token changes the site on the next request in
 development and on the next build, with no sync and no version to move. The
@@ -410,7 +415,11 @@ of these; then the custom properties and the classes they declare. It never
 reads `timds.json` `bundle.include`, a stylesheet the design does not link,
 or anything under the system's `dist/`, so a literal is never rewritten to a
 token the page would not have, and a check run after a token change matches
-the new value whether or not the system was rebuilt. A site whose
+the new value whether or not the system was rebuilt. A stylesheet the
+design links with a `media` condition (other than `all`), or imports with a
+media query, `supports()` or `layer()`, still declares classes for the site,
+but its tokens are never rewrite targets, because the site loads them only
+under that condition. A site whose
 `astro.config.mjs` names a design the system lacks, or a system with no
 website design, fails the check with what to do. `--require-token` answers
 from the same set: a token the system declares in a stylesheet the design

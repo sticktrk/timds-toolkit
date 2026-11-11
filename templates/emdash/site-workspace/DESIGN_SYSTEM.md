@@ -65,9 +65,11 @@ To wire a form up:
    ```
 
 3. Rebuild, or let `astro dev` reload: the form renders enabled, with no
-   change to the design, and `src/pages/[...page].astro` passes each POST to
-   the address on to `POST` with the request's context. A GET still renders
-   the design's page.
+   change to the design, and the integration's middleware
+   (`src/integrations/form-dispatch.mjs`) passes each POST to the address on
+   to `POST` with the request's context, before any page: a page the site
+   has at the same address (`/articles`) still answers its GET, never the
+   POST.
 
 The integration decides which forms have a handler from the files in
 `src/forms/` each time it builds the pages, in development and in the build
@@ -76,9 +78,14 @@ function POST`, `export const POST = ...`, `export { handler as POST }` and
 `export { POST } from "./elsewhere"` count, and a comment or a string that
 mentions POST does not; `export * from` does not either, so name `POST`.
 A module that does not export `POST` handles nothing, and one whose `POST`
-is not a function when the request comes is treated the same: the address
-answers 405 and the server log names the module. Two modules for one
+is not a function when the request comes answers 405 (the server log names
+the module), never the page at that address. Two modules for one
 address (`contact.ts` and `contact/index.ts`) are an error.
+
+EmDash turns Astro's cross-origin form check off for the whole site, so a
+handler receives POSTs from other origins too. A handler that should accept
+only this site's own form compares the request's `Origin` header with the
+site's origin itself and answers 403 when they differ.
 
 A form's POSTs are its own (with `method="post"`) and each submit button's
 with a `formmethod="post"` or a `formaction` of its own; any of them that

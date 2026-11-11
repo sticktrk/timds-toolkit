@@ -667,3 +667,24 @@ function List<T,>({ items }: { items: Array<T> }) {
     ["src/components/B.svelte", 3, "#1a1a1a"],
   ]);
 });
+
+test("a stylesheet the shell loads only under a condition never supplies a rewrite target, but its classes count", async (t) => {
+  const root = await temporaryDirectory(t);
+  await write(root, {
+    "timds.json": { schemaVersion: 2, systemId: "acme/print", name: "Print", workspace: { build: ["npm", "run", "build"] } },
+    "src/styles/system.css": "@import \"./narrow.css\" screen and (max-width: 40rem);\n@import \"./plain.css\";\n:root { --color-ink: #1a1a1a; }\n",
+    "src/styles/print.css": ":root { --print-ink: #333333; }\n.print-only { color: var(--print-ink); }\n",
+    "src/styles/narrow.css": ":root { --narrow-edge: #444444; }\n",
+    "src/styles/plain.css": ":root { --plain-edge: #555555; }\n",
+    ...websiteDesign(["/styles/system.css", "/styles/print.css"]),
+    "site/src/layouts/Layout.astro": "<main class=\"print-only\"><slot /></main>\n",
+    "site/src/styles/site.css": "p { color: #333333; border-color: #444444; outline-color: #555555; background: #1a1a1a; }\n",
+  });
+  await write(root, { "src/designs/website/layout.html": "<html><head><link rel=\"stylesheet\" href=\"/styles/system.css\" media=\"all\"><link rel=\"stylesheet\" href=\"/styles/print.css\" media=\"print\"></head><body>{{content}}</body></html>\n" });
+  const result = await run({ root, siteRoot: path.join(root, "site") }, { fix: false });
+  assert.deepEqual(result.rewrites.map((rewrite) => [rewrite.from, rewrite.to]), [["#555555", "var(--plain-edge)"], ["#1a1a1a", "var(--color-ink)"]]);
+  assert.deepEqual(result.findings.map((finding) => [finding.kind, finding.value ?? finding.class, finding.candidates]), [
+    ["literal", "#333333", []],
+    ["literal", "#444444", []],
+  ]);
+});
