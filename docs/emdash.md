@@ -4,15 +4,16 @@ The scaffold commands are in the [README](../README.md#emdash-sites).
 
 ## Choosing a mode
 
-`timds consumer scaffold emdash` has three modes. A product in its own
-repository keeps a pin to the Design System: the fresh mode creates that
-repository with the system as a submodule ([a new site
-repository](#a-new-site-repository)), and `--existing` adds EmDash's articles
-to an Astro site that already pins one ([adding EmDash to an existing
-site](#adding-emdash-to-an-existing-site)). A system's own website lives in
-the system's workspace with `--workspace` ([a site in its Design System's
+`timds consumer scaffold emdash` has two modes. A system's own website lives
+in the system's workspace with `--workspace` ([a site in its Design System's
 workspace](#a-site-in-its-design-systems-workspace)): it has no pin, reads the
-system from source, and is edited, reviewed and committed with it.
+system from source, and is edited, reviewed and committed with it. The fresh
+mode creates a separate site repository with the system pinned as a submodule
+([a new site repository](#a-new-site-repository)).
+
+A third mode, `--existing`, is withdrawn: the command refuses the flag, says
+to use `--workspace`, and writes nothing ([adding EmDash to an existing
+site](#adding-emdash-to-an-existing-site)).
 
 ## A new site repository
 
@@ -75,6 +76,13 @@ was created. The scaffold writes product source: `upgrade` later refreshes
 only the consumer-managed files, never the theme.
 
 ## Adding EmDash to an existing site
+
+**Withdrawn.** `timds consumer scaffold emdash --existing` refuses with a
+message that names `--workspace` and writes nothing: TimDS no longer adds
+EmDash to a site in its own repository that reads its Design System through a
+pin. The rest of this section describes the mode as it was built. It is kept
+because the workspace mode installs the same template set, and it goes when
+the mode's code is removed.
 
 ```bash
 npx --yes @dtconcepts/timds@0.1.x consumer scaffold emdash --existing \
@@ -211,9 +219,9 @@ directory, when the system has no website design with a page to build (`timds
 designs init` adds the starter's sample), when `.agents` or `.agents/skills`
 at the repository root is not a directory, when a consumer skill folder there
 holds anything but the bytes it would write, and when the system's
-`AGENTS.md` is not a regular file. `--existing`, `--design-system`,
-`--stylesheet`, `--portal-url`, `--layout` and `--site-url` belong to the
-other modes and are refused, and so is any `--platform` but `cloudflare`. A
+`AGENTS.md` is not a regular file. `--existing` is withdrawn and refused
+everywhere; `--design-system`, `--stylesheet`, `--portal-url`, `--layout` and
+`--site-url` belong to the fresh mode and are refused, and so is any `--platform` but `cloudflare`. A
 failed write removes the site and restores the files outside it. Then, unless
 `--skip-install`, it runs `npm ci` in `site/`; a failed install leaves the
 files in place, and the scaffold is not rerun (it refuses a folder that is

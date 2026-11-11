@@ -187,7 +187,7 @@ rather than upgraded. A new operation or requirement raises it, so a host that
 does not know it holds the release instead of guessing.
 
 `package.json` `emdashTemplate` names the EmDash template set this release
-installs (`consumer scaffold emdash --existing` and `--workspace`, see
+installs (`consumer scaffold emdash --workspace`, see
 [EmDash sites](emdash.md)):
 
 ```json

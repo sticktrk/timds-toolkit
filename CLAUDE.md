@@ -293,7 +293,9 @@ session edits cannot change the parent record. See `docs/offshoots.md`.
 `templates/` is copied verbatim (with `__PLACEHOLDER__` substitution) by `init`
 and `video init`. `templates/emdash/` holds the EmDash scaffold's files: the
 fresh scaffold's theme, docs and deploy workflow, and the shared template set
-`consumer scaffold emdash --existing` installs (`site/` for both platforms,
+the workspace mode installs and the withdrawn `--existing` mode installed
+(the CLI refuses `--existing` with `EXISTING_WITHDRAWN` and writes nothing;
+`scaffoldExistingEmdashSite` stays with its tests until removed) (`site/` for both platforms,
 `site-cloudflare/` and `site-node/`, the printed `manual/` snippets, and
 `site.json` with the dependencies, package keys, preview routes and design
 pairs, `.gitignore` lines and manual changes; its `version` is the template
@@ -424,7 +426,7 @@ behavior.
   `consumer-register.mjs` (`register`, `updates`), `consumer-notes.mjs`
   (`notes`), `consumer-preview.mjs` with `consumer-browser.mjs` and
   `consumer-png.mjs` (`preview`), `consumer-scaffold.mjs` (`scaffold
-  emdash`; with `--existing` it installs the shared EmDash template set,
+  emdash`; `--existing` is withdrawn and refused; its function installs the shared EmDash template set,
   `templates/emdash/site/`, `site-<platform>/` and `site.json`, into an Astro
   consumer and records `.timds/emdash.json`, which `upgrade` never touches),
   `consumer-scaffold-workspace.mjs` (`scaffold emdash --workspace`: the

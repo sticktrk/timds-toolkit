@@ -116,7 +116,12 @@ EmDash's template;
 everything it writes beyond the consumer-managed boundary above (the theme,
 the token module, public asset symlinks, `timds.consumer.json`,
 `DESIGN_SYSTEM.md`) is product source from then on, so no upgrade may touch it.
-`consumer scaffold emdash --existing` installs the toolkit's own article
+`consumer scaffold emdash --existing` is withdrawn: `runConsumerScaffold`
+refuses the flag with `EXISTING_WITHDRAWN` and writes nothing, since a
+system's own site lives in its workspace. Its function
+(`scaffoldExistingEmdashSite`), tests and templates stay until they are
+removed, and the rest of this paragraph describes that function, which no
+command reaches. It installs the toolkit's own article
 templates (`templates/emdash/site*`, described by `templates/emdash/site.json`:
 the seed's content model, the article routes, the serializer, the writer's
 contract) into an Astro consumer that already has `timds.consumer.json`. Those

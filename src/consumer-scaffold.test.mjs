@@ -10,6 +10,7 @@ import { createHash } from "node:crypto";
 import { checkConsumer, classifyConsumerPath, runConsumerCli, validateConsumerManifest } from "./consumer.mjs";
 import { initializeConsumer } from "./consumer-init.mjs";
 import {
+  EXISTING_WITHDRAWN,
   EMDASH_GENERATOR,
   EMDASH_RECORD_PATH,
   EMDASH_TEMPLATES_ROOT,
@@ -1150,33 +1151,31 @@ test("refuses a template set that is malformed or leaves a placeholder unfilled"
   assert.deepEqual(await treeHash(site), before);
 });
 
-test("runConsumerScaffold parses --existing and refuses the other mode's flags", async (t) => {
+test("--existing is withdrawn: the command refuses, says where a site goes, and writes nothing", async (t) => {
   const root = await temporaryDirectory(t);
   const site = await existingSite(root);
   const lines = [];
   assert.equal(await runConsumerScaffold(["emdash", "--help"], { output: (line) => lines.push(line) }), null);
-  assert.match(lines[0], /timds consumer scaffold emdash --existing --root PATH\n\s+\[--platform cloudflare\|node\] \[--layout PATH\] \[--site-url URL\]\n\s+\[--skip-install\]/);
+  assert.doesNotMatch(lines[0], /scaffold emdash --existing/);
+  assert.match(lines[0], /--existing is withdrawn: it refuses and writes nothing/);
 
   const before = await treeHash(site);
-  for (const [extra, pattern] of [
-    [["--design-system", "git@example.com:a/b.git"], /--design-system belongs to the fresh scaffold, not --existing/],
-    [["--stylesheet", "a.css", "--portal-url", "https://timds.example"], /--stylesheet, --portal-url belong to the fresh scaffold, not --existing/],
-  ]) {
-    await assert.rejects(runConsumerScaffold(["emdash", "--existing", "--root", site, ...extra], { output: quiet }), pattern);
-  }
-  await assert.rejects(runConsumerScaffold(["emdash", "--root", path.join(root, "new"), "--design-system", "x", "--layout", "src/layouts/Base.astro"], { output: quiet }), /--layout applies only to --existing/);
-  await assert.rejects(runConsumerScaffold(["emdash", "--existing", "--root", site, "--layout"], { output: quiet }), /--layout requires a value/);
-  await assert.rejects(runConsumerScaffold(["emdash", "--existing", "--root", site, "--platform=heroku"], { output: quiet }), /--platform heroku must be one of/);
-  await assert.rejects(runConsumerScaffold(["emdash", "--existing"], { output: quiet }), /--root is required/);
-  assert.deepEqual(await treeHash(site), before);
-  assert.equal(existsSync(path.join(root, "new")), false);
-
-  const result = await runConsumerScaffold(
+  for (const args of [
+    ["emdash", "--existing", "--root", site],
     ["emdash", "--existing", `--root=${site}`, "--platform", "node", "--layout=src/layouts/Base.astro", "--site-url", "https://www.acme.example", "--skip-install"],
-    { output: quiet, existingOptions: { templatesRoot: TEMPLATES, readDesigns: async () => [] } },
-  );
-  assert.equal(result.platform, "node");
-  assert.equal(result.siteUrl, "https://www.acme.example");
-  assert.equal(result.layout, "src/layouts/Base.astro");
-  assert.deepEqual(JSON.parse(await fs.readFile(path.join(site, EMDASH_RECORD_PATH), "utf8")).platform, "node");
+    ["emdash", "--existing", "--root", site, "--design-system", "git@example.com:a/b.git"],
+    ["emdash", "--existing", "--workspace", "--root", site],
+    ["emdash", "--existing"],
+  ]) {
+    await assert.rejects(runConsumerScaffold(args, { output: quiet }), (error) => {
+      assert.equal(error.message, EXISTING_WITHDRAWN);
+      assert.match(error.message, /nothing was written/);
+      assert.match(error.message, /timds consumer scaffold emdash --workspace/);
+      return true;
+    });
+  }
+  await assert.rejects(runConsumerScaffold(["emdash", "--root", path.join(root, "new"), "--design-system", "x", "--layout", "src/layouts/Base.astro"], { output: quiet }), /--layout belonged to the withdrawn --existing mode/);
+  assert.deepEqual(await treeHash(site), before);
+  assert.equal(existsSync(path.join(site, EMDASH_RECORD_PATH)), false);
+  assert.equal(existsSync(path.join(root, "new")), false);
 });

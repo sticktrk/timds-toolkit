@@ -339,7 +339,7 @@ test("runConsumerScaffold parses --workspace and refuses the other modes' flags 
   const workspace = await starterWorkspace(path.join(root, "ws"));
   for (const [flags, pattern] of [
     [["--platform", "node"], /--platform node is not available with --workspace/],
-    [["--existing"], /--existing belongs to the other scaffold modes/],
+    [["--existing"], /--existing is withdrawn and nothing was written/],
     [["--design-system", "https://example.com/ds.git"], /--design-system belongs/],
     [["--stylesheet", "src/styles/system.css"], /--stylesheet belongs/],
     [["--layout", "src/layouts/Base.astro"], /--layout belongs/],

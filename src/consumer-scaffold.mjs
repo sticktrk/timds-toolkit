@@ -28,7 +28,11 @@
 //
 // then hands over to `initializeConsumer` for the consumer-managed files.
 //
-// `--existing` (`scaffoldExistingEmdashSite`) installs the shared EmDash
+// `--existing` is withdrawn: `runConsumerScaffold` refuses the flag with
+// `EXISTING_WITHDRAWN` and writes nothing, because a Design System's own site
+// lives in its workspace (`--workspace`, consumer-scaffold-workspace.mjs).
+// The mode's function is still here, with its tests, until its code and
+// templates are removed. `scaffoldExistingEmdashSite` installs the shared EmDash
 // template set into an Astro consumer that already has timds.consumer.json:
 // the files under templates/emdash/site/ and site-<platform>/ at their paths
 // relative to the site root (placeholders filled, never over an existing
@@ -103,9 +107,6 @@ const SCAFFOLD_HELP = `Usage:
   timds consumer scaffold emdash --root PATH --design-system GIT_URL
       [--platform cloudflare|node] [--stylesheet PATH]... [--site-url URL]
       [--portal-url URL] [--skip-install]
-  timds consumer scaffold emdash --existing --root PATH
-      [--platform cloudflare|node] [--layout PATH] [--site-url URL]
-      [--skip-install]
   timds consumer scaffold emdash --workspace [--root PATH] [--skip-install]
 
 Creates a new EmDash CMS site repository at --root (which must not exist, or
@@ -126,21 +127,9 @@ ${STARTER_STYLESHEET} when the system has one. --site-url is the deployed
 site's origin; with it, .mcp.json also gets the EmDash MCP server for content
 editing.
 
---existing installs the EmDash template set (the article routes, the seed,
-src/live.config.ts and the site docs) into an Astro site at --root that
-already has ${CONSUMER_MANIFEST_FILE}, so it gains an articles section fed
-through EmDash's API. It adds the dependencies and package.json keys the
-templates need (keeping any the site already declares), the article routes
-and their design pairs to the app's preview, and the template version to
-${EMDASH_RECORD_PATH}. It never overwrites a path or edits an existing page:
-any path that exists, and any page of the site at a route a template page
-takes by Astro's file routing (src/pages/articles.astro and
-articles/index.astro, [id] and [slug]), is refused before anything is
-written. A dynamic or catch-all page that the article routes now outrank is
-named in the closing list. The changes to
-astro.config, wrangler.jsonc and .gitignore are printed for the developer.
---layout names the site's layout component (an .astro file relative to the
-site root; default ${BASE_LAYOUT}); --site-url fills the site's origin.
+--existing is withdrawn: it refuses and writes nothing. A Design System's own
+site lives in its workspace (--workspace, below), not in a separate
+repository that reads the system through a pin.
 
 --workspace writes a complete EmDash site for Cloudflare Workers into site/
 of the Design System workspace at --root (default: the current folder; an
@@ -1389,17 +1378,26 @@ function parseScaffoldArguments(argv) {
   return { options, positional };
 }
 
-/** `timds consumer scaffold emdash --root PATH --design-system GIT_URL [...]`, `--existing --root PATH [...]`, or `--workspace [--root PATH]` */
-export async function runConsumerScaffold(args = [], { output = (message = "") => process.stdout.write(`${message}\n`), existingOptions = {}, workspaceOptions = {} } = {}) {
+/**
+ * What `--existing` answers. The mode is withdrawn: a Design System's own
+ * site lives in its workspace (`--workspace`), not in a separate repository
+ * that reads the system through a pin. The flag is still parsed so that it
+ * refuses with this message and writes nothing; `scaffoldExistingEmdashSite`
+ * stays for its tests until the mode's code and templates are removed.
+ */
+export const EXISTING_WITHDRAWN = "--existing is withdrawn and nothing was written: TimDS no longer adds EmDash to a site in its own repository that reads its Design System through a pin. A Design System's own site lives in its workspace instead: run timds consumer scaffold emdash --workspace in the Design System workspace (the folder that holds timds.json), which writes the site into site/ with no pin.";
+
+/** `timds consumer scaffold emdash --root PATH --design-system GIT_URL [...]` or `--workspace [--root PATH]`; `--existing` refuses. */
+export async function runConsumerScaffold(args = [], { output = (message = "") => process.stdout.write(`${message}\n`), workspaceOptions = {} } = {}) {
   const { options, positional } = parseScaffoldArguments(args);
   if (options.help || !positional.length) {
     output(SCAFFOLD_HELP);
     return null;
   }
   if (positional.length > 1 || positional[0] !== "emdash") throw new Error(`Unknown site kind ${positional.join(" ")}; timds consumer scaffold creates emdash sites\n${SCAFFOLD_HELP}`);
+  if (options.existing) throw new Error(EXISTING_WITHDRAWN);
   if (options.workspace) {
     const foreign = [
-      ...(options.existing ? ["--existing"] : []),
       ...(options.designSystem ? ["--design-system"] : []),
       ...(options.stylesheets.length ? ["--stylesheet"] : []),
       ...(options.portalUrl ? ["--portal-url"] : []),
@@ -1407,27 +1405,11 @@ export async function runConsumerScaffold(args = [], { output = (message = "") =
       ...(options.siteUrl ? ["--site-url"] : []),
     ];
     if (foreign.length) throw new Error(`${foreign.join(", ")} ${foreign.length === 1 ? "belongs" : "belong"} to the other scaffold modes, not --workspace: a workspace site reads the Design System it sits in, writes its own layout, and takes its origin from EMDASH_SITE_URL when it runs, so it needs none of them. Rerun without ${foreign.length === 1 ? "it" : "them"}.`);
-    if (options.platform && options.platform !== "cloudflare") throw new Error(`--platform ${options.platform} is not available with --workspace: a workspace site runs on Cloudflare Workers only. Rerun without --platform, or use --existing for a Node.js site.`);
+    if (options.platform && options.platform !== "cloudflare") throw new Error(`--platform ${options.platform} is not available with --workspace: a workspace site runs on Cloudflare Workers only. Rerun without --platform.`);
     const { scaffoldWorkspaceEmdashSite } = await import("./consumer-scaffold-workspace.mjs");
     return scaffoldWorkspaceEmdashSite(options.root, { skipInstall: Boolean(options.skipInstall), output, ...workspaceOptions });
   }
-  if (options.existing) {
-    const fresh = [
-      ...(options.designSystem ? ["--design-system"] : []),
-      ...(options.stylesheets.length ? ["--stylesheet"] : []),
-      ...(options.portalUrl ? ["--portal-url"] : []),
-    ];
-    if (fresh.length) throw new Error(`${fresh.join(", ")} ${fresh.length === 1 ? "belongs" : "belong"} to the fresh scaffold, not --existing: an existing site already pins its Design System in ${CONSUMER_MANIFEST_FILE} and was adopted by timds consumer init. Rerun without ${fresh.length === 1 ? "it" : "them"}.`);
-    return scaffoldExistingEmdashSite(options.root, {
-      ...(options.platform ? { platform: options.platform } : {}),
-      layout: options.layout,
-      siteUrl: options.siteUrl,
-      skipInstall: Boolean(options.skipInstall),
-      output,
-      ...existingOptions,
-    });
-  }
-  if (options.layout) throw new Error(`--layout applies only to --existing: the fresh scaffold generates its own ${BASE_LAYOUT}. Rerun without it, or add --existing to install into a site that already exists.`);
+  if (options.layout) throw new Error(`--layout belonged to the withdrawn --existing mode: the fresh scaffold generates its own ${BASE_LAYOUT}. Rerun without it.`);
   return scaffoldEmdashSite(options.root, {
     designSystem: options.designSystem,
     ...(options.platform ? { platform: options.platform } : {}),

@@ -883,10 +883,9 @@ Declared `routes` always come first and always stay.
 
 - `timds consumer scaffold emdash --root PATH --design-system GIT_URL` creates
   a new EmDash CMS site repository that consumes a Design System (see
-  **EmDash sites** below), then adopts it the way `consumer init` does. With
-  `--existing --root PATH` it installs EmDash's article section into an Astro
-  site that already has `timds.consumer.json`. With `--workspace [--root
-  PATH]`, run in a Design System workspace, it writes a complete site with no
+  **EmDash sites** below), then adopts it the way `consumer init` does.
+  `--existing` is withdrawn: it refuses and writes nothing. With `--workspace
+  [--root PATH]`, run in a Design System workspace, it writes a complete site with no
   pin into the system's `site/`.
 
 The designer-change workflow (`.github/workflows/timds-designer-change.yml`)
@@ -945,23 +944,10 @@ npx --yes @dtconcepts/timds@0.1.x consumer scaffold emdash \
   --site-url https://www.client.example
 ```
 
-An Astro site that already consumes a Design System gains an articles section
-fed through EmDash's API with `--existing`:
+`--existing`, which added EmDash's articles to an Astro site in its own
+repository, is withdrawn: the command refuses the flag and writes nothing.
 
-```bash
-npx --yes @dtconcepts/timds@0.1.x consumer scaffold emdash --existing \
-  --root /path/to/client-site --site-url https://www.client.example
-```
-
-It installs the shared EmDash template set (the article routes, the seed,
-`src/live.config.ts` and the site docs), adds the dependencies and the
-article routes with their design pairs to `package.json` and
-`timds.consumer.json`, records the template version in `.timds/emdash.json`,
-and prints the `astro.config`, `wrangler.jsonc` and `.gitignore` changes for
-the developer to make. It never overwrites a path or edits an existing page,
-and `upgrade` never touches what it writes.
-
-A system's own website lives in the system's workspace instead, with no pin:
+A system's own website lives in the system's workspace, with no pin:
 
 ```bash
 npm run timds -- consumer scaffold emdash --workspace
