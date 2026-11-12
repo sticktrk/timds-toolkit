@@ -1,5 +1,5 @@
 /** The section contract is data only, shared by the seed, routes and build inventory. */
-const RESERVED = new Set(["topics", "api", "site", "assets", "styles", "scripts", "sitemap-timds-pages"]);
+const RESERVED = new Set(["topics", "api", "site", "assets", "styles", "scripts", "src", "docs", "seed", "public", "dist", "sitemap-timds-pages"]);
 const RESERVED_COLLECTIONS = new Set(["content", "media", "users", "revisions", "taxonomies", "options", "audit_logs", "reorder", "relations", "sitemap_timds_pages"]);
 const keys = (value, allowed) => value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).every((key) => allowed.includes(key));
 const COLLECTION = /^[a-z][a-z0-9_]{0,62}$/;

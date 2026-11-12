@@ -23,7 +23,7 @@ test("section seed shares one shape, validates every declaration, and preserves 
   const guidesOnly = sections.slice(1, 2);
   assert.equal(validateSectionSeed(createSectionSeed(seed, guidesOnly), guidesOnly), true);
   assert.throws(() => normalizeSections({ schemaVersion: 1, sections: [] }), /between 1 and 16/);
-  for (const prefix of ["/topics/", "/api/", "/site/", "/_emdash/", "/one/two/", "/guides", "/guides/?a", "/sitemap-timds-pages/"]) assert.throws(() => normalizeSections({ schemaVersion: 1, sections: [{ ...declaration.sections[0], prefix }] }), /prefix/);
+  for (const prefix of ["/topics/", "/api/", "/site/", "/_emdash/", "/src/", "/docs/", "/seed/", "/public/", "/dist/", "/one/two/", "/guides", "/guides/?a", "/sitemap-timds-pages/"]) assert.throws(() => normalizeSections({ schemaVersion: 1, sections: [{ ...declaration.sections[0], prefix }] }), /prefix/);
   assert.throws(() => normalizeSections({ schemaVersion: 1, sections: [{ ...declaration.sections[0], collection: "with-hyphens" }] }), /slug/);
   for (const collection of ["content", "media", "users", "revisions", "taxonomies", "options", "audit_logs", "reorder", "relations", "sitemap_timds_pages"]) assert.throws(() => normalizeSections({ schemaVersion: 1, sections: [{ ...declaration.sections[0], collection }] }), /slug/);
   assert.throws(() => normalizeSections({ ...declaration, future: true }), /schemaVersion/);

@@ -422,7 +422,9 @@ A collection slug begins with a lowercase letter and uses lowercase letters,
 numbers and underscores, at most 63 characters. A prefix is one lowercase
 address segment with letters, numbers and hyphens, surrounded by slashes.
 Collections and prefixes must each be unique. Reserved framework and topic
-addresses are refused. Entries belong to exactly one collection, and their
+addresses are refused, as are the site source and generated directories
+`/src/`, `/docs/`, `/seed/`, `/public/` and `/dist/`: those paths are blocked
+by the hosted live preview. Entries belong to exactly one collection, and their
 canonical address is that section's prefix followed by the entry slug and a
 trailing slash. A feed, when enabled, is `<prefix>rss.xml`.
 
