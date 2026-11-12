@@ -8,7 +8,7 @@ import { mergeSectionEntries } from "../templates/emdash/site/src/lib/articles/m
 import { renderWorkspaceDesign, virtualModuleSource } from "../templates/emdash/site-workspace/src/integrations/design-system.mjs";
 import { sectionRouteInventory } from "../templates/emdash/site-workspace/src/integrations/section-routes.mjs";
 
-const declaration = { schemaVersion: 1, sections: ["articles", "guides", "recipes"].map((collection) => ({ collection, prefix: `/${collection}/`, label: collection, singularLabel: collection, feed: true })) };
+const declaration = { schemaVersion: 2, sections: ["articles", "guides", "recipes"].map((collection) => ({ collection, prefix: `/${collection}/`, label: collection, singularLabel: collection, feed: true })) };
 const sections = normalizeSections(declaration);
 const model = JSON.parse(await fs.readFile(new URL("../templates/emdash/site/section-schema.json", import.meta.url), "utf8"));
 
@@ -26,18 +26,22 @@ test("section seed shares one shape, validates every declaration, and preserves 
   assert.throws(() => createSectionSeed(seed, guidesOnly, model), /Remove undeclared seed collections/);
   const removed = { ...seed, collections: [], content: {} };
   assert.equal(validateSectionSeed(createSectionSeed(removed, guidesOnly, model), guidesOnly, model), true);
-  assert.throws(() => normalizeSections({ schemaVersion: 1, sections: [] }), /between 1 and 16/);
-  for (const prefix of ["/topics/", "/api/", "/site/", "/_emdash/", "/src/", "/docs/", "/seed/", "/public/", "/dist/", "/one/two/", "/guides", "/guides/?a", "/sitemap-timds-pages/"]) assert.throws(() => normalizeSections({ schemaVersion: 1, sections: [{ ...declaration.sections[0], prefix }] }), /prefix/);
-  assert.throws(() => normalizeSections({ schemaVersion: 1, sections: [{ ...declaration.sections[0], collection: "with-hyphens" }] }), /slug/);
-  for (const collection of ["content", "media", "users", "revisions", "taxonomies", "options", "audit_logs", "reorder", "relations", "sitemap_timds_pages"]) assert.throws(() => normalizeSections({ schemaVersion: 1, sections: [{ ...declaration.sections[0], collection }] }), /slug/);
+  assert.throws(() => normalizeSections({ schemaVersion: 2, sections: [] }), /between 1 and 16/);
+  for (const prefix of ["/topics/", "/api/", "/site/", "/_emdash/", "/src/", "/docs/", "/seed/", "/public/", "/dist/", "/guides", "/guides/?a", "/sitemap-timds-pages/", "/cdn-cgi/"]) assert.throws(() => normalizeSections({ schemaVersion: 2, sections: [{ ...declaration.sections[0], prefix }] }), /prefix/);
+  assert.throws(() => normalizeSections({ schemaVersion: 2, sections: [{ ...declaration.sections[0], collection: "with-hyphens" }] }), /slug/);
+  for (const collection of ["content", "media", "users", "revisions", "taxonomies", "options", "audit_logs", "reorder", "relations", "sitemap_timds_pages"]) assert.throws(() => normalizeSections({ schemaVersion: 2, sections: [{ ...declaration.sections[0], collection }] }), /slug/);
   assert.throws(() => normalizeSections({ ...declaration, future: true }), /schemaVersion/);
-  assert.throws(() => normalizeSections({ schemaVersion: 1, sections: [{ ...declaration.sections[0], future: true }] }), /slug/);
+  assert.throws(() => normalizeSections({ schemaVersion: 2, sections: [{ ...declaration.sections[0], future: true }] }), /slug/);
   const drift = structuredClone(expanded);
   drift.collections[1].supports = ["drafts"];
   assert.throws(() => validateSectionSeed(drift, sections, model), /guides.*supports/);
   const authored = structuredClone(expanded);
   authored.collections[0].hidden = true;
   authored.taxonomies[0].description = "Authored topic guidance";
+  authored.taxonomies[0].label = "Sujets";
+  authored.taxonomies[0].labelSingular = "Sujet";
+  authored.taxonomies[0].locale = "fr";
+  authored.taxonomies[0].translationGroup = "topic-translations";
   authored.taxonomies.push({ name: "category", label: "Categories", labelSingular: "Category", hierarchical: false, collections: ["articles"], terms: [{ slug: "news", label: "News" }] });
   assert.equal(validateSectionSeed(authored, sections, model), true);
   assert.deepEqual(createSectionSeed(authored, sections, model), authored);
@@ -52,7 +56,7 @@ test("shared section schema accepts bounded field data and rejects definitions t
   assert.deepEqual(normalizeSectionSchema(custom), custom);
   assert.deepEqual(sectionSchemaFor(sections, custom).fields, custom.fields);
   for (const changed of [
-    { slug: "id" }, { type: "reference" }, { type: "blocks" }, { type: "repeater" },
+    { slug: "id" }, { slug: "locale" }, { slug: "translation_group" }, { slug: "rowid" }, { slug: "oid" }, { type: "reference" }, { type: "blocks" }, { type: "repeater" },
     { required: "yes" }, { sortOrder: 0 }, { type: "text", indexed: true },
     { validation: { min: "0" } }, { validation: { min: 10, max: 1 } },
     { validation: { pattern: "[" } }, { validation: { unknown: true } },
@@ -60,6 +64,13 @@ test("shared section schema accepts bounded field data and rejects definitions t
   ]) assert.throws(() => normalizeSectionSchema({ ...custom, fields: [...model.fields, { ...field, ...changed }] }), /section-schema.json/);
   assert.throws(() => normalizeSectionSchema({ ...custom, supports: ["drafts", "drafts"] }), /section-schema.json/);
   assert.throws(() => sectionSchemaFor(Array(16).fill(sections[0]), custom), /at most 64/);
+  const multilingual = { ...model, fields: Array.from({ length: 4 }, (_, i) => ({ slug: `field_${i}`, label: "Text", type: "string", options: { labels: Array(4).fill("界".repeat(4000)) } })) };
+  assert.ok(JSON.stringify(multilingual).length < 64 * 1024);
+  assert.throws(() => normalizeSectionSchema(multilingual), /section-schema.json/);
+  const inventoryModel = { ...model, fields: [{ slug: "body", label: "Text", type: "string", options: { label: "界".repeat(4000), other: "界".repeat(4000), last: "界".repeat(4000), fourth: "界".repeat(4000), fifth: "界".repeat(4000) } }] };
+  assert.doesNotThrow(() => normalizeSectionSchema(inventoryModel));
+  const labeled = Array.from({ length: 16 }, (_, i) => ({ ...sections[0], collection: `section_${i}`, prefix: `/section-${i}/`, label: "界".repeat(120), singularLabel: "界".repeat(120) }));
+  assert.throws(() => sectionSchemaFor(labeled, inventoryModel), /section-schema.json/);
 });
 
 test("mixed topic and latest lists carry an opaque position per collection past twenty entries", async () => {
@@ -93,28 +104,11 @@ test("mixed topic and latest lists carry an opaque position per collection past 
   await assert.rejects(mergeSectionEntries(sections, async () => ({ entries: [], error: new Error("Missing collection") })), /Missing collection/);
 });
 
-test("declared prefixes exclude design samples and expose exactly the same build inventory", async (t) => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "timds-section-design-"));
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
-  const directory = path.join(root, "src/designs/website");
-  await fs.mkdir(path.join(directory, "pages/guides"), { recursive: true });
-  await fs.writeFile(path.join(root, "timds.json"), JSON.stringify({ name: "Sample", systemId: "sample/core" }));
-  await fs.writeFile(path.join(directory, "design.json"), JSON.stringify({ title: "Website" }));
-  for (const file of ["index", "articles", "guides/index", "guides/example-article", "recipes", "topics"]) await fs.writeFile(path.join(directory, "pages", `${file}.html`), `<h1>${file}</h1>`);
-  const rendered = renderWorkspaceDesign(root, { design: "website", sections, sectionsContract: 1 });
-  assert.deepEqual(rendered.pages.map((page) => page.route), ["/"]);
-  const single = renderWorkspaceDesign(root, { design: "website", sections: sections.slice(1, 2), sectionsContract: 1 });
-  assert.deepEqual(single.pages.map((page) => page.route), ["/", "/articles", "/recipes"]);
-  const module = await import(`data:text/javascript,${encodeURIComponent(virtualModuleSource(rendered, new Map(), root, { sectionsContract: 1, sections, sectionSchema: { fields: [] } }))}`);
-  assert.deepEqual(module.sections, sections);
-  assert.equal(module.sectionsContract, 1);
-});
-
-test("nested section prefixes keep version 1 strict and reject ambiguous address namespaces", () => {
+test("nested section prefixes require the current contract and reject ambiguous address namespaces", () => {
   const section = { collection: "lease_faq", prefix: "/commercial-division/lease-faq/", label: "Lease FAQs", singularLabel: "Lease FAQ", feed: true };
   const nested = { schemaVersion: 2, sections: [section] };
   assert.equal(normalizeSections(nested)[0].urlPattern, "/commercial-division/lease-faq/{slug}/");
-  assert.throws(() => normalizeSections({ ...nested, schemaVersion: 1 }), /version 1.*single/);
+  assert.throws(() => normalizeSections({ ...nested, schemaVersion: 1 }), /schemaVersion 2/);
   for (const prefix of ["/commercial-division//lease-faq/", "/commercial-division/../lease-faq/", "/commercial-division/%6cease-faq/", "/commercial-division/lease-faq%2f/", "/commercial-division/topics/", "/commercial-division/src/", "/Commercial-division/lease-faq/", "/commercial-division/lease-faq/\n", `/${"a".repeat(99)}/`]) assert.throws(() => normalizeSections({ ...nested, sections: [{ ...section, prefix }] }), /prefix/);
   for (const pair of [["/commercial-division/", section.prefix], [section.prefix, "/commercial-division/"], [section.prefix, section.prefix]]) assert.throws(() => normalizeSections({ schemaVersion: 2, sections: pair.map((prefix, index) => ({ ...section, collection: `section_${index}`, prefix })) }), /overlap|distinct/);
   assert.equal(normalizeSections({ schemaVersion: 2, sections: [section, { ...section, collection: "leasing", prefix: "/commercial-division/leasing/" }] }).length, 2);

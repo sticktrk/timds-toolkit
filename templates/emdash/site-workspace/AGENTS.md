@@ -15,6 +15,9 @@ source paths, so a change to how the site looks is a change to the system.
   native Astro routes cannot occupy collection namespaces. Mark additional
   design samples with `{ "title": "Sample title", "site": "reference" }`
   in `design.json`'s `pages` entry; see `DESIGN_SYSTEM.md`.
+  Public-file collisions and route/public symlinks are also refused. Only
+  declaration version 2 is supported. Invalid section JSON keeps the last
+  validated dev inventory; a route conflict returns 503 until corrected.
   `section-schema.json` declares their shared fields and features. After
   editing either, run `npm run sections:sync` here and the consumer check.
   A live database also needs new collections created; a seed is applied only

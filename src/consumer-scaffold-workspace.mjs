@@ -54,7 +54,7 @@ import path from "node:path";
 
 import { CONSUMER_MANIFEST_FILE, CONSUMER_SKILL_NAMES, validateConsumerManifest } from "./consumer.mjs";
 import { normalizeSections, normalizeSectionSchema, createSectionSeed, validateSectionSeed, isSectionRoute, writerSectionTable } from "../templates/emdash/site/src/lib/articles/sections.mjs";
-import { sectionRouteInventory } from "../templates/emdash/site-workspace/src/integrations/section-routes.mjs";
+import { sectionRouteInventory, readSectionRouteFiles } from "../templates/emdash/site-workspace/src/integrations/section-routes.mjs";
 import { WORKSPACE_SITE_AGENTS_MARKER, WORKSPACE_SITE_DIRECTORY, WORKSPACE_SITE_MOUNT } from "./workspace-site.mjs";
 
 /** The template directory the workspace mode lays over the shared set. */
@@ -145,6 +145,62 @@ export function selectWebsiteDesign(designs, sections = DEFAULT_SECTIONS) {
   return candidates.find((design) => design.id === "website") ?? candidates[0] ?? null;
 }
 
+/** Resolve only the exported configuration's literal integration, without running it. */
+async function literalWorkspaceDesign(text, file, required) {
+  const { default: ts } = await import("typescript");
+  const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const invalid = () => { throw new Error(`${file} must expose one literal designSystem({ design: "<id>" }) in its exported integrations for consumer checks and previews.`); };
+  if (source.parseDiagnostics.length) invalid();
+  const bindings = new Map();
+  let integration = null, configHelper = null;
+  for (const statement of source.statements) {
+    if (ts.isImportDeclaration(statement) && ts.isStringLiteral(statement.moduleSpecifier) && statement.moduleSpecifier.text.endsWith("/integrations/design-system.mjs")) integration = statement.importClause?.name?.text ?? integration;
+    if (ts.isImportDeclaration(statement) && ts.isStringLiteral(statement.moduleSpecifier) && statement.moduleSpecifier.text === "astro/config") {
+      const imports = statement.importClause?.namedBindings;
+      if (imports && ts.isNamedImports(imports)) configHelper = imports.elements.find((item) => (item.propertyName ?? item.name).text === "defineConfig")?.name.text ?? configHelper;
+    }
+    if (ts.isVariableStatement(statement) && statement.declarationList.flags & ts.NodeFlags.Const) for (const item of statement.declarationList.declarations) if (ts.isIdentifier(item.name) && item.initializer) bindings.set(item.name.text, item.initializer);
+  }
+  const unwrap = (node, seen = new Set()) => {
+    if (!node) return node;
+    if (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isSatisfiesExpression(node)) return unwrap(node.expression, seen);
+    if (ts.isIdentifier(node) && bindings.has(node.text)) {
+      if (seen.has(node.text)) invalid();
+      return unwrap(bindings.get(node.text), new Set([...seen, node.text]));
+    }
+    return node;
+  };
+  const property = (object, name) => {
+    if (!object || !ts.isObjectLiteralExpression(object) || object.properties.some((item) => ts.isSpreadAssignment(item) || item.name && ts.isComputedPropertyName(item.name))) invalid();
+    const matches = object.properties.filter((item) => item.name && (ts.isIdentifier(item.name) || ts.isStringLiteral(item.name)) && item.name.text === name);
+    if (matches.length > 1) invalid();
+    const item = matches[0];
+    if (!item) return null;
+    if (!ts.isPropertyAssignment(item) && !ts.isShorthandPropertyAssignment(item)) invalid();
+    return unwrap(ts.isPropertyAssignment(item) ? item.initializer : item.name);
+  };
+  const exports = source.statements.filter((node) => ts.isExportAssignment(node) && !node.isExportEquals);
+  if (exports.length !== 1) invalid();
+  let config = unwrap(exports[0].expression);
+  if (ts.isCallExpression(config)) {
+    if (!configHelper || !ts.isIdentifier(config.expression) || config.expression.text !== configHelper || config.arguments.length !== 1) invalid();
+    config = unwrap(config.arguments[0]);
+  }
+  const integrations = property(config, "integrations");
+  if (!integrations && !required) return null;
+  if (!integrations || !ts.isArrayLiteralExpression(integrations)) invalid();
+  const calls = integrations.elements.map((item) => unwrap(item));
+  if (calls.some((item) => ts.isSpreadElement(item))) invalid();
+  if (!integration) invalid();
+  const selected = calls.filter((item) => ts.isCallExpression(item) && ts.isIdentifier(item.expression) && item.expression.text === integration);
+  if (selected.length !== 1) invalid();
+  if (selected[0].arguments.length !== 1) invalid();
+  const value = property(unwrap(selected[0].arguments[0]), "design");
+  if (value === null) invalid();
+  if (!ts.isStringLiteral(value) && !ts.isNoSubstitutionTemplateLiteral(value)) invalid();
+  return value.text;
+}
+
 /** Read the scaffold's literal design selection without executing the site's configuration. */
 export async function selectWorkspaceDesign({ siteRoot, designSystemRoot, designs, sections = DEFAULT_SECTIONS }) {
   designs ??= (await (await import("./designs.mjs")).readDesignCatalog(designSystemRoot)).designs;
@@ -154,12 +210,12 @@ export async function selectWorkspaceDesign({ siteRoot, designSystemRoot, design
       throw caught;
     });
     if (text === null) continue;
-    const call = /\bdesignSystem\s*\(\s*\{[^}]*?\bdesign\s*:\s*(["'`])([a-z0-9]+(?:-[a-z0-9]+)*)\1/.exec(text);
-    if (!call) break;
-    const entry = designs.find((design) => design.id === call[2]);
+    const selection = await literalWorkspaceDesign(text, file, existsSync(path.join(siteRoot, "sections.json")) || existsSync(path.join(siteRoot, ".timds/emdash.json")));
+    if (selection === null) break;
+    const entry = designs.find((design) => design.id === selection);
     if (!entry) {
       const ids = designs.map((design) => design.id);
-      throw new Error(`The site's ${file} renders the website design "${call[2]}", but the Design System has no src/designs/${call[2]}/design.json. Name one it has${ids.length ? ` (${ids.join(", ")})` : ""} in ${file}, or add that design to the system.`);
+      throw new Error(`The site's ${file} renders the website design "${selection}", but the Design System has no src/designs/${selection}/design.json. Name one it has${ids.length ? ` (${ids.join(", ")})` : ""} in ${file}, or add that design to the system.`);
     }
     return { id: entry.id, entry, selectedBy: file };
   }
@@ -290,23 +346,28 @@ export function workspacePackageJson(set, { name }) {
 }
 
 /** Preview section routes follow sections.json; an own design wins, then the stock article design. */
-export function sectionPreview(preview, sections, design, { version = 2, pageFiles = [] } = {}) {
-  const inventory = sectionRouteInventory(sections, design?.pages ?? [], { version, pageFiles });
+export function sectionPreview(preview, sections, design, options = {}) {
+  // The consumer manifest accepts trailing-slash aliases; compare canonical
+  // paths in the effective preview while leaving its authored bytes alone.
+  const routePath = (route) => route === "/" ? route : route.replace(/\/+$/, "");
+  preview = { ...preview, routes: (preview.routes || []).map(routePath), designs: Object.fromEntries(Object.entries(preview.designs || {}).map(([route, reference]) => [routePath(route), routePath(reference)])) };
+  const inventory = sectionRouteInventory(sections, design?.pages ?? [], options);
   const available = new Set(inventory.references.map((page) => page.route));
   const templateRoute = (route) => available.has(route) || isSectionRoute(route, sections) || ["/articles", "/articles/example-article"].includes(route);
-  const routes = (preview.routes || []).filter((route) => !templateRoute(route));
-  const designs = Object.fromEntries(Object.entries(preview.designs || {}).filter(([route]) => !templateRoute(route)));
+  const authored = new Map(Object.entries(preview.designs || {}).filter(([route, reference]) => available.has(reference) && (inventory.pages.some((page) => page.route === route) || sections.some(({ prefix }) => route === prefix.slice(0, -1) || route.startsWith(prefix) && /^[^/]+$/.test(route.slice(prefix.length))) || /^\/topics\/[^/]+$/.test(route))));
+  const routes = (preview.routes || []).filter((route) => authored.has(route) || !templateRoute(route));
+  const designs = Object.fromEntries(Object.entries(preview.designs || {}).filter(([route]) => authored.has(route) || !templateRoute(route)));
   for (const page of inventory.pages) if (page.route !== "/404") { routes.push(page.route); designs[page.route] ??= page.route; }
   for (const item of inventory.sections) {
     for (const [route, fallback] of [[item.list, "/articles"], [item.sample, "/articles/example-article"]]) {
       routes.push(route);
       const reference = available.has(route) ? route : available.has(fallback) ? fallback : null;
-      if (reference) designs[route] = reference;
+      if (reference) designs[route] ??= reference;
     }
   }
   // Keep the default ordering, with the shared topic sample after section samples.
   const topic = "/topics/example-topic";
-  if (available.has(topic)) designs[topic] = topic;
+  if (available.has(topic)) designs[topic] ??= topic;
   return { ...preview, routes: [...new Set([...routes.filter((route) => route !== topic), ...((preview.routes || []).includes(topic) || available.has(topic) ? [topic] : [])])], designs };
 }
 
@@ -314,9 +375,9 @@ export function sectionPreview(preview, sections, design, { version = 2, pageFil
 export async function readWorkspaceSectionDeclaration(siteRoot) {
   const declaration = await readJsonFile(path.join(siteRoot, "sections.json"), "sections.json");
   if (declaration === null) {
-    const record = await readJsonFile(path.join(siteRoot, ".timds/emdash.json"), ".timds/emdash.json");
-    if (record?.template >= 2) throw new Error("sections.json is missing from this section-aware site; restore its declaration before checking or previewing it");
-    return null;
+    // Workspace consumers need not be EmDash sites; an EmDash record requires the current declaration.
+    if (!await readJsonFile(path.join(siteRoot, ".timds/emdash.json"), ".timds/emdash.json")) return null;
+    throw new Error("sections.json is missing; restore its declaration before checking or previewing the site");
   }
   return { schemaVersion: declaration.schemaVersion, sections: normalizeSections(declaration) };
 }
@@ -337,8 +398,7 @@ export async function workspaceSectionApps(siteRoot, apps, systemRoot) {
   const declaration = await readWorkspaceSectionDeclaration(siteRoot);
   if (!declaration) return apps;
   const { sections, schemaVersion: version } = declaration;
-  const pagesDirectory = path.join(siteRoot, "src/pages");
-  const pageFiles = existsSync(pagesDirectory) ? (await listFiles(pagesDirectory)).filter((file) => file.file).map((file) => `src/pages/${file.relative}`) : [];
+  const routeFiles = readSectionRouteFiles(siteRoot);
   const catalog = systemRoot ? await (await import("./designs.mjs")).readDesignCatalog(systemRoot) : { designs: [] };
   const design = systemRoot ? (await selectWorkspaceDesign({ siteRoot, designSystemRoot: systemRoot, designs: catalog.designs, sections })).entry : null;
   const result = {};
@@ -350,7 +410,7 @@ export async function workspaceSectionApps(siteRoot, apps, systemRoot) {
       routes: (app.preview.routes || []).filter((route) => !app.preview.designs?.[route] || selectedPair(app.preview.designs[route])),
       designs: Object.fromEntries(Object.entries(app.preview.designs || {}).filter(([, reference]) => selectedPair(reference)).map(([route, reference]) => [route, reference.split(":").slice(1).join(":")])),
     };
-    const preview = sectionPreview(rawPreview, sections, design, { version, pageFiles });
+    const preview = sectionPreview(rawPreview, sections, design, { version, ...routeFiles });
     preview.designs = Object.fromEntries(Object.entries(preview.designs).map(([route, reference]) => [route, `${design?.id}:${reference}`]));
     result[name] = { ...app, preview };
   }

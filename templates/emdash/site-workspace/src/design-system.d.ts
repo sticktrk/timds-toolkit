@@ -11,7 +11,8 @@ declare module "virtual:timds/design-system" {
 	export const design: { id: string; title: string; layout: boolean };
 	export const pages: Array<DesignDocument & { route: string; title: string; body: string }>;
 	export const shell: DesignDocument & { before: string; after: string; describes: boolean };
-	export const sectionsContract: 1 | 2;
+	export const sectionsContract: 2;
+	export const routeError: string | null;
 	export const sections: Array<{ collection: string; prefix: string; label: string; singularLabel: string; feed: boolean; urlPattern: string }>;
 	export const sectionSchema: { fields: Array<Record<string, unknown>>; supports: string[]; taxonomies: Array<Record<string, unknown>> };
 	export const titleMarker: string;

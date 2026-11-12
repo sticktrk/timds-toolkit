@@ -705,7 +705,7 @@ test("section declaration drives seed checks and preview routes without rewritin
   await write(path.join(site, "seed/seed.json"), seed);
   const drift = await checkConsumer(site, { fix: false });
   assert.ok(drift.errors.some((error) => /guides_for_owners.*urlPattern/.test(error)), drift.errors.join("\n"));
-  await write(path.join(site, "sections.json"), { schemaVersion: 1, sections: [declaration.sections[1]] });
+  await write(path.join(site, "sections.json"), { schemaVersion: 2, sections: [declaration.sections[1]] });
   const reverse = await checkConsumer(site, { fix: false });
   assert.ok(reverse.errors.some((error) => /different collections/.test(error)), reverse.errors.join("\n"));
 });
@@ -724,6 +724,10 @@ test("section sync and consumer check share schema data and preserve authored se
   const seed = JSON.parse(await fs.readFile(seedFile, "utf8"));
   seed.collections[0].description = "An authored collection description";
   seed.taxonomies[0].description = "An authored topic description";
+  seed.taxonomies[0].label = "Sujets";
+  seed.taxonomies[0].labelSingular = "Sujet";
+  seed.taxonomies[0].locale = "fr";
+  seed.taxonomies[0].translationGroup = "topic-translations";
   const category = { name: "category", label: "Categories", labelSingular: "Category", hierarchical: true, collections: ["articles"], terms: [{ slug: "news", label: "News" }] };
   seed.taxonomies.unshift(category);
   await write(seedFile, seed);
@@ -777,9 +781,31 @@ test("nested section check and preview share public pages, template references a
   checked = await checkConsumer(site, { fix: false });
   assert.equal(checked.status, "passed", checked.errors.join("\n"));
   assert.ok(!resolveConsumerApp(await loadConsumer(site)).preview.routes.includes(collision));
+  const manifestFile = path.join(site, "timds.consumer.json");
+  const manifest = JSON.parse(await fs.readFile(manifestFile, "utf8"));
+  manifest.apps.site.preview.routes.push(`${collision}/`);
+  manifest.apps.site.preview.designs[`${collision}/`] = `website:${collision}/`;
+  await write(manifestFile, manifest);
+  const authoredPreview = resolveConsumerApp(await loadConsumer(site)).preview;
+  assert.ok(authoredPreview.routes.includes(collision));
+  assert.equal(authoredPreview.designs[collision], `website:${collision}`);
+  assert.deepEqual(JSON.parse(await fs.readFile(manifestFile, "utf8")), manifest);
   await write(path.join(site, "src/pages/commercial-division/[slug].astro"), "<h1>Dynamic page</h1>");
   checked = await checkConsumer(site, { fix: false });
   assert.ok(checked.errors.some((error) => /Site page.*conflicts/.test(error)), checked.errors.join("\n"));
+  await fs.rm(path.join(site, "src/pages/commercial-division/[slug].astro"));
+  const shadow = path.join(site, "public/commercial-division/lease-faq/index.html");
+  await write(shadow, "<h1>Static replacement</h1>");
+  checked = await checkConsumer(site, { fix: false });
+  assert.ok(checked.errors.some((error) => /Public file.*conflicts/.test(error)), checked.errors.join("\n"));
+  await fs.rm(shadow);
+  const target = path.join(site, "src/components/linked-page.astro"), link = path.join(site, "src/pages/commercial-division/lease-faq/linked.astro");
+  await write(target, "<h1>Linked page</h1>");
+  await fs.mkdir(path.dirname(link), { recursive: true });
+  await fs.symlink(target, link);
+  checked = await checkConsumer(site, { fix: false });
+  assert.ok(checked.errors.some((error) => /symbolic links/.test(error)), checked.errors.join("\n"));
+  await fs.rm(link);
 });
 
 test("section checks and previews follow the configured design after selection changes", async (t) => {
@@ -794,7 +820,7 @@ test("section checks and previews follow the configured design after selection c
   await write(path.join(site, "sections.json"), declaration);
   execFileSync(process.execPath, ["scripts/sections.mjs"], { cwd: site });
   const config = path.join(site, "astro.config.mjs");
-  await write(config, (await fs.readFile(config, "utf8")).replace('design: "website"', 'design: "learn"'));
+  await write(config, `// designSystem({ design: "website" }) is an obsolete example.\nconst example = 'designSystem({ design: "website" })';\nconst unused = () => designSystem({ design: "website" });\n` + (await fs.readFile(config, "utf8")).replace('design: "website"', 'design: "learn"'));
   const recorded = await fs.readFile(path.join(site, "timds.consumer.json"), "utf8");
   assert.ok(recorded.includes("website:/"));
   const collision = "/commercial-division/lease-faq/how-to-lease-building";
@@ -813,4 +839,10 @@ test("section checks and previews follow the configured design after selection c
   assert.ok(Object.values(app.preview.designs).every((reference) => reference.startsWith("learn:")));
   assert.ok(!app.preview.routes.includes(collision));
   assert.equal(await fs.readFile(path.join(site, "timds.consumer.json"), "utf8"), recorded);
+  const configured = await fs.readFile(config, "utf8");
+  for (const changed of [configured.replace('design: "learn"', 'design: process.env.DESIGN'), configured.replace('designSystem({ design: "learn" })', 'designSystem({})'), configured.replace('export default defineConfig(', 'export default opaqueConfig('), configured.replace('design: "learn"', '["design"]: "learn"'), configured.replace('design: "learn"', 'design: "website", ["design"]: "learn"'), configured.replace('import designSystem from "./src/integrations/design-system.mjs";', 'const designSystem = () => ({});')]) {
+    await write(config, changed);
+    const invalid = await checkConsumer(site, { fix: false });
+    assert.ok(invalid.errors.some((error) => /literal designSystem/.test(error)), invalid.errors.join("\n"));
+  }
 });

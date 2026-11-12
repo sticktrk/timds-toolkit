@@ -63,7 +63,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { sectionRouteInventory } from "./section-routes.mjs";
+import { readSectionRouteFiles, sectionRouteInventory } from "./section-routes.mjs";
 
 export const VIRTUAL_MODULE = "virtual:timds/design-system";
 const RESOLVED_MODULE = `\0${VIRTUAL_MODULE}`;
@@ -383,17 +383,6 @@ function htmlFiles(directory, prefix = "") {
   return found;
 }
 
-/** Native Astro routes participate in the same collision check as design pages. */
-function sitePageFiles(siteRoot) {
-  const directory = path.join(siteRoot, "src/pages");
-  if (!existsSync(directory)) return [];
-  const walk = (folder, prefix) => readdirSync(folder, { withFileTypes: true }).flatMap((entry) => {
-    const file = `${prefix}/${entry.name}`;
-    return entry.isDirectory() ? walk(path.join(folder, entry.name), file) : entry.isFile() ? [file] : [];
-  });
-  return walk(directory, "src/pages");
-}
-
 /**
  * The route of a page file's default state, by the designs catalog's rule:
  * `about.html` and `about.default.html` are the default of /about,
@@ -634,7 +623,7 @@ function pageTitle(html, fallback) {
  * the set of addresses the site handles a POST to (`formHandlers`); every
  * other posting form is rendered disabled (`disableUnconnectedForms`).
  */
-export function renderWorkspaceDesign(systemRoot, { design: designId, base = "/", forms = new Set(), sections = DEFAULT_SECTIONS, sectionsContract = 2, pageFiles = [] }) {
+export function renderWorkspaceDesign(systemRoot, { design: designId, base = "/", forms = new Set(), sections = DEFAULT_SECTIONS, sectionsContract = 2, pageFiles = [], publicFiles = [], symlinks = [], resolvedRoutes = [] }) {
   const manifest = readJson(path.join(systemRoot, "timds.json"));
   const system = {
     id: String(manifest.systemId || ""),
@@ -655,7 +644,7 @@ export function renderWorkspaceDesign(systemRoot, { design: designId, base = "/"
   const handled = new Set(forms);
   const defaults = defaultPageFiles(path.join(directory, "pages"));
   const metadata = new Map(Object.entries(declared.pages ?? {}).map(([route, page]) => [`/${route.replace(/^\/+|\/+$/g, "")}`, page]));
-  const inventory = sectionRouteInventory(sections, defaults.map(([route]) => ({ route, ...(metadata.get(route)?.site !== undefined ? { site: metadata.get(route).site } : {}) })), { version: sectionsContract, pageFiles });
+  const inventory = sectionRouteInventory(sections, defaults.map(([route]) => ({ route, ...(metadata.get(route)?.site !== undefined ? { site: metadata.get(route).site } : {}) })), { version: sectionsContract, pageFiles, publicFiles, symlinks, resolvedRoutes });
   const publicRoutes = new Set(inventory.pages.map((page) => page.route));
   const pages = [];
   for (const [route, relative] of defaults) {
@@ -782,6 +771,7 @@ export function virtualModuleSource(rendered, handlers, siteRoot, inventory = {}
     `export const sectionsContract = ${JSON.stringify(inventory.sectionsContract ?? 2)};`,
     `export const sections = ${JSON.stringify(inventory.sections ?? DEFAULT_SECTIONS)};`,
     `export const sectionSchema = ${JSON.stringify(inventory.sectionSchema ?? null)};`,
+    `export const routeError = ${JSON.stringify(inventory.routeError ?? null)};`,
     `export const forms = {\n${forms.join("\n")}${forms.length ? "\n" : ""}};`,
   ].join("\n");
 }
@@ -798,18 +788,58 @@ export default function designSystem({ design }) {
   let tokensCss = false;
   let parse;
   let logger;
+  let development = false;
+  let hostAcknowledged = false;
+  let routeFilesOptions;
+  let resolvedRoutes = [];
+  let lastRendered;
+  let routeError = null;
+  let viteServer;
   const api = {};
   // Astro strips extra integration properties while resolving config. Other
   // integrations capture this function from the original configuration and
   // call it after setup to read the populated inventory.
-  const publicApi = { getSections: () => api };
+  const publicApi = {
+    getSections: () => api,
+    acknowledgeHostedSections(contract) {
+      if (contract?.template !== 3 || contract?.workspace !== 3 || contract?.sections !== 2) throw new Error("Hosted discovery must support template 3, workspace 3 and sections 2.");
+      hostAcknowledged = true;
+      return true;
+    },
+  };
+  const invalidate = () => {
+    if (!viteServer) return;
+    for (const environment of Object.values(viteServer.environments ?? {})) {
+      const module = environment.moduleGraph?.getModuleById(RESOLVED_MODULE);
+      if (!module) continue;
+      environment.moduleGraph.invalidateModule(module);
+      environment.hot?.send({ type: "full-reload" });
+    }
+    viteServer.ws.send({ type: "full-reload" });
+  };
+  const render = (forms = new Set()) => {
+    try {
+      const rendered = renderWorkspaceDesign(systemRoot, { design, base, forms, sections: api.sections, sectionsContract: api.sectionsContract, ...readSectionRouteFiles(siteRoot, routeFilesOptions), resolvedRoutes });
+      lastRendered = rendered;
+      routeError = null;
+      return rendered;
+    } catch (error) {
+      if (!development || !lastRendered) throw error;
+      const message = `Site route inventory is invalid: ${error.message}`;
+      if (routeError !== message) logger.error(`${message} Public routes return 503 until corrected.`);
+      routeError = message;
+      return lastRendered;
+    }
+  };
   return {
     name: "timds-design-system",
     api: publicApi,
     hooks: {
-      "astro:config:setup": async ({ config, updateConfig, addMiddleware, injectRoute, addWatchFile, logger: integrationLogger }) => {
+      "astro:config:setup": async ({ config, command, updateConfig, addMiddleware, injectRoute, addWatchFile, logger: integrationLogger }) => {
         siteRoot = fileURLToPath(config.root);
         logger = integrationLogger;
+        development = command === "dev";
+        routeFilesOptions = { pagesDirectory: path.join(fileURLToPath(config.srcDir), "pages"), publicDirectory: fileURLToPath(config.publicDir) };
         const sectionsModule = path.join(siteRoot, "src/lib/articles/sections.mjs");
         const sectionsFile = path.join(siteRoot, "sections.json");
         const schemaFile = path.join(siteRoot, "section-schema.json");
@@ -820,6 +850,7 @@ export default function designSystem({ design }) {
         for (const file of [sectionsModule, sectionsFile, schemaFile, seedFile]) addWatchFile(file);
         const helpers = await import(`${pathToFileURL(sectionsModule).href}?modified=${statSync(sectionsModule).mtimeMs}`);
         const declaration = readJson(sectionsFile);
+        if (declaration.schemaVersion !== 2) throw new Error("sections.json must use declaration schemaVersion 2.");
         const sections = helpers.normalizeSections(declaration);
         const model = helpers.normalizeSectionSchema(readJson(schemaFile));
         helpers.validateSectionSeed(readJson(seedFile), sections, model);
@@ -834,6 +865,7 @@ export default function designSystem({ design }) {
         if (!systemRoot) throw new Error(`No folder above ${siteRoot} holds timds.json. This site reads the Design System it sits in; keep it inside that Design System's folder.`);
         base = config.base || "/";
         tokensCss = runsStarterBuild(readJson(path.join(systemRoot, "timds.json")));
+        render();
         // Ahead of page routing, after EmDash's own middleware (registered
         // earlier, also "pre"), so a handler sees the request as a page would.
         addMiddleware({ entrypoint: new URL("./forms-middleware.mjs", import.meta.url), order: "pre" });
@@ -850,11 +882,12 @@ export default function designSystem({ design }) {
               load(id) {
                 if (id !== RESOLVED_MODULE) return undefined;
                 const handlers = formHandlers(siteRoot, { parse, warn: (message) => logger.warn(message) });
-                const rendered = renderWorkspaceDesign(systemRoot, { design, base, forms: handlers.keys(), sections: api.sections, sectionsContract: api.sectionsContract, pageFiles: sitePageFiles(siteRoot) });
+                const rendered = render(handlers.keys());
                 for (const file of rendered.files) this.addWatchFile(file);
-                return virtualModuleSource(rendered, handlers, siteRoot, api);
+                return virtualModuleSource(rendered, handlers, siteRoot, { ...api, routeError });
               },
               configureServer(server) {
+                viteServer = server;
                 // The design lives above the site's root, where Vite does not
                 // watch: watch it, and rebuild the module on any change to it
                 // (a page added or removed changes the routes, not one file).
@@ -863,24 +896,35 @@ export default function designSystem({ design }) {
                 const designDirectory = path.join(systemRoot, "src", "designs", design);
                 const manifestFile = path.join(systemRoot, "timds.json");
                 const formsDirectory = path.join(siteRoot, "src", FORMS_DIRECTORY);
-                server.watcher.add([designDirectory, manifestFile, formsDirectory]);
+                const publicDirectory = routeFilesOptions.publicDirectory;
+                server.watcher.add([designDirectory, manifestFile, formsDirectory, publicDirectory]);
                 const reload = (file) => {
-                  if (file !== manifestFile && !file.startsWith(`${designDirectory}${path.sep}`) && !file.startsWith(`${formsDirectory}${path.sep}`)) return;
-                  for (const environment of Object.values(server.environments ?? {})) {
-                    const module = environment.moduleGraph?.getModuleById(RESOLVED_MODULE);
-                    if (!module) continue;
-                    environment.moduleGraph.invalidateModule(module);
-                    environment.hot?.send({ type: "full-reload" });
-                  }
-                  server.ws.send({ type: "full-reload" });
+                  if (file !== manifestFile && ![designDirectory, formsDirectory, publicDirectory].some((directory) => file === directory || file.startsWith(`${directory}${path.sep}`))) return;
+                  render(formHandlers(siteRoot, { parse, warn: (message) => logger.warn(message) }).keys());
+                  invalidate();
                 };
-                for (const event of ["add", "change", "unlink"]) server.watcher.on(event, reload);
+                for (const event of ["add", "change", "unlink", "addDir", "unlinkDir"]) server.watcher.on(event, reload);
                 server.middlewares.use((request, response, next) => {
                   const url = new URL(request.url || "/", "http://localhost");
                   const prefix = basePrefix(base);
                   // Under a base the request may reach this before or after
                   // Vite takes the base off; both name the same file.
                   const pathname = prefix && url.pathname.startsWith(`${prefix}/`) ? url.pathname.slice(prefix.length) : url.pathname;
+                  const sectionRequest = [...api.sections.map((section) => section.prefix), "/topics/"].some((namespace) => pathname === namespace.slice(0, -1) || pathname.startsWith(namespace));
+                  if (sectionRequest) {
+                    // Vite can serve public assets before Astro middleware,
+                    // and a removed asset may not emit another route event.
+                    // Recheck here so a collision cannot bypass the guard or
+                    // leave it stuck until an unrelated page is requested.
+                    const previousError = routeError;
+                    render();
+                    if (previousError !== routeError) invalidate();
+                  }
+                  if (routeError && sectionRequest) {
+                    response.writeHead(503, { "Content-Type": "text/plain", "Cache-Control": "no-store" });
+                    response.end("Site route configuration needs correction.");
+                    return;
+                  }
                   const found = requestStaticFile(systemRoot, pathname, tokensCss);
                   if (!found) return next();
                   response.writeHead(200, { "Content-Type": found.type, "Cache-Control": "no-store" });
@@ -891,13 +935,16 @@ export default function designSystem({ design }) {
           },
         });
       },
-      "astro:routes:resolved": () => {
+      "astro:routes:resolved": ({ routes }) => {
         // Astro invokes this again when a native page route is added or removed.
         // Validate the same inventory used by consumer check and preview before
         // a file route can take precedence over an injected collection route.
-        renderWorkspaceDesign(systemRoot, { design, base, sections: api.sections, sectionsContract: api.sectionsContract, pageFiles: sitePageFiles(siteRoot) });
+        resolvedRoutes = routes.map((route) => ({ ...route, entrypoint: path.isAbsolute(route.entrypoint) ? path.relative(siteRoot, route.entrypoint).split(path.sep).join("/") : route.entrypoint }));
+        render();
+        invalidate();
       },
       "astro:config:done": ({ config }) => {
+        if (config.integrations.some((integration) => integration.name === "timds-host-discovery") && !hostAcknowledged) throw new Error("Hosted discovery has not acknowledged template 3, workspace 3 and sections 2. Update the host before building this site.");
         clientDirectory = fileURLToPath(config.build.client);
       },
       "astro:build:done": async ({ logger }) => {

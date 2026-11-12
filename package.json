@@ -25,7 +25,8 @@
         "version": 3,
         "changes": [
           "Adds section contract 2 with nested literal address prefixes inside one Design System and rejects overlapping collection namespaces.",
-          "Shares the route inventory across builds, checks and previews, retaining explicit nonpublic design references and refusing collisions with public pages."
+          "Shares the route inventory across builds, checks and previews, retaining explicit nonpublic design references and refusing collisions with public pages.",
+          "Requires the current first-release section contract, preserves immutable schemas through retries, and rejects static or native route collisions while retaining validated development routing and authored previews."
         ]
       }
     ]

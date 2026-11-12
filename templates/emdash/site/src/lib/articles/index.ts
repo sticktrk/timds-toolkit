@@ -7,10 +7,9 @@
  */
 import type { ContentBylineCredit, PortableTextBlock, TaxonomyTerm } from "emdash";
 
-import declaration from "../../../sections.json";
-import { normalizeSections } from "./sections.mjs";
+import { sections as declaredSections } from "./sections-data";
 export interface Section { collection: string; prefix: string; label: string; singularLabel: string; feed: boolean; urlPattern: string; }
-export const sections: Section[] = normalizeSections(declaration);
+export const sections: Section[] = declaredSections;
 /** Compatibility alias: new callers pass their section's collection. */
 export const ARTICLES = sections[0].collection;
 export const TOPIC = "topic";

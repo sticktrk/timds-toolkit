@@ -74,3 +74,12 @@ export const GET: APIRoute = async ({ url, site, locals, cache }) => {
 		},
 	});
 };
+
+export const HEAD: APIRoute = async (context) => {
+	const response = await GET(context);
+	return new Response(null, { status: response.status, statusText: response.statusText, headers: response.headers });
+};
+
+export const ALL: APIRoute = ({ url }) => sectionForPath(url.pathname)?.feed
+	? new Response("Method not allowed", { status: 405, headers: { Allow: "GET, HEAD", "Cache-Control": "no-store" } })
+	: new Response("Not found", { status: 404 });

@@ -20,6 +20,7 @@ if (!slug) return Astro.rewrite("/404");
 const terms = await getTaxonomyTermsWithCacheHint(TOPIC, { includeCounts: false });
 const topic = terms.data.find((term) => term.slug === slug);
 if (!topic) return Astro.rewrite("/404");
+if (!["GET", "HEAD"].includes(Astro.request.method)) return new Response("Method not allowed", { status: 405, headers: { Allow: "GET, HEAD", "Cache-Control": "no-store" } });
 
 const cursor = Astro.url.searchParams.get("cursor") ?? undefined;
 const { entries, nextCursor, cacheHints } = await getLatestArticles({ topic: topic.slug, cursor });

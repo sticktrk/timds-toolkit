@@ -1,11 +1,10 @@
 /** The section contract is data only, shared by the seed, routes and build inventory. */
-const RESERVED = new Set(["topics", "api", "site", "assets", "styles", "scripts", "src", "docs", "seed", "public", "dist", "sitemap-timds-pages"]);
+const RESERVED = new Set(["topics", "api", "site", "assets", "styles", "scripts", "src", "docs", "seed", "public", "dist", "sitemap-timds-pages", "cdn-cgi"]);
 const RESERVED_COLLECTIONS = new Set(["content", "media", "users", "revisions", "taxonomies", "options", "audit_logs", "reorder", "relations", "sitemap_timds_pages"]);
 const keys = (value, allowed) => value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).every((key) => allowed.includes(key));
 const COLLECTION = /^[a-z][a-z0-9_]{0,62}$/;
-const PREFIX = /^\/[a-z][a-z0-9]*(?:-[a-z0-9]+)*\/$/;
 const NESTED_PREFIX = /^(?:\/[a-z][a-z0-9]*(?:-[a-z0-9]+)*)+\/$/;
-const RESERVED_FIELDS = new Set(["id", "slug", "status", "author_id", "primary_byline_id", "created_at", "updated_at", "published_at", "scheduled_at", "deleted_at", "version", "live_revision_id", "draft_revision_id", "terms", "bylines", "byline"]);
+const RESERVED_FIELDS = new Set(["id", "slug", "status", "locale", "translation_group", "rowid", "oid", "author_id", "primary_byline_id", "created_at", "updated_at", "published_at", "scheduled_at", "deleted_at", "version", "live_revision_id", "draft_revision_id", "terms", "bylines", "byline"]);
 const FIELD_TYPES = new Set(["string", "text", "url", "number", "integer", "boolean", "datetime", "select", "multiSelect", "portableText", "image", "file", "json", "slug"]);
 const INDEXED_TYPES = new Set(["string", "url", "number", "integer", "boolean", "datetime", "select", "slug"]);
 const TEXT_TYPES = new Set(["string", "text", "url", "datetime", "select", "slug"]);
@@ -42,16 +41,16 @@ export function normalizeSectionSchema(document) {
     }
     names.add(field.slug);
   }
-  if (JSON.stringify(document).length > 64 * 1024) invalidSchema();
+  if (new TextEncoder().encode(JSON.stringify(document)).byteLength > 64 * 1024) invalidSchema();
   return structuredClone(document);
 }
 
 export function normalizeSections(document) {
-  if (!keys(document, ["schemaVersion", "sections"]) || ![1, 2].includes(document?.schemaVersion) || !Array.isArray(document.sections) || document.sections.length < 1 || document.sections.length > 16) throw new Error("sections.json must declare schemaVersion 1 or 2 and between 1 and 16 sections.");
+  if (!keys(document, ["schemaVersion", "sections"]) || document?.schemaVersion !== 2 || !Array.isArray(document.sections) || document.sections.length < 1 || document.sections.length > 16) throw new Error("sections.json must declare schemaVersion 2 and between 1 and 16 sections.");
   const collections = new Set(), prefixes = new Set();
   return document.sections.map((section) => {
     if (!keys(section, ["collection", "prefix", "label", "singularLabel", "feed"]) || typeof section.collection !== "string" || !COLLECTION.test(section.collection) || RESERVED_COLLECTIONS.has(section.collection)) throw new Error("A section collection must be an EmDash slug of at most 63 characters (lowercase letters, digits and underscores).");
-    if (typeof section.prefix !== "string" || section.prefix.length > 100 || !section.prefix.endsWith("/") || !(document.schemaVersion === 1 ? PREFIX : NESTED_PREFIX).test(section.prefix) || section.prefix.slice(1, -1).split("/").some((segment) => RESERVED.has(segment))) throw new Error(document.schemaVersion === 1 ? "A version 1 section prefix must be a non-reserved single path segment, such as /guides/." : "A version 2 section prefix must contain non-reserved literal path segments and at most 100 characters, such as /commercial-division/lease-faq/.");
+    if (typeof section.prefix !== "string" || section.prefix.length > 100 || !section.prefix.endsWith("/") || !NESTED_PREFIX.test(section.prefix) || section.prefix.slice(1, -1).split("/").some((segment) => RESERVED.has(segment))) throw new Error("A version 2 section prefix must contain non-reserved literal path segments and at most 100 characters, such as /commercial-division/lease-faq/.");
     if (collections.has(section.collection) || prefixes.has(section.prefix)) throw new Error("Sections must have distinct collection slugs and address prefixes.");
     if ([...prefixes].some((prefix) => prefix.startsWith(section.prefix) || section.prefix.startsWith(prefix))) throw new Error("Section prefixes must not overlap: one collection cannot contain another collection's address prefix.");
     for (const key of ["label", "singularLabel"]) if (typeof section[key] !== "string" || !section[key].trim() || section[key].length > 120 || /[\u0000-\u001f\u007f]/.test(section[key])) throw new Error("Section labels must be nonempty text of at most 120 characters.");
@@ -65,7 +64,7 @@ export function sectionSchemaFor(sections, model) {
   const { fields, supports } = normalizeSectionSchema(model);
   if (sections.length * fields.length > 64) throw new Error("Sections may declare at most 64 collection fields in total.");
   const sectionSchema = { fields, supports, taxonomies: [{ name: "topic", label: "Topics", labelSingular: "Topic", hierarchical: false, collections: sections.map((section) => section.collection) }] };
-  if (JSON.stringify({ sections, sectionSchema }).length > 64 * 1024) invalidSchema();
+  if (new TextEncoder().encode(JSON.stringify({ sections, sectionSchema })).byteLength > 64 * 1024) invalidSchema();
   return structuredClone(sectionSchema);
 }
 
@@ -91,7 +90,7 @@ export function createSectionSeed(seed, sections, model) {
   return {
     ...seed,
     collections: sections.map((section) => ({ description: `Published ${section.label.toLowerCase()}, rendered at ${section.prefix}<slug>/.`, ...seed.collections?.find((collection) => collection.slug === section.collection), slug: section.collection, label: section.label, labelSingular: section.singularLabel, urlPattern: section.urlPattern, supports: structuredClone(schema.supports), fields: structuredClone(schema.fields) })),
-    taxonomies: [...(seed.taxonomies ?? []).map((taxonomy) => taxonomy.name === "topic" ? { ...taxonomy, ...schema.taxonomies[0] } : taxonomy), ...(!currentTopics ? schema.taxonomies : [])],
+    taxonomies: [...(seed.taxonomies ?? []).map((taxonomy) => taxonomy.name === "topic" ? { ...taxonomy, hierarchical: schema.taxonomies[0].hierarchical, collections: [...schema.taxonomies[0].collections] } : taxonomy), ...(!currentTopics ? schema.taxonomies : [])],
     content: Object.fromEntries(sections.map((section) => [section.collection, contentFor(section)])),
   };
 }
@@ -108,7 +107,7 @@ export function validateSectionSeed(seed, sections, model) {
   const topic = seed.taxonomies?.find((taxonomy) => taxonomy.name === "topic");
   if (!topic || stable([...(topic.collections ?? [])].sort()) !== stable(sections.map((section) => section.collection).sort())) throw new Error("The seed topic taxonomy must attach to every declared section; run npm run sections:sync.");
   const expectedTopic = expected.taxonomies.find((taxonomy) => taxonomy.name === "topic");
-  for (const key of ["label", "labelSingular", "hierarchical"]) if (stable(topic[key]) !== stable(expectedTopic[key])) throw new Error(`The seed topic taxonomy has a different ${key}; run npm run sections:sync.`);
+  for (const key of ["hierarchical"]) if (stable(topic[key]) !== stable(expectedTopic[key])) throw new Error(`The seed topic taxonomy has a different ${key}; run npm run sections:sync.`);
   for (const key of Object.keys(seed.content ?? {})) if (!sections.some((section) => section.collection === key)) throw new Error(`Seed content names undeclared collection ${key}.`);
   return true;
 }

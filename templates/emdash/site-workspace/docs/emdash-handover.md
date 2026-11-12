@@ -81,7 +81,7 @@ fingerprint `--status` printed.
 `sections.json` lists each collection and its canonical address prefix.
 Declaration version 2 supports nested literal prefixes within one selected
 Design System, such as `/commercial-division/lease-faq/`; ordinary parent
-and sibling pages remain public. Version 1 keeps its single-segment grammar.
+and sibling pages remain public. Older declaration versions are refused.
 `docs/content-api.md` lists the current entry addresses for writers. After
 editing the declaration, run `npm run sections:sync` in the site and run
 the consumer check at the workspace root. Commit the declaration, generated
@@ -90,20 +90,24 @@ seed and updated writer table together. The shared data in
 every collection, including preview, scheduling, search and SEO, and the
 `topic` taxonomy attaches to all of them. Sync and build and the toolkit's
 consumer check validate this same JSON; the check never executes site code.
-Sync preserves unrelated taxonomy metadata and terms, and refuses to discard
+Sync preserves authored topic labels, locale, translation group and terms,
+unrelated taxonomy metadata and terms, and refuses to discard
 an undeclared collection definition or its development content.
 
 A first setup applies the seed. Once setup is complete, editing the seed
 cannot create a new collection: create it through EmDash's schema API or
 admin with every declared field, support and URL pattern, and add its name
-to the topic taxonomy. A platform that supports the declaration's section
-contract (1 for version 1, 2 for version 2) can do
+to the topic taxonomy. A platform that supports section contract 2 can do
 this additively before routing a deployment. The TimDS host refuses changes
 to an existing collection's fields or features, including adding a field;
 choose the shared schema before first creation. Never rename collections or
 change stored patterns as an automatic migration. Removing a section only
 removes its routes; retained content needs a separate explicit decision.
 Writer scopes are global across collections.
+
+TimDS hosted discovery acknowledges template 3, workspace 3 and sections 2
+before building. An older host without that acknowledgement is refused;
+standalone builds do not require a host integration.
 
 Verify each declared list, a published entry and every enabled feed at its
 prefix. A missing collection fails the page instead of appearing as an empty

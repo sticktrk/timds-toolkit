@@ -92,6 +92,8 @@ async function fixture(name, dependencies) {
   await save(seedFile, seed);
   // Observe the same module used by pages, independently of database seeding.
   await writeFile(path.join(site, "src/pages/contract.json.ts"), 'import { sectionsContract, sections, sectionSchema } from "virtual:timds/design-system";\nexport const GET = () => Response.json({ sectionsContract, sections, sectionSchema });\n');
+  await mkdir(path.join(site, "src/pages/docs"), { recursive: true });
+  await writeFile(path.join(site, "src/pages/docs/[...slug].astro"), '<h1>Independent documentation route</h1>\n');
   return site;
 }
 
@@ -142,6 +144,7 @@ try {
     assert.equal(await status("/articles/example-article/"), 200);
     assert.equal(await status("/articles/rss.xml"), 200);
     assert.equal((await contract()).sectionsContract, 2);
+    assert.ok((await read("/docs/example")).includes("Independent documentation route"));
     assert.ok((await read(division)).includes("<h1>Commercial division</h1>"));
     assert.ok((await read(`${division}about/`)).includes("<h1>About commercial division</h1>"));
 
@@ -170,6 +173,19 @@ try {
     assert.ok(listing.includes(`${base === "/" ? "" : base}${prefix}${slug}/`));
     assert.ok(entry.includes("How to lease a building"));
     assert.ok(feed.includes(origin + prefix + slug + "/"));
+    const head = await request(`${prefix}rss.xml`, { method: "HEAD" });
+    assert.equal(head.status, 200);
+    assert.match(head.headers.get("content-type"), /application\/rss\+xml/);
+    assert.equal(await head.text(), "");
+    for (const method of ["POST", "PUT", "DELETE"]) {
+      const response = await request(`${prefix}rss.xml`, { method, headers: { Origin: serverOrigin } });
+      assert.equal(response.status, 405, `${base} feed ${method}`);
+      assert.equal(response.headers.get("allow"), "GET, HEAD");
+      await response.body?.cancel();
+    }
+    assert.equal(await status("/topics/example-topic/"), 200);
+    assert.equal(await status("/topics/example-topic/", post), 405);
+    assert.equal(await status("/topics/missing/", post), 404);
     assert.ok((await read(division)).includes("<h1>Commercial division</h1>"));
     assert.ok((await read(`${division}about/`)).includes("<h1>About commercial division</h1>"));
     const handled = await request(prefix, post);
@@ -177,6 +193,37 @@ try {
     assert.equal(await handled.text(), "lease-form-handled");
     for (const pathname of [`${division}about/`, `${prefix}${slug}/`]) assert.equal(await status(pathname, post), 405, `${base}${pathname} POST`);
     for (const pathname of [`${division}missing/`, `${prefix}missing/`, `${prefix}${slug}/extra/`]) assert.equal(await status(pathname), 404, `${base}${pathname}`);
+
+    output = "";
+    await writeFile(declarations, '{"schemaVersion":');
+    await until(() => output.includes("Continuing with previous valid configuration"), `${base} malformed declaration recovery`);
+    assert.equal(await status(prefix), 200);
+    assert.equal(await status(`${prefix}${slug}/`), 200);
+    assert.equal(await status(`${prefix}rss.xml`), 200);
+    assert.equal((await contract()).sections.length, 2);
+    output = "";
+    await save(declarations, declaration);
+    await until(() => output.includes("server restarted."), `${base} restored declaration restart`);
+
+    const conflicts = [
+      [path.join(site, "src/pages", prefix, "override.astro"), "<h1>Conflicting page</h1>"],
+      [path.join(site, "public", prefix, "rss.xml"), "Conflicting feed"],
+    ];
+    for (const [file, contents] of conflicts) {
+      await mkdir(path.dirname(file), { recursive: true });
+      output = "";
+      await writeFile(file, contents);
+      await until(async () => output.includes("Public routes return 503") && await status(prefix) === 503, `${base} guarded ${path.relative(site, file)} conflict`);
+      await rm(file);
+      await until(async () => await status(prefix) === 200, `${base} route conflict recovery`);
+    }
+    const target = path.join(site, "linked-page.astro"), linked = path.join(site, "src/pages", prefix, "linked.astro");
+    await writeFile(target, "<h1>Linked route</h1>");
+    output = "";
+    await symlink(target, linked);
+    await until(async () => output.includes("symbolic links") && await status(prefix) === 503, `${base} guarded symlink route`);
+    await rm(linked);
+    await until(async () => await status(prefix) === 200, `${base} symlink recovery`);
 
     const model = await json(schemaFile);
     model.fields.push({ slug: "review_note", label: "Review note", type: "text" });
@@ -194,9 +241,8 @@ try {
     assert.ok(originalHelper.includes('label: "Topics"'));
     output = "";
     await writeFile(helper, originalHelper.replace('label: "Topics"', 'label: "Topic library"'));
-    await until(() => output.includes("Continuing with previous valid configuration"), `${base} helper config dependency`);
-    output = "";
-    await synchronize();
+    // Taxonomy labels are authored seed metadata; changing this default does
+    // not invalidate a localized seed, but must still refresh the helper.
     await until(() => output.includes("server restarted."), `${base} helper Astro restart`);
     await until(async () => (await contract()).sectionSchema.taxonomies[0].label === "Topic library", `${base} helper import refresh`);
 
@@ -204,6 +250,9 @@ try {
     declaration.sections.pop();
     await save(declarations, declaration);
     await until(() => output.includes("Continuing with previous valid configuration"), `${base} removed section before sync`);
+    assert.equal(await status(prefix), 200);
+    assert.equal(await status(`${prefix}${slug}/`), 200);
+    assert.equal(await status(`${prefix}rss.xml`), 200);
     // Remove its development schema and content explicitly before sync.
     const seed = await json(seedFile);
     seed.collections = seed.collections.filter((collection) => collection.slug !== "lease_faq");
@@ -219,7 +268,7 @@ try {
     assert.ok((await read(division)).includes("<h1>Commercial division</h1>"));
     assert.ok((await read(`${division}about/`)).includes("<h1>About commercial division</h1>"));
     await stop();
-    console.log(`Passed EmDash development reloads at ${base}: nested list/entry/feed, division pages, POST ownership, 404/405, invalid-pair recovery, schema JSON, helper changes and removal.`);
+    console.log(`Passed EmDash development reloads at ${base}: nested list/entry/feed, HEAD/405, division pages, POST ownership, invalid JSON and pair recovery, guarded native/public/symlink conflicts, schema JSON, helper changes and removal.`);
   }
 } finally {
   await stop();

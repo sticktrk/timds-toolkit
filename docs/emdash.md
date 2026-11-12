@@ -337,16 +337,17 @@ In the site:
 The site builds its pages from the system's website design named by
 `designSystem({ design: "<id>" })` in `astro.config.mjs`. The scaffold picks
 the one with a home page (`website` first, else the first in order). Consumer
-checks and previews read that same literal selection without executing the
-configuration, so changing it also changes their page and reference inventory. Its
+checks and previews parse the active exported configuration's literal selection
+without executing it. Comments, strings and unused calls cannot select a design;
+an ambiguous or computed selection is refused. Changing the selection also
+changes their page and reference inventory. Its
 integration (`src/integrations/design-system.mjs`) runs in Node while `astro
 dev` serves and while `astro build` builds, never in the Worker:
 
 - Every ordinary page of the design is a page of the site. Declaration
   version 2 excludes only the stock article/topic references and pages marked
   `site: "reference"` in `design.json`; a public page inside a collection or
-  topic namespace is a conflict, never silently omitted. Version 1 retains
-  its legacy exclusion by prefix. Public pages are filled
+  topic namespace is a conflict, never silently omitted. Public pages are filled
   the way the system's own renderer fills it (`layout.html` around the page,
   the `{{name}}`, `{{description}}`, `{{version}}` and `{{title}}`
   placeholders), with Astro's `base` in front of root-relative `href`, `src`,
@@ -435,7 +436,7 @@ Reserved framework and topic
 addresses are refused, as are the site source and generated directories
 `/src/`, `/docs/`, `/seed/`, `/public/` and `/dist/`: those paths are blocked
 by the hosted live preview. Every prefix segment is checked against the reserved
-names. Entries belong to exactly one collection, and their
+names, including Cloudflare's `cdn-cgi`. Entries belong to exactly one collection, and their
 canonical address is that section's prefix followed by the entry slug and a
 trailing slash. A feed, when enabled, is `<prefix>rss.xml`.
 
@@ -443,9 +444,9 @@ All routes still use this site's one selected Design System. For the example
 above, `/commercial-division/` and `/commercial-division/about/` can be ordinary
 design pages, while `/commercial-division/lease-faq/how-to-lease-building/`
 belongs to the `lease_faq` collection. The division prefix does not select
-another Design System. Declaration version 1 remains readable with its
-single-segment grammar and legacy sample exclusion; changing to version 2 is
-an explicit source edit. The shared field schema below remains version 1.
+another Design System. Declaration version 2 and section contract 2 are the
+supported section format; version 1 is refused. The shared field schema below
+remains version 1.
 
 After editing the declaration or shared schema, run `npm run sections:sync` in `site/` and
 commit the resulting `seed/seed.json` and writer collection table with it.
@@ -456,7 +457,9 @@ consumer check never executes the site's JavaScript. The pure helper in
 `site/src/lib/articles/sections.mjs` validates it and derives one identical schema
 per section and attaches the `topic` taxonomy to all sections. The sync
 keeps existing sample content, unrelated collection metadata, non-topic
-taxonomies and their terms, and unrelated topic metadata. An undeclared
+taxonomies and their terms, and the topic's authored labels, locale,
+translation group, terms and other unrelated metadata. It updates the topic's
+collection attachments and keeps the shared flat taxonomy shape. An undeclared
 collection definition or content key makes sync fail before writing: removing
 a section requires explicitly removing its development seed definition and
 content as well. A newly declared section gets the existing
@@ -468,10 +471,10 @@ undeclared seeded collection, or drift in fields, features, addresses or
 taxonomy attachments. Build and development also validate the seed.
 
 The shared schema accepts 1–32 fields and at most 64 fields across all
-declared collections, within a 64 KiB section contract. Supported field types
+declared collections, within a 64 KiB section contract measured as UTF-8 bytes. Supported field types
 are `string`, `text`, `url`, `number`, `integer`, `boolean`, `datetime`,
 `select`, `multiSelect`, `portableText`, `image`, `file`, `json` and `slug`.
-System field slugs are reserved. Relations, blocks and repeaters are outside
+System field slugs and prototype names are reserved. Relations, blocks and repeaters are outside
 this creation contract. Field validation, defaults and widget options must
 fit the bounded EmDash-compatible data shape; invalid definitions are refused
 before seed generation. The stock route components still expect the shipped
@@ -499,12 +502,17 @@ The marker belongs in the selected design's `design.json`, and its page still
 needs a title and an authored HTML file. Unmarked public design pages at or
 below a collection prefix or `/topics/` fail check and build instead of being
 silently hidden. Native files under `site/src/pages/` that intersect those
-namespaces are also refused, including dynamic routes; the stock design
-catch-all and topic route are retained. Ordinary parent and sibling pages
+namespaces are also refused, including dynamic routes and Astro's resolved
+project routes; the stock design catch-all and topic route are retained.
+Public files cannot occupy these namespaces, including HTML aliases, and
+route or public directory symlinks are refused without following them.
+Ordinary parent and sibling pages
 stay public. A section without its own samples uses the stock article samples
 for preview comparisons. `consumer preview` derives
 its section routes from the current declaration without rewriting
-`timds.consumer.json`; the scaffold's missing-style report covers every
+`timds.consumer.json`. Explicit preview pairs to a reference page in the
+selected design remain authoritative; derived fallback pairs fill only missing
+entries. The scaffold's missing-style report covers every
 section. The shared topic route merges all declared sections newest first,
 and its cursor records an independent position in each collection. The
 same mixed-list helper, `getLatestArticles` in `src/lib/articles/latest.ts`,
@@ -514,14 +522,24 @@ page makes at most the section count plus the page size in content reads;
 it does not depend on EmDash's internal cursor encoding or offsets.
 
 The virtual module `virtual:timds/design-system` exports `sectionsContract`
-matching the declaration version (1 or 2), the normalized `sections`
+with value 2, the normalized `sections`
 (including each `urlPattern`) and
 `sectionSchema` for build consumers. Before Astro resolves its configuration,
 build integrations can retain the design integration's `api.getSections`
 function and call it after `astro:config:setup` for the same data. Astro strips
 extra integration properties while resolving configuration, so that function
-must be captured from the original configuration. Editing the declaration,
-shared schema or seed restarts development to rebuild the injected routes.
+must be captured from the original configuration. A hosted discovery integration
+must acknowledge the current template/workspace/sections tuple by calling
+`api.acknowledgeHostedSections({ template: 3, workspace: 3, sections: 2 })`
+before configuration resolves. A hosted build without that acknowledgement
+fails; standalone builds do not need it.
+
+Editing the declaration, shared schema or seed restarts development to rebuild
+the injected routes. An invalid save keeps the previous validated inventory,
+including the inventory used by requests; routes never read the edited JSON
+independently. A conflicting native route or public file keeps dev running but
+returns 503 until corrected. Removing the conflict restores routing. Builds
+and consumer checks reject these conflicts outright.
 Section collection reads fail when a
 collection is missing; an absent collection cannot appear as an empty page.
 
@@ -531,7 +549,10 @@ from the toolkit repository. The supplied dependency tree must contain
 EmDash 1.4.0 and Astro 7.4.10; omitting `--dependencies` installs the scaffold's
 pinned dependencies. The disposable local check exercises nested section
 addition and removal, ordinary parent and sibling pages, shared schema changes,
-feeds, and explicit form precedence under `/` and `/site`. Public pages accept
+feeds, invalid JSON, native/public/symlink conflict recovery, and explicit form
+precedence under `/` and `/site`. Feeds explicitly handle HEAD and return 405
+with `Allow: GET, HEAD` for other methods. Vite handles development OPTIONS
+preflight before Astro. Public pages accept
 GET and HEAD; a POST with an explicit `src/forms/` handler reaches that handler,
 and other unsupported methods on known pages answer 405. Missing entries,
 unknown pages and extra path segments answer 404.

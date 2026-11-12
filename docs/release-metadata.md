@@ -215,12 +215,12 @@ a version has no entry.
 A release that writes template version 3 declares `emdashWorkspaceContract: 3`
 and `emdashSectionsContract: 2`. Its fresh `sections.json` uses declaration
 version 2 for nested literal prefixes inside one Design System; builds export
-section contract 2. It can also read declaration version 1 and export section
-contract 1 without accepting nested prefixes under that older grammar. Template
-version 2's capability pair remains workspace 2 / sections 1. Hosts must accept
-the complete versioned capability tuple before scaffolding; an older host must
-refuse a template whose nested routing it cannot validate. Neither template
-version implies that an `articles` collection is mandatory.
+section contract 2. This first hosted-site release supports only that current
+contract; historical declaration versions are refused. Hosts must accept the
+complete capability tuple before scaffolding and acknowledge section contract 2
+during hosted builds. Standalone Astro builds need no host acknowledgement.
+The contract does not require an `articles` collection. Recorded template
+history describes development revisions, not supported deployment formats.
 
 ## Compatibility and verification
 

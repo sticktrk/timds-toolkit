@@ -30,13 +30,18 @@ system and the site are edited, reviewed and committed together.
   prefix when the page is rendered; a deployed site runs at `/`.
 
 `astro.config.mjs` names the design (`designSystem({ design: "__DESIGN_ID__" })`).
-The consumer check and preview follow that selection too.
+The consumer check and preview parse the literal selection in the exported
+configuration too, without executing it; comments and unused calls do not count.
 
 `sections.json` version 2 permits nested collection prefixes, such as
 `/commercial-division/lease-faq/`. Ordinary parent and sibling pages such as
 `/commercial-division/` and `/commercial-division/about/` stay public inside
 the same selected design. A public design page or native Astro route inside
 a collection namespace or `/topics/` is a conflict: check and build refuse it.
+Public files in those namespaces and symlinks in route/public directories are
+also refused. Dev remains running during a route conflict and returns 503
+until it is corrected. Invalid section JSON instead keeps the last validated
+configuration and request inventory.
 The stock `/articles`, `/articles/example-article`, `/topics` and
 `/topics/example-topic` pages are references. Mark any additional design
 sample in `design.json` with its required title and `site: "reference"`:
@@ -47,8 +52,9 @@ sample in `design.json` with its required title and `site: "reference"`:
 
 The matching HTML file remains a design reference, never a separate public
 page. Section previews use its list or `example-article` sample when present,
-falling back to the stock article reference. Declaration version 1 keeps
-its single-segment prefixes and older exclusion of all pages under them.
+falling back to the stock article reference. Explicit preview pairs to an
+existing reference in the selected design are preserved. Only declaration
+version 2 and section contract 2 are supported.
 
 ## Forms
 
