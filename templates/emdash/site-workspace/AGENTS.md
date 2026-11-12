@@ -9,9 +9,11 @@ source paths, so a change to how the site looks is a change to the system.
 - Content (articles, topics, media) goes through EmDash: the admin, the REST
   API or the MCP server, never a commit. The writer's contract is
   `docs/content-api.md`.
-- `sections.json` declares the collections and their address prefixes. After
-  editing it, run `npm run sections:sync` here and the consumer check. A live
-  database also needs the new schema; a seed is applied only during setup.
+- `sections.json` declares the collections and their address prefixes;
+  `section-schema.json` declares their shared fields and features. After
+  editing either, run `npm run sections:sync` here and the consumer check.
+  A live database also needs new collections created; a seed is applied only
+  during setup. Hosted deployment never changes an existing collection's schema.
 - A page's look and copy are edited in the design file in the system, never
   copied into `src/pages/`.
 - A style the site needs that the system lacks is added to the system in the

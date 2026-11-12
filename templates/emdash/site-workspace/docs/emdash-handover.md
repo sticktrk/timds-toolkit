@@ -82,16 +82,21 @@ fingerprint `--status` printed.
 `docs/content-api.md` lists the current entry addresses for writers. After
 editing the declaration, run `npm run sections:sync` in the site and run
 the consumer check at the workspace root. Commit the declaration, generated
-seed and updated writer table together. The shared schema in
-`src/lib/articles/sections.mjs` supplies identical fields and features to
+seed and updated writer table together. The shared data in
+`section-schema.json` supplies identical fields and features to
 every collection, including preview, scheduling, search and SEO, and the
-`topic` taxonomy attaches to all of them.
+`topic` taxonomy attaches to all of them. Sync and build and the toolkit's
+consumer check validate this same JSON; the check never executes site code.
+Sync preserves unrelated taxonomy metadata and terms, and refuses to discard
+an undeclared collection definition or its development content.
 
 A first setup applies the seed. Once setup is complete, editing the seed
 cannot create a new collection: create it through EmDash's schema API or
 admin with every declared field, support and URL pattern, and add its name
 to the topic taxonomy. A platform that supports section contract 1 can do
-this additively before routing a deployment. Never rename collections or
+this additively before routing a deployment. The TimDS host refuses changes
+to an existing collection's fields or features, including adding a field;
+choose the shared schema before first creation. Never rename collections or
 change stored patterns as an automatic migration. Removing a section only
 removes its routes; retained content needs a separate explicit decision.
 Writer scopes are global across collections.

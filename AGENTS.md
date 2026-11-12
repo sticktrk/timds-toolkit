@@ -191,8 +191,10 @@ would need to receive raises `version` in both places and adds a `history`
 entry saying what changed.
 
 Template version 2 declares article sections in `site/sections.json` (section
-contract 1). Its pure `src/lib/articles/sections.mjs` helper is the single
-field shape, seed generator and seed validator. `npm run sections:sync` is an
+contract 1) and their shared fields and features in `site/section-schema.json`.
+Its pure `src/lib/articles/sections.mjs` helper validates that data and generates
+the seed; consumer checks read the same JSON without executing site code.
+`npm run sections:sync` is an
 explicit site command; build, dev and consumer check validate without silently
 changing source. The design integration injects routes per prefix from the
 shared `src/routes/articles/` modules and exports the section contract beside

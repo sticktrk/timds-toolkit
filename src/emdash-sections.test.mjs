@@ -3,25 +3,28 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import test from "node:test";
-import { normalizeSections, createSectionSeed, validateSectionSeed } from "../templates/emdash/site/src/lib/articles/sections.mjs";
+import { normalizeSections, normalizeSectionSchema, sectionSchemaFor, createSectionSeed, validateSectionSeed } from "../templates/emdash/site/src/lib/articles/sections.mjs";
 import { mergeSectionEntries } from "../templates/emdash/site/src/lib/articles/mixed.mjs";
 import { renderWorkspaceDesign, virtualModuleSource } from "../templates/emdash/site-workspace/src/integrations/design-system.mjs";
 
 const declaration = { schemaVersion: 1, sections: ["articles", "guides", "recipes"].map((collection) => ({ collection, prefix: `/${collection}/`, label: collection, singularLabel: collection, feed: true })) };
 const sections = normalizeSections(declaration);
+const model = JSON.parse(await fs.readFile(new URL("../templates/emdash/site/section-schema.json", import.meta.url), "utf8"));
 
 test("section seed shares one shape, validates every declaration, and preserves existing samples", async () => {
   const seed = JSON.parse(await fs.readFile(new URL("../templates/emdash/site/seed/seed.json", import.meta.url), "utf8"));
-  const expanded = createSectionSeed(seed, sections);
-  assert.equal(validateSectionSeed(expanded, sections), true);
+  const expanded = createSectionSeed(seed, sections, model);
+  assert.equal(validateSectionSeed(expanded, sections, model), true);
   assert.deepEqual(expanded.content.articles, seed.content.articles);
   assert.equal(expanded.content.guides[0].slug, "example-article");
   assert.notEqual(expanded.content.guides[0].id, expanded.content.recipes[0].id);
   assert.deepEqual(expanded.collections.map((item) => item.urlPattern), sections.map((item) => item.urlPattern));
   assert.deepEqual(expanded.taxonomies[0].collections, ["articles", "guides", "recipes"]);
-  assert.deepEqual(createSectionSeed(expanded, sections), expanded);
+  assert.deepEqual(createSectionSeed(expanded, sections, model), expanded);
   const guidesOnly = sections.slice(1, 2);
-  assert.equal(validateSectionSeed(createSectionSeed(seed, guidesOnly), guidesOnly), true);
+  assert.throws(() => createSectionSeed(seed, guidesOnly, model), /Remove undeclared seed collections/);
+  const removed = { ...seed, collections: [], content: {} };
+  assert.equal(validateSectionSeed(createSectionSeed(removed, guidesOnly, model), guidesOnly, model), true);
   assert.throws(() => normalizeSections({ schemaVersion: 1, sections: [] }), /between 1 and 16/);
   for (const prefix of ["/topics/", "/api/", "/site/", "/_emdash/", "/src/", "/docs/", "/seed/", "/public/", "/dist/", "/one/two/", "/guides", "/guides/?a", "/sitemap-timds-pages/"]) assert.throws(() => normalizeSections({ schemaVersion: 1, sections: [{ ...declaration.sections[0], prefix }] }), /prefix/);
   assert.throws(() => normalizeSections({ schemaVersion: 1, sections: [{ ...declaration.sections[0], collection: "with-hyphens" }] }), /slug/);
@@ -30,7 +33,32 @@ test("section seed shares one shape, validates every declaration, and preserves 
   assert.throws(() => normalizeSections({ schemaVersion: 1, sections: [{ ...declaration.sections[0], future: true }] }), /slug/);
   const drift = structuredClone(expanded);
   drift.collections[1].supports = ["drafts"];
-  assert.throws(() => validateSectionSeed(drift, sections), /guides.*supports/);
+  assert.throws(() => validateSectionSeed(drift, sections, model), /guides.*supports/);
+  const authored = structuredClone(expanded);
+  authored.collections[0].hidden = true;
+  authored.taxonomies[0].description = "Authored topic guidance";
+  authored.taxonomies.push({ name: "category", label: "Categories", labelSingular: "Category", hierarchical: false, collections: ["articles"], terms: [{ slug: "news", label: "News" }] });
+  assert.equal(validateSectionSeed(authored, sections, model), true);
+  assert.deepEqual(createSectionSeed(authored, sections, model), authored);
+  authored.taxonomies.reverse();
+  assert.equal(validateSectionSeed(authored, sections, model), true);
+  assert.deepEqual(createSectionSeed(authored, sections, model), authored);
+});
+
+test("shared section schema accepts bounded field data and rejects definitions the creation API cannot preserve", () => {
+  const field = { slug: "reading_time", label: "Reading time", type: "integer", defaultValue: 0, validation: { min: 0, max: 120 }, indexed: true };
+  const custom = { ...model, fields: [...model.fields, field] };
+  assert.deepEqual(normalizeSectionSchema(custom), custom);
+  assert.deepEqual(sectionSchemaFor(sections, custom).fields, custom.fields);
+  for (const changed of [
+    { slug: "id" }, { type: "reference" }, { type: "blocks" }, { type: "repeater" },
+    { required: "yes" }, { sortOrder: 0 }, { type: "text", indexed: true },
+    { validation: { min: "0" } }, { validation: { min: 10, max: 1 } },
+    { validation: { pattern: "[" } }, { validation: { unknown: true } },
+    { defaultValue: "not a number" }, { options: { constructor: "unsafe" } },
+  ]) assert.throws(() => normalizeSectionSchema({ ...custom, fields: [...model.fields, { ...field, ...changed }] }), /section-schema.json/);
+  assert.throws(() => normalizeSectionSchema({ ...custom, supports: ["drafts", "drafts"] }), /section-schema.json/);
+  assert.throws(() => sectionSchemaFor(Array(16).fill(sections[0]), custom), /at most 64/);
 });
 
 test("mixed topic and latest lists carry an opaque position per collection past twenty entries", async () => {

@@ -53,7 +53,7 @@ import { existsSync, readFileSync, promises as fs } from "node:fs";
 import path from "node:path";
 
 import { CONSUMER_MANIFEST_FILE, CONSUMER_SKILL_NAMES, validateConsumerManifest } from "./consumer.mjs";
-import { normalizeSections, createSectionSeed, validateSectionSeed, isSectionRoute, writerSectionTable } from "../templates/emdash/site/src/lib/articles/sections.mjs";
+import { normalizeSections, normalizeSectionSchema, createSectionSeed, validateSectionSeed, isSectionRoute, writerSectionTable } from "../templates/emdash/site/src/lib/articles/sections.mjs";
 import { WORKSPACE_SITE_AGENTS_MARKER, WORKSPACE_SITE_DIRECTORY, WORKSPACE_SITE_MOUNT } from "./workspace-site.mjs";
 
 /** The template directory the workspace mode lays over the shared set. */
@@ -296,9 +296,10 @@ export async function readWorkspaceSections(siteRoot) {
 }
 
 export async function checkWorkspaceSectionSeed(siteRoot, sections) {
+  const model = normalizeSectionSchema(await readJsonFile(path.join(siteRoot, "section-schema.json"), "section-schema.json"));
   const seed = await readJsonFile(path.join(siteRoot, "seed/seed.json"), "seed/seed.json");
   if (!seed) throw new Error("seed/seed.json is missing; run npm run sections:sync in the site");
-  validateSectionSeed(seed, sections);
+  validateSectionSeed(seed, sections, model);
 }
 
 /** Derive preview inputs without rewriting the consumer manifest or its review boundary. */
@@ -407,7 +408,9 @@ export async function planWorkspaceSite(designSystemRoot, { templatesRoot, repoR
     },
   });
   const seedFile = plan.files.find((file) => file.path === "seed/seed.json");
-  seedFile.content = toJson(createSectionSeed(JSON.parse(String(seedFile.content)), sections));
+  const schemaFile = plan.files.find((file) => file.path === "section-schema.json");
+  const model = normalizeSectionSchema(JSON.parse(String(schemaFile.content)));
+  seedFile.content = toJson(createSectionSeed(JSON.parse(String(seedFile.content)), sections, model));
   const writerFile = plan.files.find((file) => file.path === "docs/content-api.md");
   writerFile.content = String(writerFile.content).replace(/<!-- timds:sections -->[\s\S]*?<!-- \/timds:sections -->/, () => writerSectionTable(sections));
   const packageJson = workspacePackageJson(set, { name });

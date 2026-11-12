@@ -793,14 +793,22 @@ export default function designSystem({ design }) {
     name: "timds-design-system",
     api: publicApi,
     hooks: {
-      "astro:config:setup": async ({ config, updateConfig, addMiddleware, injectRoute, logger: integrationLogger }) => {
+      "astro:config:setup": async ({ config, updateConfig, addMiddleware, injectRoute, addWatchFile, logger: integrationLogger }) => {
         siteRoot = fileURLToPath(config.root);
         logger = integrationLogger;
         const sectionsModule = path.join(siteRoot, "src/lib/articles/sections.mjs");
+        const sectionsFile = path.join(siteRoot, "sections.json");
+        const schemaFile = path.join(siteRoot, "section-schema.json");
+        const seedFile = path.join(siteRoot, "seed/seed.json");
+        // These are Astro configuration inputs: its restart rebuilds injected
+        // routes and keeps the previous configuration when a saved pair is
+        // temporarily invalid. A Vite-only restart keeps the old route table.
+        for (const file of [sectionsModule, sectionsFile, schemaFile, seedFile]) addWatchFile(file);
         const helpers = await import(`${pathToFileURL(sectionsModule).href}?modified=${statSync(sectionsModule).mtimeMs}`);
-        const sections = helpers.normalizeSections(readJson(path.join(siteRoot, "sections.json")));
-        helpers.validateSectionSeed(readJson(path.join(siteRoot, "seed/seed.json")), sections);
-        Object.assign(api, { sectionsContract: 1, sections, sectionSchema: helpers.sectionSchemaFor(sections) });
+        const sections = helpers.normalizeSections(readJson(sectionsFile));
+        const model = helpers.normalizeSectionSchema(readJson(schemaFile));
+        helpers.validateSectionSeed(readJson(seedFile), sections, model);
+        Object.assign(api, { sectionsContract: 1, sections, sectionSchema: helpers.sectionSchemaFor(sections, model) });
         for (const section of sections) {
           injectRoute({ pattern: section.prefix, entrypoint: path.join(siteRoot, "src/routes/articles/index.astro"), prerender: false });
           injectRoute({ pattern: `${section.prefix}[slug]`, entrypoint: path.join(siteRoot, "src/routes/articles/entry.astro"), prerender: false });
@@ -840,23 +848,8 @@ export default function designSystem({ design }) {
                 const designDirectory = path.join(systemRoot, "src", "designs", design);
                 const manifestFile = path.join(systemRoot, "timds.json");
                 const formsDirectory = path.join(siteRoot, "src", FORMS_DIRECTORY);
-                const sectionsFile = path.join(siteRoot, "sections.json");
-                const seedFile = path.join(siteRoot, "seed/seed.json");
-                server.watcher.add([designDirectory, manifestFile, formsDirectory, sectionsFile, seedFile, sectionsModule]);
-                const reload = async (file) => {
-                  if (file === sectionsFile || file === seedFile || file === sectionsModule) {
-                    // A declaration and its generated seed are usually saved
-                    // separately. Keep the current dev server alive until the
-                    // pair validates, then rebuild its injected route table.
-                    try {
-                      const current = await import(`${pathToFileURL(sectionsModule).href}?modified=${statSync(sectionsModule).mtimeMs}`);
-                      current.validateSectionSeed(readJson(seedFile), current.normalizeSections(readJson(sectionsFile)));
-                      await server.restart();
-                    } catch {
-                      logger.warn("Section changes need a matching seed; run npm run sections:sync, then fix any reported configuration error.");
-                    }
-                    return;
-                  }
+                server.watcher.add([designDirectory, manifestFile, formsDirectory]);
+                const reload = (file) => {
                   if (file !== manifestFile && !file.startsWith(`${designDirectory}${path.sep}`) && !file.startsWith(`${formsDirectory}${path.sep}`)) return;
                   for (const environment of Object.values(server.environments ?? {})) {
                     const module = environment.moduleGraph?.getModuleById(RESOLVED_MODULE);

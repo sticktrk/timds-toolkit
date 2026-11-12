@@ -709,3 +709,42 @@ test("section declaration drives seed checks and preview routes without rewritin
   const reverse = await checkConsumer(site, { fix: false });
   assert.ok(reverse.errors.some((error) => /different collections/.test(error)), reverse.errors.join("\n"));
 });
+
+test("section sync and consumer check share schema data and preserve authored seed metadata", async (t) => {
+  const root = await temporaryDirectory(t);
+  const workspace = await starterWorkspace(path.join(root, "section-schema"));
+  await scaffoldWorkspaceEmdashSite(workspace, { skipInstall: true, output: quiet });
+  const site = path.join(workspace, "site");
+  const model = JSON.parse(await fs.readFile(path.join(site, "section-schema.json"), "utf8"));
+  model.fields.push({ slug: "reading_time", label: "Reading time", type: "integer", validation: { min: 0 } });
+  await write(path.join(site, "section-schema.json"), model);
+  const before = await checkConsumer(site, { fix: false });
+  assert.ok(before.errors.some((error) => /different fields.*sections:sync/.test(error)), before.errors.join("\n"));
+  const seedFile = path.join(site, "seed/seed.json");
+  const seed = JSON.parse(await fs.readFile(seedFile, "utf8"));
+  seed.collections[0].description = "An authored collection description";
+  seed.taxonomies[0].description = "An authored topic description";
+  const category = { name: "category", label: "Categories", labelSingular: "Category", hierarchical: true, collections: ["articles"], terms: [{ slug: "news", label: "News" }] };
+  seed.taxonomies.unshift(category);
+  await write(seedFile, seed);
+  execFileSync(process.execPath, ["scripts/sections.mjs"], { cwd: site });
+  const synced = JSON.parse(await fs.readFile(seedFile, "utf8"));
+  assert.deepEqual(synced.collections[0].fields, model.fields);
+  assert.equal(synced.collections[0].description, seed.collections[0].description);
+  assert.deepEqual(synced.taxonomies, seed.taxonomies);
+  assert.deepEqual(synced.content, seed.content);
+  // A consumer check reads only data; custom executable site code is not trusted.
+  const helperFile = path.join(site, "src/lib/articles/sections.mjs");
+  const helper = await fs.readFile(helperFile, "utf8");
+  await fs.writeFile(helperFile, 'throw new Error("Site code must not execute in consumer check");\n');
+  const checked = await checkConsumer(site, { fix: false });
+  assert.equal(checked.status, "passed", checked.errors.join("\n"));
+  await fs.writeFile(helperFile, helper);
+  synced.collections.push({ slug: "authors", label: "Authors", fields: [] });
+  await write(seedFile, synced);
+  const seedBefore = await fs.readFile(seedFile, "utf8");
+  const writerBefore = await fs.readFile(path.join(site, "docs/content-api.md"), "utf8");
+  assert.throws(() => execFileSync(process.execPath, ["scripts/sections.mjs"], { cwd: site, stdio: "pipe" }), /Remove undeclared seed collections/);
+  assert.equal(await fs.readFile(seedFile, "utf8"), seedBefore);
+  assert.equal(await fs.readFile(path.join(site, "docs/content-api.md"), "utf8"), writerBefore);
+});

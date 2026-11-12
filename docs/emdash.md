@@ -428,18 +428,36 @@ by the hosted live preview. Entries belong to exactly one collection, and their
 canonical address is that section's prefix followed by the entry slug and a
 trailing slash. A feed, when enabled, is `<prefix>rss.xml`.
 
-After editing the declaration, run `npm run sections:sync` in `site/` and
+After editing the declaration or shared schema, run `npm run sections:sync` in `site/` and
 commit the resulting `seed/seed.json` and writer collection table with it.
-The shared field and feature shape lives in
-`site/src/lib/articles/sections.mjs`; the seed derives one identical schema
+The shared field and feature shape lives in `site/section-schema.json`, a
+JSON object with `schemaVersion: 1`, `fields` and `supports`. Site sync,
+build and development and the toolkit's consumer check read this same data;
+consumer check never executes the site's JavaScript. The pure helper in
+`site/src/lib/articles/sections.mjs` validates it and derives one identical schema
 per section and attaches the `topic` taxonomy to all sections. The sync
-keeps existing sample content. A newly declared section gets the existing
+keeps existing sample content, unrelated collection metadata, non-topic
+taxonomies and their terms, and unrelated topic metadata. An undeclared
+collection definition or content key makes sync fail before writing: removing
+a section requires explicitly removing its development seed definition and
+content as well. A newly declared section gets the existing
 `example-article` sample with its own ID; an explicitly empty content array
 stays empty. These are development or first-setup examples: adding a section
 to a live database creates schema only. Section removal does not delete
 deployed content. `consumer check` refuses a missing declared collection, an
 undeclared seeded collection, or drift in fields, features, addresses or
 taxonomy attachments. Build and development also validate the seed.
+
+The shared schema accepts 1–32 fields and at most 64 fields across all
+declared collections, within a 64 KiB section contract. Supported field types
+are `string`, `text`, `url`, `number`, `integer`, `boolean`, `datetime`,
+`select`, `multiSelect`, `portableText`, `image`, `file`, `json` and `slug`.
+System field slugs are reserved. Relations, blocks and repeaters are outside
+this creation contract. Field validation, defaults and widget options must
+fit the bounded EmDash-compatible data shape; invalid definitions are refused
+before seed generation. The stock route components still expect the shipped
+`title`, `summary`, `body` and `cover` fields, so a different article model
+also needs corresponding route and writer-document changes.
 
 The design integration injects each section's list, entry and optional feed
 route from `src/routes/articles/`. Design pages under any declared prefix
@@ -466,10 +484,19 @@ shared schema or seed restarts development to rebuild the injected routes.
 Section collection reads fail when a
 collection is missing; an absent collection cannot appear as an empty page.
 
+To verify dev route changes and recovery against the pinned runtime, run
+`node scripts/check-emdash-dev.mjs --dependencies /absolute/path/to/node_modules`
+from the toolkit repository. The supplied dependency tree must contain
+EmDash 1.4.0 and Astro 7.4.10; omitting `--dependencies` installs the scaffold's
+pinned dependencies. The disposable local check exercises section addition,
+removal and shared schema changes under `/` and `/site`.
+
 On a database already set up, EmDash does not rerun the seed. Adding a section
 there also requires creating its collection, fields and taxonomy attachment
 through EmDash's schema API or admin, or a platform that reconciles this
-contract. Changing a stored URL pattern is refused by the TimDS host;
+contract. Shared schema edits apply before a collection's first creation.
+The TimDS host refuses changes to an existing collection's fields or features,
+including adding a field, as well as changing its stored URL pattern;
 renaming collections, moving entries and creating redirects are outside this
 template. Writer token scopes apply to every collection, not one section.
 Existing sites receive these stock files by a reviewed manual change; no

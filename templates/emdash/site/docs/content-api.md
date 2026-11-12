@@ -32,6 +32,10 @@ does not create collections in an already set-up database by itself.
 
 ### Shared article fields
 
+`section-schema.json` is the site's shared field and feature declaration.
+The table below describes the stock article model; update this writer guide
+alongside an authored schema change before the collection is first created.
+
 | Name | Kind | Type | Notes |
 | --- | --- | --- | --- |
 | `slug` | System | string | The URL segment. Lowercase, unique in the collection. Generated from the title when a create leaves it out. |
