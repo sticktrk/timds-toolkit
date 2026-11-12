@@ -40,3 +40,12 @@ source paths, so a change to how the site looks is a change to the system.
   and the article routes the system does not style yet.
 - The site is its own package: run npm in this folder, not at the workspace
   root. Deploying is in `docs/emdash-handover.md`.
+
+
+Optional `divisions.json` mounts owner-authored HTML fragments in
+`src/divisions/` with a layout in `src/layouts/` and a selected reference
+design. Put division navigation in that layout and expose both its default
+and `head` slots. Associate collections by slug while keeping their native
+URL patterns and shared schema in the sections files. A layout receives
+`context.base` and `context.prefix` for mounted links. Keep styling in the
+selected design rather than importing an additional Design System.

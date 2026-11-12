@@ -102,7 +102,9 @@ import path from "node:path";
 
 import { matchesGlob } from "./consumer.mjs";
 import { applyWritesWithRollback, compileTokenCss } from "./consumer-scaffold.mjs";
-import { designShellStylesheets, runsStarterBuild, selectWorkspaceDesign } from "./consumer-scaffold-workspace.mjs";
+import { readDivisionComposition } from "../templates/emdash/site-workspace/src/integrations/composition.mjs";
+import { divisionStyles } from "../templates/emdash/site-workspace/src/integrations/design-system.mjs";
+import { designShellStylesheets, readWorkspaceSections, runsStarterBuild, selectWorkspaceDesign } from "./consumer-scaffold-workspace.mjs";
 import { hasContractGroups, readContractGroups } from "./contract-groups.mjs";
 import { declaredClasses } from "./designs.mjs";
 import { classifyToken, importReferences, parseCssTokens, resolveTokens } from "./tokens.mjs";
@@ -464,6 +466,7 @@ async function readSystem({ designSystemRoot, siteRoot, siteImports, stylesheets
   let entries;
   if (stylesheets) {
     entries = stylesheets.map((stylesheet) => {
+      if (typeof stylesheet !== "string") return stylesheet;
       const normalized = path.posix.normalize(toPosix(stylesheet));
       return normalized === COMPILED_TOKENS ? normalized : normalized.replace(/^\.\//, "");
     });
@@ -1242,8 +1245,30 @@ export async function checkWorkspaceSite({
   const siteRoot = path.resolve(siteRootInput);
   const designSystemRoot = path.resolve(designSystemRootInput);
 
-  const { texts, siteImports } = await readSite({ siteRoot, designSystemRoot, designSurface, protectedGlobs });
-  const system = await readSystem({ designSystemRoot, siteRoot, siteImports, stylesheets });
+  const sections = await readWorkspaceSections(siteRoot);
+  const composition = sections && readDivisionComposition(siteRoot, sections);
+  const { texts } = await readSite({ siteRoot, designSystemRoot, designSurface: [...designSurface, ...(composition ? composition.divisions.map(({ pages }) => `${pages}/**`) : [])], protectedGlobs });
+  const selectedDivisions = new Map();
+  const divisionFiles = new Map();
+  for (const division of composition?.divisions ?? []) {
+    const linked = divisionStyles(designSystemRoot, division);
+    const entries = linked.map(({ href, media }) => ({ path: href === COMPILED_TOKENS ? href : `src${href}`, condition: media ? `media ${media}` : null }));
+    selectedDivisions.set(division.id, await readSystem({ designSystemRoot, siteRoot, stylesheets: entries }));
+    for (const [relative] of texts) {
+      if (relative !== division.layout && !relative.startsWith(`${division.pages}/`)) continue;
+      const ids = divisionFiles.get(relative) ?? [];
+      ids.push(division.id);
+      divisionFiles.set(relative, ids);
+    }
+  }
+  const mainImports = new Set();
+  for (const [relative, text] of texts) {
+    const imports = systemImports(relative, text, { siteRoot, designSystemRoot });
+    if (!divisionFiles.has(relative)) {
+      for (const imported of imports) mainImports.add(imported);
+    } else if (imports.length) throw new Error(`Division source ${relative} imports a Design System stylesheet. Select the design in divisions.json to load its styles.`);
+  }
+  const mainSystem = await readSystem({ designSystemRoot, siteRoot, siteImports: [...mainImports].sort(), stylesheets });
 
   const only = files ? new Set(files.map((file) => path.posix.normalize(toPosix(file)).replace(/^\.\//, ""))) : null;
   const scanned = [...texts.keys()].filter((relative) => !only || only.has(relative));
@@ -1254,14 +1279,16 @@ export async function checkWorkspaceSite({
 
   for (const relative of scanned) {
     const text = texts.get(relative);
-    const editable = !protectedGlobs.some((glob) => matchesGlob(relative, glob));
+    const systems = divisionFiles.get(relative)?.map((division) => selectedDivisions.get(division)) ?? [mainSystem];
+    const system = systems[0];
+    const editable = systems.length === 1 && !protectedGlobs.some((glob) => matchesGlob(relative, glob));
     const extension = path.posix.extname(relative).toLowerCase();
     const edits = [];
     const reportedClasses = new Set();
     const at = (offset) => ({ file: relative, ...position(text, offset) });
 
     const classFinding = (name, offset, declared) => {
-      if (system.classes.has(name) || reportedClasses.has(name)) return;
+      if (systems.every((entry) => entry.classes.has(name)) || reportedClasses.has(name)) return;
       reportedClasses.add(name);
       findings.push({
         kind: "class",
@@ -1278,7 +1305,7 @@ export async function checkWorkspaceSite({
       }
       for (const declaration of declarations) {
         if (declaration.atRules.some((name) => DESCRIPTOR_AT_RULES.has(name))) continue;
-        if (declaration.name.startsWith("--") && system.tokenNames.has(declaration.name)) {
+        if (declaration.name.startsWith("--") && systems.some((entry) => entry.tokenNames.has(declaration.name))) {
           findings.push({
             kind: "token-override",
             ...at(base + declaration.nameStart),
@@ -1374,11 +1401,11 @@ export async function checkWorkspaceSite({
     changedFiles,
     scanned,
     system: {
-      design: system.design,
-      stylesheets: system.stylesheets,
-      tokensJson: system.tokensJson,
-      tokenCount: system.tokenNames.size,
-      classCount: system.classes.size,
+      design: mainSystem.design,
+      stylesheets: mainSystem.stylesheets,
+      tokensJson: mainSystem.tokensJson,
+      tokenCount: mainSystem.tokenNames.size,
+      classCount: mainSystem.classes.size,
     },
   };
 }

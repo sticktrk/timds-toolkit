@@ -5,7 +5,7 @@
   "type": "module",
   "hostContract": 2,
   "emdashTemplate": {
-    "version": 3,
+    "version": 4,
     "history": [
       {
         "version": 1,
@@ -27,6 +27,13 @@
           "Adds section contract 2 with nested literal address prefixes inside one Design System and rejects overlapping collection namespaces.",
           "Shares the route inventory across builds, checks and previews, retaining explicit nonpublic design references and refusing collisions with public pages.",
           "Requires the current first-release section contract, preserves immutable schemas through retries, and rejects static or native route collisions while retaining validated development routing and authored previews."
+        ]
+      },
+      {
+        "version": 4,
+        "changes": [
+          "Allows an optional divisions.json in workspace sites to mount owner-authored pages, select a layout and design, and associate existing collections without changing their addresses or schemas.",
+          "Validates and exports the resolved composition as a separate versioned contract shared by development, consumer checks, previews and hosted builds."
         ]
       }
     ]
@@ -220,5 +227,6 @@
     "access": "public"
   },
   "emdashWorkspaceContract": 3,
-  "emdashSectionsContract": 2
+  "emdashSectionsContract": 2,
+  "emdashCompositionContract": 1
 }

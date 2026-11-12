@@ -683,6 +683,7 @@ const importFrom = (file, layout) => {
 };
 const fill = (text, { file, layout = "src/layouts/Base.astro", siteUrl = "https://example.com", siteName = "acme-site" }) => text
   .replaceAll("__LAYOUT_IMPORT__", importFrom(file, layout))
+  .replaceAll("__SECTION_LAYOUT_PROPS__", "")
   .replaceAll("__SITE_URL__", siteUrl)
   .replaceAll("__SITE_NAME__", siteName);
 

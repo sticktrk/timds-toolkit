@@ -144,7 +144,7 @@ test("--workspace writes a complete site into site/ of a starter workspace", asy
   for (const binding of ["DB", "MEDIA", "SESSION"]) assert.match(wrangler, new RegExp(`"binding": "${binding}"`));
   assert.match(await fs.readFile(path.join(site, "astro.config.mjs"), "utf8"), /designSystem\(\{ design: "website" \}\)/);
   assert.match(await fs.readFile(path.join(site, "astro.config.mjs"), "utf8"), /process\.env\.TIMDS_SITE_BASE \|\| "\/"/);
-  assert.match(await fs.readFile(path.join(site, "src/routes/articles/index.astro"), "utf8"), /import Layout from "\.\.\/\.\.\/layouts\/Base\.astro";/);
+  assert.match(await fs.readFile(path.join(site, "src/routes/articles/index.astro"), "utf8"), /import Layout from "\.\.\/\.\.\/layouts\/Article\.astro";/);
 
   // Its own package, with the template set's exact versions, and no toolkit.
   const set = await readEmdashTemplateSet(TEMPLATES);
@@ -178,7 +178,7 @@ test("--workspace writes a complete site into site/ of a starter workspace", asy
   assert.equal(app.preview.designs["/"], "website:/");
   assert.equal(app.preview.designs["/about"], "website:/about");
   for (const [route, designRoute] of Object.entries(set.preview.designs)) assert.equal(app.preview.designs[route], `website:${designRoute}`);
-  assert.deepEqual(app.designSurface, ["src/layouts/**", "src/components/**", "src/styles/**", "src/pages/**", "src/routes/**", "public/**"]);
+  assert.deepEqual(app.designSurface, ["src/layouts/**", "src/components/**", "src/styles/**", "src/pages/**", "src/routes/**", "src/divisions/**", "public/**"]);
 
   // The record: template version, platform, mode, and a hash of every template file as written.
   const record = JSON.parse(await fs.readFile(path.join(site, EMDASH_RECORD_PATH), "utf8"));
@@ -845,4 +845,47 @@ test("section checks and previews follow the configured design after selection c
     const invalid = await checkConsumer(site, { fix: false });
     assert.ok(invalid.errors.some((error) => /literal designSystem/.test(error)), invalid.errors.join("\n"));
   }
+});
+
+test("division routes and checks use the selected design without changing section declarations", async (t) => {
+  const root = await temporaryDirectory(t);
+  const workspace = await starterWorkspace(path.join(root, "workspace"));
+  await scaffoldWorkspaceEmdashSite(workspace, { skipInstall: true, output: quiet });
+  const siteRoot = path.join(workspace, "site");
+  const save = async (folder, relative, body) => {
+    const target = path.join(folder, relative);
+    await fs.mkdir(path.dirname(target), { recursive: true });
+    await fs.writeFile(target, typeof body === "string" ? body : JSON.stringify(body));
+  };
+  const division = {
+    id: "studio", prefix: "/our-studio/", system: "main", design: "studio",
+    pages: "src/divisions/studio/pages", layout: "src/layouts/Studio.astro", collections: ["articles"],
+  };
+  const declaration = { schemaVersion: 1, systems: { main: { workspace: true } }, divisions: [division] };
+  await save(workspace, "src/designs/studio/design.json", { title: "Studio" });
+  await save(workspace, "src/designs/studio/layout.html", '<html><head><link rel="stylesheet" href="/styles/studio.css"></head><body>{{content}}</body></html>');
+  await save(workspace, "src/designs/studio/pages/index.html", '<h1 class="studio-only">Studio reference</h1>');
+  await save(workspace, "src/designs/studio/pages/articles.html", '<h1 class="studio-only">Reference list</h1>');
+  await save(workspace, "src/styles/studio.css", ':root { --studio-color: #112233; } .studio-only { color: var(--studio-color); }');
+  await save(siteRoot, "divisions.json", declaration);
+  await save(siteRoot, `${division.pages}/index.html`, '<h1 class="studio-only">Owner Studio</h1>');
+  await save(siteRoot, `${division.pages}/about.html`, '<h1 class="studio-only">About</h1>');
+  await save(siteRoot, division.layout, '<html><head><slot name="head" /></head><body><slot /></body></html>');
+  const before = await fs.readFile(path.join(siteRoot, "sections.json"), "utf8");
+  const { loadConsumer } = await import("./consumer.mjs");
+  const { checkWorkspaceSite } = await import("./consumer-workspace-check.mjs");
+  const consumer = await loadConsumer(siteRoot);
+  const app = consumer.apps.site;
+  assert.ok(app.preview.routes.includes("/our-studio/about"));
+  assert.equal(app.preview.designs["/our-studio"], "studio:/");
+  assert.equal(app.preview.designs["/articles"], "studio:/articles");
+  assert.equal(app.preview.designs["/about"], "website:/about");
+  assert.deepEqual((await checkWorkspaceSite({ siteRoot, designSystemRoot: workspace, designSurface: app.designSurface, files: [`${division.pages}/index.html`], fix: false })).findings, []);
+  assert.equal(await fs.readFile(path.join(siteRoot, "sections.json"), "utf8"), before);
+
+  await save(siteRoot, "public/our-studio/about/index.html", "shadow");
+  await assert.rejects(loadConsumer(siteRoot), /Public file .* conflicts with a division mount/);
+  await fs.rm(path.join(siteRoot, "public"), { recursive: true });
+  await save(siteRoot, "divisions.json", { ...declaration, divisions: [division, { ...division, id: "second", prefix: "/our-studio/sub/" }] });
+  await assert.rejects(loadConsumer(siteRoot), /overlapping mount/);
 });

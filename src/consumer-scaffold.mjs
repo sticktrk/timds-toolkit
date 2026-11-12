@@ -759,11 +759,13 @@ export function layoutImport(fromFile, layout) {
   return relative.startsWith("../") ? relative : `./${relative}`;
 }
 
-function substitute(text, { file, layout, siteUrl, siteName, placeholders = {} }) {
+function substitute(text, { file, layout, siteUrl, siteName, placeholders = {}, workspace = false }) {
   let result = text;
   for (const [name, value] of Object.entries(placeholders)) result = result.replaceAll(name, () => value);
+  const articlePage = workspace && ["src/routes/articles/index.astro", "src/routes/articles/entry.astro"].includes(file);
   return result
-    .replaceAll("__LAYOUT_IMPORT__", () => layoutImport(file, layout))
+    .replaceAll("__LAYOUT_IMPORT__", () => layoutImport(file, articlePage ? "src/layouts/Article.astro" : layout))
+    .replaceAll("__SECTION_LAYOUT_PROPS__", articlePage ? " collection={section.collection}" : "")
     .replaceAll("__SITE_URL__", () => siteUrl)
     .replaceAll("__SITE_NAME__", () => siteName);
 }
@@ -791,7 +793,7 @@ export async function planEmdashTemplates(siteRoot, { platform, layout, siteUrl 
   const both = own.filter((file) => shared.includes(file));
   if (both.length) throw templateDefect(`${both.join(", ")} is in both site/ and site-${platform}/`);
   const origin = siteUrl || EXAMPLE_SITE_URL;
-  const values = { layout, siteUrl: origin, siteName, placeholders };
+  const values = { layout, siteUrl: origin, siteName, placeholders, workspace: overlay === "site-workspace" };
   const layers = [["site", shared], [`site-${platform}`, own]];
   if (overlay) {
     const extra = await templateFiles(path.join(templatesRoot, overlay));

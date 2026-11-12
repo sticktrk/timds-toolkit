@@ -1,0 +1,24 @@
+---
+/** Render owner-authored layout and navigation with the selected design's styles. */
+import { divisionContexts, divisionLayouts } from "virtual:timds/design-system";
+
+interface Props {
+	division: string;
+	title: string;
+	description?: string;
+}
+
+const { division, title, description } = Astro.props;
+const selected = divisionContexts[division];
+const base = import.meta.env.BASE_URL.replace(/\/+$/, "");
+const context = { ...selected, base, assetPrefix: `${base}${selected.assetPrefix}` };
+const Layout = (await divisionLayouts[division]()).default;
+---
+
+<Layout title={title} description={description} context={context}>
+	<Fragment slot="head">
+		{selected.styles.map(({ href, media }) => <link rel="stylesheet" href={`${base}${href}`} media={media ?? undefined} />)}
+		<slot name="head" />
+	</Fragment>
+	<slot />
+</Layout>

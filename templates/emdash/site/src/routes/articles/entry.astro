@@ -74,7 +74,7 @@ const structuredData = JSON.stringify({
 }).replace(/</g, "\\u003c");
 ---
 
-<Layout title={seo.title || data.title} description={seo.description ?? ""}>
+<Layout__SECTION_LAYOUT_PROPS__ title={seo.title || data.title} description={seo.description ?? ""}>
 	<Fragment slot="head">
 		<link rel="canonical" href={canonical} />
 		{seo.robots && <meta name="robots" content={seo.robots} />}

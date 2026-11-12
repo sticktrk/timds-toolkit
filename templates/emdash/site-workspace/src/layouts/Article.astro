@@ -1,0 +1,28 @@
+---
+import { collectionContexts } from "virtual:timds/design-system";
+import Base from "./Base.astro";
+import Division from "./Division.astro";
+
+interface Props {
+	collection: string;
+	title: string;
+	description?: string;
+}
+
+const { collection, ...props } = Astro.props;
+const division = collectionContexts[collection];
+---
+
+{
+	division ? (
+		<Division division={division} {...props}>
+			<slot name="head" slot="head" />
+			<slot />
+		</Division>
+	) : (
+		<Base {...props}>
+			<slot name="head" slot="head" />
+			<slot />
+		</Base>
+	)
+}

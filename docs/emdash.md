@@ -534,8 +534,9 @@ build integrations can retain the design integration's `api.getSections`
 function and call it after `astro:config:setup` for the same data. Astro strips
 extra integration properties while resolving configuration, so that function
 must be captured from the original configuration. A hosted discovery integration
-must acknowledge the current template/workspace/sections tuple by calling
-`api.acknowledgeHostedSections({ template: 3, workspace: 3, sections: 2 })`
+must acknowledge the installed template, workspace and sections capabilities.
+Template 4 additionally requires the composition capability, through
+`api.acknowledgeHostedSections({ template: 4, workspace: 3, sections: 2, composition: 1 })`
 before configuration resolves. A hosted build without that acknowledgement
 fails; standalone builds do not need it.
 
@@ -576,6 +577,79 @@ template. Writer token scopes apply to every collection, not one section.
 Existing sites receive these stock files by a reviewed manual change; no
 template updater is introduced, and ordinary toolkit upgrades keep the site
 untouched.
+
+### Optional division designs
+
+Template 4 adds an optional `site/divisions.json` declaration. The workspace
+site still uses the owner’s selected Astro integration for ordinary pages,
+the global topics and latest articles, the EmDash database, and the admin.
+A division provides its own presentation for a mount and for the collections
+assigned to it. The collection and its address still come from
+`sections.json`; the shared article schema stays in `section-schema.json`.
+
+```json
+{
+  "schemaVersion": 1,
+  "systems": { "main": { "workspace": true } },
+  "divisions": [
+    {
+      "id": "commercial",
+      "prefix": "/commercial-division/",
+      "system": "main",
+      "design": "commercial-web",
+      "pages": "src/divisions/commercial/pages",
+      "layout": "src/layouts/Commercial.astro",
+      "collections": ["lease_faq"]
+    }
+  ]
+}
+```
+
+Mounts use up to four lowercase, hyphenated segments and a trailing slash.
+The site can declare up to eight divisions. Each division supplies regular
+HTML fragments using the default design-page filenames, including
+`index.html` for the mount itself. A page named `about.html` in this example
+has the canonical address `/commercial-division/about/`. Its layout is an
+owner-authored Astro component with a default slot for content and a slot
+named `head` for the selected design’s stylesheet links and route metadata.
+The layout receives `title`, optional `description`, and `context` with the
+division `prefix`, Astro `base`, and selected `system`, `design` and
+`assetPrefix`. Put the header, footer and navigation in that layout, using
+the selected design as a reference. The division selects the design's
+stylesheet links from its layout or, if absent, its default home page. The
+layout should pass both slots through and leave stylesheet selection to the
+integration.
+
+An absolute in-site link in a division fragment such as `/about/` resolves
+under the division mount when that division owns the target. Links to
+other site routes keep those routes, and asset URLs use a separate
+namespace. A layout can build navigation from `context.base` and
+`context.prefix`; the full site base is required for a link from an Astro
+layout. Form handlers stay in `src/forms/`, named by the full route where
+they handle POST. Development keeps serving the site after a corrected save
+and answers 503 for public composition routes during an invalid save.
+
+Each collection may be associated once. A collection inside a mount must be
+explicitly associated with that division; a collection outside any mount
+can also be associated and keeps its existing prefix. Section lists, entries
+and feeds keep their native addresses. Topic and latest views keep the
+main context and link to entries at the existing canonical URLs. Changing
+or removing a division is a presentation change and does not move content
+or grant division-specific writer access.
+
+The route inventory refuses overlapping mounts and collisions between
+mounted pages, main design pages, collections, public files and Astro
+routes. The two-way check reads the styles for each division’s authored
+pages and layout, and preview routes come from that same inventory.
+Reference pages are available for design comparison. Sites can use the
+template without adding a divisions declaration.
+
+The scaffold writes template 4 for a new workspace site. For an existing
+site, generate a comparison scaffold in a disposable workspace and port
+the composition integration, virtual module types, catch-all page, article
+routes and layout wrappers into the existing site while preserving local
+customizations. Keep the site's declaration, seed, collection schema and
+database as they are. Toolkit upgrades leave the site's files in place.
 
 ### The check runs both ways
 
