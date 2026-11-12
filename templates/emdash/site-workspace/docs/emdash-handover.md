@@ -78,7 +78,10 @@ fingerprint `--status` printed.
 
 ## Declared sections
 
-`sections.json` lists each collection and its canonical address prefix;
+`sections.json` lists each collection and its canonical address prefix.
+Declaration version 2 supports nested literal prefixes within one selected
+Design System, such as `/commercial-division/lease-faq/`; ordinary parent
+and sibling pages remain public. Version 1 keeps its single-segment grammar.
 `docs/content-api.md` lists the current entry addresses for writers. After
 editing the declaration, run `npm run sections:sync` in the site and run
 the consumer check at the workspace root. Commit the declaration, generated
@@ -93,7 +96,8 @@ an undeclared collection definition or its development content.
 A first setup applies the seed. Once setup is complete, editing the seed
 cannot create a new collection: create it through EmDash's schema API or
 admin with every declared field, support and URL pattern, and add its name
-to the topic taxonomy. A platform that supports section contract 1 can do
+to the topic taxonomy. A platform that supports the declaration's section
+contract (1 for version 1, 2 for version 2) can do
 this additively before routing a deployment. The TimDS host refuses changes
 to an existing collection's fields or features, including adding a field;
 choose the shared schema before first creation. Never rename collections or

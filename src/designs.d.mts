@@ -11,7 +11,7 @@ export const DEFAULT_STATE: "default";
 export const JOURNEYS_OUTPUT_DIRECTORY: "journeys";
 
 export type CatalogState = { name: string; path: string; source: string };
-export type CatalogPage = { route: string; title: string | null; states: CatalogState[] };
+export type CatalogPage = { route: string; title: string | null; site?: "reference"; states: CatalogState[] };
 /** A journey screen as design.json declares it, with the route normalized and the state resolved (`default` when omitted). */
 export type CatalogScreen = { page: string; state: string; label: string | null; note: string | null };
 export type CatalogStep = { title: string; summary: string; screens: CatalogScreen[]; branches: CatalogScreen[] };

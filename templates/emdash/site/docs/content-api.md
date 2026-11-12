@@ -6,9 +6,10 @@ written against EmDash 1.4.0; statements marked **unconfirmed** could not be
 checked against a running site and should be verified on the first one.
 
 Renaming the collection, the taxonomy or any field below, or changing a
-field's type, is a breaking change for every writer. Add fields instead;
-never rename or remove them without a migration plan agreed with the
-writers.
+field's type, is a breaking change for every writer. Hosted deployment
+preserves existing collection schemas, including their field inventory;
+choose the shared schema before first creation. Any later schema change
+needs a separate migration plan agreed with the writers.
 
 ## Content model
 
@@ -17,7 +18,9 @@ writers.
 `sections.json` declares the collections this site serves. An entry belongs
 to exactly one collection; choose it when creating the entry. Every section
 uses the same fields and publishing features. The address belongs to the
-entry's collection and must not be copied to another section.
+entry's collection and must not be copied to another section. A nested
+address such as `/commercial-division/lease-faq/{slug}/` still belongs to one
+collection in this same site; use its collection slug in API requests.
 
 <!-- timds:sections -->
 | Collection | Entry address | Feed |

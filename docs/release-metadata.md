@@ -192,10 +192,11 @@ installs (`consumer scaffold emdash --workspace`, see
 
 ```json
 "emdashTemplate": {
-  "version": 2,
+  "version": 3,
   "history": [
     { "version": 1, "changes": ["The first template set: ..."] },
-    { "version": 2, "changes": ["Declared sections, shared schema, routes, feeds and mixed lists."] }
+    { "version": 2, "changes": ["Declared sections, shared schema, routes, feeds and mixed lists."] },
+    { "version": 3, "changes": ["Nested section prefixes and a shared route inventory with explicit reference pages."] }
   ]
 }
 ```
@@ -211,14 +212,15 @@ would need to receive raises `version` in both places and adds a `history`
 entry; `src/emdash-template-metadata.test.mjs` fails when the two disagree or
 a version has no entry.
 
-A release that writes template version 2 also declares
-`emdashWorkspaceContract: 2` and `emdashSectionsContract: 1` in its package
-metadata. Workspace contract 2 requires section-aware verification, so older
-hosts that understand only workspace contract 1 refuse this template. The second says
-that `sections.json` and the build's `virtual:timds/design-system` section
-exports use section contract 1. A host must understand both before accepting
-the scaffold. The template version by itself no longer means a single
-`articles` collection.
+A release that writes template version 3 declares `emdashWorkspaceContract: 3`
+and `emdashSectionsContract: 2`. Its fresh `sections.json` uses declaration
+version 2 for nested literal prefixes inside one Design System; builds export
+section contract 2. It can also read declaration version 1 and export section
+contract 1 without accepting nested prefixes under that older grammar. Template
+version 2's capability pair remains workspace 2 / sections 1. Hosts must accept
+the complete versioned capability tuple before scaffolding; an older host must
+refuse a template whose nested routing it cannot validate. Neither template
+version implies that an `articles` collection is mandatory.
 
 ## Compatibility and verification
 

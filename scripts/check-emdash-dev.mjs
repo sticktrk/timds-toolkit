@@ -78,11 +78,20 @@ async function fixture(name, dependencies) {
   await writeFile(config, (await readFile(config, "utf8")).replace("vite: { server:", 'vite: { cacheDir: ".astro/vite-cache", server:'));
   await symlink(dependencies, path.join(site, "node_modules"), "dir");
   await save(path.join(workspace, "timds.json"), { systemId: "timds-example", name: "Example site", description: "Synthetic development verification.", version: "1.0.0" });
-  await mkdir(path.join(workspace, "src/designs/website/pages"), { recursive: true });
+  const pages = path.join(workspace, "src/designs/website/pages");
+  await mkdir(path.join(pages, "commercial-division"), { recursive: true });
   await save(path.join(workspace, "src/designs/website/design.json"), { title: "Website", pages: {} });
-  await writeFile(path.join(workspace, "src/designs/website/pages/index.html"), "<html><head><title>Example home</title></head><body><main>Example home</main></body></html>");
+  await writeFile(path.join(pages, "index.html"), "<html><head><title>Example home</title></head><body><main>Example home</main></body></html>");
+  await writeFile(path.join(pages, "commercial-division.html"), '<html><head><title>Commercial division</title></head><body><main><h1>Commercial division</h1><a href="/commercial-division/about/">About</a><a href="/commercial-division/lease-faq/">Lease FAQ</a></main></body></html>');
+  await writeFile(path.join(pages, "commercial-division/about.html"), "<html><head><title>About commercial division</title></head><body><main><h1>About commercial division</h1></main></body></html>");
+  await mkdir(path.join(site, "src/forms/commercial-division"), { recursive: true });
+  await writeFile(path.join(site, "src/forms/commercial-division/lease-faq.ts"), 'export const POST = () => new Response("lease-form-handled", { status: 201, headers: { "Content-Type": "text/plain" } });\n');
+  // Seed only local synthetic content: the stock sample includes remote media.
+  const seedFile = path.join(site, "seed/seed.json"), seed = await json(seedFile);
+  seed.content = { articles: [{ id: "articles-example", slug: "example-article", status: "published", data: { title: "Example article", summary: "Synthetic local content.", body: [] } }] };
+  await save(seedFile, seed);
   // Observe the same module used by pages, independently of database seeding.
-  await writeFile(path.join(site, "src/pages/contract.json.ts"), 'import { sections, sectionSchema } from "virtual:timds/design-system";\nexport const GET = () => Response.json({ sections, sectionSchema });\n');
+  await writeFile(path.join(site, "src/pages/contract.json.ts"), 'import { sectionsContract, sections, sectionSchema } from "virtual:timds/design-system";\nexport const GET = () => Response.json({ sectionsContract, sections, sectionSchema });\n');
   return site;
 }
 
@@ -114,12 +123,16 @@ try {
     const site = await fixture(base === "/" ? "root" : "mounted", dependencies);
     const port = await freePort(), serverOrigin = `http://127.0.0.1:${port}`, origin = serverOrigin + (base === "/" ? "" : base);
     // EmDash's development API stays at the root even when pages use /site.
-    const request = (pathname) => fetch((pathname.startsWith("/_emdash/") ? serverOrigin : origin) + pathname, { signal: AbortSignal.timeout(10_000), redirect: "manual" });
-    const status = async (pathname) => { const response = await request(pathname); await response.body?.cancel(); return response.status; };
+    const request = (pathname, init = {}) => fetch((pathname.startsWith("/_emdash/") ? serverOrigin : origin) + pathname, { signal: AbortSignal.timeout(10_000), redirect: "manual", ...init });
+    const status = async (pathname, init) => { const response = await request(pathname, init); await response.body?.cancel(); return response.status; };
+    const read = async (pathname) => { const response = await request(pathname); assert.equal(response.status, 200, pathname); return response.text(); };
+    const post = { method: "POST", headers: { Origin: serverOrigin, "Content-Type": "application/x-www-form-urlencoded" }, body: "example=1" };
     const contract = async () => { const response = await request("/contract.json"); assert.equal(response.status, 200); return response.json(); };
     const synchronize = () => command([process.execPath, "scripts/sections.mjs"], site);
     const declarations = path.join(site, "sections.json"), seedFile = path.join(site, "seed/seed.json"), schemaFile = path.join(site, "section-schema.json");
     const declaration = await json(declarations);
+    assert.equal(declaration.schemaVersion, 2);
+    const division = "/commercial-division/", prefix = `${division}lease-faq/`, slug = "how-to-lease-building";
     console.log(`Checking EmDash development reloads at ${base}.`);
     output = "";
     child = spawn(process.execPath, [astroCli, "dev", "--host", "127.0.0.1", "--port", String(port), "--ignore-lock"], { cwd: site, env: { ...environment, TIMDS_SITE_BASE: base }, stdio: ["ignore", "pipe", "pipe"] });
@@ -128,21 +141,42 @@ try {
     assert.equal(await status("/articles/"), 200);
     assert.equal(await status("/articles/example-article/"), 200);
     assert.equal(await status("/articles/rss.xml"), 200);
+    assert.equal((await contract()).sectionsContract, 2);
+    assert.ok((await read(division)).includes("<h1>Commercial division</h1>"));
+    assert.ok((await read(`${division}about/`)).includes("<h1>About commercial division</h1>"));
 
-    declaration.sections.push({ collection: "guides", prefix: "/guides/", label: "Guides", singularLabel: "Guide", feed: true });
+    declaration.sections.push({ collection: "lease_faq", prefix, label: "Lease FAQ", singularLabel: "Lease answer", feed: true });
     output = "";
     await save(declarations, declaration);
     await until(() => output.includes("Continuing with previous valid configuration"), `${base} invalid declaration/seed recovery`);
     assert.equal(await status("/articles/"), 200);
-    assert.equal(await status("/guides/"), 404);
+    assert.equal(await status(prefix), 404);
+    // Supply the requested entry slug before sync derives its new collection.
+    const additionalSeed = await json(seedFile);
+    additionalSeed.content.lease_faq = [{ id: "lease-faq-example", slug, status: "published", data: { title: "How to lease a building", summary: "Synthetic leasing guide.", body: [] } }];
+    output = "";
+    await save(seedFile, additionalSeed);
+    await until(() => output.includes("Continuing with previous valid configuration"), `${base} new collection awaiting sync`);
     output = "";
     await synchronize();
     await until(() => output.includes("server restarted."), `${base} added section Astro restart`);
-    await until(async () => (await contract()).sections.some((section) => section.collection === "guides"), `${base} added section route configuration`);
+    await until(async () => (await contract()).sections.some((section) => section.collection === "lease_faq" && section.urlPattern === `${prefix}{slug}/`), `${base} added nested section route configuration`);
     // Dev bypass explicitly reapplies the changed seed to this local database.
     // Production schema reconciliation is a separate host responsibility.
     assert.equal(await status("/_emdash/api/setup/dev-bypass"), 200);
-    for (const pathname of ["/guides/", "/guides/example-article/", "/guides/rss.xml"]) assert.equal(await status(pathname), 200, `${base}${pathname}`);
+    console.log(`Checking ${base} nested content, division pages and method ownership.`);
+    const listing = await read(prefix), entry = await read(`${prefix}${slug}/`), feed = await read(`${prefix}rss.xml`);
+    assert.ok(listing.includes("How to lease a building"));
+    assert.ok(listing.includes(`${base === "/" ? "" : base}${prefix}${slug}/`));
+    assert.ok(entry.includes("How to lease a building"));
+    assert.ok(feed.includes(origin + prefix + slug + "/"));
+    assert.ok((await read(division)).includes("<h1>Commercial division</h1>"));
+    assert.ok((await read(`${division}about/`)).includes("<h1>About commercial division</h1>"));
+    const handled = await request(prefix, post);
+    assert.equal(handled.status, 201);
+    assert.equal(await handled.text(), "lease-form-handled");
+    for (const pathname of [`${division}about/`, `${prefix}${slug}/`]) assert.equal(await status(pathname, post), 405, `${base}${pathname} POST`);
+    for (const pathname of [`${division}missing/`, `${prefix}missing/`, `${prefix}${slug}/extra/`]) assert.equal(await status(pathname), 404, `${base}${pathname}`);
 
     const model = await json(schemaFile);
     model.fields.push({ slug: "review_note", label: "Review note", type: "text" });
@@ -172,18 +206,20 @@ try {
     await until(() => output.includes("Continuing with previous valid configuration"), `${base} removed section before sync`);
     // Remove its development schema and content explicitly before sync.
     const seed = await json(seedFile);
-    seed.collections = seed.collections.filter((collection) => collection.slug !== "guides");
-    delete seed.content.guides;
+    seed.collections = seed.collections.filter((collection) => collection.slug !== "lease_faq");
+    delete seed.content.lease_faq;
     output = "";
     await save(seedFile, seed);
     await until(() => output.includes("Continuing with previous valid configuration"), `${base} removed section taxonomy before sync`);
     output = "";
     await synchronize();
     await until(() => output.includes("server restarted."), `${base} removed section Astro restart`);
-    await until(async () => (await contract()).sections.length === 1 && await status("/guides/") === 404, `${base} removed section route`);
+    await until(async () => (await contract()).sections.length === 1 && await status(prefix) === 404, `${base} removed section route`);
     assert.equal(await status("/articles/"), 200);
+    assert.ok((await read(division)).includes("<h1>Commercial division</h1>"));
+    assert.ok((await read(`${division}about/`)).includes("<h1>About commercial division</h1>"));
     await stop();
-    console.log(`Passed EmDash development reloads at ${base}: sections, invalid-pair recovery, schema JSON, helper changes and removal.`);
+    console.log(`Passed EmDash development reloads at ${base}: nested list/entry/feed, division pages, POST ownership, 404/405, invalid-pair recovery, schema JSON, helper changes and removal.`);
   }
 } finally {
   await stop();

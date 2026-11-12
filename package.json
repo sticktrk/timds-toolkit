@@ -5,7 +5,7 @@
   "type": "module",
   "hostContract": 2,
   "emdashTemplate": {
-    "version": 2,
+    "version": 3,
     "history": [
       {
         "version": 1,
@@ -19,6 +19,13 @@
         "changes": [
           "Declares article sections in sections.json with one shared field model, generated seeds, section routes and feeds, and mixed topic lists with per-collection cursors.",
           "Exposes section contract 1 to builds, validates declarations against seeds, and derives preview routes and design references for every section."
+        ]
+      },
+      {
+        "version": 3,
+        "changes": [
+          "Adds section contract 2 with nested literal address prefixes inside one Design System and rejects overlapping collection namespaces.",
+          "Shares the route inventory across builds, checks and previews, retaining explicit nonpublic design references and refusing collisions with public pages."
         ]
       }
     ]
@@ -211,6 +218,6 @@
   "publishConfig": {
     "access": "public"
   },
-  "emdashWorkspaceContract": 2,
-  "emdashSectionsContract": 1
+  "emdashWorkspaceContract": 3,
+  "emdashSectionsContract": 2
 }

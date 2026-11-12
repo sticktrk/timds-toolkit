@@ -211,13 +211,17 @@ export async function readDesignCatalog(designSystemRoot) {
     if (!title) throw new Error(`${label} needs a title`);
     if (manifest.summary !== undefined && typeof manifest.summary !== "string") throw new Error(`${label} summary must be a string`);
     // Optional page titles by route, for a home page whose <h1> is a headline rather than a name.
-    const titles = new Map();
+    const titles = new Map(), siteRoles = new Map();
     if (manifest.pages !== undefined) {
       if (!manifest.pages || typeof manifest.pages !== "object" || Array.isArray(manifest.pages)) throw new Error(`${label} pages must be an object keyed by route`);
       for (const [route, page] of Object.entries(manifest.pages)) {
         const title = typeof page === "string" ? page : page?.title;
         if (typeof title !== "string" || !title.trim()) throw new Error(`${label} pages[${JSON.stringify(route)}] needs a title`);
         titles.set(normalizeRoute(route), title.trim());
+        if (page?.site !== undefined) {
+          if (page.site !== "reference") throw new Error(`${label} pages[${JSON.stringify(route)}].site must be "reference" when supplied`);
+          siteRoles.set(normalizeRoute(route), page.site);
+        }
       }
     }
     const layout = path.join(directory, "layout.html");
@@ -229,7 +233,7 @@ export async function readDesignCatalog(designSystemRoot) {
       const file = `${DESIGNS_SOURCE_DIRECTORY}/${entry.name}/pages/${relative}`;
       const { route, state } = parsePageFile(relative, file);
       if (isJourneysRoute(route)) throw new Error(`${file}: the route ${route} is reserved for journey storyboards (/designs/${entry.name}/${JOURNEYS_OUTPUT_DIRECTORY}/<journey>/); name the route differently`);
-      const page = pages.get(route) ?? { route, title: titles.get(route) ?? null, states: [] };
+      const page = pages.get(route) ?? { route, title: titles.get(route) ?? null, ...(siteRoles.has(route) ? { site: siteRoles.get(route) } : {}), states: [] };
       const existing = page.states.find((candidate) => candidate.name === state);
       if (existing) throw new Error(`${file} and ${existing.source} both describe route ${route}${state === DEFAULT_STATE ? "" : ` state ${state}`}; keep one`);
       page.states.push({ name: state, path: path.join(pagesDirectory, ...relative.split("/")), source: file });

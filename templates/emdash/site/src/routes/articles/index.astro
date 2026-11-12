@@ -15,6 +15,7 @@ export const prerender = false;
 
 const section = sectionForPath(Astro.url.pathname);
 if (!section) return Astro.rewrite("/404");
+if (Astro.request.method !== "GET" && Astro.request.method !== "HEAD") return new Response("This address accepts GET and HEAD.", { status: 405, headers: { Allow: "GET, HEAD", "Cache-Control": "no-store" } });
 if (!await sectionAvailable(section)) return sectionUnavailable();
 const cursor = Astro.url.searchParams.get("cursor") ?? undefined;
 const { entries, nextCursor, cacheHint, error } = await getEmDashCollection<string, ArticleData>(section.collection, {

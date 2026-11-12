@@ -9,9 +9,8 @@ system and the site are edited, reviewed and committed together.
 
 ## How the system reaches the site
 
-- **Pages.** Every page of the website design `src/designs/__DESIGN_ID__/`
-  that is not under a declared section prefix (`sections.json`) or
-  `/topics/` is a page of this site, built from the design file by
+- **Pages.** Every ordinary page of the website design `src/designs/__DESIGN_ID__/`
+  is a page of this site, built from the design file by
   `src/integrations/design-system.mjs` and served by
   `src/pages/[...page].astro`. There is one copy, in the system: editing the
   design is editing the page, and a page added to the design is a page here.
@@ -31,6 +30,25 @@ system and the site are edited, reviewed and committed together.
   prefix when the page is rendered; a deployed site runs at `/`.
 
 `astro.config.mjs` names the design (`designSystem({ design: "__DESIGN_ID__" })`).
+The consumer check and preview follow that selection too.
+
+`sections.json` version 2 permits nested collection prefixes, such as
+`/commercial-division/lease-faq/`. Ordinary parent and sibling pages such as
+`/commercial-division/` and `/commercial-division/about/` stay public inside
+the same selected design. A public design page or native Astro route inside
+a collection namespace or `/topics/` is a conflict: check and build refuse it.
+The stock `/articles`, `/articles/example-article`, `/topics` and
+`/topics/example-topic` pages are references. Mark any additional design
+sample in `design.json` with its required title and `site: "reference"`:
+
+```json
+{ "pages": { "/commercial-division/lease-faq": { "title": "Lease FAQ list", "site": "reference" } } }
+```
+
+The matching HTML file remains a design reference, never a separate public
+page. Section previews use its list or `example-article` sample when present,
+falling back to the stock article reference. Declaration version 1 keeps
+its single-segment prefixes and older exclusion of all pages under them.
 
 ## Forms
 

@@ -54,6 +54,7 @@ import path from "node:path";
 
 import { CONSUMER_MANIFEST_FILE, CONSUMER_SKILL_NAMES, validateConsumerManifest } from "./consumer.mjs";
 import { normalizeSections, normalizeSectionSchema, createSectionSeed, validateSectionSeed, isSectionRoute, writerSectionTable } from "../templates/emdash/site/src/lib/articles/sections.mjs";
+import { sectionRouteInventory } from "../templates/emdash/site-workspace/src/integrations/section-routes.mjs";
 import { WORKSPACE_SITE_AGENTS_MARKER, WORKSPACE_SITE_DIRECTORY, WORKSPACE_SITE_MOUNT } from "./workspace-site.mjs";
 
 /** The template directory the workspace mode lays over the shared set. */
@@ -142,6 +143,29 @@ export function selectWebsiteDesign(designs, sections = DEFAULT_SECTIONS) {
   const withHome = designs.filter((design) => pageRoutes(design).includes("/"));
   const candidates = withHome.length ? withHome : designs.filter((design) => pageRoutes(design).length || design.layout);
   return candidates.find((design) => design.id === "website") ?? candidates[0] ?? null;
+}
+
+/** Read the scaffold's literal design selection without executing the site's configuration. */
+export async function selectWorkspaceDesign({ siteRoot, designSystemRoot, designs, sections = DEFAULT_SECTIONS }) {
+  designs ??= (await (await import("./designs.mjs")).readDesignCatalog(designSystemRoot)).designs;
+  for (const file of ["astro.config.mjs", "astro.config.js", "astro.config.ts", "astro.config.mts", "astro.config.cjs", "astro.config.cts"]) {
+    const text = await fs.readFile(path.join(siteRoot, file), "utf8").catch((caught) => {
+      if (caught?.code === "ENOENT" || caught?.code === "EISDIR") return null;
+      throw caught;
+    });
+    if (text === null) continue;
+    const call = /\bdesignSystem\s*\(\s*\{[^}]*?\bdesign\s*:\s*(["'`])([a-z0-9]+(?:-[a-z0-9]+)*)\1/.exec(text);
+    if (!call) break;
+    const entry = designs.find((design) => design.id === call[2]);
+    if (!entry) {
+      const ids = designs.map((design) => design.id);
+      throw new Error(`The site's ${file} renders the website design "${call[2]}", but the Design System has no src/designs/${call[2]}/design.json. Name one it has${ids.length ? ` (${ids.join(", ")})` : ""} in ${file}, or add that design to the system.`);
+    }
+    return { id: entry.id, entry, selectedBy: file };
+  }
+  const entry = selectWebsiteDesign(designs, sections);
+  if (!entry) throw new Error("The two-way check reads the styles the site loads from the website design it renders inside, and the Design System has none (src/designs/<id>/ with a layout.html or pages/index.html). Add one with timds designs init, then name it in the site's astro.config.mjs as designSystem({ design: \"<id>\" }).");
+  return { id: entry.id, entry, selectedBy: "catalog" };
 }
 
 /**
@@ -266,14 +290,15 @@ export function workspacePackageJson(set, { name }) {
 }
 
 /** Preview section routes follow sections.json; an own design wins, then the stock article design. */
-export function sectionPreview(preview, sections, design) {
-  const available = new Set(design?.pages?.map((page) => page.route) || []);
-  const routes = (preview.routes || []).filter((route) => !["/articles", "/articles/example-article"].includes(route));
-  const designs = { ...(preview.designs || {}) };
-  delete designs["/articles"];
-  delete designs["/articles/example-article"];
-  for (const section of sections) {
-    for (const [route, fallback] of [[section.prefix.slice(0, -1), "/articles"], [`${section.prefix}example-article`, "/articles/example-article"]]) {
+export function sectionPreview(preview, sections, design, { version = 2, pageFiles = [] } = {}) {
+  const inventory = sectionRouteInventory(sections, design?.pages ?? [], { version, pageFiles });
+  const available = new Set(inventory.references.map((page) => page.route));
+  const templateRoute = (route) => available.has(route) || isSectionRoute(route, sections) || ["/articles", "/articles/example-article"].includes(route);
+  const routes = (preview.routes || []).filter((route) => !templateRoute(route));
+  const designs = Object.fromEntries(Object.entries(preview.designs || {}).filter(([route]) => !templateRoute(route)));
+  for (const page of inventory.pages) if (page.route !== "/404") { routes.push(page.route); designs[page.route] ??= page.route; }
+  for (const item of inventory.sections) {
+    for (const [route, fallback] of [[item.list, "/articles"], [item.sample, "/articles/example-article"]]) {
       routes.push(route);
       const reference = available.has(route) ? route : available.has(fallback) ? fallback : null;
       if (reference) designs[route] = reference;
@@ -281,18 +306,23 @@ export function sectionPreview(preview, sections, design) {
   }
   // Keep the default ordering, with the shared topic sample after section samples.
   const topic = "/topics/example-topic";
-  return { ...preview, routes: [...new Set([...routes.filter((route) => route !== topic), ...(routes.includes(topic) ? [topic] : [])])], designs };
+  if (available.has(topic)) designs[topic] = topic;
+  return { ...preview, routes: [...new Set([...routes.filter((route) => route !== topic), ...((preview.routes || []).includes(topic) || available.has(topic) ? [topic] : [])])], designs };
 }
 
 /** Read only JSON data: consumer check and preview never execute the site's code. */
-export async function readWorkspaceSections(siteRoot) {
+export async function readWorkspaceSectionDeclaration(siteRoot) {
   const declaration = await readJsonFile(path.join(siteRoot, "sections.json"), "sections.json");
   if (declaration === null) {
     const record = await readJsonFile(path.join(siteRoot, ".timds/emdash.json"), ".timds/emdash.json");
     if (record?.template >= 2) throw new Error("sections.json is missing from this section-aware site; restore its declaration before checking or previewing it");
     return null;
   }
-  return normalizeSections(declaration);
+  return { schemaVersion: declaration.schemaVersion, sections: normalizeSections(declaration) };
+}
+
+export async function readWorkspaceSections(siteRoot) {
+  return (await readWorkspaceSectionDeclaration(siteRoot))?.sections ?? null;
 }
 
 export async function checkWorkspaceSectionSeed(siteRoot, sections) {
@@ -304,27 +334,34 @@ export async function checkWorkspaceSectionSeed(siteRoot, sections) {
 
 /** Derive preview inputs without rewriting the consumer manifest or its review boundary. */
 export async function workspaceSectionApps(siteRoot, apps, systemRoot) {
-  const sections = await readWorkspaceSections(siteRoot);
-  if (!sections) return apps;
+  const declaration = await readWorkspaceSectionDeclaration(siteRoot);
+  if (!declaration) return apps;
+  const { sections, schemaVersion: version } = declaration;
+  const pagesDirectory = path.join(siteRoot, "src/pages");
+  const pageFiles = existsSync(pagesDirectory) ? (await listFiles(pagesDirectory)).filter((file) => file.file).map((file) => `src/pages/${file.relative}`) : [];
   const catalog = systemRoot ? await (await import("./designs.mjs")).readDesignCatalog(systemRoot) : { designs: [] };
+  const design = systemRoot ? (await selectWorkspaceDesign({ siteRoot, designSystemRoot: systemRoot, designs: catalog.designs, sections })).entry : null;
   const result = {};
   for (const [name, app] of Object.entries(apps)) {
     if (app.cwd !== ".") { result[name] = app; continue; }
-    const ownId = Object.values(app.preview.designs || {})[0]?.split(":")[0];
-    const design = catalog.designs.find((entry) => entry.id === ownId) || selectWebsiteDesign(catalog.designs, sections);
-    const rawPreview = { ...app.preview, designs: Object.fromEntries(Object.entries(app.preview.designs || {}).map(([route, reference]) => [route, reference.split(":").slice(1).join(":")])) };
-    const preview = sectionPreview(rawPreview, sections, design);
-    preview.designs = Object.fromEntries(Object.entries(preview.designs).map(([route, reference]) => [route, app.preview.designs?.[route] || `${design?.id}:${reference}`]));
+    const selectedPair = (reference) => !design || reference.split(":")[0] === design.id;
+    const rawPreview = {
+      ...app.preview,
+      routes: (app.preview.routes || []).filter((route) => !app.preview.designs?.[route] || selectedPair(app.preview.designs[route])),
+      designs: Object.fromEntries(Object.entries(app.preview.designs || {}).filter(([, reference]) => selectedPair(reference)).map(([route, reference]) => [route, reference.split(":").slice(1).join(":")])),
+    };
+    const preview = sectionPreview(rawPreview, sections, design, { version, pageFiles });
+    preview.designs = Object.fromEntries(Object.entries(preview.designs).map(([route, reference]) => [route, `${design?.id}:${reference}`]));
     result[name] = { ...app, preview };
   }
   return result;
 }
 
 /** `site/timds.consumer.json`: the workspace form, one root app previewed from a seeded local database. */
-export function workspaceConsumerManifest({ systemId, design, preview, sections = DEFAULT_SECTIONS }) {
-  preview = sectionPreview(preview, sections, design);
+export function workspaceConsumerManifest({ systemId, design, preview, sections = DEFAULT_SECTIONS, sectionsContract = 2 }) {
+  preview = sectionPreview(preview, sections, design, { version: sectionsContract });
   const designRoutes = new Set(design.pages.map((page) => page.route));
-  const pages = design.pages.map((page) => page.route).filter((route) => !isSectionRoute(route, sections) && route !== "/404");
+  const pages = sectionRouteInventory(sections, design.pages, { version: sectionsContract }).pages.map((page) => page.route).filter((route) => route !== "/404");
   const routes = [...new Set(["/", ...pages, ...preview.routes])];
   const designs = {};
   for (const route of routes) {
@@ -374,7 +411,9 @@ export async function planWorkspaceSite(designSystemRoot, { templatesRoot, repoR
 
   const { readDesignCatalog } = await import("./designs.mjs");
   const catalog = await readDesignCatalog(designSystemRoot);
-  const sections = normalizeSections(await readJsonFile(path.join(templatesRoot, "site", "sections.json"), "sections.json"));
+  const declaration = await readJsonFile(path.join(templatesRoot, "site", "sections.json"), "sections.json");
+  const sections = normalizeSections(declaration);
+  const sectionsContract = declaration.schemaVersion;
   const design = selectWebsiteDesign(catalog.designs, sections);
   if (!design) {
     throw new Error(`The Design System ${systemId} has no website design under src/designs/ with a page to build, so the site would have no pages and no layout for its articles. Add one (timds designs init writes the starter's sample design), then rerun. Nothing was written.`);
@@ -415,7 +454,7 @@ export async function planWorkspaceSite(designSystemRoot, { templatesRoot, repoR
   writerFile.content = String(writerFile.content).replace(/<!-- timds:sections -->[\s\S]*?<!-- \/timds:sections -->/, () => writerSectionTable(sections));
   const packageJson = workspacePackageJson(set, { name });
   const ports = await articleRoutePorts({ designSystemRoot, design, templatesRoot, sections });
-  const siteManifest = workspaceConsumerManifest({ systemId, design, preview: set.preview, sections });
+  const siteManifest = workspaceConsumerManifest({ systemId, design, preview: set.preview, sections, sectionsContract });
   const files = [...plan.files.map(({ path: file, content }) => ({ path: file, content })),
     { path: "package.json", content: toJson(packageJson) },
     { path: CONSUMER_MANIFEST_FILE, content: toJson(siteManifest) }];
@@ -436,7 +475,7 @@ export async function planWorkspaceSite(designSystemRoot, { templatesRoot, repoR
     design: {
       id: design.id,
       layout: Boolean(design.layout),
-      pages: design.pages.map((page) => page.route).filter((route) => !isSectionRoute(route, sections)),
+      pages: sectionRouteInventory(sections, design.pages, { version: sectionsContract }).pages.map((page) => page.route),
     },
     tokens: runsStarterBuild(manifest),
     packageJson,

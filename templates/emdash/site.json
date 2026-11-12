@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "dependencies": {
     "all": {
       "emdash": "1.4.0",

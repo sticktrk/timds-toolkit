@@ -122,7 +122,7 @@ of its root app (`"cwd": "."`) when it declares several. It writes:
   and EmDash's seed route as `preview.ready` when the app's is absent or `/`.
   The result is validated before it is written.
 - `.timds/emdash.json`, the template version and platform the site came from
-  (`{ "template": 2, "platform": "cloudflare" }`).
+  (`{ "template": 3, "platform": "cloudflare" }`).
 
 The seed defines the content model external writers target: an `articles`
 collection (`title`, `summary`, `body` as Portable Text, and `cover`; the
@@ -334,13 +334,19 @@ In the site:
 
 ### Pages from the designs
 
-The site builds its pages from the system's website design. The design is the
-one with a home page (`website` first, else the first in order). Its
+The site builds its pages from the system's website design named by
+`designSystem({ design: "<id>" })` in `astro.config.mjs`. The scaffold picks
+the one with a home page (`website` first, else the first in order). Consumer
+checks and previews read that same literal selection without executing the
+configuration, so changing it also changes their page and reference inventory. Its
 integration (`src/integrations/design-system.mjs`) runs in Node while `astro
 dev` serves and while `astro build` builds, never in the Worker:
 
-- Every page of the design that is not an article, topic or list route
-  (the prefixes in `sections.json`, and `/topics/`) is a page of the site, filled
+- Every ordinary page of the design is a page of the site. Declaration
+  version 2 excludes only the stock article/topic references and pages marked
+  `site: "reference"` in `design.json`; a public page inside a collection or
+  topic namespace is a conflict, never silently omitted. Version 1 retains
+  its legacy exclusion by prefix. Public pages are filled
   the way the system's own renderer fills it (`layout.html` around the page,
   the `{{name}}`, `{{description}}`, `{{version}}` and `{{title}}`
   placeholders), with Astro's `base` in front of root-relative `href`, `src`,
@@ -403,30 +409,43 @@ having no port yet; the `timds-update-design-system` skill ports it.
 
 ### Article sections
 
-Template version 2 declares its sections in `site/sections.json`. A fresh
+Template version 3 declares its sections in `site/sections.json` with declaration
+version 2. A fresh
 site has the same single `articles` section. Any non-empty set can replace
 it; `articles` is not mandatory:
 
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "sections": [
     { "collection": "articles", "prefix": "/articles/", "label": "Articles", "singularLabel": "Article", "feed": true },
-    { "collection": "guides_for_owners", "prefix": "/guides-for-owners/", "label": "Guides", "singularLabel": "Guide", "feed": true },
+    { "collection": "lease_faq", "prefix": "/commercial-division/lease-faq/", "label": "Lease FAQs", "singularLabel": "Lease FAQ", "feed": true },
     { "collection": "recipes", "prefix": "/recipes/", "label": "Recipes", "singularLabel": "Recipe", "feed": false }
   ]
 }
 ```
 
 A collection slug begins with a lowercase letter and uses lowercase letters,
-numbers and underscores, at most 63 characters. A prefix is one lowercase
-address segment with letters, numbers and hyphens, surrounded by slashes.
-Collections and prefixes must each be unique. Reserved framework and topic
+numbers and underscores, at most 63 characters. A version 2 prefix has one
+or more literal lowercase address segments with letters, numbers and hyphens,
+surrounded by slashes, at most 100 characters in total. Empty, encoded, dot,
+query and fragment segments are refused. Collections and prefixes must each
+be unique, and no collection prefix may contain another collection prefix.
+Reserved framework and topic
 addresses are refused, as are the site source and generated directories
 `/src/`, `/docs/`, `/seed/`, `/public/` and `/dist/`: those paths are blocked
-by the hosted live preview. Entries belong to exactly one collection, and their
+by the hosted live preview. Every prefix segment is checked against the reserved
+names. Entries belong to exactly one collection, and their
 canonical address is that section's prefix followed by the entry slug and a
 trailing slash. A feed, when enabled, is `<prefix>rss.xml`.
+
+All routes still use this site's one selected Design System. For the example
+above, `/commercial-division/` and `/commercial-division/about/` can be ordinary
+design pages, while `/commercial-division/lease-faq/how-to-lease-building/`
+belongs to the `lease_faq` collection. The division prefix does not select
+another Design System. Declaration version 1 remains readable with its
+single-segment grammar and legacy sample exclusion; changing to version 2 is
+an explicit source edit. The shared field schema below remains version 1.
 
 After editing the declaration or shared schema, run `npm run sections:sync` in `site/` and
 commit the resulting `seed/seed.json` and writer collection table with it.
@@ -460,9 +479,30 @@ before seed generation. The stock route components still expect the shipped
 also needs corresponding route and writer-document changes.
 
 The design integration injects each section's list, entry and optional feed
-route from `src/routes/articles/`. Design pages under any declared prefix
-and `/topics/` remain reference samples. A section without its own samples
-uses the article samples for preview comparisons. `consumer preview` derives
+route from `src/routes/articles/`. Integration, consumer check and preview use
+one route inventory from `src/integrations/section-routes.mjs`. With declaration
+version 2, the stock `/articles`, `/articles/example-article`, `/topics` and
+`/topics/example-topic` design references stay nonpublic even when `articles`
+is removed. Another design sample must opt in through its page metadata:
+
+```json
+{
+  "title": "Website",
+  "pages": {
+    "/commercial-division/lease-faq": { "title": "Lease FAQ list", "site": "reference" },
+    "/commercial-division/lease-faq/example-article": { "title": "Lease FAQ entry", "site": "reference" }
+  }
+}
+```
+
+The marker belongs in the selected design's `design.json`, and its page still
+needs a title and an authored HTML file. Unmarked public design pages at or
+below a collection prefix or `/topics/` fail check and build instead of being
+silently hidden. Native files under `site/src/pages/` that intersect those
+namespaces are also refused, including dynamic routes; the stock design
+catch-all and topic route are retained. Ordinary parent and sibling pages
+stay public. A section without its own samples uses the stock article samples
+for preview comparisons. `consumer preview` derives
 its section routes from the current declaration without rewriting
 `timds.consumer.json`; the scaffold's missing-style report covers every
 section. The shared topic route merges all declared sections newest first,
@@ -473,8 +513,9 @@ collection and advances only the emitted entry's opaque EmDash cursor. A
 page makes at most the section count plus the page size in content reads;
 it does not depend on EmDash's internal cursor encoding or offsets.
 
-The virtual module `virtual:timds/design-system` exports `sectionsContract:
-1`, the normalized `sections` (including each `urlPattern`) and
+The virtual module `virtual:timds/design-system` exports `sectionsContract`
+matching the declaration version (1 or 2), the normalized `sections`
+(including each `urlPattern`) and
 `sectionSchema` for build consumers. Before Astro resolves its configuration,
 build integrations can retain the design integration's `api.getSections`
 function and call it after `astro:config:setup` for the same data. Astro strips
@@ -488,8 +529,12 @@ To verify dev route changes and recovery against the pinned runtime, run
 `node scripts/check-emdash-dev.mjs --dependencies /absolute/path/to/node_modules`
 from the toolkit repository. The supplied dependency tree must contain
 EmDash 1.4.0 and Astro 7.4.10; omitting `--dependencies` installs the scaffold's
-pinned dependencies. The disposable local check exercises section addition,
-removal and shared schema changes under `/` and `/site`.
+pinned dependencies. The disposable local check exercises nested section
+addition and removal, ordinary parent and sibling pages, shared schema changes,
+feeds, and explicit form precedence under `/` and `/site`. Public pages accept
+GET and HEAD; a POST with an explicit `src/forms/` handler reaches that handler,
+and other unsupported methods on known pages answer 405. Missing entries,
+unknown pages and extra path segments answer 404.
 
 On a database already set up, EmDash does not rerun the seed. Adding a section
 there also requires creating its collection, fields and taxonomy attachment
@@ -707,7 +752,7 @@ checklist, Cloudflare Access and caching.
 
 ```json
 {
-  "template": 2,
+  "template": 3,
   "platform": "cloudflare",
   "mode": "workspace",
   "files": { "astro.config.mjs": "<sha256>", "src/worker.ts": "<sha256>" },

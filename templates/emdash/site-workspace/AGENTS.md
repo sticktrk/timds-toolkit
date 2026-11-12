@@ -10,6 +10,11 @@ source paths, so a change to how the site looks is a change to the system.
   API or the MCP server, never a commit. The writer's contract is
   `docs/content-api.md`.
 - `sections.json` declares the collections and their address prefixes;
+  version 2 permits nested prefixes within this one selected design, while
+  ordinary parent and sibling pages stay public. Public design pages or
+  native Astro routes cannot occupy collection namespaces. Mark additional
+  design samples with `{ "title": "Sample title", "site": "reference" }`
+  in `design.json`'s `pages` entry; see `DESIGN_SYSTEM.md`.
   `section-schema.json` declares their shared fields and features. After
   editing either, run `npm run sections:sync` here and the consumer check.
   A live database also needs new collections created; a seed is applied only

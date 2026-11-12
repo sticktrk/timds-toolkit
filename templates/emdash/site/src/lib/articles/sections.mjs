@@ -4,6 +4,7 @@ const RESERVED_COLLECTIONS = new Set(["content", "media", "users", "revisions", 
 const keys = (value, allowed) => value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).every((key) => allowed.includes(key));
 const COLLECTION = /^[a-z][a-z0-9_]{0,62}$/;
 const PREFIX = /^\/[a-z][a-z0-9]*(?:-[a-z0-9]+)*\/$/;
+const NESTED_PREFIX = /^(?:\/[a-z][a-z0-9]*(?:-[a-z0-9]+)*)+\/$/;
 const RESERVED_FIELDS = new Set(["id", "slug", "status", "author_id", "primary_byline_id", "created_at", "updated_at", "published_at", "scheduled_at", "deleted_at", "version", "live_revision_id", "draft_revision_id", "terms", "bylines", "byline"]);
 const FIELD_TYPES = new Set(["string", "text", "url", "number", "integer", "boolean", "datetime", "select", "multiSelect", "portableText", "image", "file", "json", "slug"]);
 const INDEXED_TYPES = new Set(["string", "url", "number", "integer", "boolean", "datetime", "select", "slug"]);
@@ -46,12 +47,13 @@ export function normalizeSectionSchema(document) {
 }
 
 export function normalizeSections(document) {
-  if (!keys(document, ["schemaVersion", "sections"]) || document?.schemaVersion !== 1 || !Array.isArray(document.sections) || document.sections.length < 1 || document.sections.length > 16) throw new Error("sections.json must declare schemaVersion 1 and between 1 and 16 sections.");
+  if (!keys(document, ["schemaVersion", "sections"]) || ![1, 2].includes(document?.schemaVersion) || !Array.isArray(document.sections) || document.sections.length < 1 || document.sections.length > 16) throw new Error("sections.json must declare schemaVersion 1 or 2 and between 1 and 16 sections.");
   const collections = new Set(), prefixes = new Set();
   return document.sections.map((section) => {
     if (!keys(section, ["collection", "prefix", "label", "singularLabel", "feed"]) || typeof section.collection !== "string" || !COLLECTION.test(section.collection) || RESERVED_COLLECTIONS.has(section.collection)) throw new Error("A section collection must be an EmDash slug of at most 63 characters (lowercase letters, digits and underscores).");
-    if (typeof section.prefix !== "string" || section.prefix.length > 100 || !PREFIX.test(section.prefix) || RESERVED.has(section.prefix.slice(1, -1))) throw new Error("A section prefix must be a non-reserved single path segment, such as /guides/.");
+    if (typeof section.prefix !== "string" || section.prefix.length > 100 || !section.prefix.endsWith("/") || !(document.schemaVersion === 1 ? PREFIX : NESTED_PREFIX).test(section.prefix) || section.prefix.slice(1, -1).split("/").some((segment) => RESERVED.has(segment))) throw new Error(document.schemaVersion === 1 ? "A version 1 section prefix must be a non-reserved single path segment, such as /guides/." : "A version 2 section prefix must contain non-reserved literal path segments and at most 100 characters, such as /commercial-division/lease-faq/.");
     if (collections.has(section.collection) || prefixes.has(section.prefix)) throw new Error("Sections must have distinct collection slugs and address prefixes.");
+    if ([...prefixes].some((prefix) => prefix.startsWith(section.prefix) || section.prefix.startsWith(prefix))) throw new Error("Section prefixes must not overlap: one collection cannot contain another collection's address prefix.");
     for (const key of ["label", "singularLabel"]) if (typeof section[key] !== "string" || !section[key].trim() || section[key].length > 120 || /[\u0000-\u001f\u007f]/.test(section[key])) throw new Error("Section labels must be nonempty text of at most 120 characters.");
     if (typeof section.feed !== "boolean") throw new Error("Each section must declare feed as true or false.");
     collections.add(section.collection); prefixes.add(section.prefix);

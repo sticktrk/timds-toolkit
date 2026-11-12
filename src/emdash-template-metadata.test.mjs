@@ -12,8 +12,8 @@ const readJson = (relative) => JSON.parse(readFileSync(path.join(packageRoot, re
 
 test("package.json publishes the EmDash template version with what each version changed", () => {
   const { emdashTemplate, emdashWorkspaceContract, emdashSectionsContract } = readJson("package.json");
-  assert.equal(emdashWorkspaceContract, 2);
-  assert.equal(emdashSectionsContract, 1);
+  assert.equal(emdashWorkspaceContract, 3);
+  assert.equal(emdashSectionsContract, 2);
   const templates = readJson("templates/emdash/site.json");
   assert.deepEqual(Object.keys(emdashTemplate), ["version", "history"]);
   assert.equal(emdashTemplate.version, templates.version, "package.json emdashTemplate.version must equal templates/emdash/site.json version");

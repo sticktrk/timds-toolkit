@@ -63,14 +63,14 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { sectionRouteInventory } from "./section-routes.mjs";
 
 export const VIRTUAL_MODULE = "virtual:timds/design-system";
 const RESOLVED_MODULE = `\0${VIRTUAL_MODULE}`;
 /** The folders under the system's src/ that its build serves at the same name. */
 export const STATIC_DIRECTORIES = ["assets", "scripts", "styles"];
-/** Routes the article templates serve; a design page there is a sample of a template, never a page. */
+/** Default section when the renderer is used without a site's declaration. */
 const DEFAULT_SECTIONS = [{ collection: "articles", prefix: "/articles/", label: "Articles", singularLabel: "Article", feed: true, urlPattern: "/articles/{slug}/" }];
-const isTemplateRoute = (route, sections) => route === "/topics" || route.startsWith("/topics/") || sections.some(({ prefix }) => route === prefix.slice(0, -1) || route.startsWith(prefix));
 /** Stands in for the page title in the article shell until a request fills it. */
 export const TITLE_MARKER = "\u0000timds-title\u0000";
 const CONTENT_MARKER = "\u0000timds-content\u0000";
@@ -383,6 +383,17 @@ function htmlFiles(directory, prefix = "") {
   return found;
 }
 
+/** Native Astro routes participate in the same collision check as design pages. */
+function sitePageFiles(siteRoot) {
+  const directory = path.join(siteRoot, "src/pages");
+  if (!existsSync(directory)) return [];
+  const walk = (folder, prefix) => readdirSync(folder, { withFileTypes: true }).flatMap((entry) => {
+    const file = `${prefix}/${entry.name}`;
+    return entry.isDirectory() ? walk(path.join(folder, entry.name), file) : entry.isFile() ? [file] : [];
+  });
+  return walk(directory, "src/pages");
+}
+
 /**
  * The route of a page file's default state, by the designs catalog's rule:
  * `about.html` and `about.default.html` are the default of /about,
@@ -623,7 +634,7 @@ function pageTitle(html, fallback) {
  * the set of addresses the site handles a POST to (`formHandlers`); every
  * other posting form is rendered disabled (`disableUnconnectedForms`).
  */
-export function renderWorkspaceDesign(systemRoot, { design: designId, base = "/", forms = new Set(), sections = DEFAULT_SECTIONS }) {
+export function renderWorkspaceDesign(systemRoot, { design: designId, base = "/", forms = new Set(), sections = DEFAULT_SECTIONS, sectionsContract = 2, pageFiles = [] }) {
   const manifest = readJson(path.join(systemRoot, "timds.json"));
   const system = {
     id: String(manifest.systemId || ""),
@@ -636,16 +647,19 @@ export function renderWorkspaceDesign(systemRoot, { design: designId, base = "/"
   const directory = path.join(systemRoot, "src", "designs", designId);
   if (!existsSync(path.join(directory, "design.json"))) throw new Error(`The Design System at ${systemRoot} has no website design ${designId} (src/designs/${designId}/design.json); name one it has in astro.config.mjs.`);
   const declared = readJson(path.join(directory, "design.json"));
-  const titles = new Map(Object.entries(declared.pages ?? {}).map(([route, page]) => [route.length > 1 ? `/${route.replace(/^\/+|\/+$/g, "")}` : "/", typeof page === "string" ? page : page?.title]));
+  const titles = new Map(Object.entries(declared.pages ?? {}).map(([route, page]) => [`/${route.replace(/^\/+|\/+$/g, "")}`, typeof page === "string" ? page : page?.title]));
   const layoutFile = path.join(directory, "layout.html");
   const layout = existsSync(layoutFile) ? readFileSync(layoutFile, "utf8") : null;
   const files = [layoutFile, path.join(directory, "design.json")];
 
   const handled = new Set(forms);
   const defaults = defaultPageFiles(path.join(directory, "pages"));
+  const metadata = new Map(Object.entries(declared.pages ?? {}).map(([route, page]) => [`/${route.replace(/^\/+|\/+$/g, "")}`, page]));
+  const inventory = sectionRouteInventory(sections, defaults.map(([route]) => ({ route, ...(metadata.get(route)?.site !== undefined ? { site: metadata.get(route).site } : {}) })), { version: sectionsContract, pageFiles });
+  const publicRoutes = new Set(inventory.pages.map((page) => page.route));
   const pages = [];
   for (const [route, relative] of defaults) {
-    if (isTemplateRoute(route, sections)) continue;
+    if (!publicRoutes.has(route)) continue;
     const file = path.join(directory, "pages", ...relative.split("/"));
     files.push(file);
     const authored = readFileSync(file, "utf8");
@@ -681,7 +695,7 @@ export function renderWorkspaceDesign(systemRoot, { design: designId, base = "/"
     after,
     describes: /<meta\b[^>]*\bname\s*=\s*["']?description\b/i.test(parts.head),
   };
-  return { system, design: { id: designId, title: String(declared.title || designId), layout: layout !== null }, pages, shell, files };
+  return { system, design: { id: designId, title: String(declared.title || designId), layout: layout !== null }, pages, shell, files, inventory };
 }
 
 /**
@@ -765,7 +779,7 @@ export function virtualModuleSource(rendered, handlers, siteRoot, inventory = {}
     `export const pages = ${JSON.stringify(rendered.pages.map(({ route, title, htmlAttributes, head, bodyAttributes, body }) => ({ route, title, htmlAttributes, head, bodyAttributes, body })))};`,
     `export const shell = ${JSON.stringify(rendered.shell)};`,
     `export const titleMarker = ${JSON.stringify(TITLE_MARKER)};`,
-    `export const sectionsContract = ${JSON.stringify(inventory.sectionsContract ?? 1)};`,
+    `export const sectionsContract = ${JSON.stringify(inventory.sectionsContract ?? 2)};`,
     `export const sections = ${JSON.stringify(inventory.sections ?? DEFAULT_SECTIONS)};`,
     `export const sectionSchema = ${JSON.stringify(inventory.sectionSchema ?? null)};`,
     `export const forms = {\n${forms.join("\n")}${forms.length ? "\n" : ""}};`,
@@ -805,10 +819,11 @@ export default function designSystem({ design }) {
         // temporarily invalid. A Vite-only restart keeps the old route table.
         for (const file of [sectionsModule, sectionsFile, schemaFile, seedFile]) addWatchFile(file);
         const helpers = await import(`${pathToFileURL(sectionsModule).href}?modified=${statSync(sectionsModule).mtimeMs}`);
-        const sections = helpers.normalizeSections(readJson(sectionsFile));
+        const declaration = readJson(sectionsFile);
+        const sections = helpers.normalizeSections(declaration);
         const model = helpers.normalizeSectionSchema(readJson(schemaFile));
         helpers.validateSectionSeed(readJson(seedFile), sections, model);
-        Object.assign(api, { sectionsContract: 1, sections, sectionSchema: helpers.sectionSchemaFor(sections, model) });
+        Object.assign(api, { sectionsContract: declaration.schemaVersion, sections, sectionSchema: helpers.sectionSchemaFor(sections, model) });
         for (const section of sections) {
           injectRoute({ pattern: section.prefix, entrypoint: path.join(siteRoot, "src/routes/articles/index.astro"), prerender: false });
           injectRoute({ pattern: `${section.prefix}[slug]`, entrypoint: path.join(siteRoot, "src/routes/articles/entry.astro"), prerender: false });
@@ -835,7 +850,7 @@ export default function designSystem({ design }) {
               load(id) {
                 if (id !== RESOLVED_MODULE) return undefined;
                 const handlers = formHandlers(siteRoot, { parse, warn: (message) => logger.warn(message) });
-                const rendered = renderWorkspaceDesign(systemRoot, { design, base, forms: handlers.keys(), sections: api.sections });
+                const rendered = renderWorkspaceDesign(systemRoot, { design, base, forms: handlers.keys(), sections: api.sections, sectionsContract: api.sectionsContract, pageFiles: sitePageFiles(siteRoot) });
                 for (const file of rendered.files) this.addWatchFile(file);
                 return virtualModuleSource(rendered, handlers, siteRoot, api);
               },
@@ -875,6 +890,12 @@ export default function designSystem({ design }) {
             }],
           },
         });
+      },
+      "astro:routes:resolved": () => {
+        // Astro invokes this again when a native page route is added or removed.
+        // Validate the same inventory used by consumer check and preview before
+        // a file route can take precedence over an injected collection route.
+        renderWorkspaceDesign(systemRoot, { design, base, sections: api.sections, sectionsContract: api.sectionsContract, pageFiles: sitePageFiles(siteRoot) });
       },
       "astro:config:done": ({ config }) => {
         clientDirectory = fileURLToPath(config.build.client);

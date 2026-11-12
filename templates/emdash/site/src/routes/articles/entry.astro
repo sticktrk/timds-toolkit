@@ -42,6 +42,7 @@ const { entry, isPreview, cacheHint, error } = await getEmDashEntry<string, Arti
 if (error) throw error;
 if (!entry) return Astro.rewrite("/404");
 if (!isPreview && !isSignedIn(Astro.locals) && entry.data.status !== "published") return Astro.rewrite("/404");
+if (Astro.request.method !== "GET" && Astro.request.method !== "HEAD") return new Response("This address accepts GET and HEAD.", { status: 405, headers: { Allow: "GET, HEAD", "Cache-Control": "no-store" } });
 
 if (Astro.cache?.enabled) Astro.cache.set(cacheHint);
 Astro.response.headers.set("Cache-Control", cacheControl(Astro.locals, Astro.url, isPreview));

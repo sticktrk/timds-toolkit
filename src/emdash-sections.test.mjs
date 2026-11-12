@@ -6,6 +6,7 @@ import test from "node:test";
 import { normalizeSections, normalizeSectionSchema, sectionSchemaFor, createSectionSeed, validateSectionSeed } from "../templates/emdash/site/src/lib/articles/sections.mjs";
 import { mergeSectionEntries } from "../templates/emdash/site/src/lib/articles/mixed.mjs";
 import { renderWorkspaceDesign, virtualModuleSource } from "../templates/emdash/site-workspace/src/integrations/design-system.mjs";
+import { sectionRouteInventory } from "../templates/emdash/site-workspace/src/integrations/section-routes.mjs";
 
 const declaration = { schemaVersion: 1, sections: ["articles", "guides", "recipes"].map((collection) => ({ collection, prefix: `/${collection}/`, label: collection, singularLabel: collection, feed: true })) };
 const sections = normalizeSections(declaration);
@@ -100,11 +101,51 @@ test("declared prefixes exclude design samples and expose exactly the same build
   await fs.writeFile(path.join(root, "timds.json"), JSON.stringify({ name: "Sample", systemId: "sample/core" }));
   await fs.writeFile(path.join(directory, "design.json"), JSON.stringify({ title: "Website" }));
   for (const file of ["index", "articles", "guides/index", "guides/example-article", "recipes", "topics"]) await fs.writeFile(path.join(directory, "pages", `${file}.html`), `<h1>${file}</h1>`);
-  const rendered = renderWorkspaceDesign(root, { design: "website", sections });
+  const rendered = renderWorkspaceDesign(root, { design: "website", sections, sectionsContract: 1 });
   assert.deepEqual(rendered.pages.map((page) => page.route), ["/"]);
-  const single = renderWorkspaceDesign(root, { design: "website", sections: sections.slice(1, 2) });
+  const single = renderWorkspaceDesign(root, { design: "website", sections: sections.slice(1, 2), sectionsContract: 1 });
   assert.deepEqual(single.pages.map((page) => page.route), ["/", "/articles", "/recipes"]);
   const module = await import(`data:text/javascript,${encodeURIComponent(virtualModuleSource(rendered, new Map(), root, { sectionsContract: 1, sections, sectionSchema: { fields: [] } }))}`);
   assert.deepEqual(module.sections, sections);
   assert.equal(module.sectionsContract, 1);
+});
+
+test("nested section prefixes keep version 1 strict and reject ambiguous address namespaces", () => {
+  const section = { collection: "lease_faq", prefix: "/commercial-division/lease-faq/", label: "Lease FAQs", singularLabel: "Lease FAQ", feed: true };
+  const nested = { schemaVersion: 2, sections: [section] };
+  assert.equal(normalizeSections(nested)[0].urlPattern, "/commercial-division/lease-faq/{slug}/");
+  assert.throws(() => normalizeSections({ ...nested, schemaVersion: 1 }), /version 1.*single/);
+  for (const prefix of ["/commercial-division//lease-faq/", "/commercial-division/../lease-faq/", "/commercial-division/%6cease-faq/", "/commercial-division/lease-faq%2f/", "/commercial-division/topics/", "/commercial-division/src/", "/Commercial-division/lease-faq/", "/commercial-division/lease-faq/\n", `/${"a".repeat(99)}/`]) assert.throws(() => normalizeSections({ ...nested, sections: [{ ...section, prefix }] }), /prefix/);
+  for (const pair of [["/commercial-division/", section.prefix], [section.prefix, "/commercial-division/"], [section.prefix, section.prefix]]) assert.throws(() => normalizeSections({ schemaVersion: 2, sections: pair.map((prefix, index) => ({ ...section, collection: `section_${index}`, prefix })) }), /overlap|distinct/);
+  assert.equal(normalizeSections({ schemaVersion: 2, sections: [section, { ...section, collection: "leasing", prefix: "/commercial-division/leasing/" }] }).length, 2);
+});
+
+test("one nested route inventory keeps public parent pages and explicit reference samples separate", async (t) => {
+  const sections = normalizeSections({ schemaVersion: 2, sections: [{ collection: "lease_faq", prefix: "/commercial-division/lease-faq/", label: "Lease FAQs", singularLabel: "Lease FAQ", feed: true }] });
+  const routes = ["/", "/commercial-division", "/commercial-division/about", "/articles", "/articles/example-article", "/commercial-division/lease-faq", "/commercial-division/lease-faq/example-article"];
+  const pages = routes.map((route) => ({ route, ...(route.includes("/lease-faq") ? { site: "reference" } : {}) }));
+  const inventory = sectionRouteInventory(sections, pages);
+  assert.deepEqual(inventory.pages.map((page) => page.route), routes.slice(0, 3));
+  assert.equal(inventory.sections[0].entry, "/commercial-division/lease-faq/[slug]");
+  assert.equal(inventory.sections[0].feed, "/commercial-division/lease-faq/rss.xml");
+  assert.throws(() => sectionRouteInventory(sections, [...pages, { route: "/commercial-division/lease-faq/how-to-lease-building" }]), /conflicts.*namespace/);
+  assert.throws(() => sectionRouteInventory(sections, [{ route: "/commercial-division/lease-faq" }]), /conflicts.*namespace/);
+  for (const file of ["src/pages/commercial-division/lease-faq/index.astro", "src/pages/commercial-division/lease-faq/[slug].astro", "src/pages/commercial-division/lease-faq/help.markdown", "src/pages/commercial-division/lease-faq/.well-known/example.ts", "src/pages/commercial-division/[slug].astro", "src/pages/[...custom].astro"]) assert.throws(() => sectionRouteInventory(sections, pages, { pageFiles: [file] }), /Site page.*conflicts/);
+  assert.doesNotThrow(() => sectionRouteInventory(sections, pages, { pageFiles: ["src/pages/[...page].astro", "src/pages/topics/[slug].astro", "src/pages/commercial-division/about.astro", "src/pages/commercial-division/lease-faq/helper.mjs"] }));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "timds-nested-design-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const directory = path.join(root, "src/designs/website");
+  await fs.mkdir(directory, { recursive: true });
+  await fs.writeFile(path.join(root, "timds.json"), JSON.stringify({ name: "Sample", systemId: "sample/core" }));
+  await fs.writeFile(path.join(directory, "design.json"), JSON.stringify({ title: "Website", pages: { ...Object.fromEntries(pages.filter((page) => page.site).map((page) => [page.route, { title: "Reference", site: page.site }])), a: { title: "Short reference", site: "reference" } } }));
+  for (const route of [...routes, "/a"]) {
+    const file = path.join(directory, "pages", route === "/" ? "index.html" : `${route.slice(1)}.html`);
+    await fs.mkdir(path.dirname(file), { recursive: true });
+    await fs.writeFile(file, `<h1>${route}</h1>`);
+  }
+  const { readDesignCatalog } = await import("./designs.mjs");
+  const catalog = await readDesignCatalog(root);
+  assert.equal(catalog.designs[0].pages.find((page) => page.route === "/commercial-division/lease-faq").site, "reference");
+  const rendered = renderWorkspaceDesign(root, { design: "website", sections, sectionsContract: 2 });
+  assert.deepEqual(rendered.pages.map((page) => page.route).sort(), inventory.pages.map((page) => page.route).sort());
 });
