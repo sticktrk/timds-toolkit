@@ -9,6 +9,19 @@ source paths, so a change to how the site looks is a change to the system.
 - Content (articles, topics, media) goes through EmDash: the admin, the REST
   API or the MCP server, never a commit. The writer's contract is
   `docs/content-api.md`.
+- `sections.json` declares the collections and their address prefixes;
+  version 2 permits nested prefixes within this one selected design, while
+  ordinary parent and sibling pages stay public. Public design pages or
+  native Astro routes cannot occupy collection namespaces. Mark additional
+  design samples with `{ "title": "Sample title", "site": "reference" }`
+  in `design.json`'s `pages` entry; see `DESIGN_SYSTEM.md`.
+  Public-file collisions and route/public symlinks are also refused. Only
+  declaration version 2 is supported. Invalid section JSON keeps the last
+  validated dev inventory; a route conflict returns 503 until corrected.
+  `section-schema.json` declares their shared fields and features. After
+  editing either, run `npm run sections:sync` here and the consumer check.
+  A live database also needs new collections created; a seed is applied only
+  during setup. Hosted deployment never changes an existing collection's schema.
 - A page's look and copy are edited in the design file in the system, never
   copied into `src/pages/`.
 - A style the site needs that the system lacks is added to the system in the

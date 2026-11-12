@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 2,
+  "sections": [
+    { "collection": "articles", "prefix": "/articles/", "label": "Articles", "singularLabel": "Article", "feed": true }
+  ]
+}

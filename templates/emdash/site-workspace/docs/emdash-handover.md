@@ -76,6 +76,47 @@ npx emdash migrate --d1 <database name or id> --check
 non-interactive apply also needs `--expected-target-fingerprint` with the
 fingerprint `--status` printed.
 
+## Declared sections
+
+`sections.json` lists each collection and its canonical address prefix.
+Declaration version 2 supports nested literal prefixes within one selected
+Design System, such as `/commercial-division/lease-faq/`; ordinary parent
+and sibling pages remain public. Older declaration versions are refused.
+`docs/content-api.md` lists the current entry addresses for writers. After
+editing the declaration, run `npm run sections:sync` in the site and run
+the consumer check at the workspace root. Commit the declaration, generated
+seed and updated writer table together. The shared data in
+`section-schema.json` supplies identical fields and features to
+every collection, including preview, scheduling, search and SEO, and the
+`topic` taxonomy attaches to all of them. Sync and build and the toolkit's
+consumer check validate this same JSON; the check never executes site code.
+Sync preserves authored topic labels, locale, translation group and terms,
+unrelated taxonomy metadata and terms, and refuses to discard
+an undeclared collection definition or its development content.
+Every section must be routable. Sync writes `routable: true`; an explicit
+false seed value is rejected before setup, while omission uses EmDash's true
+default.
+
+A first setup applies the seed. Once setup is complete, editing the seed
+cannot create a new collection: create it through EmDash's schema API or
+admin with every declared field, support and URL pattern, and add its name
+to the topic taxonomy. A platform that supports section contract 2 can do
+this additively before routing a deployment. The TimDS host refuses changes
+to an existing collection's fields or features, including adding a field;
+choose the shared schema before first creation. Never rename collections or
+change stored patterns as an automatic migration. Removing a section only
+removes its routes; retained content needs a separate explicit decision.
+Writer scopes are global across collections.
+
+TimDS hosted discovery acknowledges template 3, workspace 3 and sections 2
+before building. An older host without that acknowledgement is refused;
+standalone builds do not require a host integration.
+
+Verify each declared list, a published entry and every enabled feed at its
+prefix. A missing collection fails the page instead of appearing as an empty
+list. Topic pages merge all sections, newest first, with cursors that retain
+a position for each collection.
+
 ## Scheduled work
 
 Scheduled publishing and maintenance run every minute from the cron trigger
@@ -112,7 +153,7 @@ unset. The secret is compared in constant time. Call it about once a minute.
        handler in `src/forms/` renders disabled and a POST to its address
        answers 405 (`DESIGN_SYSTEM.md`, "Forms").
 6. [ ] Create one draft through the REST API with the writer's token,
-       publish it, and confirm it appears at `/articles/<slug>/` without a
+       publish it, and confirm it appears at its section's `<prefix><slug>/` without a
        rebuild; unpublish it and confirm the page answers 404.
 
 To put Cloudflare Access in front of the admin, enable `auth: access({ … })`

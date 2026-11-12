@@ -9,9 +9,8 @@ system and the site are edited, reviewed and committed together.
 
 ## How the system reaches the site
 
-- **Pages.** Every page of the website design `src/designs/__DESIGN_ID__/`
-  that is not an article, topic or list route (`/articles`, `/articles/...`,
-  `/topics/...`) is a page of this site, built from the design file by
+- **Pages.** Every ordinary page of the website design `src/designs/__DESIGN_ID__/`
+  is a page of this site, built from the design file by
   `src/integrations/design-system.mjs` and served by
   `src/pages/[...page].astro`. There is one copy, in the system: editing the
   design is editing the page, and a page added to the design is a page here.
@@ -31,6 +30,33 @@ system and the site are edited, reviewed and committed together.
   prefix when the page is rendered; a deployed site runs at `/`.
 
 `astro.config.mjs` names the design (`designSystem({ design: "__DESIGN_ID__" })`).
+The consumer check and preview parse the literal selection in the exported
+configuration too, without executing it; comments and unused calls do not count.
+
+`sections.json` version 2 permits nested collection prefixes, such as
+`/commercial-division/lease-faq/`. Ordinary parent and sibling pages such as
+`/commercial-division/` and `/commercial-division/about/` stay public inside
+the same selected design. A public design page or native Astro route inside
+a collection namespace or `/topics/` is a conflict: check and build refuse it.
+Routes injected by another integration are also checked against the owned
+namespaces; only the expected Toolkit route and entrypoint pairs are exempt.
+Public files in those namespaces and symlinks in route/public directories are
+also refused. Dev remains running during a route conflict and returns 503
+until it is corrected. Invalid section JSON instead keeps the last validated
+configuration and request inventory.
+The stock `/articles`, `/articles/example-article`, `/topics` and
+`/topics/example-topic` pages are references. Mark any additional design
+sample in `design.json` with its required title and `site: "reference"`:
+
+```json
+{ "pages": { "/commercial-division/lease-faq": { "title": "Lease FAQ list", "site": "reference" } } }
+```
+
+The matching HTML file remains a design reference, never a separate public
+page. Section previews use its list or `example-article` sample when present,
+falling back to the stock article reference. Explicit preview pairs to an
+existing reference in the selected design are preserved. Only declaration
+version 2 and section contract 2 are supported.
 
 ## Forms
 
@@ -80,7 +106,10 @@ mentions POST does not; `export * from` does not either, so name `POST`.
 A module that does not export `POST` handles nothing, and one whose `POST`
 is not a function when the request comes answers 405 (the server log names
 the module), never the page at that address. Two modules for one
-address (`contact.ts` and `contact/index.ts`) are an error.
+address (`contact.ts` and `contact/index.ts`) are an error. If a duplicate is
+saved during dev, the server stays running with its last validated inventory
+and public routes return 503 until the duplicate is corrected. Correcting it
+restores the handler's precedence over pages at that address.
 
 EmDash turns Astro's cross-origin form check off for the whole site, so a
 handler receives POSTs from other origins too. A handler that should accept
@@ -113,7 +142,7 @@ ported into an Astro route by hand instead (see the rules below).
   Astro route by hand, keeping its markup.
 - Never write a color, font or size literal in `site/`. Name the system's
   tokens with `var(--…)`; a value the system lacks is added to the system.
-- The article routes (`src/pages/articles/`, `src/pages/topics/`) render on
+- The article routes (`src/routes/articles/`, `src/pages/topics/`) render on
   the system's classes: `hero`, `section`, `article-list`, `article-card`,
   `article-meta`, `topic-list`, `prose`, `table-scroll`, `button` and
   `button--secondary`. A route whose classes the system's stylesheets do not

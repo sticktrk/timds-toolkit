@@ -593,7 +593,9 @@ export async function loadConsumer(repoRootInput = process.cwd()) {
       linked: false,
       present: Boolean(root) && existsSync(path.join(root, "timds.json")),
     };
-    return { repoRoot, manifestPath, manifest, rawManifest: parsed, apps: manifest.apps, designSystem, binaryInstallation: root ? await readBinaryInstallation(root) : null };
+    const { workspaceSectionApps } = await import("./consumer-scaffold-workspace.mjs");
+    const apps = await workspaceSectionApps(repoRoot, manifest.apps, root);
+    return { repoRoot, manifestPath, manifest, rawManifest: parsed, apps, designSystem, binaryInstallation: root ? await readBinaryInstallation(root) : null };
   }
   const designSystemRoot = path.resolve(repoRoot, manifest.designSystem.path);
   const linked = mode === "published" && await fs.lstat(designSystemRoot).then((info) => info.isSymbolicLink(), () => false);
@@ -1000,6 +1002,13 @@ export async function checkConsumer(repoRootInput = process.cwd(), options = {})
     const app = resolveConsumerApp(consumer, name);
     const cwdExists = existsSync(app.cwd);
     if (!cwdExists) errors.push(`App "${name}": cwd ${app.cwdRelative} does not exist`);
+    if (workspace && cwdExists) {
+      try {
+        const { readWorkspaceSections, checkWorkspaceSectionSeed } = await import("./consumer-scaffold-workspace.mjs");
+        const sections = await readWorkspaceSections(app.cwd);
+        if (sections) await checkWorkspaceSectionSeed(app.cwd, sections);
+      } catch (error) { errors.push(`App "${name}": ${error.message}`); }
+    }
     if (designCatalog) {
       for (const [route, reference] of Object.entries(app.preview.designs || {})) {
         const { design: designId, route: designRoute } = parseDesignReference(reference);

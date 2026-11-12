@@ -6,16 +6,38 @@ written against EmDash 1.4.0; statements marked **unconfirmed** could not be
 checked against a running site and should be verified on the first one.
 
 Renaming the collection, the taxonomy or any field below, or changing a
-field's type, is a breaking change for every writer. Add fields instead;
-never rename or remove them without a migration plan agreed with the
-writers.
+field's type, is a breaking change for every writer. Hosted deployment
+preserves existing collection schemas, including their field inventory;
+choose the shared schema before first creation. Any later schema change
+needs a separate migration plan agreed with the writers.
 
 ## Content model
 
-### Collection `articles`
+### Collections and addresses
 
-Articles live in the `articles` collection. Each one is published at
-`/articles/<slug>/`.
+`sections.json` declares the collections this site serves. An entry belongs
+to exactly one collection; choose it when creating the entry. Every section
+uses the same fields and publishing features. The address belongs to the
+entry's collection and must not be copied to another section. A nested
+address such as `/commercial-division/lease-faq/{slug}/` still belongs to one
+collection in this same site; use its collection slug in API requests.
+
+<!-- timds:sections -->
+| Collection | Entry address | Feed |
+| --- | --- | --- |
+| `articles` | `/articles/{slug}/` | `/articles/rss.xml` |
+<!-- /timds:sections -->
+
+The examples below use `articles`; substitute the collection from this table
+in every content API path and MCP call. `npm run sections:sync` refreshes
+this table and the seed after a declaration change. Changing a declaration
+does not create collections in an already set-up database by itself.
+
+### Shared article fields
+
+`section-schema.json` is the site's shared field and feature declaration.
+The table below describes the stock article model; update this writer guide
+alongside an authored schema change before the collection is first created.
 
 | Name | Kind | Type | Notes |
 | --- | --- | --- | --- |
@@ -36,7 +58,7 @@ head.
 ### Taxonomy `topic`
 
 Topics are the `topic` taxonomy, flat (not hierarchical), attached to
-`articles`. A topic page lives at `/topics/<term slug>/`. A term has a `slug`,
+every declared section. A topic page lives at `/topics/<term slug>/`. A term has a `slug`,
 a `label` (the visible name) and an optional `description` (the line under
 the topic page's heading).
 
@@ -129,7 +151,8 @@ token. EmDash itself accepts the bearer token without an Access login, but
 Access answers before EmDash does. **Unconfirmed** on a deployed site.
 
 A scope never grants more than the user's role allows. The writer's user
-needs the **Author** role to publish its own articles, and **Editor** to
+has global scopes across all collections; it cannot be restricted to one
+section. It needs the **Author** role to publish its own articles, and **Editor** to
 create topic terms or bylines, to publish other users' articles, or to set
 `publishedAt` directly.
 
@@ -277,9 +300,9 @@ with the new token."
 
 ## What visitors see
 
-- `/articles/` lists published articles, newest first, 20 to a page.
-- `/articles/<slug>/` shows a published article. A draft, an unpublished or
+- Each declared prefix lists its published entries, newest first, 20 to a page.
+- `<prefix><slug>/` shows a published entry. A draft, an unpublished or
   a missing article answers the site's 404 page. A signed-in editor and a
   valid preview link see the draft; those responses are never cached.
-- `/topics/<slug>/` lists a topic's published articles.
-- `/articles/rss.xml` is an RSS feed of the 20 newest.
+- `/topics/<slug>/` merges that topic's published entries across sections, newest first, with an independent cursor position per collection.
+- `<prefix>rss.xml` is a feed of the 20 newest entries when that section enables its feed.

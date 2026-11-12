@@ -6,9 +6,9 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { validateConsumerManifest } from "./consumer.mjs";
+import { checkConsumer, loadConsumer, resolveConsumerApp, validateConsumerManifest } from "./consumer.mjs";
 import { EMDASH_RECORD_PATH, EMDASH_TEMPLATES_ROOT, compileTokenCss, planEmdashTemplates, readEmdashTemplateSet, runConsumerScaffold } from "./consumer-scaffold.mjs";
-import { WORKSPACE_AGENTS_MARKER, scaffoldWorkspaceEmdashSite, workspacePackageJson } from "./consumer-scaffold-workspace.mjs";
+import { WORKSPACE_AGENTS_MARKER, scaffoldWorkspaceEmdashSite, workspacePackageJson, articleRoutePorts } from "./consumer-scaffold-workspace.mjs";
 import { consumerSkillFiles } from "./consumer-init.mjs";
 import { initializeRepository } from "./core.mjs";
 
@@ -144,7 +144,7 @@ test("--workspace writes a complete site into site/ of a starter workspace", asy
   for (const binding of ["DB", "MEDIA", "SESSION"]) assert.match(wrangler, new RegExp(`"binding": "${binding}"`));
   assert.match(await fs.readFile(path.join(site, "astro.config.mjs"), "utf8"), /designSystem\(\{ design: "website" \}\)/);
   assert.match(await fs.readFile(path.join(site, "astro.config.mjs"), "utf8"), /process\.env\.TIMDS_SITE_BASE \|\| "\/"/);
-  assert.match(await fs.readFile(path.join(site, "src/pages/articles/index.astro"), "utf8"), /import Layout from "\.\.\/\.\.\/layouts\/Base\.astro";/);
+  assert.match(await fs.readFile(path.join(site, "src/routes/articles/index.astro"), "utf8"), /import Layout from "\.\.\/\.\.\/layouts\/Base\.astro";/);
 
   // Its own package, with the template set's exact versions, and no toolkit.
   const set = await readEmdashTemplateSet(TEMPLATES);
@@ -178,7 +178,7 @@ test("--workspace writes a complete site into site/ of a starter workspace", asy
   assert.equal(app.preview.designs["/"], "website:/");
   assert.equal(app.preview.designs["/about"], "website:/about");
   for (const [route, designRoute] of Object.entries(set.preview.designs)) assert.equal(app.preview.designs[route], `website:${designRoute}`);
-  assert.deepEqual(app.designSurface, ["src/layouts/**", "src/components/**", "src/styles/**", "src/pages/**", "public/**"]);
+  assert.deepEqual(app.designSurface, ["src/layouts/**", "src/components/**", "src/styles/**", "src/pages/**", "src/routes/**", "public/**"]);
 
   // The record: template version, platform, mode, and a hash of every template file as written.
   const record = JSON.parse(await fs.readFile(path.join(site, EMDASH_RECORD_PATH), "utf8"));
@@ -283,7 +283,7 @@ test("--workspace builds a system's own design and lists the article routes with
   assert.ok(lines.some((line) => line.startsWith("No port yet")));
   assert.ok(result.todos.some((todo) => todo.startsWith("/articles has no port to this system yet")));
   // The routes are installed all the same.
-  for (const file of ["src/pages/articles/index.astro", "src/pages/articles/[slug].astro", "src/pages/topics/[slug].astro"]) assert.ok(existsSync(path.join(workspace, "site", file)));
+  for (const file of ["src/routes/articles/index.astro", "src/routes/articles/entry.astro", "src/pages/topics/[slug].astro"]) assert.ok(existsSync(path.join(workspace, "site", file)));
   const manifest = JSON.parse(await fs.readFile(path.join(workspace, "site", "timds.consumer.json"), "utf8"));
   assert.deepEqual(manifest.apps.site.preview.designs, { "/": "marketing:/", "/company/team": "marketing:/company/team" });
   assert.match(await fs.readFile(path.join(workspace, "site", "astro.config.mjs"), "utf8"), /designSystem\(\{ design: "marketing" \}\)/);
@@ -660,4 +660,189 @@ test("--workspace renders the root files for a workspace that selects the execut
   }
   assert.match(sectionOf(await fs.readFile(path.join(workspace, "AGENTS.md"), "utf8")), /```bash\ntimds-cli consumer check --root site\n```/);
   assert.match(await fs.readFile(path.join(workspace, "site", "AGENTS.md"), "utf8"), /`timds-cli consumer check --root site`/);
+});
+
+
+test("section declaration drives seed checks and preview routes without rewriting the manifest", async (t) => {
+  const root = await temporaryDirectory(t);
+  const workspace = await starterWorkspace(path.join(root, "sections"));
+  await scaffoldWorkspaceEmdashSite(workspace, { skipInstall: true, output: quiet });
+  const site = path.join(workspace, "site");
+  const originalManifest = await fs.readFile(path.join(site, "timds.consumer.json"), "utf8");
+  const declaration = JSON.parse(await fs.readFile(path.join(site, "sections.json"), "utf8"));
+  declaration.sections.push(
+    { collection: "guides_for_owners", prefix: "/guides-for-owners/", label: "Guides", singularLabel: "Guide", feed: true },
+    { collection: "recipes", prefix: "/recipes/", label: "Recipes", singularLabel: "Recipe", feed: false },
+  );
+  await write(path.join(site, "sections.json"), declaration);
+  const beforeSync = await checkConsumer(site, { fix: false });
+  assert.equal(beforeSync.status, "failed");
+  assert.ok(beforeSync.errors.some((error) => /different collections.*sections:sync/.test(error)), beforeSync.errors.join("\n"));
+  execFileSync(process.execPath, ["scripts/sections.mjs"], { cwd: site });
+  const afterSync = await checkConsumer(site, { fix: false });
+  assert.equal(afterSync.status, "passed", afterSync.errors.join("\n"));
+  const app = resolveConsumerApp(await loadConsumer(site));
+  const { readDesignCatalog } = await import("./designs.mjs");
+  const { normalizeSections } = await import("../templates/emdash/site/src/lib/articles/sections.mjs");
+  const design = (await readDesignCatalog(workspace)).designs.find((item) => item.id === "website");
+  const ports = await articleRoutePorts({ designSystemRoot: workspace, design, templatesRoot: TEMPLATES, sections: normalizeSections(declaration) });
+  assert.deepEqual(ports.routes.map((item) => item.route), ["/articles", "/articles/[slug]", "/guides-for-owners", "/guides-for-owners/[slug]", "/recipes", "/recipes/[slug]", "/topics/[slug]"]);
+  assert.ok(ports.routes.every((item) => item.classes.length && !item.missing.length));
+  for (const prefix of ["/articles", "/guides-for-owners", "/recipes"]) {
+    assert.ok(app.preview.routes.includes(prefix));
+    assert.ok(app.preview.routes.includes(`${prefix}/example-article`));
+    assert.equal(app.preview.designs[prefix], "website:/articles");
+    assert.equal(app.preview.designs[`${prefix}/example-article`], "website:/articles/example-article");
+  }
+  assert.equal(await fs.readFile(path.join(site, "timds.consumer.json"), "utf8"), originalManifest);
+  const seed = JSON.parse(await fs.readFile(path.join(site, "seed/seed.json"), "utf8"));
+  assert.equal(seed.collections.length, 3);
+  assert.ok(seed.content.guides_for_owners.some((entry) => entry.slug === "example-article"));
+  assert.ok(seed.content.recipes.some((entry) => entry.slug === "example-article"));
+  assert.deepEqual(seed.collections.map((item) => item.fields), Array(3).fill(seed.collections[0].fields));
+  assert.match(await fs.readFile(path.join(site, "docs/content-api.md"), "utf8"), /guides_for_owners.*guides-for-owners/);
+  seed.collections[1].urlPattern = "/wrong/{slug}/";
+  await write(path.join(site, "seed/seed.json"), seed);
+  const drift = await checkConsumer(site, { fix: false });
+  assert.ok(drift.errors.some((error) => /guides_for_owners.*urlPattern/.test(error)), drift.errors.join("\n"));
+  await write(path.join(site, "sections.json"), { schemaVersion: 2, sections: [declaration.sections[1]] });
+  const reverse = await checkConsumer(site, { fix: false });
+  assert.ok(reverse.errors.some((error) => /different collections/.test(error)), reverse.errors.join("\n"));
+});
+
+test("section sync and consumer check share schema data and preserve authored seed metadata", async (t) => {
+  const root = await temporaryDirectory(t);
+  const workspace = await starterWorkspace(path.join(root, "section-schema"));
+  await scaffoldWorkspaceEmdashSite(workspace, { skipInstall: true, output: quiet });
+  const site = path.join(workspace, "site");
+  const model = JSON.parse(await fs.readFile(path.join(site, "section-schema.json"), "utf8"));
+  model.fields.push({ slug: "reading_time", label: "Reading time", type: "integer", validation: { min: 0 } });
+  await write(path.join(site, "section-schema.json"), model);
+  const before = await checkConsumer(site, { fix: false });
+  assert.ok(before.errors.some((error) => /different fields.*sections:sync/.test(error)), before.errors.join("\n"));
+  const seedFile = path.join(site, "seed/seed.json");
+  const seed = JSON.parse(await fs.readFile(seedFile, "utf8"));
+  seed.collections[0].description = "An authored collection description";
+  seed.taxonomies[0].description = "An authored topic description";
+  seed.taxonomies[0].label = "Sujets";
+  seed.taxonomies[0].labelSingular = "Sujet";
+  seed.taxonomies[0].locale = "fr";
+  seed.taxonomies[0].translationGroup = "topic-translations";
+  const category = { name: "category", label: "Categories", labelSingular: "Category", hierarchical: true, collections: ["articles"], terms: [{ slug: "news", label: "News" }] };
+  seed.taxonomies.unshift(category);
+  await write(seedFile, seed);
+  execFileSync(process.execPath, ["scripts/sections.mjs"], { cwd: site });
+  const synced = JSON.parse(await fs.readFile(seedFile, "utf8"));
+  assert.deepEqual(synced.collections[0].fields, model.fields);
+  assert.equal(synced.collections[0].description, seed.collections[0].description);
+  assert.deepEqual(synced.taxonomies, seed.taxonomies);
+  assert.deepEqual(synced.content, seed.content);
+  // A consumer check reads only data; custom executable site code is not trusted.
+  const helperFile = path.join(site, "src/lib/articles/sections.mjs");
+  const helper = await fs.readFile(helperFile, "utf8");
+  await fs.writeFile(helperFile, 'throw new Error("Site code must not execute in consumer check");\n');
+  const checked = await checkConsumer(site, { fix: false });
+  assert.equal(checked.status, "passed", checked.errors.join("\n"));
+  await fs.writeFile(helperFile, helper);
+  synced.collections.push({ slug: "authors", label: "Authors", fields: [] });
+  await write(seedFile, synced);
+  const seedBefore = await fs.readFile(seedFile, "utf8");
+  const writerBefore = await fs.readFile(path.join(site, "docs/content-api.md"), "utf8");
+  assert.throws(() => execFileSync(process.execPath, ["scripts/sections.mjs"], { cwd: site, stdio: "pipe" }), /Remove undeclared seed collections/);
+  assert.equal(await fs.readFile(seedFile, "utf8"), seedBefore);
+  assert.equal(await fs.readFile(path.join(site, "docs/content-api.md"), "utf8"), writerBefore);
+});
+
+test("nested section check and preview share public pages, template references and collision refusals", async (t) => {
+  const root = await temporaryDirectory(t);
+  const workspace = await starterWorkspace(path.join(root, "nested-sections"));
+  await scaffoldWorkspaceEmdashSite(workspace, { skipInstall: true, output: quiet });
+  const site = path.join(workspace, "site"), directory = path.join(workspace, "src/designs/website");
+  for (const route of ["commercial-division/index", "commercial-division/about"]) await write(path.join(directory, "pages", `${route}.html`), `<h1>${route}</h1>`);
+  const declaration = JSON.parse(await fs.readFile(path.join(site, "sections.json"), "utf8"));
+  assert.equal(declaration.schemaVersion, 2);
+  declaration.sections.push({ collection: "lease_faq", prefix: "/commercial-division/lease-faq/", label: "Lease FAQs", singularLabel: "Lease FAQ", feed: true });
+  await write(path.join(site, "sections.json"), declaration);
+  execFileSync(process.execPath, ["scripts/sections.mjs"], { cwd: site });
+  let checked = await checkConsumer(site, { fix: false });
+  assert.equal(checked.status, "passed", checked.errors.join("\n"));
+  const app = resolveConsumerApp(await loadConsumer(site));
+  for (const route of ["/commercial-division", "/commercial-division/about", "/commercial-division/lease-faq", "/commercial-division/lease-faq/example-article"]) assert.ok(app.preview.routes.includes(route), route);
+  assert.equal(app.preview.designs["/commercial-division/about"], "website:/commercial-division/about");
+  assert.equal(app.preview.designs["/commercial-division/lease-faq"], "website:/articles");
+  const collision = "/commercial-division/lease-faq/how-to-lease-building";
+  await write(path.join(directory, "pages", `${collision.slice(1)}.html`), "<h1>Lease information</h1>");
+  checked = await checkConsumer(site, { fix: false });
+  assert.equal(checked.status, "failed");
+  assert.ok(checked.errors.some((error) => error.includes(collision) && /conflicts.*namespace/.test(error)), checked.errors.join("\n"));
+  const design = JSON.parse(await fs.readFile(path.join(directory, "design.json"), "utf8"));
+  design.pages[collision] = { title: "Lease reference", site: "reference" };
+  await write(path.join(directory, "design.json"), design);
+  checked = await checkConsumer(site, { fix: false });
+  assert.equal(checked.status, "passed", checked.errors.join("\n"));
+  assert.ok(!resolveConsumerApp(await loadConsumer(site)).preview.routes.includes(collision));
+  const manifestFile = path.join(site, "timds.consumer.json");
+  const manifest = JSON.parse(await fs.readFile(manifestFile, "utf8"));
+  manifest.apps.site.preview.routes.push(`${collision}/`);
+  manifest.apps.site.preview.designs[`${collision}/`] = `website:${collision}/`;
+  await write(manifestFile, manifest);
+  const authoredPreview = resolveConsumerApp(await loadConsumer(site)).preview;
+  assert.ok(authoredPreview.routes.includes(collision));
+  assert.equal(authoredPreview.designs[collision], `website:${collision}`);
+  assert.deepEqual(JSON.parse(await fs.readFile(manifestFile, "utf8")), manifest);
+  await write(path.join(site, "src/pages/commercial-division/[slug].astro"), "<h1>Dynamic page</h1>");
+  checked = await checkConsumer(site, { fix: false });
+  assert.ok(checked.errors.some((error) => /Site page.*conflicts/.test(error)), checked.errors.join("\n"));
+  await fs.rm(path.join(site, "src/pages/commercial-division/[slug].astro"));
+  const shadow = path.join(site, "public/commercial-division/lease-faq/index.html");
+  await write(shadow, "<h1>Static replacement</h1>");
+  checked = await checkConsumer(site, { fix: false });
+  assert.ok(checked.errors.some((error) => /Public file.*conflicts/.test(error)), checked.errors.join("\n"));
+  await fs.rm(shadow);
+  const target = path.join(site, "src/components/linked-page.astro"), link = path.join(site, "src/pages/commercial-division/lease-faq/linked.astro");
+  await write(target, "<h1>Linked page</h1>");
+  await fs.mkdir(path.dirname(link), { recursive: true });
+  await fs.symlink(target, link);
+  checked = await checkConsumer(site, { fix: false });
+  assert.ok(checked.errors.some((error) => /symbolic links/.test(error)), checked.errors.join("\n"));
+  await fs.rm(link);
+});
+
+test("section checks and previews follow the configured design after selection changes", async (t) => {
+  const root = await temporaryDirectory(t);
+  const workspace = await starterWorkspace(path.join(root, "selected-design"));
+  await scaffoldWorkspaceEmdashSite(workspace, { skipInstall: true, output: quiet });
+  const site = path.join(workspace, "site"), directory = path.join(workspace, "src/designs/learn");
+  await fs.cp(path.join(workspace, "src/designs/website"), directory, { recursive: true });
+  await write(path.join(directory, "pages/commercial-division/about.html"), "<h1>About the division</h1>");
+  const declaration = JSON.parse(await fs.readFile(path.join(site, "sections.json"), "utf8"));
+  declaration.sections.push({ collection: "lease_faq", prefix: "/commercial-division/lease-faq/", label: "Lease FAQs", singularLabel: "Lease FAQ", feed: true });
+  await write(path.join(site, "sections.json"), declaration);
+  execFileSync(process.execPath, ["scripts/sections.mjs"], { cwd: site });
+  const config = path.join(site, "astro.config.mjs");
+  await write(config, `// designSystem({ design: "website" }) is an obsolete example.\nconst example = 'designSystem({ design: "website" })';\nconst unused = () => designSystem({ design: "website" });\n` + (await fs.readFile(config, "utf8")).replace('design: "website"', 'design: "learn"'));
+  const recorded = await fs.readFile(path.join(site, "timds.consumer.json"), "utf8");
+  assert.ok(recorded.includes("website:/"));
+  const collision = "/commercial-division/lease-faq/how-to-lease-building";
+  await write(path.join(directory, "pages", `${collision.slice(1)}.html`), "<h1>Lease information</h1>");
+  let checked = await checkConsumer(site, { fix: false });
+  assert.equal(checked.status, "failed");
+  assert.ok(checked.errors.some((error) => error.includes(collision) && /conflicts.*namespace/.test(error)), checked.errors.join("\n"));
+  const design = JSON.parse(await fs.readFile(path.join(directory, "design.json"), "utf8"));
+  design.pages[collision] = { title: "Lease reference", site: "reference" };
+  await write(path.join(directory, "design.json"), design);
+  checked = await checkConsumer(site, { fix: false });
+  assert.equal(checked.status, "passed", checked.errors.join("\n"));
+  const app = resolveConsumerApp(await loadConsumer(site));
+  assert.equal(app.preview.designs["/commercial-division/about"], "learn:/commercial-division/about");
+  assert.equal(app.preview.designs["/commercial-division/lease-faq"], "learn:/articles");
+  assert.ok(Object.values(app.preview.designs).every((reference) => reference.startsWith("learn:")));
+  assert.ok(!app.preview.routes.includes(collision));
+  assert.equal(await fs.readFile(path.join(site, "timds.consumer.json"), "utf8"), recorded);
+  const configured = await fs.readFile(config, "utf8");
+  for (const changed of [configured.replace('design: "learn"', 'design: process.env.DESIGN'), configured.replace('designSystem({ design: "learn" })', 'designSystem({})'), configured.replace('export default defineConfig(', 'export default opaqueConfig('), configured.replace('design: "learn"', '["design"]: "learn"'), configured.replace('design: "learn"', 'design: "website", ["design"]: "learn"'), configured.replace('import designSystem from "./src/integrations/design-system.mjs";', 'const designSystem = () => ({});')]) {
+    await write(config, changed);
+    const invalid = await checkConsumer(site, { fix: false });
+    assert.ok(invalid.errors.some((error) => /literal designSystem/.test(error)), invalid.errors.join("\n"));
+  }
 });

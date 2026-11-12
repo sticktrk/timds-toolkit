@@ -7,7 +7,11 @@
  */
 import type { ContentBylineCredit, PortableTextBlock, TaxonomyTerm } from "emdash";
 
-export const ARTICLES = "articles";
+import { sections as declaredSections } from "./sections-data";
+export interface Section { collection: string; prefix: string; label: string; singularLabel: string; feed: boolean; urlPattern: string; }
+export const sections: Section[] = declaredSections;
+/** Compatibility alias: new callers pass their section's collection. */
+export const ARTICLES = sections[0].collection;
 export const TOPIC = "topic";
 
 /** An image field value, as EmDash stores it. */
@@ -67,8 +71,13 @@ export function sitePath(path: string): string {
 	return `${BASE}${path}`;
 }
 
-export function articlePath(slug: string): string {
-	return sitePath(`/articles/${encodeURIComponent(slug)}/`);
+export function articlePath(slug: string, section: Section = sections[0]): string {
+	return sitePath(`${section.prefix}${encodeURIComponent(slug)}/`);
+}
+
+export function sectionForPath(pathname: string): Section | undefined {
+	const route = BASE && pathname.startsWith(`${BASE}/`) ? pathname.slice(BASE.length) : pathname;
+	return sections.find((section) => route === section.prefix.slice(0, -1) || route.startsWith(section.prefix));
 }
 
 export function topicPath(slug: string): string {

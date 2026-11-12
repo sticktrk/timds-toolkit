@@ -7,12 +7,18 @@ import { getEmDashCollection } from "emdash";
 
 import Layout from "__LAYOUT_IMPORT__";
 import ArticleCard from "../../components/articles/ArticleCard.astro";
-import { ARTICLES, cacheControl, type ArticleData } from "../../lib/articles/index";
+import { sectionForPath, cacheControl, type ArticleData } from "../../lib/articles/index";
+
+import { sectionAvailable, sectionUnavailable } from "../../lib/articles/availability";
 
 export const prerender = false;
 
+const section = sectionForPath(Astro.url.pathname);
+if (!section) return Astro.rewrite("/404");
+if (Astro.request.method !== "GET" && Astro.request.method !== "HEAD") return new Response("This address accepts GET and HEAD.", { status: 405, headers: { Allow: "GET, HEAD", "Cache-Control": "no-store" } });
+if (!await sectionAvailable(section)) return sectionUnavailable();
 const cursor = Astro.url.searchParams.get("cursor") ?? undefined;
-const { entries, nextCursor, cacheHint, error } = await getEmDashCollection<typeof ARTICLES, ArticleData>(ARTICLES, {
+const { entries, nextCursor, cacheHint, error } = await getEmDashCollection<string, ArticleData>(section.collection, {
 	orderBy: { published_at: "desc" },
 	limit: 20,
 	cursor,
@@ -22,7 +28,7 @@ if (error) throw error;
 if (Astro.cache?.enabled) Astro.cache.set(cacheHint);
 Astro.response.headers.set("Cache-Control", cacheControl(Astro.locals, Astro.url));
 
-const title = "Articles";
+const title = section.label;
 const description = "Notes, guides, and news, newest first.";
 ---
 
@@ -37,14 +43,14 @@ const description = "Notes, guides, and news, newest first.";
 			<section class="section" id="list">
 				<ul class="article-list">
 					{entries.map((entry) => (
-						<ArticleCard entry={entry} />
+						<ArticleCard entry={entry} section={section} />
 					))}
 				</ul>
 			</section>
 		) : (
 			<section class="section" id="list">
 				<h2>Nothing published yet</h2>
-				<p>The first articles appear here as soon as they are published.</p>
+				<p>The first {section.label.toLowerCase()} appear here as soon as they are published.</p>
 			</section>
 		)
 	}
@@ -53,7 +59,7 @@ const description = "Notes, guides, and news, newest first.";
 		nextCursor && (
 			<div class="section">
 				<a class="button button--secondary" href={`?cursor=${encodeURIComponent(nextCursor)}`}>
-					Older articles
+					Older {section.label.toLowerCase()}
 				</a>
 			</div>
 		)

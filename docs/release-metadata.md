@@ -192,8 +192,12 @@ installs (`consumer scaffold emdash --workspace`, see
 
 ```json
 "emdashTemplate": {
-  "version": 1,
-  "history": [{ "version": 1, "changes": ["The first template set: ..."] }]
+  "version": 3,
+  "history": [
+    { "version": 1, "changes": ["The first template set: ..."] },
+    { "version": 2, "changes": ["Declared sections, shared schema, routes, feeds and mixed lists."] },
+    { "version": 3, "changes": ["Nested section prefixes and a shared route inventory with explicit reference pages."] }
+  ]
 }
 ```
 
@@ -207,6 +211,16 @@ managed resources above. For maintainers: a template change an installed site
 would need to receive raises `version` in both places and adds a `history`
 entry; `src/emdash-template-metadata.test.mjs` fails when the two disagree or
 a version has no entry.
+
+A release that writes template version 3 declares `emdashWorkspaceContract: 3`
+and `emdashSectionsContract: 2`. Its fresh `sections.json` uses declaration
+version 2 for nested literal prefixes inside one Design System; builds export
+section contract 2. This first hosted-site release supports only that current
+contract; historical declaration versions are refused. Hosts must accept the
+complete capability tuple before scaffolding and acknowledge section contract 2
+during hosted builds. Standalone Astro builds need no host acknowledgement.
+The contract does not require an `articles` collection. Recorded template
+history describes development revisions, not supported deployment formats.
 
 ## Compatibility and verification
 

@@ -447,13 +447,25 @@ test("the catch-all route answers 405 to a POST, and the handlers are dispatched
   const source = await fs.readFile(path.join(SITE_TEMPLATE, "src/integrations/design-system.mjs"), "utf8");
   assert.match(source, /addMiddleware\(\{ entrypoint: new URL\("\.\/forms-middleware\.mjs", import\.meta\.url\), order: "pre" \}\);/);
   const middleware = await fs.readFile(path.join(SITE_TEMPLATE, "src/integrations/forms-middleware.mjs"), "utf8");
-  assert.match(middleware, /import \{ forms \} from "virtual:timds\/design-system";/);
-  assert.match(middleware, /export const onRequest = formDispatch\(forms, import\.meta\.env\.BASE_URL\);/);
+  assert.match(middleware, /import \{ forms, routeError \} from "virtual:timds\/design-system";/);
+  assert.match(middleware, /const dispatch = formDispatch\(forms, import\.meta\.env\.BASE_URL\);/);
+  assert.match(middleware, /dispatch\(context, \(\) => routeError/);
   const types = await fs.readFile(path.join(SITE_TEMPLATE, "src/design-system.d.ts"), "utf8");
   assert.match(types, /export const forms: Record<string,/);
   for (const doc of ["AGENTS.md", "DESIGN_SYSTEM.md", "docs/emdash-handover.md"]) {
     assert.match(await fs.readFile(path.join(SITE_TEMPLATE, doc), "utf8"), /src\/forms\//, `${doc} says where a form handler goes`);
   }
+});
+
+test("hosted discovery acknowledges the current contract while standalone configuration remains available", () => {
+  const config = { integrations: [{ name: "timds-host-discovery" }], build: { client: new URL("file:///tmp/timds-example-client/") } };
+  const hosted = integration.default({ design: "website" });
+  assert.throws(() => hosted.hooks["astro:config:done"]({ config }), /not acknowledged/);
+  assert.throws(() => hosted.api.acknowledgeHostedSections({ template: 2, workspace: 2, sections: 1 }), /must support template 3/);
+  assert.equal(hosted.api.acknowledgeHostedSections({ template: 3, workspace: 3, sections: 2 }), true);
+  assert.doesNotThrow(() => hosted.hooks["astro:config:done"]({ config }));
+  const standalone = integration.default({ design: "website" });
+  assert.doesNotThrow(() => standalone.hooks["astro:config:done"]({ config: { ...config, integrations: [] } }));
 });
 
 const { formDispatch, formRoute } = await import(path.join(SITE_TEMPLATE, "src", "integrations", "form-dispatch.mjs"));

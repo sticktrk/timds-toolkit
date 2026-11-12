@@ -13,7 +13,7 @@ before changing the site.
 | Colors, fonts, spacing, component styles | The system's tokens and `src/styles/` |
 | A style the site needs that the system lacks | Added to the system in the same change; never an existing token or rule changed |
 | Articles, topics, media | EmDash (its admin, REST API, or MCP server), never a commit |
-| Article routes, site configuration, dependencies | `site/`, a developer change |
+| Article sections (`site/sections.json`), shared schema (`site/section-schema.json`), routes, site configuration, dependencies | `site/`, a developer change |
 
 Run from the repository root, this checks the site both ways: it rewrites a
 literal that equals one system token and lists every style the system lacks.

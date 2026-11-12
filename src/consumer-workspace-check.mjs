@@ -102,9 +102,9 @@ import path from "node:path";
 
 import { matchesGlob } from "./consumer.mjs";
 import { applyWritesWithRollback, compileTokenCss } from "./consumer-scaffold.mjs";
-import { designShellStylesheets, runsStarterBuild, selectWebsiteDesign } from "./consumer-scaffold-workspace.mjs";
+import { designShellStylesheets, runsStarterBuild, selectWorkspaceDesign } from "./consumer-scaffold-workspace.mjs";
 import { hasContractGroups, readContractGroups } from "./contract-groups.mjs";
-import { declaredClasses, readDesignCatalog } from "./designs.mjs";
+import { declaredClasses } from "./designs.mjs";
 import { classifyToken, importReferences, parseCssTokens, resolveTokens } from "./tokens.mjs";
 
 /** The version of the result and finding shapes `checkWorkspaceSite` returns. */
@@ -120,7 +120,6 @@ const STARTER_STYLESHEET = "src/styles/system.css";
 const COMPILED_TOKENS = "/tokens.css";
 // The system's src/ folders the site integration serves at /<name>/.
 const SERVED_DIRECTORIES = ["assets", "scripts", "styles"];
-const ASTRO_CONFIGS = ["astro.config.mjs", "astro.config.js", "astro.config.ts", "astro.config.mts", "astro.config.cjs", "astro.config.cts"];
 const MAX_IMPORT_DEPTH = 8;
 // The system's built artifact (`timds check` and the starter build write it).
 // The workspace site never loads it: it reads src/styles/ and the tokens from
@@ -437,41 +436,6 @@ function conditionalImports(css) {
   return found;
 }
 
-/** The design id the site's astro.config passes to the integration (`designSystem({ design: "<id>" })`), with the file, or null. */
-async function configuredDesign(siteRoot) {
-  for (const file of ASTRO_CONFIGS) {
-    const text = await readText(path.join(siteRoot, file));
-    if (text === null) continue;
-    const call = /\bdesignSystem\s*\(\s*\{[^}]*?\bdesign\s*:\s*(["'`])([a-z0-9]+(?:-[a-z0-9]+)*)\1/.exec(text);
-    return call ? { id: call[2], file } : null;
-  }
-  return null;
-}
-
-/**
- * The website design the site renders inside: the one its astro.config names,
- * else the one the scaffold would pick (`selectWebsiteDesign`). Throws when
- * the config names a design the system lacks, or when there is none to pick:
- * the site cannot render then either, and no sheet can be shown to load.
- */
-async function selectDesign({ siteRoot, designSystemRoot }) {
-  const catalog = await readDesignCatalog(designSystemRoot);
-  const configured = await configuredDesign(siteRoot);
-  if (configured) {
-    const entry = catalog.designs.find((design) => design.id === configured.id);
-    if (!entry) {
-      const ids = catalog.designs.map((design) => design.id);
-      throw new Error(`The site's ${configured.file} renders the website design "${configured.id}", but the Design System has no src/designs/${configured.id}/design.json. Name one it has${ids.length ? ` (${ids.join(", ")})` : ""} in ${configured.file}, or add that design to the system.`);
-    }
-    return { id: entry.id, entry, selectedBy: configured.file };
-  }
-  const entry = selectWebsiteDesign(catalog.designs);
-  if (!entry) {
-    throw new Error("The two-way check reads the styles the site loads from the website design it renders inside, and the Design System has none (src/designs/<id>/ with a layout.html or pages/index.html). Add one with timds designs init, then name it in the site's astro.config.mjs as designSystem({ design: \"<id>\" }).");
-  }
-  return { id: entry.id, entry, selectedBy: "catalog" };
-}
-
 /** The first tokens.json group whose values are of `kind`, for a suggestion; `fallback` when none is. */
 function tokenGroupOf(tokens, kind, fallback) {
   for (const [group, entries] of Object.entries(tokens ?? {})) {
@@ -504,7 +468,7 @@ async function readSystem({ designSystemRoot, siteRoot, siteImports, stylesheets
       return normalized === COMPILED_TOKENS ? normalized : normalized.replace(/^\.\//, "");
     });
   } else {
-    design = await selectDesign({ siteRoot, designSystemRoot });
+    design = await selectWorkspaceDesign({ siteRoot, designSystemRoot });
     const shell = await designShellStylesheets(designSystemRoot, design.entry);
     design.shell = shell.shell;
     design.inline = shell.inline;

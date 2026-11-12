@@ -190,6 +190,36 @@ publishes the template version beside `hostContract` and must equal
 would need to receive raises `version` in both places and adds a `history`
 entry saying what changed.
 
+Template version 3 declares article sections in `site/sections.json` (section
+contract 2) and their shared fields and features in `site/section-schema.json`.
+Declaration version 2 permits single or nested literal prefixes inside one
+Design System; older section contracts are refused.
+`src/integrations/section-routes.mjs` is the shared route inventory
+for integration, consumer checks and previews: version 2 keeps stock samples
+and design pages explicitly marked `site: "reference"` nonpublic, and rejects
+real public pages, native Astro routes and public files inside collection
+namespaces. Resolved routes from every integration are checked; only exact
+Toolkit route/entrypoint pairs are exempt. Route/public symlinks are refused
+without following them.
+Its pure `src/lib/articles/sections.mjs` helper validates that data and generates
+the seed; consumer checks read the same JSON without executing site code.
+Sync owns `routable: true`; an explicit false seed value is refused before
+setup, while an omitted value keeps EmDash's true default.
+`npm run sections:sync` is an
+explicit site command; build, dev and consumer check validate without silently
+changing source. The design integration injects routes per prefix from the
+shared `src/routes/articles/` modules and exports the section contract beside
+its pages. The consumer preview derives routes and design pairs from the
+current declaration and active exported config selection, preserving authored
+preview pairs to selected-design reference pages and the consumer manifest.
+Workspace requests import the validated virtual section inventory; invalid JSON
+keeps the previous configuration, while dev route conflicts and duplicate
+form handlers return 503 until
+corrected. Hosted discovery must acknowledge the current 3/3/2 tuple; standalone
+builds remain available. Keep package
+`emdashWorkspaceContract: 3` and `emdashSectionsContract: 2` in step with these
+exports. See `docs/emdash.md` for the existing-database boundary.
+
 `upgrade --version VERSION` selects one exact tested resolution, restores the
 bounded requirement, runs `npm ci`, synchronizes adopted managed files with the
 selected CLI, and validates the graph and workspace. Explicit `--own-runtime`

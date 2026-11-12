@@ -590,7 +590,7 @@ test("the index holds what the selected design links: a token only in an unlinke
 
 test("a design the system lacks, or no design at all, is an error that says what to do", async (t) => {
   const fixture = await cssSystem(t, { site: { "src/styles/site.css": "a { color: #fff; }\n" } });
-  await write(fixture.root, { "site/astro.config.mjs": "export default { integrations: [designSystem({ design: \"gone\" })] };\n" });
+  await write(fixture.root, { "site/astro.config.mjs": "import designSystem from \"./src/integrations/design-system.mjs\";\nexport default { integrations: [designSystem({ design: \"gone\" })] };\n" });
   await assert.rejects(run(fixture), /astro\.config\.mjs renders the website design "gone", but the Design System has no src\/designs\/gone\/design\.json\. Name one it has \(website\)/);
   await fs.rm(path.join(fixture.root, "site", "astro.config.mjs"));
   await fs.rm(path.join(fixture.root, "src", "designs"), { recursive: true });
