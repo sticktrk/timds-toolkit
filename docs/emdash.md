@@ -468,7 +468,10 @@ stays empty. These are development or first-setup examples: adding a section
 to a live database creates schema only. Section removal does not delete
 deployed content. `consumer check` refuses a missing declared collection, an
 undeclared seeded collection, or drift in fields, features, addresses or
-taxonomy attachments. Build and development also validate the seed.
+taxonomy attachments. Sections are routable collections: sync writes
+`routable: true`, and checks, build and development reject an explicit false
+value before setup can create a nonroutable collection. An omitted value uses
+EmDash's default of true. Build and development also validate the seed.
 
 The shared schema accepts 1–32 fields and at most 64 fields across all
 declared collections, within a 64 KiB section contract measured as UTF-8 bytes. Supported field types
@@ -502,8 +505,10 @@ The marker belongs in the selected design's `design.json`, and its page still
 needs a title and an authored HTML file. Unmarked public design pages at or
 below a collection prefix or `/topics/` fail check and build instead of being
 silently hidden. Native files under `site/src/pages/` that intersect those
-namespaces are also refused, including dynamic routes and Astro's resolved
-project routes; the stock design catch-all and topic route are retained.
+namespaces are also refused, including dynamic routes and routes injected by
+other integrations. Resolved-route exemptions match both the expected pattern
+and the Toolkit entrypoint for the catch-all, topic, list, entry and feed;
+a foreign route cannot replace them merely by having a different origin.
 Public files cannot occupy these namespaces, including HTML aliases, and
 route or public directory symlinks are refused without following them.
 Ordinary parent and sibling pages
@@ -537,9 +542,10 @@ fails; standalone builds do not need it.
 Editing the declaration, shared schema or seed restarts development to rebuild
 the injected routes. An invalid save keeps the previous validated inventory,
 including the inventory used by requests; routes never read the edited JSON
-independently. A conflicting native route or public file keeps dev running but
+independently. A conflicting route, public file or duplicate form handler keeps dev running but
 returns 503 until corrected. Removing the conflict restores routing. Builds
-and consumer checks reject these conflicts outright.
+reject these conflicts outright. Consumer checks validate the source route
+and public-file inventory without executing the site's integrations.
 Section collection reads fail when a
 collection is missing; an absent collection cannot appear as an empty page.
 
@@ -549,7 +555,9 @@ from the toolkit repository. The supplied dependency tree must contain
 EmDash 1.4.0 and Astro 7.4.10; omitting `--dependencies` installs the scaffold's
 pinned dependencies. The disposable local check exercises nested section
 addition and removal, ordinary parent and sibling pages, shared schema changes,
-feeds, invalid JSON, native/public/symlink conflict recovery, and explicit form
+nonroutable seed refusal and sync recovery, duplicate form correction,
+foreign injected-route refusal, feeds, invalid JSON, native/public/symlink
+conflict recovery, and explicit form
 precedence under `/` and `/site`. Feeds explicitly handle HEAD and return 405
 with `Allow: GET, HEAD` for other methods. Vite handles development OPTIONS
 preflight before Astro. Public pages accept

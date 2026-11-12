@@ -89,7 +89,7 @@ export function createSectionSeed(seed, sections, model) {
   };
   return {
     ...seed,
-    collections: sections.map((section) => ({ description: `Published ${section.label.toLowerCase()}, rendered at ${section.prefix}<slug>/.`, ...seed.collections?.find((collection) => collection.slug === section.collection), slug: section.collection, label: section.label, labelSingular: section.singularLabel, urlPattern: section.urlPattern, supports: structuredClone(schema.supports), fields: structuredClone(schema.fields) })),
+    collections: sections.map((section) => ({ description: `Published ${section.label.toLowerCase()}, rendered at ${section.prefix}<slug>/.`, ...seed.collections?.find((collection) => collection.slug === section.collection), slug: section.collection, label: section.label, labelSingular: section.singularLabel, routable: true, urlPattern: section.urlPattern, supports: structuredClone(schema.supports), fields: structuredClone(schema.fields) })),
     taxonomies: [...(seed.taxonomies ?? []).map((taxonomy) => taxonomy.name === "topic" ? { ...taxonomy, hierarchical: schema.taxonomies[0].hierarchical, collections: [...schema.taxonomies[0].collections] } : taxonomy), ...(!currentTopics ? schema.taxonomies : [])],
     content: Object.fromEntries(sections.map((section) => [section.collection, contentFor(section)])),
   };
@@ -102,6 +102,7 @@ export function validateSectionSeed(seed, sections, model) {
   const expected = createSectionSeed(seed, sections, model);
   for (const collection of expected.collections) {
     const stored = actual.find((item) => item.slug === collection.slug);
+    if (stored.routable !== undefined && stored.routable !== true) throw new Error(`Section ${collection.slug} must be routable in seed/seed.json; run npm run sections:sync.`);
     for (const key of ["urlPattern", "supports", "fields", "label", "labelSingular"]) if (stable(stored?.[key]) !== stable(collection[key])) throw new Error(`Section ${collection.slug} has a different ${key} in seed/seed.json; run npm run sections:sync.`);
   }
   const topic = seed.taxonomies?.find((taxonomy) => taxonomy.name === "topic");

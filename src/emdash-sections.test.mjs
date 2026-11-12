@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -73,6 +74,25 @@ test("shared section schema accepts bounded field data and rejects definitions t
   assert.throws(() => sectionSchemaFor(labeled, inventoryModel), /section-schema.json/);
 });
 
+test("section sync restores routable collections and checks reject a false seed before setup", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "timds-routable-seed-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  await fs.cp(new URL("../templates/emdash/site/", import.meta.url), directory, { recursive: true });
+  const file = path.join(directory, "seed/seed.json");
+  const seed = JSON.parse(await fs.readFile(file, "utf8"));
+  const declared = normalizeSections(JSON.parse(await fs.readFile(path.join(directory, "sections.json"), "utf8")));
+  delete seed.collections[0].routable;
+  assert.equal(validateSectionSeed(seed, declared, model), true, "an absent value uses EmDash's true default");
+  seed.collections[0].routable = false;
+  assert.throws(() => validateSectionSeed(seed, declared, model), /articles must be routable/);
+  await fs.writeFile(file, JSON.stringify(seed));
+  execFileSync(process.execPath, ["scripts/sections.mjs"], { cwd: directory });
+  const synchronized = JSON.parse(await fs.readFile(file, "utf8"));
+  assert.equal(synchronized.collections[0].routable, true);
+  assert.equal(validateSectionSeed(synchronized, declared, model), true);
+  assert.deepEqual(synchronized.content, seed.content);
+});
+
 test("mixed topic and latest lists carry an opaque position per collection past twenty entries", async () => {
   const records = Object.fromEntries(sections.map((section, column) => [section.collection, Array.from({ length: 31 }, (_, index) => ({ id: `${section.collection}-${index}`, data: { id: `${section.collection}-${index}`, publishedAt: new Date(Date.UTC(2026, 0, 31 - Math.floor((index * 3 + column) / 4))) }, topic: index % 2 === 0 ? "example-topic" : "elsewhere" }))]));
   const query = async (collection, filter) => {
@@ -126,6 +146,18 @@ test("one nested route inventory keeps public parent pages and explicit referenc
   assert.throws(() => sectionRouteInventory(sections, [{ route: "/commercial-division/lease-faq" }]), /conflicts.*namespace/);
   for (const file of ["src/pages/commercial-division/lease-faq/index.astro", "src/pages/commercial-division/lease-faq/[slug].astro", "src/pages/commercial-division/lease-faq/help.markdown", "src/pages/commercial-division/lease-faq/.well-known/example.ts", "src/pages/commercial-division/[slug].astro", "src/pages/[...custom].astro"]) assert.throws(() => sectionRouteInventory(sections, pages, { pageFiles: [file] }), /Site page.*conflicts/);
   assert.doesNotThrow(() => sectionRouteInventory(sections, pages, { pageFiles: ["src/pages/[...page].astro", "src/pages/topics/[slug].astro", "src/pages/commercial-division/about.astro", "src/pages/commercial-division/lease-faq/helper.mjs"] }));
+  const resolvedRoutes = [
+    { origin: "project", pattern: "/[...page]", entrypoint: "src/pages/[...page].astro" },
+    { origin: "project", pattern: "/topics/[slug]", entrypoint: "src/pages/topics/[slug].astro" },
+    { origin: "external", pattern: "/commercial-division/lease-faq", entrypoint: "src/routes/articles/index.astro" },
+    { origin: "external", pattern: "/commercial-division/lease-faq/[slug]", entrypoint: "src/routes/articles/entry.astro" },
+    { origin: "external", pattern: "/commercial-division/lease-faq/rss.xml", entrypoint: "src/routes/articles/rss.xml.ts" },
+  ];
+  assert.doesNotThrow(() => sectionRouteInventory(sections, pages, { resolvedRoutes }));
+  for (const pattern of ["/commercial-division/lease-faq", "/commercial-division/lease-faq/how-to-lease-building", "/topics/[slug]"]) {
+    assert.throws(() => sectionRouteInventory(sections, pages, { resolvedRoutes: [...resolvedRoutes, { origin: "external", pattern, entrypoint: "foreign.astro" }] }), /Site route.*conflicts/);
+  }
+  assert.throws(() => sectionRouteInventory(sections, pages, { resolvedRoutes: [{ origin: "external", pattern: "/topics/override", entrypoint: "src/routes/articles/index.astro" }] }), /Site route.*conflicts/);
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "timds-nested-design-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const directory = path.join(root, "src/designs/website");

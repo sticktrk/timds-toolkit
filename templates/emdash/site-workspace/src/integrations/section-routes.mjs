@@ -78,7 +78,14 @@ export function sectionRouteInventory(sections, designPages = [], { version = 2,
     if (aliases.some((alias) => namespaces.some((prefix) => inNamespace(alias, prefix)))) throw new Error(`Public file ${file} conflicts with a collection or topic namespace. Move the file outside that namespace.`);
   }
   for (const route of resolvedRoutes) {
-    if (route.origin !== "project" || STOCK_PAGE_FILES.has(route.entrypoint?.replaceAll("\\", "/"))) continue;
+    const entrypoint = route.entrypoint?.replaceAll("\\", "/");
+    const pattern = normalizedRoute(route.pattern ?? "");
+    const owned = entrypoint === "src/pages/[...page].astro" && pattern === "/[...page]"
+      || entrypoint === "src/pages/topics/[slug].astro" && pattern === "/topics/[slug]"
+      || sections.some((section) => entrypoint === "src/routes/articles/index.astro" && pattern === section.prefix.slice(0, -1)
+        || entrypoint === "src/routes/articles/entry.astro" && pattern === `${section.prefix}[slug]`
+        || section.feed && entrypoint === "src/routes/articles/rss.xml.ts" && pattern === `${section.prefix}rss.xml`);
+    if (owned) continue;
     if (typeof route.pattern === "string" && namespaces.some((prefix) => fileOverlapsNamespace(route.pattern, prefix))) throw new Error(`Site route ${route.pattern} conflicts with a collection or topic namespace. Move the route outside that namespace.`);
   }
   return {

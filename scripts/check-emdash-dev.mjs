@@ -194,6 +194,41 @@ try {
     for (const pathname of [`${division}about/`, `${prefix}${slug}/`]) assert.equal(await status(pathname, post), 405, `${base}${pathname} POST`);
     for (const pathname of [`${division}missing/`, `${prefix}missing/`, `${prefix}${slug}/extra/`]) assert.equal(await status(pathname), 404, `${base}${pathname}`);
 
+    const nonroutable = await json(seedFile);
+    nonroutable.collections.find((collection) => collection.slug === "lease_faq").routable = false;
+    output = "";
+    await save(seedFile, nonroutable);
+    await until(() => output.includes("must be routable") && output.includes("Continuing with previous valid configuration"), `${base} nonroutable seed refusal`);
+    assert.equal(await status(`${prefix}${slug}/`), 200);
+    output = "";
+    await synchronize();
+    assert.ok((await json(seedFile)).collections.every((collection) => collection.routable === true));
+    await until(() => output.includes("server restarted."), `${base} routable seed sync recovery`);
+
+    const duplicateForm = path.join(site, "src/forms", prefix, "index.ts");
+    await mkdir(path.dirname(duplicateForm), { recursive: true });
+    output = "";
+    await writeFile(duplicateForm, 'export const POST = () => new Response("duplicate-form");\n');
+    await until(async () => output.includes("both handle POST") && await status(prefix) === 503, `${base} guarded duplicate form handler`);
+    await rm(duplicateForm);
+    await until(async () => await status(prefix) === 200 && await status(prefix, post) === 201, `${base} duplicate form correction and precedence`);
+    assert.equal(await (await request(prefix, post)).text(), "lease-form-handled");
+
+    const configFile = path.join(site, "astro.config.mjs"), validConfig = await readFile(configFile, "utf8");
+    await writeFile(path.join(site, "foreign-route.ts"), 'export const GET = () => new Response("foreign route replacement");\n');
+    const foreignIntegration = `{ name: "synthetic-foreign-route", hooks: { "astro:config:setup"({ injectRoute }) { injectRoute({ pattern: ${JSON.stringify(prefix + slug)}, entrypoint: new URL("./foreign-route.ts", import.meta.url).pathname, prerender: false }); } } },`;
+    assert.ok(validConfig.includes("integrations: ["));
+    output = "";
+    await writeFile(configFile, validConfig.replace("integrations: [", `integrations: [\n${foreignIntegration}`));
+    await until(async () => output.includes("Site route") && output.includes("conflicts") && await status(`${prefix}${slug}/`) === 503, `${base} foreign injected route refusal`);
+    const blocked = await request(`${prefix}${slug}/`);
+    assert.equal(blocked.status, 503);
+    assert.ok(!(await blocked.text()).includes("foreign route replacement"));
+    output = "";
+    await writeFile(configFile, validConfig);
+    await until(async () => output.includes("server restarted.") && await status(`${prefix}${slug}/`) === 200, `${base} foreign injected route removal`);
+    assert.equal(await status(prefix, post), 201);
+
     output = "";
     await writeFile(declarations, '{"schemaVersion":');
     await until(() => output.includes("Continuing with previous valid configuration"), `${base} malformed declaration recovery`);
@@ -268,7 +303,7 @@ try {
     assert.ok((await read(division)).includes("<h1>Commercial division</h1>"));
     assert.ok((await read(`${division}about/`)).includes("<h1>About commercial division</h1>"));
     await stop();
-    console.log(`Passed EmDash development reloads at ${base}: nested list/entry/feed, HEAD/405, division pages, POST ownership, invalid JSON and pair recovery, guarded native/public/symlink conflicts, schema JSON, helper changes and removal.`);
+    console.log(`Passed EmDash development reloads at ${base}: nested list/entry/feed, HEAD/405, division pages, POST ownership, routable seed checks, duplicate-form recovery, foreign route refusal, invalid JSON and pair recovery, guarded native/public/symlink conflicts, schema JSON, helper changes and removal.`);
   }
 } finally {
   await stop();

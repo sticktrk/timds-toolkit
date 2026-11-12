@@ -38,6 +38,8 @@ configuration too, without executing it; comments and unused calls do not count.
 `/commercial-division/` and `/commercial-division/about/` stay public inside
 the same selected design. A public design page or native Astro route inside
 a collection namespace or `/topics/` is a conflict: check and build refuse it.
+Routes injected by another integration are also checked against the owned
+namespaces; only the expected Toolkit route and entrypoint pairs are exempt.
 Public files in those namespaces and symlinks in route/public directories are
 also refused. Dev remains running during a route conflict and returns 503
 until it is corrected. Invalid section JSON instead keeps the last validated
@@ -104,7 +106,10 @@ mentions POST does not; `export * from` does not either, so name `POST`.
 A module that does not export `POST` handles nothing, and one whose `POST`
 is not a function when the request comes answers 405 (the server log names
 the module), never the page at that address. Two modules for one
-address (`contact.ts` and `contact/index.ts`) are an error.
+address (`contact.ts` and `contact/index.ts`) are an error. If a duplicate is
+saved during dev, the server stays running with its last validated inventory
+and public routes return 503 until the duplicate is corrected. Correcting it
+restores the handler's precedence over pages at that address.
 
 EmDash turns Astro's cross-origin form check off for the whole site, so a
 handler receives POSTs from other origins too. A handler that should accept

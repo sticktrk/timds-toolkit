@@ -793,6 +793,7 @@ export default function designSystem({ design }) {
   let routeFilesOptions;
   let resolvedRoutes = [];
   let lastRendered;
+  let lastHandlers = new Map();
   let routeError = null;
   let viteServer;
   const api = {};
@@ -817,10 +818,12 @@ export default function designSystem({ design }) {
     }
     viteServer.ws.send({ type: "full-reload" });
   };
-  const render = (forms = new Set()) => {
+  const render = () => {
     try {
-      const rendered = renderWorkspaceDesign(systemRoot, { design, base, forms, sections: api.sections, sectionsContract: api.sectionsContract, ...readSectionRouteFiles(siteRoot, routeFilesOptions), resolvedRoutes });
+      const handlers = formHandlers(siteRoot, { parse, warn: (message) => logger.warn(message) });
+      const rendered = renderWorkspaceDesign(systemRoot, { design, base, forms: handlers.keys(), sections: api.sections, sectionsContract: api.sectionsContract, ...readSectionRouteFiles(siteRoot, routeFilesOptions), resolvedRoutes });
       lastRendered = rendered;
+      lastHandlers = handlers;
       routeError = null;
       return rendered;
     } catch (error) {
@@ -881,10 +884,9 @@ export default function designSystem({ design }) {
               },
               load(id) {
                 if (id !== RESOLVED_MODULE) return undefined;
-                const handlers = formHandlers(siteRoot, { parse, warn: (message) => logger.warn(message) });
-                const rendered = render(handlers.keys());
+                const rendered = render();
                 for (const file of rendered.files) this.addWatchFile(file);
-                return virtualModuleSource(rendered, handlers, siteRoot, { ...api, routeError });
+                return virtualModuleSource(rendered, lastHandlers, siteRoot, { ...api, routeError });
               },
               configureServer(server) {
                 viteServer = server;
@@ -900,7 +902,7 @@ export default function designSystem({ design }) {
                 server.watcher.add([designDirectory, manifestFile, formsDirectory, publicDirectory]);
                 const reload = (file) => {
                   if (file !== manifestFile && ![designDirectory, formsDirectory, publicDirectory].some((directory) => file === directory || file.startsWith(`${directory}${path.sep}`))) return;
-                  render(formHandlers(siteRoot, { parse, warn: (message) => logger.warn(message) }).keys());
+                  render();
                   invalidate();
                 };
                 for (const event of ["add", "change", "unlink", "addDir", "unlinkDir"]) server.watcher.on(event, reload);
@@ -939,7 +941,9 @@ export default function designSystem({ design }) {
         // Astro invokes this again when a native page route is added or removed.
         // Validate the same inventory used by consumer check and preview before
         // a file route can take precedence over an injected collection route.
-        resolvedRoutes = routes.map((route) => ({ ...route, entrypoint: path.isAbsolute(route.entrypoint) ? path.relative(siteRoot, route.entrypoint).split(path.sep).join("/") : route.entrypoint }));
+        // Astro's pattern omits base; its patternRegex includes it. Resolve
+        // component paths against the site so owned pairs compare identically.
+        resolvedRoutes = routes.map((route) => ({ ...route, entrypoint: path.relative(siteRoot, path.resolve(siteRoot, route.entrypoint)).split(path.sep).join("/") }));
         render();
         invalidate();
       },

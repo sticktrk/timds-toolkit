@@ -93,6 +93,9 @@ consumer check validate this same JSON; the check never executes site code.
 Sync preserves authored topic labels, locale, translation group and terms,
 unrelated taxonomy metadata and terms, and refuses to discard
 an undeclared collection definition or its development content.
+Every section must be routable. Sync writes `routable: true`; an explicit
+false seed value is rejected before setup, while omission uses EmDash's true
+default.
 
 A first setup applies the seed. Once setup is complete, editing the seed
 cannot create a new collection: create it through EmDash's schema API or

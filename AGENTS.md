@@ -198,9 +198,13 @@ Design System; older section contracts are refused.
 for integration, consumer checks and previews: version 2 keeps stock samples
 and design pages explicitly marked `site: "reference"` nonpublic, and rejects
 real public pages, native Astro routes and public files inside collection
-namespaces. Route/public symlinks are refused without following them.
+namespaces. Resolved routes from every integration are checked; only exact
+Toolkit route/entrypoint pairs are exempt. Route/public symlinks are refused
+without following them.
 Its pure `src/lib/articles/sections.mjs` helper validates that data and generates
 the seed; consumer checks read the same JSON without executing site code.
+Sync owns `routable: true`; an explicit false seed value is refused before
+setup, while an omitted value keeps EmDash's true default.
 `npm run sections:sync` is an
 explicit site command; build, dev and consumer check validate without silently
 changing source. The design integration injects routes per prefix from the
@@ -209,7 +213,8 @@ its pages. The consumer preview derives routes and design pairs from the
 current declaration and active exported config selection, preserving authored
 preview pairs to selected-design reference pages and the consumer manifest.
 Workspace requests import the validated virtual section inventory; invalid JSON
-keeps the previous configuration, while dev route conflicts return 503 until
+keeps the previous configuration, while dev route conflicts and duplicate
+form handlers return 503 until
 corrected. Hosted discovery must acknowledge the current 3/3/2 tuple; standalone
 builds remain available. Keep package
 `emdashWorkspaceContract: 3` and `emdashSectionsContract: 2` in step with these

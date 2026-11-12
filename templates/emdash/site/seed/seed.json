@@ -9,6 +9,7 @@
   "collections": [
     {
       "slug": "articles",
+      "routable": true,
       "label": "Articles",
       "labelSingular": "Article",
       "description": "Generated articles, rendered at /articles/<slug>/.",
