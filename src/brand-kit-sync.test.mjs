@@ -85,10 +85,13 @@ test('brand-kit init seeds every stock page once and records plumbing only, and 
   // The viewer and its slot helper are resolved from the package, not copied.
   for (const relative of ['scripts/brand-kit.mjs', 'scripts/viewer.mjs']) await assert.rejects(fs.access(path.join(root, relative)), { code: 'ENOENT' }, relative);
   assert.deepEqual([record.level, record.declined], [1, []]);
-  for (const relative of ['src/pages/digital', 'src/designs/website', 'src/pages/print/letterheads.html']) {
+  for (const relative of ['src/pages/digital', 'src/pages/print/letterheads.html']) {
     await assert.rejects(fs.access(path.join(root, relative)), { code: 'ENOENT' });
   }
-  assert.deepEqual(await fs.readdir(path.join(root, 'src/designs')), ['.gitkeep']);
+  // The website design is seeded like the pages: written once, never recorded.
+  assert.deepEqual(await fs.readdir(path.join(root, 'src/designs')), ['website']);
+  assert.equal(await read('src/designs/website/layout.html'), await fs.readFile(path.join(packageRoot, 'templates/brand-kit/src/designs/website/layout.html'), 'utf8'));
+  assert.ok(!Object.keys(record.files).some(relative => relative.startsWith('src/designs/')));
   const before = await read('.timds/starter.json');
   const synced = await quiet(() => syncStarterWorkspace(root));
   assert.deepEqual(synced.written, []);

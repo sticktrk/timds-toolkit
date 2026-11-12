@@ -62,7 +62,7 @@ test('the brand-kit slot export owns the exact foundation, copy, page and stock 
   }
   for (const id of brandKitPages.planned) await assert.rejects(fs.access(path.join(overlay, fragment(id))), {code: 'ENOENT'});
   for (const file of brandKitStockPaths) assert.ok((await fs.lstat(path.join(overlay, file))).isFile(), file);
-  assert.deepEqual(await fs.readdir(path.join(overlay, 'src/designs')), ['.gitkeep']);
+  assert.deepEqual(await fs.readdir(path.join(overlay, 'src/designs')), ['website']);
   const pkg = JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8'));
   assert.equal(pkg.exports['./brand-kit'], './src/brand-kit.mjs');
   for (const file of ['src/brand-kit.mjs', 'src/brand-kit.d.mts', 'templates']) assert.ok(pkg.files.includes(file), file);
@@ -102,7 +102,7 @@ test('the built kit quotes every slot key and its exported guidance without a pr
   const site = await renderSite(directory);
   assert.equal(site.pages, brandKitPages.authored.length);
   assert.deepEqual(site.planned, brandKitPages.planned);
-  assert.equal(site.designs.length, 0);
+  assert.deepEqual(site.designs.map(design => design.id), ['website']);
   const html = [...site.files.values()].join('\n');
   for (const slot of brandKitSlots) {
     assert.ok(html.includes(escapeHtml(slot.key)), slot.key);
@@ -155,9 +155,52 @@ test('the built kit quotes every slot key and its exported guidance without a pr
   assert.match(await fs.readFile(path.join(directory, 'dist/llms.txt'), 'utf8'), /\/overview\/index\.md/);
   assert.equal(checked.machine.counts.untyped, 0);
   assert.deepEqual(checked.machine.warnings, ['no asset is annotated data-timds-role="logo"; the brand kit has no logo']);
-  assert.deepEqual(checked.designs, { enabled: true, designCount: 0, pageCount: 0, stateCount: 0, journeyCount: 0, warnings: [] });
+  assert.deepEqual(checked.designs, { enabled: true, designCount: 1, pageCount: 9, stateCount: 11, journeyCount: 2, warnings: [] });
   const copy = JSON.parse(await fs.readFile(path.join(directory, 'src/copy.json'), 'utf8'));
   copy.voice = 'Lead with one useful fact. Show an example before a claim.';
   await fs.writeFile(path.join(directory, 'src/copy.json'), JSON.stringify(copy));
   assert.deepEqual((await renderSite(directory)).warnings, []);
+});
+
+// The kit's website design is the ordinary starter's set of routes and states
+// in the kit's own elements, and the stylesheet it loads is written in the
+// kit's tokens: a fresh kit can take a site (consumer scaffold emdash
+// --workspace) with every article route styled.
+test('the kit ships a website design with the starter routes, styled in kit tokens only', async () => {
+  const walk = async (directory, prefix = '') => (await Promise.all((await fs.readdir(path.join(directory, prefix), {withFileTypes: true}))
+    .map(entry => entry.isDirectory() ? walk(directory, `${prefix}${entry.name}/`) : [`${prefix}${entry.name}`]))).flat().sort();
+  const kitDesign = path.join(overlay, 'src/designs/website');
+  assert.deepEqual(await walk(kitDesign), await walk(path.join(root, 'templates/starter/src/designs/website')));
+  const design = await json('src/designs/website/design.json');
+  const starterDesign = JSON.parse(await fs.readFile(path.join(root, 'templates/starter/src/designs/website/design.json'), 'utf8'));
+  assert.deepEqual([design.pages, design.journeys], [starterDesign.pages, starterDesign.journeys]);
+  // The article designs are the markup the EmDash templates port, unchanged.
+  for (const page of ['pages/articles.html', 'pages/articles/example-article.html', 'pages/topics/example-topic.html']) {
+    assert.equal(await read(`src/designs/website/${page}`), await fs.readFile(path.join(root, 'templates/starter/src/designs/website', page), 'utf8'), page);
+  }
+  const layout = await read('src/designs/website/layout.html');
+  assert.deepEqual([...layout.matchAll(/<link rel="stylesheet" href="([^"]+)">/g)].map(match => match[1]), ['/tokens.css', '/styles/system.css']);
+  const css = await read('src/styles/system.css');
+  const {declaredClasses} = await import('./designs.mjs');
+  const declared = declaredClasses(css);
+  const literal = /#[0-9a-f]{3,8}\b|\b(?:rgba?|hsla?|oklch|oklab)\(/i;
+  for (const file of await walk(kitDesign)) {
+    if (!file.endsWith('.html')) continue;
+    const html = await read(`src/designs/website/${file}`);
+    assert.doesNotMatch(html, literal, file);
+    assert.doesNotMatch(html, /\bstyle\s*=|\{\{(?:copy|media|slots|canvas|page):/, `${file}: a design page takes no inline style or viewer placeholder`);
+    for (const [, names] of html.matchAll(/\bclass="([^"]*)"/g)) for (const name of names.split(/\s+/).filter(Boolean)) assert.ok(declared.has(name), `${file}: .${name} is declared by the kit stylesheet`);
+  }
+  for (const name of ['article-card', 'article-list', 'article-meta', 'topic-list', 'prose', 'table-scroll', 'site-footer__links']) assert.ok(declared.has(name), name);
+  // Every custom property the stylesheet reads is a kit token, one of the
+  // aliases it declares for the shared plumbing, or set by the renderer.
+  const tokens = await json('tokens.json');
+  const known = new Set(Object.entries(tokens).flatMap(([group, entries]) => Object.keys(entries).map(name => `--${group}-${name}`)));
+  for (const [, name] of css.matchAll(/(--[a-z0-9-]+)\s*:/g)) known.add(name);
+  for (const name of ['--u', '--cw', '--ch', '--focal-position']) known.add(name);
+  const articles = css.slice(css.indexOf('/* Articles:'), css.indexOf('/* ---- end site layout ---- */'));
+  assert.ok(articles.length > 0);
+  for (const [, name] of css.matchAll(/var\((--[a-z0-9-]+)/g)) assert.ok(known.has(name), `${name} is not a kit token`);
+  // The article block uses the kit's own names, never the plumbing aliases.
+  assert.doesNotMatch(articles, /--(?:font-serif|font-sans|radius-sm|radius-md|size-line)\b/);
 });

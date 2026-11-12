@@ -1449,7 +1449,7 @@ test("designs init adopts website designs in a system scaffolded without them", 
   assert.match(await read("scripts/build.mjs"), /client change/, "designs init never touches a script");
   const checked = await checkWorkspace(repoRoot);
   assert.deepEqual([checked.designs.pageCount, checked.designs.stateCount, checked.designs.journeyCount, checked.designs.warnings], [9, 11, 2, []]);
-  await assert.rejects(initializeDesigns(repoRoot), /src\/designs\/ already exists/);
+  await assert.rejects(initializeDesigns(repoRoot), /src\/designs\/ already holds a design \(website\)/);
 
   // A system that renamed its tokens is told which classes the sample needs rather than given a block that would not resolve.
   await fs.rm(path.join(repoRoot, "src/designs"), { recursive: true });
@@ -1458,7 +1458,15 @@ test("designs init adopts website designs in a system scaffolded without them", 
   tokens.spacing = tokens.space;
   delete tokens.space;
   await fs.rename(path.join(repoRoot, "tokens/space.json"), path.join(repoRoot, "tokens/spacing.json"));
+  // A designs directory that holds no design, only placeholder files (an older brand-kit system holds .gitkeep), is not set up yet:
+  // init proceeds without --force and leaves the files already there alone.
+  await fs.mkdir(path.join(repoRoot, "src/designs"));
+  await fs.writeFile(path.join(repoRoot, "src/designs/.gitkeep"), "");
+  await fs.writeFile(path.join(repoRoot, "src/designs/NOTES.md"), "authored\n");
   const renamed = await initializeDesigns(repoRoot);
+  await fs.access(path.join(repoRoot, "src/designs/website/pages/index.html"));
+  await fs.access(path.join(repoRoot, "src/designs/.gitkeep"));
+  assert.equal(await read("src/designs/NOTES.md"), "authored\n");
   assert.equal(renamed.stylesheet, "untouched");
   // The list is the layout block's own classes the sample uses: the original pieces and the article's prose among them.
   const starterStylesheet = await fs.readFile(path.join(templatesRoot, "starter/src/styles/system.css"), "utf8");

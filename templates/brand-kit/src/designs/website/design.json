@@ -1,0 +1,65 @@
+{
+  "title": "Website",
+  "summary": "The public website: home, about, contact with its sent state, privacy, terms, and the page a missing address shows, plus the article templates (the article list with its empty state, an article, and a topic) that CMS entries render into. Composed from the kit's layout pieces and brand elements. Starter pages; replace them with the client's.",
+  "pages": {
+    "/": { "title": "Home" },
+    "/404": { "title": "Not found" },
+    "/articles/example-article": { "title": "Article" },
+    "/topics/example-topic": { "title": "Topic" }
+  },
+  "journeys": [
+    {
+      "id": "get-in-touch",
+      "title": "Getting in touch",
+      "summary": "A visitor arrives on the home page, opens the contact page, and sends the form. Every path a visitor moves through in order is declared like this: steps, each with the screens the visitor meets, and branches for the screens met instead (an error, an empty list).",
+      "steps": [
+        {
+          "title": "Arrive",
+          "summary": "The home page is where most visitors start.",
+          "screens": [
+            { "page": "/", "label": "Home", "note": "The headline and the call to action that leads to the contact page." }
+          ]
+        },
+        {
+          "title": "Write",
+          "summary": "The form, then what the visitor sees once it is sent.",
+          "screens": [
+            { "page": "/contact" },
+            { "page": "/contact", "state": "sent", "label": "Message sent", "note": "The thanks and the way back home." }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "read-an-article",
+      "title": "Reading an article",
+      "summary": "A visitor opens the article list, reads an article, and follows its topic to more like it. The list, the article, and the topic are templates: the design is here, and the content is CMS entries.",
+      "steps": [
+        {
+          "title": "Browse",
+          "summary": "The published articles, newest first.",
+          "screens": [
+            { "page": "/articles" }
+          ],
+          "branches": [
+            { "page": "/articles", "state": "empty", "label": "No articles yet", "note": "What the list shows before anything is published." }
+          ]
+        },
+        {
+          "title": "Read",
+          "summary": "The article: its header, then the body.",
+          "screens": [
+            { "page": "/articles/example-article", "label": "Article", "note": "One of every element an article body may contain." }
+          ]
+        },
+        {
+          "title": "Follow a topic",
+          "summary": "A topic link leads to the articles that share it.",
+          "screens": [
+            { "page": "/topics/example-topic", "label": "Topic" }
+          ]
+        }
+      ]
+    }
+  ]
+}
