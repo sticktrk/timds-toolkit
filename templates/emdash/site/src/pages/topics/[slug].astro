@@ -4,11 +4,13 @@
  * first. The port of the Design System's topics/example-topic.html design.
  * A topic that does not exist answers the 404 page.
  */
-import { decodeSlug, getEmDashCollection, getTaxonomyTermsWithCacheHint } from "emdash";
+import { decodeSlug, getTaxonomyTermsWithCacheHint } from "emdash";
 
 import Layout from "__LAYOUT_IMPORT__";
 import ArticleCard from "../../components/articles/ArticleCard.astro";
-import { ARTICLES, TOPIC, cacheControl, sitePath, type ArticleData } from "../../lib/articles/index";
+import { sections, TOPIC, cacheControl, sitePath } from "../../lib/articles/index";
+
+import { getLatestArticles } from "../../lib/articles/latest";
 
 export const prerender = false;
 
@@ -20,17 +22,11 @@ const topic = terms.data.find((term) => term.slug === slug);
 if (!topic) return Astro.rewrite("/404");
 
 const cursor = Astro.url.searchParams.get("cursor") ?? undefined;
-const { entries, nextCursor, cacheHint, error } = await getEmDashCollection<typeof ARTICLES, ArticleData>(ARTICLES, {
-	where: { [TOPIC]: topic.slug },
-	orderBy: { published_at: "desc" },
-	limit: 20,
-	cursor,
-});
-if (error) throw error;
+const { entries, nextCursor, cacheHints } = await getLatestArticles({ topic: topic.slug, cursor });
 
 if (Astro.cache?.enabled) {
 	Astro.cache.set(terms.cacheHint);
-	Astro.cache.set(cacheHint);
+	for (const hint of cacheHints) Astro.cache.set(hint);
 }
 Astro.response.headers.set("Cache-Control", cacheControl(Astro.locals, Astro.url));
 
@@ -47,8 +43,8 @@ const description = topic.description || `Articles about ${topic.label}.`;
 		entries.length > 0 ? (
 			<section class="section" id="list">
 				<ul class="article-list">
-					{entries.map((entry) => (
-						<ArticleCard entry={entry} />
+					{entries.map(({ entry, section }) => (
+						<ArticleCard entry={entry} section={section} />
 					))}
 				</ul>
 			</section>
@@ -56,7 +52,7 @@ const description = topic.description || `Articles about ${topic.label}.`;
 			<section class="section" id="list">
 				<h2>Nothing published yet</h2>
 				<p>
-					Articles filed under this topic appear here as soon as they are published. <a href={sitePath("/articles/")}>See all articles</a>.
+					Articles filed under this topic appear here as soon as they are published. {sections.map((section, index) => <Fragment>{index > 0 && " · "}<a href={sitePath(section.prefix)}>See all {section.label.toLowerCase()}</a></Fragment>)}.
 				</p>
 			</section>
 		)

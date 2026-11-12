@@ -5,13 +5,20 @@
   "type": "module",
   "hostContract": 2,
   "emdashTemplate": {
-    "version": 1,
+    "version": 2,
     "history": [
       {
         "version": 1,
         "changes": [
           "The first template set: the articles collection and topic taxonomy in the seed, the article, topic and feed routes, the Portable Text serializer, the content contract and the handover checklist.",
           "Installs into a Design System workspace as site/ with no pin, a secret-gated path for scheduled work beside the scheduled handler, bindings named without resource identifiers, and a hash of every installed file in .timds/emdash.json."
+        ]
+      },
+      {
+        "version": 2,
+        "changes": [
+          "Declares article sections in sections.json with one shared field model, generated seeds, section routes and feeds, and mixed topic lists with per-collection cursors.",
+          "Exposes section contract 1 to builds, validates declarations against seeds, and derives preview routes and design references for every section."
         ]
       }
     ]
@@ -203,5 +210,7 @@
   "homepage": "https://github.com/sticktrk/timds-toolkit#readme",
   "publishConfig": {
     "access": "public"
-  }
+  },
+  "emdashWorkspaceContract": 2,
+  "emdashSectionsContract": 1
 }

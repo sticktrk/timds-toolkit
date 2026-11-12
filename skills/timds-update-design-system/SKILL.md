@@ -131,11 +131,12 @@ unless a step names another folder.
 
 ## Find the routes with no port
 
-Every site gets the same article routes: `/articles`
-(`__SITE__/src/pages/articles/index.astro`), `/articles/[slug]`
-(`__SITE__/src/pages/articles/[slug].astro`), and `/topics/[slug]`
-(`__SITE__/src/pages/topics/[slug].astro`), with the components they import
-under `__SITE__/src/components/articles/`. They are written on the starter's
+Read `__SITE__/sections.json` for every collection and address prefix. Each
+section's list and entry render through
+`__SITE__/src/routes/articles/index.astro` and `entry.astro`; its optional
+feed is `rss.xml.ts`. `/topics/[slug]` uses
+`__SITE__/src/pages/topics/[slug].astro` and combines all sections. The
+components are under `__SITE__/src/components/articles/`. They use the starter's
 classes (`hero`, `section`, `article-list`, `article-card`, `article-meta`,
 `topic-list`, `prose`, `table-scroll`, `button`, `button--secondary`) and
 render inside the design's layout, so they are styled only by the
@@ -163,7 +164,7 @@ For every route with missing classes, choose per class:
    stylesheet the design links (the starter's is
    `__SYSTEM_PREFIX__src/styles/system.css`), written with the system's
    tokens (`var(--…)`). When the design has article pages
-   (`__SYSTEM_PREFIX__src/designs/<id>/pages/articles/`), match them: they
+   at a section prefix (or the shared `articles/` samples), match them: they
    are samples of the route. A value the system has no token for is a new
    token, added the way **Run the two-way check** in the
    `timds-consume-design-system` skill describes.

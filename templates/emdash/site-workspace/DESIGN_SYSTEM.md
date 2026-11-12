@@ -10,8 +10,8 @@ system and the site are edited, reviewed and committed together.
 ## How the system reaches the site
 
 - **Pages.** Every page of the website design `src/designs/__DESIGN_ID__/`
-  that is not an article, topic or list route (`/articles`, `/articles/...`,
-  `/topics/...`) is a page of this site, built from the design file by
+  that is not under a declared section prefix (`sections.json`) or
+  `/topics/` is a page of this site, built from the design file by
   `src/integrations/design-system.mjs` and served by
   `src/pages/[...page].astro`. There is one copy, in the system: editing the
   design is editing the page, and a page added to the design is a page here.
@@ -113,7 +113,7 @@ ported into an Astro route by hand instead (see the rules below).
   Astro route by hand, keeping its markup.
 - Never write a color, font or size literal in `site/`. Name the system's
   tokens with `var(--…)`; a value the system lacks is added to the system.
-- The article routes (`src/pages/articles/`, `src/pages/topics/`) render on
+- The article routes (`src/routes/articles/`, `src/pages/topics/`) render on
   the system's classes: `hero`, `section`, `article-list`, `article-card`,
   `article-meta`, `topic-list`, `prose`, `table-scroll`, `button` and
   `button--secondary`. A route whose classes the system's stylesheets do not

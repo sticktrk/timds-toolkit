@@ -803,7 +803,8 @@ export async function planEmdashTemplates(siteRoot, { platform, layout, siteUrl 
   const leftover = [];
   for (const [directory, list] of layers) {
     for (const template of list) {
-      const file = directory === overlay && Object.hasOwn(renames, template) ? renames[template] : template;
+      const legacyRoutes = { "src/routes/articles/index.astro": "src/pages/articles/index.astro", "src/routes/articles/entry.astro": "src/pages/articles/[slug].astro", "src/routes/articles/rss.xml.ts": "src/pages/articles/rss.xml.ts" };
+      const file = directory === overlay && Object.hasOwn(renames, template) ? renames[template] : !overlay && Object.hasOwn(legacyRoutes, template) ? legacyRoutes[template] : template;
       const bytes = await fs.readFile(path.join(templatesRoot, directory, ...template.split("/")));
       let content = bytes;
       if (!bytes.includes(0)) {

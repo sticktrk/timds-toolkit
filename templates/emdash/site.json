@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "dependencies": {
     "all": {
       "emdash": "1.4.0",
@@ -26,22 +26,44 @@
   "package": {
     "emdash": {
       "seed": "seed/seed.json"
+    },
+    "scripts": {
+      "sections:sync": "node scripts/sections.mjs"
     }
   },
   "preview": {
     "ready": "/_emdash/api/setup/dev-bypass?redirect=/",
-    "routes": ["/articles", "/articles/example-article", "/topics/example-topic"],
+    "routes": [
+      "/articles",
+      "/articles/example-article",
+      "/topics/example-topic"
+    ],
     "designs": {
       "/articles": "/articles",
       "/articles/example-article": "/articles/example-article",
       "/topics/example-topic": "/topics/example-topic"
     },
-    "discoverExclude": ["/_emdash/**"]
+    "discoverExclude": [
+      "/_emdash/**"
+    ]
   },
   "gitignore": {
-    "all": [".emdash/migrations.json", ".env", ".env.*", "!.env.example"],
-    "cloudflare": [".wrangler", ".dev.vars", ".dev.vars.*"],
-    "node": ["data.db", "data.db-*", "uploads"]
+    "all": [
+      ".emdash/migrations.json",
+      ".env",
+      ".env.*",
+      "!.env.example"
+    ],
+    "cloudflare": [
+      ".wrangler",
+      ".dev.vars",
+      ".dev.vars.*"
+    ],
+    "node": [
+      "data.db",
+      "data.db-*",
+      "uploads"
+    ]
   },
   "workspace": {
     "dependencies": {
@@ -52,7 +74,8 @@
       "dev": "astro dev",
       "build": "astro build",
       "preview": "astro preview",
-      "worker": "astro build && wrangler deploy --dry-run --outdir dist/worker"
+      "worker": "astro build && wrangler deploy --dry-run --outdir dist/worker",
+      "sections:sync": "node scripts/sections.mjs"
     },
     "renames": {
       "gitignore": ".gitignore",

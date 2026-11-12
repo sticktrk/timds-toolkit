@@ -76,6 +76,31 @@ npx emdash migrate --d1 <database name or id> --check
 non-interactive apply also needs `--expected-target-fingerprint` with the
 fingerprint `--status` printed.
 
+## Declared sections
+
+`sections.json` lists each collection and its canonical address prefix;
+`docs/content-api.md` lists the current entry addresses for writers. After
+editing the declaration, run `npm run sections:sync` in the site and run
+the consumer check at the workspace root. Commit the declaration, generated
+seed and updated writer table together. The shared schema in
+`src/lib/articles/sections.mjs` supplies identical fields and features to
+every collection, including preview, scheduling, search and SEO, and the
+`topic` taxonomy attaches to all of them.
+
+A first setup applies the seed. Once setup is complete, editing the seed
+cannot create a new collection: create it through EmDash's schema API or
+admin with every declared field, support and URL pattern, and add its name
+to the topic taxonomy. A platform that supports section contract 1 can do
+this additively before routing a deployment. Never rename collections or
+change stored patterns as an automatic migration. Removing a section only
+removes its routes; retained content needs a separate explicit decision.
+Writer scopes are global across collections.
+
+Verify each declared list, a published entry and every enabled feed at its
+prefix. A missing collection fails the page instead of appearing as an empty
+list. Topic pages merge all sections, newest first, with cursors that retain
+a position for each collection.
+
 ## Scheduled work
 
 Scheduled publishing and maintenance run every minute from the cron trigger
@@ -112,7 +137,7 @@ unset. The secret is compared in constant time. Call it about once a minute.
        handler in `src/forms/` renders disabled and a POST to its address
        answers 405 (`DESIGN_SYSTEM.md`, "Forms").
 6. [ ] Create one draft through the REST API with the writer's token,
-       publish it, and confirm it appears at `/articles/<slug>/` without a
+       publish it, and confirm it appears at its section's `<prefix><slug>/` without a
        rebuild; unpublish it and confirm the page answers 404.
 
 To put Cloudflare Access in front of the admin, enable `auth: access({ … })`

@@ -15,7 +15,7 @@ import ArticleBody from "../../components/articles/ArticleBody.astro";
 import ArticleMeta from "../../components/articles/ArticleMeta.astro";
 import TopicList from "../../components/articles/TopicList.astro";
 import {
-	ARTICLES,
+	sectionForPath,
 	absoluteUrl,
 	articlePath,
 	bylineNames,
@@ -28,12 +28,17 @@ import {
 	type ArticleData,
 } from "../../lib/articles/index";
 
+import { sectionAvailable, sectionUnavailable } from "../../lib/articles/availability";
+
 export const prerender = false;
 
+const section = sectionForPath(Astro.url.pathname);
+if (!section) return Astro.rewrite("/404");
+if (!await sectionAvailable(section)) return sectionUnavailable();
 const slug = decodeSlug(Astro.params.slug);
 if (!slug) return Astro.rewrite("/404");
 
-const { entry, isPreview, cacheHint, error } = await getEmDashEntry<typeof ARTICLES, ArticleData>(ARTICLES, slug);
+const { entry, isPreview, cacheHint, error } = await getEmDashEntry<string, ArticleData>(section.collection, slug);
 if (error) throw error;
 if (!entry) return Astro.rewrite("/404");
 if (!isPreview && !isSignedIn(Astro.locals) && entry.data.status !== "published") return Astro.rewrite("/404");
@@ -46,11 +51,11 @@ const origin = siteOrigin(Astro.url, Astro.site);
 const coverSrc = imageFieldUrl(data.cover, Astro.locals);
 const seo = getSeoMeta(entry, {
 	siteUrl: origin,
-	path: articlePath(entry.id),
+	path: articlePath(entry.id, section),
 	defaultDescription: data.summary ?? undefined,
 	defaultOgImage: coverSrc ? absoluteUrl(coverSrc, origin) : undefined,
 });
-const canonical = seo.canonical ?? absoluteUrl(articlePath(entry.id), origin);
+const canonical = seo.canonical ?? absoluteUrl(articlePath(entry.id, section), origin);
 const authors = bylineNames(data);
 
 // Escaped so the JSON can never close its own script element.
@@ -111,6 +116,6 @@ const structuredData = JSON.stringify({
 	</article>
 
 	<div class="section">
-		<a class="button button--secondary" href={sitePath("/articles/")}>Back to all articles</a>
+		<a class="button button--secondary" href={sitePath(section.prefix)}>Back to all {section.label.toLowerCase()}</a>
 	</div>
 </Layout>

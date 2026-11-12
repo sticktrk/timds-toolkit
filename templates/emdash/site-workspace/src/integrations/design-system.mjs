@@ -69,7 +69,8 @@ const RESOLVED_MODULE = `\0${VIRTUAL_MODULE}`;
 /** The folders under the system's src/ that its build serves at the same name. */
 export const STATIC_DIRECTORIES = ["assets", "scripts", "styles"];
 /** Routes the article templates serve; a design page there is a sample of a template, never a page. */
-export const ARTICLE_ROUTE = /^\/(?:articles|topics)(?:\/|$)/;
+const DEFAULT_SECTIONS = [{ collection: "articles", prefix: "/articles/", label: "Articles", singularLabel: "Article", feed: true, urlPattern: "/articles/{slug}/" }];
+const isTemplateRoute = (route, sections) => route === "/topics" || route.startsWith("/topics/") || sections.some(({ prefix }) => route === prefix.slice(0, -1) || route.startsWith(prefix));
 /** Stands in for the page title in the article shell until a request fills it. */
 export const TITLE_MARKER = "\u0000timds-title\u0000";
 const CONTENT_MARKER = "\u0000timds-content\u0000";
@@ -622,7 +623,7 @@ function pageTitle(html, fallback) {
  * the set of addresses the site handles a POST to (`formHandlers`); every
  * other posting form is rendered disabled (`disableUnconnectedForms`).
  */
-export function renderWorkspaceDesign(systemRoot, { design: designId, base = "/", forms = new Set() }) {
+export function renderWorkspaceDesign(systemRoot, { design: designId, base = "/", forms = new Set(), sections = DEFAULT_SECTIONS }) {
   const manifest = readJson(path.join(systemRoot, "timds.json"));
   const system = {
     id: String(manifest.systemId || ""),
@@ -644,7 +645,7 @@ export function renderWorkspaceDesign(systemRoot, { design: designId, base = "/"
   const defaults = defaultPageFiles(path.join(directory, "pages"));
   const pages = [];
   for (const [route, relative] of defaults) {
-    if (ARTICLE_ROUTE.test(route)) continue;
+    if (isTemplateRoute(route, sections)) continue;
     const file = path.join(directory, "pages", ...relative.split("/"));
     files.push(file);
     const authored = readFileSync(file, "utf8");
@@ -756,7 +757,7 @@ export async function writeStaticFiles(systemRoot, clientDirectory, tokensCss) {
  * handlers, each as the file the route's log names (relative to the site)
  * and a loader.
  */
-export function virtualModuleSource(rendered, handlers, siteRoot) {
+export function virtualModuleSource(rendered, handlers, siteRoot, inventory = {}) {
   const forms = [...handlers].map(([route, file]) => `  ${JSON.stringify(route)}: { file: ${JSON.stringify(path.relative(siteRoot, file).split(path.sep).join("/"))}, load: () => import(${JSON.stringify(file.split(path.sep).join("/"))}) },`);
   return [
     `export const system = ${JSON.stringify(rendered.system)};`,
@@ -764,6 +765,9 @@ export function virtualModuleSource(rendered, handlers, siteRoot) {
     `export const pages = ${JSON.stringify(rendered.pages.map(({ route, title, htmlAttributes, head, bodyAttributes, body }) => ({ route, title, htmlAttributes, head, bodyAttributes, body })))};`,
     `export const shell = ${JSON.stringify(rendered.shell)};`,
     `export const titleMarker = ${JSON.stringify(TITLE_MARKER)};`,
+    `export const sectionsContract = ${JSON.stringify(inventory.sectionsContract ?? 1)};`,
+    `export const sections = ${JSON.stringify(inventory.sections ?? DEFAULT_SECTIONS)};`,
+    `export const sectionSchema = ${JSON.stringify(inventory.sectionSchema ?? null)};`,
     `export const forms = {\n${forms.join("\n")}${forms.length ? "\n" : ""}};`,
   ].join("\n");
 }
@@ -780,12 +784,28 @@ export default function designSystem({ design }) {
   let tokensCss = false;
   let parse;
   let logger;
+  const api = {};
+  // Astro strips extra integration properties while resolving config. Other
+  // integrations capture this function from the original configuration and
+  // call it after setup to read the populated inventory.
+  const publicApi = { getSections: () => api };
   return {
     name: "timds-design-system",
+    api: publicApi,
     hooks: {
-      "astro:config:setup": async ({ config, updateConfig, addMiddleware, logger: integrationLogger }) => {
+      "astro:config:setup": async ({ config, updateConfig, addMiddleware, injectRoute, logger: integrationLogger }) => {
         siteRoot = fileURLToPath(config.root);
         logger = integrationLogger;
+        const sectionsModule = path.join(siteRoot, "src/lib/articles/sections.mjs");
+        const helpers = await import(`${pathToFileURL(sectionsModule).href}?modified=${statSync(sectionsModule).mtimeMs}`);
+        const sections = helpers.normalizeSections(readJson(path.join(siteRoot, "sections.json")));
+        helpers.validateSectionSeed(readJson(path.join(siteRoot, "seed/seed.json")), sections);
+        Object.assign(api, { sectionsContract: 1, sections, sectionSchema: helpers.sectionSchemaFor(sections) });
+        for (const section of sections) {
+          injectRoute({ pattern: section.prefix, entrypoint: path.join(siteRoot, "src/routes/articles/index.astro"), prerender: false });
+          injectRoute({ pattern: `${section.prefix}[slug]`, entrypoint: path.join(siteRoot, "src/routes/articles/entry.astro"), prerender: false });
+          if (section.feed) injectRoute({ pattern: `${section.prefix}rss.xml`, entrypoint: path.join(siteRoot, "src/routes/articles/rss.xml.ts"), prerender: false });
+        }
         parse = await loadModuleParser(siteRoot);
         systemRoot = findDesignSystem(siteRoot);
         if (!systemRoot) throw new Error(`No folder above ${siteRoot} holds timds.json. This site reads the Design System it sits in; keep it inside that Design System's folder.`);
@@ -807,9 +827,9 @@ export default function designSystem({ design }) {
               load(id) {
                 if (id !== RESOLVED_MODULE) return undefined;
                 const handlers = formHandlers(siteRoot, { parse, warn: (message) => logger.warn(message) });
-                const rendered = renderWorkspaceDesign(systemRoot, { design, base, forms: handlers.keys() });
+                const rendered = renderWorkspaceDesign(systemRoot, { design, base, forms: handlers.keys(), sections: api.sections });
                 for (const file of rendered.files) this.addWatchFile(file);
-                return virtualModuleSource(rendered, handlers, siteRoot);
+                return virtualModuleSource(rendered, handlers, siteRoot, api);
               },
               configureServer(server) {
                 // The design lives above the site's root, where Vite does not
@@ -820,8 +840,23 @@ export default function designSystem({ design }) {
                 const designDirectory = path.join(systemRoot, "src", "designs", design);
                 const manifestFile = path.join(systemRoot, "timds.json");
                 const formsDirectory = path.join(siteRoot, "src", FORMS_DIRECTORY);
-                server.watcher.add([designDirectory, manifestFile, formsDirectory]);
-                const reload = (file) => {
+                const sectionsFile = path.join(siteRoot, "sections.json");
+                const seedFile = path.join(siteRoot, "seed/seed.json");
+                server.watcher.add([designDirectory, manifestFile, formsDirectory, sectionsFile, seedFile, sectionsModule]);
+                const reload = async (file) => {
+                  if (file === sectionsFile || file === seedFile || file === sectionsModule) {
+                    // A declaration and its generated seed are usually saved
+                    // separately. Keep the current dev server alive until the
+                    // pair validates, then rebuild its injected route table.
+                    try {
+                      const current = await import(`${pathToFileURL(sectionsModule).href}?modified=${statSync(sectionsModule).mtimeMs}`);
+                      current.validateSectionSeed(readJson(seedFile), current.normalizeSections(readJson(sectionsFile)));
+                      await server.restart();
+                    } catch {
+                      logger.warn("Section changes need a matching seed; run npm run sections:sync, then fix any reported configuration error.");
+                    }
+                    return;
+                  }
                   if (file !== manifestFile && !file.startsWith(`${designDirectory}${path.sep}`) && !file.startsWith(`${formsDirectory}${path.sep}`)) return;
                   for (const environment of Object.values(server.environments ?? {})) {
                     const module = environment.moduleGraph?.getModuleById(RESOLVED_MODULE);

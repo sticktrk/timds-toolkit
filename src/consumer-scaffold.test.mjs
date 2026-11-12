@@ -603,7 +603,8 @@ async function walkFiles(directory, prefix = "") {
 
 /** Every template file for `platform`: `{ path, source }`, the source under the template root. */
 async function templateFilesFor(platform) {
-  const shared = (await walkFiles(path.join(TEMPLATES, "site"))).map((file) => ({ path: file, source: `site/${file}` }));
+  const remap = { "src/routes/articles/index.astro": "src/pages/articles/index.astro", "src/routes/articles/entry.astro": "src/pages/articles/[slug].astro", "src/routes/articles/rss.xml.ts": "src/pages/articles/rss.xml.ts" };
+  const shared = (await walkFiles(path.join(TEMPLATES, "site"))).map((file) => ({ path: remap[file] || file, source: `site/${file}` }));
   const own = (await walkFiles(path.join(TEMPLATES, `site-${platform}`))).map((file) => ({ path: file, source: `site-${platform}/${file}` }));
   return [...shared, ...own].sort((left, right) => left.path.localeCompare(right.path));
 }
@@ -747,6 +748,7 @@ for (const platform of ["cloudflare", "node"]) {
       if (!EXISTING_PACKAGE[block] && !Object.keys(stripped[block]).length) delete stripped[block];
     }
     for (const key of Object.keys(set.package)) if (!Object.hasOwn(EXISTING_PACKAGE, key)) delete stripped[key];
+    for (const key of Object.keys(set.package.scripts || {})) if (!Object.hasOwn(EXISTING_PACKAGE.scripts, key)) delete stripped.scripts[key];
     assert.equal(`${JSON.stringify(stripped, null, 2)}\n`, packageBefore, "package.json is otherwise byte-identical");
 
     // The manifest gains the routes, the pairs the system has designs for, the exclusions and the seed route, and still validates.

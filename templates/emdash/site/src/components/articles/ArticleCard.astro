@@ -5,15 +5,16 @@
  */
 import type { ContentEntry } from "emdash";
 
-import { articlePath, imageFieldUrl, topicsOf, type ArticleData } from "../../lib/articles/index";
+import { articlePath, imageFieldUrl, topicsOf, type Section, type ArticleData } from "../../lib/articles/index";
 import ArticleMeta from "./ArticleMeta.astro";
 import TopicList from "./TopicList.astro";
 
 interface Props {
 	entry: ContentEntry<ArticleData>;
+	section: Section;
 }
 
-const { entry } = Astro.props;
+const { entry, section } = Astro.props;
 const { data } = entry;
 const cover = imageFieldUrl(data.cover, Astro.locals);
 ---
@@ -32,7 +33,7 @@ const cover = imageFieldUrl(data.cover, Astro.locals);
 				/>
 			)
 		}
-		<h2><a href={articlePath(entry.id)}>{data.title}</a></h2>
+		<h2><a href={articlePath(entry.id, section)}>{data.title}</a></h2>
 		{data.summary && <p>{data.summary}</p>}
 		<ArticleMeta data={data} />
 		<TopicList topics={topicsOf(data)} />

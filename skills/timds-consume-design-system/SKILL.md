@@ -86,6 +86,9 @@ __PIN_RULES__
   the design file is editing the page, and a page added to the design is a
   page of the site. Only a page's default state is served; its other states
   stay references.
+- `__SITE__/sections.json` declares article collections and their address prefixes.
+  Changing sections is a developer change: run the site's `npm run sections:sync`,
+  then the consumer check, and arrange schema creation for an existing database.
 - The article, topic, and 404 routes render inside the design's
   `layout.html` (without one, its home page with the content of its `<main>`
   taken out) through `__SITE__/src/layouts/Base.astro`.
@@ -93,7 +96,7 @@ __PIN_RULES__
   design file, never by copying the design into `__SITE__/src/pages/`.
   After editing a design, `npm run timds -- check` checks that it stays
   portable (no inline styles, no undeclared classes, no relative references).
-- The article routes (`__SITE__/src/pages/articles/`,
+- The article routes (`__SITE__/src/routes/articles/`,
   `__SITE__/src/pages/topics/`) and their components are the site's own
   templates, written on the system's classes. A route whose classes the
   system does not declare has no port yet; porting it is the

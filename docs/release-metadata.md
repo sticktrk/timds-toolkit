@@ -192,8 +192,11 @@ installs (`consumer scaffold emdash --workspace`, see
 
 ```json
 "emdashTemplate": {
-  "version": 1,
-  "history": [{ "version": 1, "changes": ["The first template set: ..."] }]
+  "version": 2,
+  "history": [
+    { "version": 1, "changes": ["The first template set: ..."] },
+    { "version": 2, "changes": ["Declared sections, shared schema, routes, feeds and mixed lists."] }
+  ]
 }
 ```
 
@@ -207,6 +210,15 @@ managed resources above. For maintainers: a template change an installed site
 would need to receive raises `version` in both places and adds a `history`
 entry; `src/emdash-template-metadata.test.mjs` fails when the two disagree or
 a version has no entry.
+
+A release that writes template version 2 also declares
+`emdashWorkspaceContract: 2` and `emdashSectionsContract: 1` in its package
+metadata. Workspace contract 2 requires section-aware verification, so older
+hosts that understand only workspace contract 1 refuse this template. The second says
+that `sections.json` and the build's `virtual:timds/design-system` section
+exports use section contract 1. A host must understand both before accepting
+the scaffold. The template version by itself no longer means a single
+`articles` collection.
 
 ## Compatibility and verification
 

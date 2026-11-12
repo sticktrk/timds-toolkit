@@ -190,6 +190,17 @@ publishes the template version beside `hostContract` and must equal
 would need to receive raises `version` in both places and adds a `history`
 entry saying what changed.
 
+Template version 2 declares article sections in `site/sections.json` (section
+contract 1). Its pure `src/lib/articles/sections.mjs` helper is the single
+field shape, seed generator and seed validator. `npm run sections:sync` is an
+explicit site command; build, dev and consumer check validate without silently
+changing source. The design integration injects routes per prefix from the
+shared `src/routes/articles/` modules and exports the section contract beside
+its pages. The consumer preview derives routes and design pairs from the
+current declaration, preserving the authored consumer manifest. Keep package
+`emdashWorkspaceContract: 2` and `emdashSectionsContract: 1` in step with these
+exports. See `docs/emdash.md` for the existing-database boundary.
+
 `upgrade --version VERSION` selects one exact tested resolution, restores the
 bounded requirement, runs `npm ci`, synchronizes adopted managed files with the
 selected CLI, and validates the graph and workspace. Explicit `--own-runtime`

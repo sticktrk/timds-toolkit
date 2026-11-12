@@ -122,7 +122,7 @@ of its root app (`"cwd": "."`) when it declares several. It writes:
   and EmDash's seed route as `preview.ready` when the app's is absent or `/`.
   The result is validated before it is written.
 - `.timds/emdash.json`, the template version and platform the site came from
-  (`{ "template": 1, "platform": "cloudflare" }`).
+  (`{ "template": 2, "platform": "cloudflare" }`).
 
 The seed defines the content model external writers target: an `articles`
 collection (`title`, `summary`, `body` as Portable Text, and `cover`; the
@@ -340,7 +340,7 @@ integration (`src/integrations/design-system.mjs`) runs in Node while `astro
 dev` serves and while `astro build` builds, never in the Worker:
 
 - Every page of the design that is not an article, topic or list route
-  (`/articles`, `/articles/...`, `/topics/...`) is a page of the site, filled
+  (the prefixes in `sections.json`, and `/topics/`) is a page of the site, filled
   the way the system's own renderer fills it (`layout.html` around the page,
   the `{{name}}`, `{{description}}`, `{{version}}` and `{{title}}`
   placeholders), with Astro's `base` in front of root-relative `href`, `src`,
@@ -400,6 +400,79 @@ stock article routes are installed for every system. They render on the
 system's classes (`prose`, `article-card` and the rest), and the scaffold
 lists each route whose classes the design's stylesheets do not declare as
 having no port yet; the `timds-update-design-system` skill ports it.
+
+### Article sections
+
+Template version 2 declares its sections in `site/sections.json`. A fresh
+site has the same single `articles` section. Any non-empty set can replace
+it; `articles` is not mandatory:
+
+```json
+{
+  "schemaVersion": 1,
+  "sections": [
+    { "collection": "articles", "prefix": "/articles/", "label": "Articles", "singularLabel": "Article", "feed": true },
+    { "collection": "guides_for_owners", "prefix": "/guides-for-owners/", "label": "Guides", "singularLabel": "Guide", "feed": true },
+    { "collection": "recipes", "prefix": "/recipes/", "label": "Recipes", "singularLabel": "Recipe", "feed": false }
+  ]
+}
+```
+
+A collection slug begins with a lowercase letter and uses lowercase letters,
+numbers and underscores, at most 63 characters. A prefix is one lowercase
+address segment with letters, numbers and hyphens, surrounded by slashes.
+Collections and prefixes must each be unique. Reserved framework and topic
+addresses are refused. Entries belong to exactly one collection, and their
+canonical address is that section's prefix followed by the entry slug and a
+trailing slash. A feed, when enabled, is `<prefix>rss.xml`.
+
+After editing the declaration, run `npm run sections:sync` in `site/` and
+commit the resulting `seed/seed.json` and writer collection table with it.
+The shared field and feature shape lives in
+`site/src/lib/articles/sections.mjs`; the seed derives one identical schema
+per section and attaches the `topic` taxonomy to all sections. The sync
+keeps existing sample content. A newly declared section gets the existing
+`example-article` sample with its own ID; an explicitly empty content array
+stays empty. These are development or first-setup examples: adding a section
+to a live database creates schema only. Section removal does not delete
+deployed content. `consumer check` refuses a missing declared collection, an
+undeclared seeded collection, or drift in fields, features, addresses or
+taxonomy attachments. Build and development also validate the seed.
+
+The design integration injects each section's list, entry and optional feed
+route from `src/routes/articles/`. Design pages under any declared prefix
+and `/topics/` remain reference samples. A section without its own samples
+uses the article samples for preview comparisons. `consumer preview` derives
+its section routes from the current declaration without rewriting
+`timds.consumer.json`; the scaffold's missing-style report covers every
+section. The shared topic route merges all declared sections newest first,
+and its cursor records an independent position in each collection. The
+same mixed-list helper, `getLatestArticles` in `src/lib/articles/latest.ts`,
+is available for a site's latest entries. It reads one entry ahead per
+collection and advances only the emitted entry's opaque EmDash cursor. A
+page makes at most the section count plus the page size in content reads;
+it does not depend on EmDash's internal cursor encoding or offsets.
+
+The virtual module `virtual:timds/design-system` exports `sectionsContract:
+1`, the normalized `sections` (including each `urlPattern`) and
+`sectionSchema` for build consumers. Before Astro resolves its configuration,
+build integrations can retain the design integration's `api.getSections`
+function and call it after `astro:config:setup` for the same data. Astro strips
+extra integration properties while resolving configuration, so that function
+must be captured from the original configuration. Editing the declaration,
+shared schema or seed restarts development to rebuild the injected routes.
+Section collection reads fail when a
+collection is missing; an absent collection cannot appear as an empty page.
+
+On a database already set up, EmDash does not rerun the seed. Adding a section
+there also requires creating its collection, fields and taxonomy attachment
+through EmDash's schema API or admin, or a platform that reconciles this
+contract. Changing a stored URL pattern is refused by the TimDS host;
+renaming collections, moving entries and creating redirects are outside this
+template. Writer token scopes apply to every collection, not one section.
+Existing sites receive these stock files by a reviewed manual change; no
+template updater is introduced, and ordinary toolkit upgrades keep the site
+untouched.
 
 ### The check runs both ways
 
@@ -605,7 +678,7 @@ checklist, Cloudflare Access and caching.
 
 ```json
 {
-  "template": 1,
+  "template": 2,
   "platform": "cloudflare",
   "mode": "workspace",
   "files": { "astro.config.mjs": "<sha256>", "src/worker.ts": "<sha256>" },
