@@ -97,7 +97,7 @@ operations for hosts and MCP clients, beside `timds_status`,
 `timds_history`, and `timds_publish` for the human verbs.
 
 `timds auth login` (also `timds login`) selects `--portal-url` first, then the
-nearest workspace's hosted `provider.url`, then `TIMDS_PORTAL_URL` or
+nearest workspace's host (its open session's, else `timds.json` `provider.url`), then `TIMDS_PORTAL_URL` or
 `https://timds.com`. Status and logout select the same host. A host advertising
 `/.well-known/oauth-authorization-server` uses authorization code with PKCE S256
 and a temporary `127.0.0.1` callback. The CLI registers a public client when the
@@ -168,7 +168,10 @@ a `.git` directory. Interrupted starts retain their idempotency key under
 `.timds/start.json`; retry the same command, or use its key in a fresh empty
 workspace after a partial download. Credentials remain in the private TimDS
 credential file or `TIMDS_ACCESS_TOKEN`, never source or session metadata.
-`TIMDS_PORTAL_URL` selects a host before a session exists.
+`TIMDS_PORTAL_URL` selects a host before a session exists. Inside a session the
+host recorded in `.timds/session.json` wins over `timds.json` `provider.url`,
+which is source content and can name an origin the host has since left; a
+flag or `TIMDS_PORTAL_URL` naming another host is refused.
 With that host configured, `timds mcp --root PATH` keeps an empty, missing, or
 interrupted destination at the exact requested path, even within another
 repository. Start or join the session there before using editing tools; its
