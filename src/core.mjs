@@ -1623,8 +1623,11 @@ export async function initializeDesigns(repoRootInput, { force = false } = {}) {
   const workspace = await loadWorkspace(repoRootInput);
   const designSystemRoot = workspace.designSystemRoot;
   const catalog = await readDesignCatalog(designSystemRoot);
-  if (catalog.exists && !force) {
-    throw new Error(`${DESIGNS_SOURCE_DIRECTORY}/ already exists in ${designSystemRoot}; add designs there, or rerun with --force to rewrite the sample`);
+  // A directory that holds no design (empty, or only a placeholder such as
+  // .gitkeep, as brand kits made before the starter seeded a design hold) is not set up yet. The copy
+  // below never replaces an existing file without --force.
+  if (catalog.designs.length && !force) {
+    throw new Error(`${DESIGNS_SOURCE_DIRECTORY}/ already holds a design (${catalog.designs.map((design) => design.id).join(", ")}) in ${designSystemRoot}; add designs there, or rerun with --force to rewrite the sample`);
   }
   const created = [];
   const source = path.join(packageRoot, "templates", "starter", "src", "designs");

@@ -78,7 +78,7 @@ from the same definitions that starter sync and skill installation use.
 | `dependency-automation` | Dependency PR workflow; require explicit dependency-PR adoption. |
 | `catalog-merge` | Site/format catalogs use their recorded three-way merge; a raw template hash is never replacement permission. |
 | `layout-patch` | Only missing stock stylesheet links may be added to the authored layout. |
-| `seed-only` | Initial content owned by its author thereafter. All brand-kit pages are seed-only, including its Use pages. |
+| `seed-only` | Initial content owned by its author thereafter. All brand-kit pages are seed-only, including its Use pages, and so is its website design under `src/designs/website/`. |
 | `version-metadata` | Generated installation/starter records, distinct from authored content and from managed-file changes. |
 | `create-if-absent` | Create the declared link only when nothing exists at its destination. |
 

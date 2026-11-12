@@ -192,6 +192,23 @@ test("--workspace writes a complete site into site/ of a starter workspace", asy
   assert.ok(!lines.some((line) => line.includes("No port yet")));
 });
 
+test("--workspace takes a fresh brand kit: its own website design, every article route ported", async (t) => {
+  const root = await temporaryDirectory(t);
+  const workspace = path.join(root, "kit");
+  await fs.mkdir(workspace, { recursive: true });
+  git(workspace, "init", "-b", "main");
+  await initializeRepository(workspace, { standalone: true, starter: "brand-kit", name: "Example kit", systemId: "example-kit" });
+  const lines = [];
+  const result = await scaffoldWorkspaceEmdashSite(workspace, { skipInstall: true, output: (line) => lines.push(line) });
+  assert.equal(result.design.id, "website");
+  assert.equal(result.design.layout, true);
+  assert.deepEqual(result.design.pages, ["/", "/404", "/about", "/contact", "/privacy", "/terms"]);
+  assert.deepEqual(result.stylesheets, ["/styles/system.css"]);
+  assert.deepEqual(result.noPort, []);
+  assert.ok(!lines.some((line) => line.includes("No port yet")));
+  assert.ok(!result.todos.some((todo) => todo.includes("has no port")));
+});
+
 test("--workspace writes byte-identical sites for identical workspaces", async (t) => {
   const root = await temporaryDirectory(t);
   const sites = [];

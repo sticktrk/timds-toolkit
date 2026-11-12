@@ -127,7 +127,9 @@ the seed's content model, the article routes, the serializer, the writer's
 contract) into an Astro consumer that already has `timds.consumer.json`. Those
 templates are TimDS's port of the starter's article designs, not EmDash's
 template; keep their markup in step with
-`templates/starter/src/designs/website/`. The mode never overwrites a path or
+`templates/starter/src/designs/website/` and the brand kit's copy of the
+article designs in `templates/brand-kit/src/designs/website/`, whose
+`src/styles/system.css` must declare every class those templates use. The mode never overwrites a path or
 edits an existing page, and it refuses a site page at a route a template page
 takes by Astro's file routing (`articles.astro` beside `articles/index.astro`,
 `[id]` beside `[slug]`), naming any dynamic or catch-all page the article

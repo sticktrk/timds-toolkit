@@ -234,11 +234,23 @@ keep the overview at `/` and Landing at `/use/`.
 Foundation and channel pages lead with previews and keep slot evidence and
 technical tables in closed Spec drawers, still available to the derived layer.
 
-Designs keep their contract and their place in the app bar, with no sample
-page: `src/designs/` is present and empty, the designs build renders nothing
-for it, and the Designs directory and Install page say that whole pages are
-authored per system by a designer's agent. The actual designs are each
-system's own.
+Designs keep their contract and their place in the app bar. A fresh kit
+holds one design, `src/designs/website/`: the ordinary starter's routes and
+states (home, about, contact with its sent state, privacy, terms, 404, the
+article list with its empty state, an article and a topic) written in the
+kit's elements, with placeholder copy. It exists so a kit can take a site at
+once: `timds consumer scaffold emdash --workspace` builds its pages from this
+design and reports no article route without a port, because
+`src/styles/system.css` declares the article classes (`article-list`,
+`article-card`, `article-meta`, `topic-list`, `prose`, `table-scroll`) and
+`site-footer__links` in the kit's own tokens, every ground naming its ink. The
+article pages keep the markup the EmDash templates port, so the design and the
+site's routes stay one thing. The design is seed-only like the pages: init
+writes it once, `.timds/starter.json` never records it, and no sync, upgrade
+or feed writes it. `.timds/stock.json` cannot name a design, so a structure
+shoot still omits `src/designs/` and a child begins without one; it receives
+the article classes only when its parent's declared `src/styles/system.css`
+carries them. The actual designs are each system's own.
 
 The contract declares 34 authored pages, including the overview and builder-owned
 Evidence page, and 24 planned pages. Each of the 24 formats names an authored
@@ -327,7 +339,9 @@ Tests check the exact slot, copy, page and stock vocabulary; render every
 format and stage on stock and inverted palettes; and verify computed
 canvas/ink pairs. The viewer rejects color literals in source stylesheets.
 Each non-planned catalog page has exactly one fragment and every format
-names a declared page. Whole-page designs begin empty.
+names a declared page. The seeded website design keeps the starter's routes
+and states, uses only classes the kit stylesheet declares, and that
+stylesheet reads only kit tokens.
 
 ## 8. Initialization and sync
 
@@ -341,7 +355,7 @@ The default remains `starter`. Initialization selects one overlay, then
 records `starter: "brand-kit"` in `.timds/starter.json`; an absent field means
 `starter` for older records. `templates/brand-kit/` contains only the changed
 catalogs, foundation samples, copy, stock declaration, stylesheet, layout and
-pages, plus an empty Designs directory. Shared renderer, canvas, composer and
+pages, plus the seeded website design. Shared renderer, canvas, composer and
 build scripts come from the ordinary starter; the slot data module comes from
 `src/brand-kit.mjs`. No shared plumbing is duplicated in the overlay.
 
@@ -384,6 +398,9 @@ kind is separate host work.
    is a manual migration per kit, since feed never moves or removes an entry.
 2. The designs structure ships; no sample design does. The launch page is a
    live demo on the Web Layout page; whole pages are each system's own.
+   Revised 2026-11-12: a fresh kit seeds one website design so it can take
+   an EmDash site without further authoring (see "Designs keep their
+   contract" above). Existing kits and structure children are unchanged.
 3. Six photo slots at first, center crops, with the Photography page saying
    so. Focal detection is a later crawler step.
 4. `accent-2` and `ink-ground` are captured slots, derived from accent and
