@@ -69,7 +69,10 @@ export async function workspaceProvider(root) {
   const selected = await findHostedRoot(root);
   const manifest = await readJson(path.join(selected, "timds.json"));
   const state = await readJson(path.join(selected, SESSION_FILE));
-  return normalizeProvider(manifest?.provider || state?.provider);
+  // An open session records the host it was started on. timds.json is source
+  // content stamped when the system was created, so it can name an origin the
+  // host has since moved away from.
+  return normalizeProvider(state?.provider || manifest?.provider);
 }
 
 export function createHostProvider({ url, token, resolveToken, fetchImpl = fetch, retryClock: clock = retryClock }) {
@@ -383,7 +386,7 @@ export async function runHostedCommand(command, { root = process.cwd(), fixedRoo
   if (manifest && !["whoami", "systems", "principals"].includes(command)) await assertBinaryInstallation(selected);
   const state = await readJson(path.join(selected, SESSION_FILE));
   const configured = destination
-    ? normalizeProvider((await readJson(path.join(selected, "timds.json")))?.provider || state?.provider)
+    ? normalizeProvider(state?.provider || manifest?.provider)
     : await workspaceProvider(selected);
   const pending = command === "start" ? await readJson(path.join(selected, PENDING_START_FILE)) : null;
   // whoami and systems read an identity and its catalog, not a workspace: they answer for any signed-in host.

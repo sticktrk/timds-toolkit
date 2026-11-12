@@ -149,6 +149,18 @@ test("host session materializes plain files, uploads changed/deleted paths, read
   await assert.rejects(runHostedCommand("submit", f.options), /closed/);
 });
 
+test("an open session keeps its recorded host when timds.json names an older origin", async (t) => {
+  const manifest = JSON.stringify({ systemId: "example/core", provider: { kind: "hosted", url: "https://old-host.example.workers.dev" } });
+  const f = await fixture(t, [file("timds.json", manifest), file("note.txt", "base")]);
+  const saved = process.env.TIMDS_PORTAL_URL;
+  delete process.env.TIMDS_PORTAL_URL;
+  t.after(() => { if (saved !== undefined) process.env.TIMDS_PORTAL_URL = saved; });
+  const { portalUrl, ...options } = f.options;
+  await runHostedCommand("status", options);
+  assert.match(f.requests.at(-1).url, /^https:\/\/host\.example\//);
+  await assert.rejects(runHostedCommand("status", { ...options, portalUrl: "https://old-host.example.workers.dev" }), /different TimDS host/);
+});
+
 test('sessions retain parent lineage and refuse creating, changing or deleting it before upload', async t => {
   const record = JSON.stringify({ schemaVersion: 1, systemId: 'example/parent' });
   const f = await fixture(t, [file('.timds/parent.json', record), file('note.txt', 'base')]);
