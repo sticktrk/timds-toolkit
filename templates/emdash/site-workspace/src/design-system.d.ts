@@ -18,6 +18,8 @@ declare module "virtual:timds/design-system" {
 	export const sectionSchema: { fields: Array<Record<string, unknown>>; supports: string[]; taxonomies: Array<Record<string, unknown>> };
 	export const divisionContexts: Record<string, { prefix: string; system: string; design: string; assetPrefix: string; styles: Array<{ href: string; media: string | null }> }>;
 	export const divisionLayouts: Record<string, () => Promise<{ default: AstroComponentFactory }>>;
+	export const mainLayout: () => Promise<{ default: AstroComponentFactory }>;
+	export const mainPage: () => Promise<{ default: AstroComponentFactory }>;
 	export const collectionContexts: Partial<Record<string, string>>;
 	export const titleMarker: string;
 	/** The site's form handlers by the address they handle: the modules under src/forms/ that export POST, by file (relative to the site) and loader. */

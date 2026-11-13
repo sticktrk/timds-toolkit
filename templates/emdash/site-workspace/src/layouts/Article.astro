@@ -1,6 +1,5 @@
 ---
-import { collectionContexts } from "virtual:timds/design-system";
-import Base from "./Base.astro";
+import { collectionContexts, mainLayout } from "virtual:timds/design-system";
 import Division from "./Division.astro";
 import { absoluteUrl, sectionForPath, siteOrigin, sitePath } from "../lib/articles/index";
 
@@ -12,6 +11,7 @@ interface Props {
 
 const { collection, ...props } = Astro.props;
 const division = Object.hasOwn(collectionContexts, collection) ? collectionContexts[collection] : undefined;
+const Base = division ? undefined : (await mainLayout()).default;
 const section = division && sectionForPath(Astro.url.pathname);
 const path = Astro.url.pathname.replace(/\/+$/, "");
 const canonical = section && (path === sitePath(section.prefix.slice(0, -1)) || path === section.prefix.slice(0, -1))

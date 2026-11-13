@@ -66,6 +66,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { defaultPageFiles, inNamespace, readSectionRouteFiles, sectionRouteInventory } from "./section-routes.mjs";
 
 import { COMPOSITION_CONTRACT, compositionFile, compositionRouteInventory, divisionInputsRoot, readDivisionComposition, retainComposition } from "./composition.mjs";
+import { compositionSourceContexts, moduleImportReferences } from "./source-contexts.mjs";
 
 export const VIRTUAL_MODULE = "virtual:timds/design-system";
 const RESOLVED_MODULE = `\0${VIRTUAL_MODULE}`;
@@ -439,7 +440,22 @@ export async function loadModuleParser(siteRoot) {
     throw new Error(`The design system integration reads the site's form handlers with the Vite that Astro runs on, and found no astro install in ${siteRoot}. Run npm ci in ${siteRoot}.`);
   }
   const { parseAst } = await import(pathToFileURL(vite).href);
-  return (code, file) => parseAst(code, { lang: file.endsWith(".ts") ? "ts" : "js" }, file);
+  return (code, file) => parseAst(code, { lang: /\.(?:ts|tsx|jsx)$/.exec(file)?.[0].slice(1) ?? "js" }, file);
+}
+
+async function loadCompositionImportParser(siteRoot) {
+  const astro = createRequire(path.join(siteRoot, "package.json")).resolve("astro/package.json");
+  const vite = createRequire(astro).resolve("vite");
+  const { parseSync } = await import(pathToFileURL(createRequire(vite).resolve("rolldown/utils")).href);
+  return (text, file) => {
+    const lang = /\.(?:mts|cts)$/.test(file) ? "ts" : /\.(?:ts|tsx|jsx)$/.exec(file)?.[0].slice(1) ?? "js";
+    const result = parseSync(file, text, { lang, sourceType: /\.(?:cjs|cts)$/.test(file) ? "commonjs" : "module" });
+    // Astro frontmatter permits top-level return and await together. Keep the
+    // complete module AST; only its return-placement diagnostic is inapplicable.
+    const errors = result.errors.filter((error) => !(file.endsWith(".astro.ts") && error.message === "A 'return' statement can only be used within a function body."));
+    if (errors.length) throw new Error(`Composition source ${file} could not be parsed.`);
+    return moduleImportReferences(result.program);
+  };
 }
 
 /**
@@ -670,7 +686,7 @@ export function divisionStyles(systemRoot, { design }, input) {
   compositionFile(systemRoot, `${directory}/design.json`);
   const layout = compositionFile(systemRoot, `${directory}/layout.html`, { optional: true });
   const pages = compositionFile(systemRoot, `${directory}/pages`, { optional: true, directory: true });
-  const defaults = pages ? defaultPageFiles(pages, { strict: true }) : [];
+  const defaults = pages ? defaultPageFiles(pages, { strict: true, literalRoutes: false }) : [];
   const home = (defaults.find(([route]) => route === "/") ?? defaults[0])?.[1];
   const shell = layout ?? (home && compositionFile(systemRoot, `${directory}/pages/${home}`));
   if (!shell) throw new Error(`Division reference design ${design} requires a layout or default page.`);
@@ -905,6 +921,8 @@ export function virtualModuleSource(rendered, handlers, siteRoot, inventory = {}
     `export const divisionContexts = ${JSON.stringify(rendered.contexts ?? {})};`,
     `export const collectionContexts = ${JSON.stringify(rendered.collectionContexts ?? {})};`,
     `export const divisionLayouts = {\n${layouts.join("\n")}${layouts.length ? "\n" : ""}};`,
+    `export const mainLayout = () => import(${JSON.stringify(path.join(siteRoot, "src/layouts/Base.astro").split(path.sep).join("/"))});`,
+    `export const mainPage = () => import(${JSON.stringify(path.join(siteRoot, "src/components/DesignPage.astro").split(path.sep).join("/"))});`,
     `export const shell = ${JSON.stringify(rendered.shell)};`,
     `export const titleMarker = ${JSON.stringify(TITLE_MARKER)};`,
     `export const sectionsContract = ${JSON.stringify(inventory.sectionsContract ?? 2)};`,
@@ -926,6 +944,7 @@ export default function designSystem({ design }) {
   let clientDirectory;
   let tokensCss = false;
   let parse;
+  let parseImports;
   let logger;
   let development = false;
   let hostAcknowledged = false;
@@ -966,9 +985,11 @@ export default function designSystem({ design }) {
       const composition = readDivisionComposition(siteRoot, api.sections, { previousInputs: revalidateRoutes ? lastInputs : null });
       const rendered = renderWorkspaceDesign(systemRoot, { design, base, forms: handlers.keys(), sections: api.sections, sectionsContract: api.sectionsContract, ...routeFiles });
       if (composition) {
+        const sources = compositionSourceContexts(siteRoot, composition, api.sections, { htmlTags, parseImports });
         const routes = compositionRouteInventory(composition, rendered.inventory, handlers.keys(), routeFiles);
         const divisions = renderDivisions({ siteRoot, systemRoot, base, forms: new Set(handlers.keys()), composition, routes, sections: api.sections, publicFiles: routeFiles.publicFiles, main: rendered });
         Object.assign(rendered, { ...divisions, pages: [...rendered.pages, ...divisions.pages] });
+        rendered.files.push(...[...sources.texts.keys()].map((file) => path.join(siteRoot, file)));
       }
       lastInputs = composition ? { systemsKey: composition.systemsKey, inputs: composition.inputs, dependencies: composition.dependencies } : null;
       lastRendered = rendered;
@@ -1013,6 +1034,7 @@ export default function designSystem({ design }) {
           if (section.feed) injectRoute({ pattern: `${section.prefix}rss.xml`, entrypoint: path.join(siteRoot, "src/routes/articles/rss.xml.ts"), prerender: false });
         }
         parse = await loadModuleParser(siteRoot);
+        parseImports = await loadCompositionImportParser(siteRoot);
         systemRoot = findDesignSystem(siteRoot);
         if (!systemRoot) throw new Error(`No folder above ${siteRoot} holds timds.json. This site reads the Design System it sits in; keep it inside that Design System's folder.`);
         base = config.base || "/";
@@ -1052,7 +1074,7 @@ export default function designSystem({ design }) {
                 const divisionsFile = path.join(siteRoot, "divisions.json");
                 const layoutsDirectory = path.join(siteRoot, "src/layouts");
                 const systemDesigns = path.join(systemRoot, "src/designs");
-                const watchedDirectories = [systemDesigns, formsDirectory, publicDirectory, divisionsDirectory, layoutsDirectory, divisionInputsRoot(siteRoot)];
+                const watchedDirectories = [systemDesigns, formsDirectory, publicDirectory, divisionsDirectory, layoutsDirectory, path.join(siteRoot, "src"), divisionInputsRoot(siteRoot)];
                 server.watcher.add([...watchedDirectories, manifestFile, divisionsFile]);
                 const reload = (file) => {
                   if (file !== manifestFile && file !== divisionsFile && !watchedDirectories.some((directory) => file === directory || file.startsWith(`${directory}${path.sep}`))) return;

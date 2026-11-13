@@ -218,6 +218,12 @@ form handlers return 503 until corrected. Template 4 adds optional
 `site/divisions.json` without changing the workspace or section schemas.
 Its integration exports composition 1 alongside the unchanged section
 contract; build, consumer checks and preview read the same division inventory.
+The data-only `src/integrations/source-contexts.mjs` graph follows literal
+local imports and re-exports for layouts and shared article renderers. Build
+and dev refuse division dependencies that import outside the site; consumer
+checks validate shared classes and token references against every rendering
+context and never autofix shared source against only one. Scoped Astro family
+navigation styles remain component-local.
 Hosted discovery must acknowledge the installed template and capabilities.
 Keep package `emdashWorkspaceContract: 3`, `emdashSectionsContract: 2` and
 `emdashCompositionContract: 1` in step with these exports. See

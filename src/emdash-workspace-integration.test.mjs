@@ -438,7 +438,7 @@ test("the starter's contact form renders disabled until the site handles it", ()
 
 test("the catch-all route answers 405 to a POST, and the handlers are dispatched ahead of it by middleware", async () => {
   const route = await fs.readFile(path.join(SITE_TEMPLATE, "src/pages/[...page].astro"), "utf8");
-  assert.match(route, /import \{ pages \} from "virtual:timds\/design-system";/);
+  assert.match(route, /import \{ pages, mainPage \} from "virtual:timds\/design-system";/);
   assert.match(route, /if \(method !== "GET" && method !== "HEAD"\)/);
   assert.match(route, /status: 405/);
   assert.match(route, /Allow: "GET, HEAD"/);

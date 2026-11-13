@@ -133,12 +133,12 @@ export function pageRoute(relative) {
  * (`about.html` and `about.default.html`) are refused, as the catalog
  * refuses them.
  */
-export function defaultPageFiles(pagesDirectory, { strict = false } = {}) {
+export function defaultPageFiles(pagesDirectory, { strict = false, literalRoutes = strict } = {}) {
   const byRoute = new Map();
   for (const relative of htmlFiles(pagesDirectory, { strict })) {
     const route = pageRoute(relative);
     if (!route) continue;
-    if (strict && !/^\/(?:[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?:\/[a-z][a-z0-9]*(?:-[a-z0-9]+)*)*)?$/.test(route)) throw new Error(`Division page ${relative} has an invalid route.`);
+    if (literalRoutes && !/^\/(?:[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?:\/[a-z][a-z0-9]*(?:-[a-z0-9]+)*)*)?$/.test(route)) throw new Error(`Division page ${relative} has an invalid route.`);
     if (byRoute.has(route)) throw new Error(`pages/${relative} and pages/${byRoute.get(route)} both describe route ${route}; keep one`);
     byRoute.set(route, relative);
   }

@@ -103,7 +103,8 @@ import path from "node:path";
 import { matchesGlob } from "./consumer.mjs";
 import { applyWritesWithRollback, compileTokenCss } from "./consumer-scaffold.mjs";
 import { readDivisionComposition } from "../templates/emdash/site-workspace/src/integrations/composition.mjs";
-import { divisionStyles } from "../templates/emdash/site-workspace/src/integrations/design-system.mjs";
+import { divisionStyles, htmlTags } from "../templates/emdash/site-workspace/src/integrations/design-system.mjs";
+import { compositionSourceContexts } from "../templates/emdash/site-workspace/src/integrations/source-contexts.mjs";
 import { designShellStylesheets, readWorkspaceSections, runsStarterBuild, selectWorkspaceDesign } from "./consumer-scaffold-workspace.mjs";
 import { hasContractGroups, readContractGroups } from "./contract-groups.mjs";
 import { declaredClasses } from "./designs.mjs";
@@ -113,7 +114,7 @@ import { classifyToken, importReferences, parseCssTokens, resolveTokens } from "
 export const WORKSPACE_CHECK_SCHEMA_VERSION = 1;
 
 /** The finding kinds, in the order the text report lists them. */
-export const WORKSPACE_FINDING_KINDS = Object.freeze(["literal", "ambiguous-literal", "token-override", "class"]);
+export const WORKSPACE_FINDING_KINDS = Object.freeze(["literal", "ambiguous-literal", "token-override", "token", "class"]);
 
 // The starter stylesheet, as `inspectDesignSystem` in consumer-scaffold.mjs
 // recognises it (that constant is not exported).
@@ -955,7 +956,7 @@ function scanMarkup(text, extension) {
       const lang = tag.attributes.find((attribute) => attribute.name.toLowerCase() === "lang" && attribute.quote !== null && attribute.quote !== "{");
       const language = lang ? text.slice(lang.valueStart, lang.valueEnd).trim() : "";
       const css = text.slice(tag.end, bodyEnd);
-      blocks.push({ start: tag.end, css, skipped: Boolean(language && !/^(?:css|postcss)$/i.test(language)) || css.trim().startsWith("{") });
+      blocks.push({ start: tag.end, css, scoped: extension === ".astro" && !tag.attributes.some((attribute) => ["is:global", "is:inline"].includes(attribute.name.toLowerCase())), skipped: Boolean(language && !/^(?:css|postcss)$/i.test(language)) || css.trim().startsWith("{") });
     }
     return close ? close.index + close[0].length : source.length;
   }
@@ -1237,6 +1238,31 @@ export async function workspaceTokenInventory({
  * @param {string[]|null} [options.stylesheets] Design-System-relative stylesheets to treat as the system's instead of reading the design's links and the site's imports (`/tokens.css` names the compiled tokens; any under dist/ is passed over)
  * @param {(file: string, content: string) => Promise<void>} [options.writeFile] the writer (tests inject a failing one)
  */
+async function compositionImportParser() {
+  const { default: ts } = await import("typescript");
+  return (text, file) => {
+    const kind = file.endsWith(".tsx") ? ts.ScriptKind.TSX : file.endsWith(".jsx") ? ts.ScriptKind.JSX : /\.(?:ts|mts|cts)$/.test(file) ? ts.ScriptKind.TS : ts.ScriptKind.JS;
+    const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, kind);
+    if (source.parseDiagnostics.length) throw new Error(`Composition source ${file} could not be parsed.`);
+    const references = [];
+    const literal = (node) => {
+      if (!node || !ts.isStringLiteralLike(node)) throw new Error("Composition source imports must use literal paths.");
+      references.push(node.text);
+    };
+    const visit = (node) => {
+      if (ts.isImportDeclaration(node) && !node.importClause?.isTypeOnly || ts.isExportDeclaration(node) && node.moduleSpecifier && !node.isTypeOnly) literal(node.moduleSpecifier);
+      if (ts.isImportEqualsDeclaration(node) && !node.isTypeOnly && ts.isExternalModuleReference(node.moduleReference)) literal(node.moduleReference.expression);
+      if (ts.isCallExpression(node)) {
+        if (node.expression.kind === ts.SyntaxKind.ImportKeyword || ts.isIdentifier(node.expression) && node.expression.text === "require") literal(node.arguments[0]);
+        if (ts.isPropertyAccessExpression(node.expression) && ts.isMetaProperty(node.expression.expression) && ["glob", "globEager"].includes(node.expression.name.text)) throw new Error("Composition sources need explicit local imports instead of import.meta.glob.");
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(source);
+    return references;
+  };
+}
+
 export async function checkWorkspaceSite({
   siteRoot: siteRootInput,
   designSystemRoot: designSystemRootInput,
@@ -1254,8 +1280,10 @@ export async function checkWorkspaceSite({
   const sections = await readWorkspaceSections(siteRoot);
   const composition = sections && readDivisionComposition(siteRoot, sections);
   const { texts } = await readSite({ siteRoot, designSystemRoot, designSurface: [...designSurface, ...(composition ? composition.divisions.map(({ pages }) => `${pages}/**`) : [])], protectedGlobs });
+  const surfaceFiles = new Set(texts.keys());
+  const sourceGraph = composition && compositionSourceContexts(siteRoot, composition, sections, { htmlTags, parseImports: await compositionImportParser() });
+  for (const [file, text] of sourceGraph?.texts ?? []) if (isScannable(file)) texts.set(file, text);
   const selectedDivisions = new Map();
-  const divisionFiles = new Map();
   for (const division of composition?.divisions ?? []) {
     const staged = composition.inputs.get(division.system);
     const linked = divisionStyles(designSystemRoot, division, staged);
@@ -1264,17 +1292,11 @@ export async function checkWorkspaceSite({
       condition: media ? `media ${media}` : null,
     }));
     selectedDivisions.set(division.id, await readSystem({ designSystemRoot, siteRoot, stylesheets: entries, staged }));
-    for (const [relative] of texts) {
-      if (relative !== division.layout && !relative.startsWith(`${division.pages}/`)) continue;
-      const ids = divisionFiles.get(relative) ?? [];
-      ids.push(division.id);
-      divisionFiles.set(relative, ids);
-    }
   }
   const mainImports = new Set();
   for (const [relative, text] of texts) {
     const imports = systemImports(relative, text, { siteRoot, designSystemRoot });
-    if (!divisionFiles.has(relative)) {
+    if (![...sourceGraph?.contexts.get(relative) ?? []].some((context) => context !== null)) {
       for (const imported of imports) mainImports.add(imported);
     } else if (imports.length) throw new Error(`Division source ${relative} imports a Design System stylesheet. Select the design in divisions.json to load its styles.`);
   }
@@ -1289,22 +1311,28 @@ export async function checkWorkspaceSite({
 
   for (const relative of scanned) {
     const text = texts.get(relative);
-    const systems = divisionFiles.get(relative)?.map((division) => selectedDivisions.get(division)) ?? [mainSystem];
+    const contextIds = sourceGraph?.contexts.get(relative);
+    const systems = contextIds ? [...contextIds].map((division) => division === null ? mainSystem : selectedDivisions.get(division)) : [mainSystem];
     const system = systems[0];
-    const editable = systems.length === 1 && !protectedGlobs.some((glob) => matchesGlob(relative, glob));
+    const editable = systems.length === 1 && surfaceFiles.has(relative) && !protectedGlobs.some((glob) => matchesGlob(relative, glob));
     const extension = path.posix.extname(relative).toLowerCase();
+    const markup = extension === ".css" ? null : scanMarkup(text, extension);
+    const scoped = contextIds && [...contextIds].some((context) => context !== null) ? markup?.blocks.filter((block) => block.scoped && !block.skipped) ?? [] : [];
+    const localClasses = new Set(scoped.flatMap((block) => [...declaredClasses(block.css)]));
+    const localTokens = new Set(scoped.flatMap((block) => parseCssTokens(block.css).map((token) => token.name)));
     const edits = [];
     const reportedClasses = new Set();
+    const reportedTokens = new Set();
     const at = (offset) => ({ file: relative, ...position(text, offset) });
 
     const classFinding = (name, offset, declared) => {
-      if (systems.every((entry) => entry.classes.has(name)) || reportedClasses.has(name)) return;
+      if (localClasses.has(name) || systems.every((entry) => entry.classes.has(name)) || reportedClasses.has(name)) return;
       reportedClasses.add(name);
       findings.push({
         kind: "class",
         ...at(offset),
         class: name,
-        suggestion: `Add a .${name} rule to ${system.where.classes} in the Design System${declared ? ", moving this rule's declarations there," : ""} without changing any existing rule; then ${declared ? "remove the rule from the site and keep" : "keep"} class="${name}" in the site. If the system already has a class for this, use that class instead.`,
+        suggestion: `Add a .${name} rule to ${(systems.find((entry) => !entry.classes.has(name)) ?? system).where.classes} in each selected Design System that lacks it${declared ? ", moving this rule's declarations there," : ""} without changing any existing rule; then ${declared ? "remove the rule from the site and keep" : "keep"} class="${name}" in the site. If the system already has a class for this, use that class instead.`,
       });
     };
 
@@ -1327,15 +1355,22 @@ export async function checkWorkspaceSite({
         }
         const property = declaration.name;
         const valueOffset = base + declaration.valueStart;
+        if (contextIds) for (const match of maskValue(declaration.value).matchAll(/\bvar\(\s*(--[\w-]+)/g)) {
+          const token = match[1];
+          if (localTokens.has(token) || systems.every((entry) => entry.tokenNames.has(token)) || reportedTokens.has(token)) continue;
+          reportedTokens.add(token);
+          findings.push({ kind: "token", ...at(valueOffset + match.index), property, value: token, suggestion: `The token ${token} is unavailable in at least one context that renders this file. Use a token supplied by every selected context, or port the component separately for that context.` });
+        }
         if (property.toLowerCase() === "font-family") {
           const key = fontStackKey(declaration.value);
           if (!key) continue;
-          const names = [...(system.fonts.get(key) ?? [])].sort();
+          const names = [...(system.fonts.get(key) ?? [])].filter((name) => systems.every((entry) => entry.fonts.get(key)?.has(name))).sort();
           handleLiteral({ property, offset: valueOffset, literal: declaration.value, names, kind: "font", declaration });
           continue;
         }
         for (const literal of colorLiterals(declaration, system)) {
-          const names = [...(system.colors.get(colorKey(literal.text)) ?? [])].sort();
+          const key = colorKey(literal.text);
+          const names = [...(system.colors.get(key) ?? [])].filter((name) => systems.every((entry) => entry.colors.get(key)?.has(name))).sort();
           handleLiteral({ property, offset: valueOffset + literal.offset, literal: literal.text, names, kind: "color", declaration, within: literal.offset });
         }
       }
@@ -1357,7 +1392,7 @@ export async function checkWorkspaceSite({
           property,
           value: literal,
           candidates: names,
-          suggestion: `${literal} is the value of the system token ${names[0]}, but this file is protected, so it is not rewritten. Nothing needs adding to the Design System; change the line to \`${after(`var(${names[0]})`)}\`.`,
+          suggestion: `${literal} is the value of the system token ${names[0]}, but this file is ${systems.length > 1 ? "shared by multiple contexts" : "protected"}, so it is not rewritten. Change the line to \`${after(`var(${names[0]})`)}\` only after checking every rendering context.`,
         });
         return;
       }
@@ -1386,7 +1421,7 @@ export async function checkWorkspaceSite({
     if (extension === ".css") {
       checkCss(text, 0);
     } else {
-      const { blocks, classes, styles } = scanMarkup(text, extension);
+      const { blocks, classes, styles } = markup;
       for (const block of blocks) if (!block.skipped) checkCss(block.css, block.start);
       for (const style of styles) checkCss(style.css, style.start);
       for (const { name, offset } of classes) classFinding(name, offset, false);

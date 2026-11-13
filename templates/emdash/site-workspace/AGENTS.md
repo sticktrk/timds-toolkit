@@ -49,3 +49,9 @@ and `head` slots. Associate collections by slug while keeping their native
 URL patterns and shared schema in the sections files. A layout receives
 `context.base` and `context.prefix` for mounted links. Keep styling in the
 selected design rather than importing an additional Design System.
+That rule also applies to components and stylesheets the layout imports.
+Use literal relative local imports; the check, build and dev read the same
+dependency graph without executing it. Shared article components must work
+with every collection context and the main topic views; their literals are
+never automatically rewritten against a single context. Scoped Astro styles
+can provide self-contained family navigation without importing system CSS.

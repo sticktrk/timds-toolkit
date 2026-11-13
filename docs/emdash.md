@@ -640,7 +640,28 @@ or grant division-specific writer access.
 The route inventory refuses overlapping mounts and collisions between
 mounted pages, main design pages, collections, public files and Astro
 routes. The two-way check reads the styles for each division’s authored
-pages and layout, and preview routes come from that same inventory.
+pages, layout and transitive local imports, and preview routes come from that
+same inventory. Shared article routes and components are checked against every
+context that renders them, including explicitly associated collections outside
+the mount and main-context topic lists. Missing classes or token references in
+any selected context fail the check. A shared file is never automatically
+rewritten to a token from only one context. The stock shared routes load the
+main `Base` and `DesignPage` renderers only for main-context pages; their
+owner-only markup is checked against the main design.
+
+The build, development server and consumer check read the source dependency
+graph without executing it. Local imports and re-exports must use literal
+relative paths or site-root paths; packages must be declared in the site's
+package manifest. Computed imports, `import.meta.glob`, local symlinks, and
+imports outside the site from a division's dependency graph are refused.
+This includes a component or a site stylesheet that indirectly imports the
+owner's Design System CSS. Select those styles through `divisions.json`.
+Composition source graphs use plain CSS; stylesheet preprocessors and non-CSS
+Astro `style` languages are refused rather than scanned as a different format.
+Ordinary Astro scoped `<style>` blocks remain available for self-contained
+family navigation: their classes belong to that component. They do not make
+another context's tokens available. Development watches these transitive
+sources and returns 503 until an invalid import is corrected.
 Reference pages in the owner system are available for design comparison.
 The generated canonical link and discovery entry assume division pages
 are public and indexable. Sites can use the template without adding a
@@ -742,8 +763,9 @@ expressions are never guessed at. The module comment of
   literal in a protected file is reported, never rewritten.
 - A literal no token holds (`literal`), one several tokens hold
   (`ambiguous-literal`, listing the candidates), a site declaration of a
-  system custom property (`token-override`), and a class no system stylesheet
-  declares (`class`) are findings. Each fails the check until it is resolved
+  system custom property (`token-override`), a token reference unavailable in
+  a composed file's rendering contexts (`token`), and a class a selected
+  context's stylesheets do not declare (`class`) are findings. Each fails the check until it is resolved
   in the same change by adding to the system (a new token, a new class), or
   by using what the system has; the check never proposes changing an existing
   token's value or an existing class's rules. A suggestion names where to add

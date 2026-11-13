@@ -934,3 +934,78 @@ test("pinned sibling references are checked against verified bytes and never bec
   await write(staged, "sibling/files/styles/colors.css", files["files/styles/colors.css"].replace("789abc", "000000"));
   await assert.rejects(loadConsumer(siteRoot), /pins and digests/);
 });
+
+test("assigned collections check shared article components against every rendering context", async (t) => {
+  const root = await temporaryDirectory(t), workspace = await starterWorkspace(path.join(root, "workspace"));
+  await scaffoldWorkspaceEmdashSite(workspace, { skipInstall: true, output: quiet });
+  const siteRoot = path.join(workspace, "site");
+  const division = { id: "studio", prefix: "/studio/", system: "main", design: "studio", pages: "src/divisions/studio/pages", layout: "src/layouts/Studio.astro", collections: ["articles"] };
+  await write(path.join(workspace, "src/designs/studio/design.json"), { title: "Studio" });
+  await write(path.join(workspace, "src/designs/studio/layout.html"), '<link rel="stylesheet" href="/styles/studio.css">');
+  await write(path.join(workspace, "src/designs/studio/pages/index.html"), "<h1>Studio reference</h1>");
+  await write(path.join(workspace, "src/styles/studio.css"), ":root{--studio-color:#112233}.studio-only{color:var(--studio-color)}");
+  await write(path.join(siteRoot, "divisions.json"), { schemaVersion: 1, systems: { main: { workspace: true } }, divisions: [division] });
+  await write(path.join(siteRoot, `${division.pages}/index.html`), '<h1 class="studio-only">Studio</h1>');
+  await write(path.join(siteRoot, division.layout), '<html><head><slot name="head" /></head><body><slot /></body></html>');
+  const { checkWorkspaceSite } = await import("./consumer-workspace-check.mjs"), app = (await loadConsumer(siteRoot)).apps.site;
+  await fs.appendFile(path.join(workspace, "src/styles/system.css"), "\n.owner-only{color:inherit}\n");
+  const base = "src/layouts/Base.astro", mainPage = "src/components/DesignPage.astro";
+  for (const file of [base, mainPage]) await write(path.join(siteRoot, file), `${await fs.readFile(path.join(siteRoot, file), "utf8")}\n<header class="owner-only">Owner navigation</header>`);
+  assert.deepEqual((await checkWorkspaceSite({ siteRoot, designSystemRoot: workspace, designSurface: app.designSurface, files: [base, mainPage], fix: false })).findings, [], "main-only renderers are not checked as division markup");
+  const card = "src/components/articles/ArticleCard.astro", before = await fs.readFile(path.join(siteRoot, card), "utf8");
+  await write(path.join(siteRoot, card), before.replace('class="article-card"', 'class="article-card" style="color: #2457d6"'));
+  const options = { siteRoot, designSystemRoot: workspace, designSurface: app.designSurface, files: [card], fix: true };
+  const result = await checkWorkspaceSite(options);
+  assert.ok(result.findings.some((finding) => finding.kind === "class" && finding.class === "article-card"));
+  assert.ok(result.findings.some((finding) => finding.kind === "literal" && finding.value === "#2457d6"));
+  assert.deepEqual(result.rewrites, []);
+  assert.match(await fs.readFile(path.join(siteRoot, card), "utf8"), /color: #2457d6/);
+  await write(path.join(siteRoot, card), before.replace('class="article-card"', 'class="article-card" style="color: var(--color-accent)"'));
+  assert.ok((await checkWorkspaceSite(options)).findings.some((finding) => finding.kind === "token" && finding.value === "--color-accent"));
+  const sections = JSON.parse(await fs.readFile(path.join(siteRoot, "sections.json"), "utf8"));
+  assert.equal(sections.sections[0].prefix, "/articles/", "presentation association does not move the collection");
+});
+
+test("division source imports are transitive data-only inputs and scoped navigation remains valid", async (t) => {
+  const root = await temporaryDirectory(t), workspace = await starterWorkspace(path.join(root, "workspace"));
+  await scaffoldWorkspaceEmdashSite(workspace, { skipInstall: true, output: quiet });
+  const siteRoot = path.join(workspace, "site");
+  const division = { id: "studio", prefix: "/studio/", system: "main", design: "website", pages: "src/divisions/studio/pages", layout: "src/layouts/Studio.astro", collections: [] };
+  await write(path.join(siteRoot, "divisions.json"), { schemaVersion: 1, systems: { main: { workspace: true } }, divisions: [division] });
+  await write(path.join(siteRoot, `${division.pages}/index.html`), "<h1>Studio</h1>");
+  await write(path.join(siteRoot, division.layout), '---\nimport Family from "../components/Family.astro";\n---\n<html><head><slot name="head" /></head><body><Family /><slot /></body></html>');
+  const component = "src/components/Family.astro";
+  const navigation = '<nav class="family"><a href="/">Family</a></nav><style>.family{display:flex;gap:1rem;color:inherit}</style>';
+  await write(path.join(siteRoot, component), navigation);
+  const { checkWorkspaceSite } = await import("./consumer-workspace-check.mjs"), app = (await loadConsumer(siteRoot)).apps.site;
+  const options = { siteRoot, designSystemRoot: workspace, designSurface: app.designSurface, fix: false };
+  assert.deepEqual((await checkWorkspaceSite(options)).findings, [], "scoped component classes belong to their component");
+  await write(path.join(siteRoot, component), `---\nimport { marker } from "./bridge.mjs";\n---\n${navigation}`);
+  await write(path.join(siteRoot, "src/components/bridge.mjs"), 'throw new Error("Source modules must never execute during a check");\nexport { marker } from "./nested.mjs";');
+  await write(path.join(siteRoot, "src/components/nested.mjs"), 'export const marker = "data";');
+  assert.deepEqual((await checkWorkspaceSite(options)).findings, []);
+  await write(path.join(siteRoot, "src/components/nested.mjs"), 'import hero from "../assets/hero.png"; export const marker = hero;');
+  await fs.mkdir(path.join(siteRoot, "src/assets"), { recursive: true });
+  await fs.writeFile(path.join(siteRoot, "src/assets/hero.png"), Buffer.alloc(3 * 1024 * 1024));
+  assert.deepEqual((await checkWorkspaceSite(options)).findings, [], "passive assets do not consume the source parser byte budget");
+  await write(path.join(siteRoot, "src/components/nested.mjs"), 'import "../../../src/styles/system.css"; export const marker = "data";');
+  await assert.rejects(checkWorkspaceSite(options), /imports outside the site/);
+  await write(path.join(siteRoot, "src/components/nested.mjs"), 'import "../styles/family.css"; export const marker = "data";');
+  await write(path.join(siteRoot, "src/styles/family.css"), '@import "../../../src/styles/system.css";');
+  await assert.rejects(checkWorkspaceSite(options), /imports outside the site/);
+  await write(path.join(siteRoot, "src/components/nested.mjs"), 'export const marker = import(getPath());');
+  await assert.rejects(checkWorkspaceSite(options), /literal paths/);
+  for (const extension of ["mts", "cts", "cjs"]) {
+    await write(path.join(siteRoot, "src/components/nested.mjs"), `export { marker } from "./barrel.${extension}";`);
+    await write(path.join(siteRoot, `src/components/barrel.${extension}`), 'import "../../../src/styles/system.css"; export const marker = "data";');
+    await assert.rejects(checkWorkspaceSite(options), /imports outside the site/);
+  }
+  await write(path.join(siteRoot, "src/components/nested.mjs"), 'export { marker } from "./barrel.cts";');
+  await write(path.join(siteRoot, "src/components/barrel.cts"), 'import theme = require("../../../src/styles/system.css"); export const marker = theme;');
+  await assert.rejects(checkWorkspaceSite(options), /imports outside the site/);
+  await write(path.join(siteRoot, "src/components/nested.mjs"), 'import "../styles/family.scss"; export const marker = "data";');
+  await write(path.join(siteRoot, "src/styles/family.scss"), '@use "../../../src/styles/system.css";');
+  await assert.rejects(checkWorkspaceSite(options), /plain CSS/);
+  await write(path.join(siteRoot, component), '<nav>Family</nav><style lang="scss">@use "../../../src/styles/system.css";</style>');
+  await assert.rejects(checkWorkspaceSite(options), /plain CSS/);
+});

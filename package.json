@@ -34,7 +34,8 @@
         "changes": [
           "Allows an optional divisions.json in workspace sites to mount owner-authored pages, select a layout and design, and associate existing collections without changing their addresses or schemas.",
           "Validates and exports the resolved composition as a separate versioned contract shared by development, consumer checks, previews and hosted builds.",
-          "Accepts verified offline inputs for pinned sibling Design Systems and publishes their passive styles and assets in a release-specific namespace."
+          "Accepts verified offline inputs for pinned sibling Design Systems and publishes their passive styles and assets in a release-specific namespace.",
+          "Checks transitive composition sources and shared article components against their rendering contexts, refuses imported system styles, and preserves scoped family navigation."
         ]
       }
     ]
