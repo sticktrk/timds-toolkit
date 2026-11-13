@@ -13,7 +13,7 @@
  */
 import handler, { createScheduledHandler, PluginBridge } from "@emdash-cms/cloudflare/worker";
 
-import { drainContact, redriveContact } from "./lib/contact/delivery";
+import { contactStatus, drainContact, redriveContact } from "./lib/contact/delivery";
 import { migrateContact, type ContactEnv } from "./lib/contact/runtime";
 
 export { PluginBridge };
@@ -31,6 +31,7 @@ function ensureContactSchema(env: ContactEnv) {
 const SCHEDULED_PATH = `${import.meta.env.BASE_URL.replace(/\/+$/, "")}/_scheduled`;
 
 const REDRIVE_PATH = `${SCHEDULED_PATH}/contact/redrive`;
+const CONTACT_STATUS_PATH = `${SCHEDULED_PATH}/contact/status`;
 type ScheduledEnv = ContactEnv & { SCHEDULED_TASKS_SECRET?: string };
 
 async function digest(value: string): Promise<Uint8Array> {
@@ -51,7 +52,9 @@ async function runScheduledRequest(request: Request, env: ScheduledEnv): Promise
 	if (request.method !== "POST" || !expected || !(await sameSecret(given, expected))) {
 		return new Response("Not found", { status: 404 });
 	}
-	if (new URL(request.url).pathname === REDRIVE_PATH) return redriveContact(env, request);
+	const path = new URL(request.url).pathname;
+	if (path === REDRIVE_PATH) return redriveContact(env, request);
+	if (path === CONTACT_STATUS_PATH) return contactStatus(env);
 	const { runScheduledTasks } = await import("emdash/middleware");
 	const [{ published }, jobs] = await Promise.all([
 		runScheduledTasks(),
@@ -68,7 +71,7 @@ export default {
 			await ensureContactSchema(runtime);
 		}
 		const path = new URL(request.url).pathname;
-		if (path === SCHEDULED_PATH || path === REDRIVE_PATH) return runScheduledRequest(request, runtime);
+		if (path === SCHEDULED_PATH || path === REDRIVE_PATH || path === CONTACT_STATUS_PATH) return runScheduledRequest(request, runtime);
 		return handler.fetch!(request, env, context);
 	},
 	async scheduled(controller, env, context) {

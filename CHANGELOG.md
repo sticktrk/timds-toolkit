@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Add fresh EmDash template 7: an explicit nine-field HTML content profile,
+  exact-source rendering, site-owned article regions, guide/video metadata,
+  structured data and a designed native 410 response. Permit sixteen sections
+  with 144 field definitions. Tracking contract 2 adds per-site webhook
+  configuration, attributed phone/email leads, durable acknowledged delivery
+  and recovery commands. These are fresh-site contracts; ordinary upgrades
+  leave installed sites and their database schemas unchanged.
+
 - Let EmDash contact forms post from any site page, including shared sidebars and dynamically inserted dialogs. Honor submitter overrides and rebase the contact action in mounted previews.
 
 - Add opt-in workspace-site contact forms with durable Resend and Meta CAPI delivery, Meta Pixel, GA4 and Google Ads with configurable consent enforcement, and hosted site credential commands (#174).

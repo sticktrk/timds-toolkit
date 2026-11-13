@@ -107,7 +107,7 @@ const SCAFFOLD_HELP = `Usage:
   timds consumer scaffold emdash --root PATH --design-system GIT_URL
       [--platform cloudflare|node] [--stylesheet PATH]... [--site-url URL]
       [--portal-url URL] [--skip-install]
-  timds consumer scaffold emdash --workspace [--root PATH] [--skip-install]
+  timds consumer scaffold emdash --workspace [--root PATH] [--content-profile portable-text|html] [--skip-install]
 
 Creates a new EmDash CMS site repository at --root (which must not exist, or
 be empty) that consumes a TimDS Design System: the Design System is pinned as
@@ -149,6 +149,10 @@ System workspace, a site/ that exists and is not empty, and a system with no
 website design, before writing anything; then, unless --skip-install, it
 runs npm ci in site/. Article routes whose classes the system's stylesheets
 do not declare are listed as having no port yet.
+
+Choose --content-profile html before first setup for the nine-field native writer
+contract; portable-text keeps the four base fields. This selects fresh source
+only and never changes an existing site or database.
 
 For a workspace site, edit site/sections.json and site/section-schema.json,
 then explicitly run npm run sections:sync inside site/. Build, dev and
@@ -1378,7 +1382,7 @@ function parseScaffoldArguments(argv) {
       options[name === "h" ? "help" : name] = true;
       continue;
     }
-    if (!["root", "designSystem", "platform", "stylesheet", "siteUrl", "portalUrl", "layout"].includes(name)) throw new Error(`Unknown option --${rawName}\n${SCAFFOLD_HELP}`);
+    if (!["root", "designSystem", "platform", "stylesheet", "siteUrl", "portalUrl", "layout", "contentProfile"].includes(name)) throw new Error(`Unknown option --${rawName}\n${SCAFFOLD_HELP}`);
     const next = inlineValue ?? argv[index + 1];
     if (next === undefined || String(next).startsWith("-")) throw new Error(`--${rawName} requires a value`);
     if (name === "stylesheet") options.stylesheets.push(next);
@@ -1417,8 +1421,9 @@ export async function runConsumerScaffold(args = [], { output = (message = "") =
     if (foreign.length) throw new Error(`${foreign.join(", ")} ${foreign.length === 1 ? "belongs" : "belong"} to the other scaffold modes, not --workspace: a workspace site reads the Design System it sits in, writes its own layout, and takes its origin from EMDASH_SITE_URL when it runs, so it needs none of them. Rerun without ${foreign.length === 1 ? "it" : "them"}.`);
     if (options.platform && options.platform !== "cloudflare") throw new Error(`--platform ${options.platform} is not available with --workspace: a workspace site runs on Cloudflare Workers only. Rerun without --platform.`);
     const { scaffoldWorkspaceEmdashSite } = await import("./consumer-scaffold-workspace.mjs");
-    return scaffoldWorkspaceEmdashSite(options.root, { skipInstall: Boolean(options.skipInstall), output, ...workspaceOptions });
+    return scaffoldWorkspaceEmdashSite(options.root, { skipInstall: Boolean(options.skipInstall), ...(options.contentProfile ? { contentProfile: options.contentProfile } : {}), output, ...workspaceOptions });
   }
+  if (options.contentProfile) throw new Error("--content-profile requires --workspace.");
   if (options.layout) throw new Error(`--layout belonged to the withdrawn --existing mode: the fresh scaffold generates its own ${BASE_LAYOUT}. Rerun without it.`);
   return scaffoldEmdashSite(options.root, {
     designSystem: options.designSystem,

@@ -335,7 +335,11 @@ rewrites in the site's design surface. Build the site with its own
 source changes need both checks. Deployment is separate from source review.
 
 Article sections are declared by version-2 `sections.json` and shared
-`section-schema.json` inside the site. Changes are developer work: run
+`section-schema.json` inside the site. Fresh machine-authored sites can select
+`--content-profile html` during workspace scaffolding. It adds the declared
+HTML, short-answer, state, video and related-guide fields before setup; it is
+not an installed-site migration. Read the site's `docs/content-api.md` and
+`docs/article-presentation.md` for body fidelity and site-owned regions. Changes are developer work: run
 `npm run sections:sync` there, commit its seed and writer-table changes, then
 run consumer check and build. Neither check nor build silently syncs source.
 Nested literal prefixes are supported inside one selected design; public

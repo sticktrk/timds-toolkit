@@ -22,6 +22,12 @@ entry's collection and must not be copied to another section. A nested
 address such as `/commercial-division/lease-faq/{slug}/` still belongs to one
 collection in this same site; use its collection slug in API requests.
 
+Identify content by site, collection and database entry ID. A slug can be
+the same in two collections. Use the public site origin and that section's
+trailing-slash address for canonical links, redirect verification and
+attribution. The API origin is a transport address. Uploaded media uses its
+declared public URL, which may be on a separate media origin.
+
 <!-- timds:sections -->
 | Collection | Entry address | Feed |
 | --- | --- | --- |
@@ -39,6 +45,16 @@ does not create collections in an already set-up database by itself.
 The table below describes the stock article model; update this writer guide
 alongside an authored schema change before the collection is first created.
 
+<!-- timds:content-profile -->
+
+`portable-text` installs the four base fields. `html` installs those plus
+the five optional fields below. Discover supported fields for the selected
+collection in `GET /_emdash/api/schema` (`data.collections[].fields`) with
+the writer credential, or use the site's published collection inventory.
+Always send Portable Text `body` when writing article content. Send an
+optional field only when the collection declares that name and type.
+Report skipped fields without treating them as publishing failures.
+
 | Name | Kind | Type | Notes |
 | --- | --- | --- | --- |
 | `slug` | System | string | The URL segment. Lowercase, unique in the collection. Generated from the title when a create leaves it out. |
@@ -47,13 +63,24 @@ alongside an authored schema change before the collection is first created.
 | `bylines` | System | byline credits | EmDash's byline profiles; shown as "By …". See [Bylines](#bylines). |
 | `title` | Field | `string`, required | The article's only first-level heading. |
 | `summary` | Field | `text` | One or two sentences under the title and on every card. Also the meta description. |
-| `body` | Field | `portableText` | The article itself. See [The body](#the-body). |
+| `body` | Field | `portableText` | Portable Text body. See [The body](#the-body). |
 | `cover` | Field | `image` | Optional. The header image and the social image. See [Cover media](#cover-media). |
+| `body_html` | Field | `text` | Optional original HTML source. Nonempty HTML takes precedence over `body`. |
+| `short_answer` | Field | `text` | Optional plain text shown in the article header. Leave the answer card out of the HTML when using this field. |
+| `state` | Field | `string` | Optional two uppercase letters. Omit the field when the article has no applicable geography. |
+| `video_id` | Field | `string` | Optional 11-character YouTube video identifier. The site builds the player outside the body. |
+| `related_guide` | Field | `json` | Optional `{"url":"/guides/example/","title":"Example guide"}`. The URL is a same-site path with no query or fragment. |
 
 The collection supports drafts, revisions, previews, scheduling, search and
 the SEO panel. The SEO panel's title, description and image, when an editor
 sets them, take precedence over `title`, `summary` and `cover` in the page
 head.
+
+Map guide and hub pipelines to sections declared by the site. For example,
+the site may declare a `guides` collection at `/guides/`; the writer should
+use its configured mapping for the selected site and pillar. Guide content
+can use the same HTML field and the site can give that collection a division
+layout. Authored pages such as contact, about and terms are site source.
 
 ### Taxonomy `topic`
 
@@ -124,6 +151,22 @@ Through MCP, `body` may instead be a Markdown string: `content_create` and
 `content_update` convert Markdown to Portable Text for `portableText` fields.
 Through REST, send Portable Text JSON; REST does not convert Markdown.
 
+### Original HTML
+
+For a collection that declares `body_html`, send the source as a string in
+`data.body_html`. [HTML policy version 1](article-presentation.md#html-policy-version-1)
+defines the allowed elements, classes, media and embeds. Validate before
+sending. The public renderer refuses unsupported HTML and returns a plain
+error response. It never repairs the source or substitutes the Portable
+Text body for rejected HTML. Omitted, null or blank HTML selects `body`.
+
+Compare `data.item.data.body_html` from the API to the exact submitted
+string, including whitespace, entity spellings and attribute order. Check
+the public page separately for the intended composition, including stable
+anchors and images. The site can insert a component between top-level nodes.
+Review the HTML field in the CMS when present. It has no inline Portable
+Text editor.
+
 ## Tokens and permissions
 
 A writer authenticates with a personal access token (prefix `ec_pat_`)
@@ -138,6 +181,7 @@ Scopes the writer's token needs:
 | Scope | For |
 | --- | --- |
 | `content:read` | Reading articles, terms and revision tokens (`_rev`). |
+| `schema:read` | Reading the per-collection field inventory through `/_emdash/api/schema`. |
 | `content:write` | Creating, updating, publishing and unpublishing articles; MCP byline tools. It also grants `taxonomies:manage`. |
 | `media:write` | Uploading cover and body images. |
 | `taxonomies:manage` | Creating topic terms through REST. Implied by `content:write`; list it anyway so the grant survives a later change to that rule. |
@@ -210,12 +254,17 @@ Content-Type: application/json
 }
 ```
 
-EmDash's REST reference: "Send `_rev` with `PUT /content/{collection}/{id}`
-to prevent overwriting a change made since the read." A stale `_rev` answers
-`409`; read again and retry. REST accepts an update without `_rev`, but
-writers must always send it. Changing a published article creates a draft
-while the published version stays live; publish again to make the change
-live.
+A stale `_rev` answers `409`. Record the conflict and leave the editor's
+changes in place. Resume with a reviewed change against a fresh revision.
+Changing a published article creates a draft while the published version
+stays live. Publish again to make the change live, with the latest revision
+from the update.
+
+When setting or clearing `related_guide` or `video_id`, send only that field
+and the observed `_rev`. Send `null` to clear either field. Leave both body
+representations and unrelated metadata untouched. Publish the resulting
+revision when it is ready to go live. The site reads these fields from the
+entry and updates through ordinary EmDash content cache invalidation.
 
 ### Publish and unpublish
 
@@ -229,6 +278,20 @@ the article visible at `/articles/<slug>/` on the next request, without a
 rebuild. Unpublishing keeps the article and its date and removes it from the
 site. Scheduling is `POST /_emdash/api/content/articles/<id>/schedule` with
 `{ "scheduledAt": "<ISO 8601>", "_rev": "…" }`.
+
+### Redirect, retire and restore
+
+Use the native `/_emdash/api/redirects` routes to create and manage rules.
+For a permanent move send `{"source":"/old/","destination":"/new/","type":301}`
+to `POST /_emdash/api/redirects`. For permanent removal send
+`{"source":"/old/","type":410}`. Use same-site paths for source and
+destination. With a denied rule write (`403`), record `redirect_pending`
+and leave the entry in place. Verify the exact `301` and `Location`, or the
+`410`, with a request to the public URL before moving the source entry to
+trash. `DELETE /_emdash/api/content/<collection>/<id>` moves an entry to
+trash. Restore with `POST /_emdash/api/content/<collection>/<id>/restore`.
+Use the rule ID and verify its ownership and current source, destination
+and status before removing a writer-owned rule. Keep the entry recoverable.
 
 ### Topic terms
 
@@ -293,10 +356,8 @@ input schemas.
 | Topics | `taxonomy_list_terms`, `taxonomy_create_term` | Taxonomy name `topic`. |
 | Bylines | `byline_list`, `byline_create` | `content:write` scope, Editor role. |
 
-The `_rev` rule, as EmDash's MCP server states it to clients: "Call
-content_get first and pass back the _rev it returns. If this call fails with
-CONFLICT the item changed in the meantime: call content_get again and retry
-with the new token."
+Read with `content_get` and send the returned `_rev`. Record `CONFLICT`
+and resolve it through the same review flow as a stale REST revision.
 
 ## What visitors see
 

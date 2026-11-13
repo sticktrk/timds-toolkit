@@ -14,6 +14,12 @@ import Layout from "__LAYOUT_IMPORT__";
 import ArticleBody from "../../components/articles/ArticleBody.astro";
 import ArticleMeta from "../../components/articles/ArticleMeta.astro";
 import TopicList from "../../components/articles/TopicList.astro";
+import ArticleHead from "../../components/articles/regions/Head.astro";
+import ArticleHeader from "../../components/articles/regions/Header.astro";
+import BeforeBody from "../../components/articles/regions/BeforeBody.astro";
+import WithinBody from "../../components/articles/regions/WithinBody.astro";
+import AfterBody from "../../components/articles/regions/AfterBody.astro";
+import Sidebar from "../../components/articles/regions/Sidebar.astro";
 import {
 	sectionForPath,
 	absoluteUrl,
@@ -29,6 +35,10 @@ import {
 } from "../../lib/articles/index";
 
 import { sectionAvailable, sectionUnavailable } from "../../lib/articles/availability";
+import { articleHtml, ArticleHtmlError } from "../../lib/articles/html";
+import { insertionIndex, portableTextBoundary } from "../../lib/articles/body-regions";
+import { articlePresentation, organizationSchema, type ArticleRegionProps } from "../../lib/articles/presentation";
+import { divisionForArticle } from "../../lib/articles/presentation-context";
 
 export const prerender = false;
 
@@ -44,20 +54,49 @@ if (!entry) return Astro.rewrite("/404");
 if (!isPreview && !isSignedIn(Astro.locals) && entry.data.status !== "published") return Astro.rewrite("/404");
 if (Astro.request.method !== "GET" && Astro.request.method !== "HEAD") return new Response("This address accepts GET and HEAD.", { status: 405, headers: { Allow: "GET, HEAD", "Cache-Control": "no-store" } });
 
+const { data } = entry;
+const origin = siteOrigin(Astro.url, Astro.site, Astro.request);
+let html: ReturnType<typeof articleHtml> | undefined;
+try {
+	if (data.body_html != null && typeof data.body_html !== "string") throw new ArticleHtmlError();
+	if (typeof data.body_html === "string" && data.body_html.trim()) {
+		html = articleHtml(data.body_html, { ...articlePresentation.html, origin });
+	}
+} catch (caught) {
+	if (!(caught instanceof ArticleHtmlError)) throw caught;
+	Astro.cache?.set(false);
+	return new Response(Astro.request.method === "HEAD" ? null : "Article content is unavailable.", {
+		status: 500,
+		headers: { "Content-Type": "text/plain; charset=utf-8", "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" },
+	});
+}
+
 if (Astro.cache?.enabled) Astro.cache.set(cacheHint);
 Astro.response.headers.set("Cache-Control", cacheControl(Astro.locals, Astro.url, isPreview));
 
-const { data } = entry;
-const origin = siteOrigin(Astro.url, Astro.site, Astro.request);
 const coverSrc = imageFieldUrl(data.cover, Astro.locals);
+const path = articlePath(entry.id, section);
 const seo = getSeoMeta(entry, {
 	siteUrl: origin,
-	path: articlePath(entry.id, section),
+	path,
 	defaultDescription: data.summary ?? undefined,
 	defaultOgImage: coverSrc ? absoluteUrl(coverSrc, origin) : undefined,
 });
-const canonical = seo.canonical ?? absoluteUrl(articlePath(entry.id, section), origin);
-const authors = bylineNames(data);
+const canonical = absoluteUrl(path, origin);
+const sectionUrl = absoluteUrl(sitePath(section.prefix), origin);
+const publisher = organizationSchema(articlePresentation.organization, origin);
+const authors = articlePresentation.author === "organization" && publisher
+	? [publisher]
+	: bylineNames(data).map((name) => ({ "@type": "Person", name }));
+const region: ArticleRegionProps = {
+	context: {
+		entry, section, canonical, isPreview: Boolean(isPreview),
+		presentation: { division: divisionForArticle(section.collection), origin, sectionUrl, bodyFormat: html ? "html" : "portable-text" },
+	},
+};
+const htmlIndex = html ? insertionIndex(html.boundaries.length, articlePresentation.withinBody) : undefined;
+const htmlBoundary = htmlIndex === undefined ? undefined : html?.boundaries[htmlIndex - 1];
+const textBoundary = html ? undefined : portableTextBoundary(data.body, articlePresentation.withinBody);
 
 // Escaped so the JSON can never close its own script element.
 const structuredData = JSON.stringify({
@@ -68,9 +107,20 @@ const structuredData = JSON.stringify({
 	...(seo.ogImage ? { image: [seo.ogImage] } : {}),
 	...(data.publishedAt ? { datePublished: data.publishedAt.toISOString() } : {}),
 	dateModified: data.updatedAt.toISOString(),
-	...(authors.length > 0 ? { author: authors.map((name) => ({ "@type": "Person", name })) } : {}),
+	...(authors.length ? { author: authors } : {}),
+	...(publisher ? { publisher } : {}),
+	articleSection: section.label,
 	mainEntityOfPage: canonical,
 	url: canonical,
+}).replace(/</g, "\\u003c");
+const breadcrumbData = JSON.stringify({
+	"@context": "https://schema.org",
+	"@type": "BreadcrumbList",
+	itemListElement: [
+		{ "@type": "ListItem", position: 1, name: "Home", item: absoluteUrl(sitePath("/"), origin) },
+		{ "@type": "ListItem", position: 2, name: section.label, item: sectionUrl },
+		{ "@type": "ListItem", position: 3, name: data.title, item: canonical },
+	],
 }).replace(/</g, "\\u003c");
 ---
 
@@ -89,6 +139,8 @@ const structuredData = JSON.stringify({
 		{data.publishedAt && <meta property="article:published_time" content={data.publishedAt.toISOString()} />}
 		<meta property="article:modified_time" content={data.updatedAt.toISOString()} />
 		<script type="application/ld+json" set:html={structuredData} />
+		<script type="application/ld+json" set:html={breadcrumbData} />
+		<ArticleHead {...region} />
 	</Fragment>
 
 	<article>
@@ -97,6 +149,7 @@ const structuredData = JSON.stringify({
 			<h1 {...entry.edit.title}>{data.title}</h1>
 			{data.summary && <p {...entry.edit.summary}>{data.summary}</p>}
 			<ArticleMeta data={data} />
+			<ArticleHeader {...region} />
 			{
 				coverSrc && (
 					<img
@@ -111,8 +164,29 @@ const structuredData = JSON.stringify({
 			}
 		</header>
 
-		<div class="prose">
-			<ArticleBody value={data.body} />
+		<div class="article-content">
+			<div>
+				<BeforeBody {...region} />
+				<div class="prose">
+					{html ? (
+						htmlBoundary === undefined ? <Fragment set:html={html.source} /> : (
+							<Fragment>
+								<Fragment set:html={html.source.slice(0, htmlBoundary)} />
+								<WithinBody {...region} />
+								<Fragment set:html={html.source.slice(htmlBoundary)} />
+							</Fragment>
+						)
+					) : textBoundary === undefined ? <ArticleBody value={data.body} /> : (
+						<Fragment>
+							<ArticleBody value={data.body?.slice(0, textBoundary)} />
+							<WithinBody {...region} />
+							<ArticleBody value={data.body?.slice(textBoundary)} />
+						</Fragment>
+					)}
+				</div>
+				<AfterBody {...region} />
+			</div>
+			<Sidebar {...region} />
 		</div>
 	</article>
 

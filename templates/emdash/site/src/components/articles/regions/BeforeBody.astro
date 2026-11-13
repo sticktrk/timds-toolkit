@@ -1,0 +1,15 @@
+---
+import { videoEmbedUrl } from "../../../lib/articles/html";
+import type { ArticleRegionProps } from "../../../lib/articles/presentation";
+
+interface Props extends ArticleRegionProps {}
+
+const { data } = Astro.props.context.entry;
+const video = videoEmbedUrl(data.video_id);
+---
+
+{video && (
+	<figure class="article-video">
+		<iframe src={video} title={`Video for ${data.title}`} width="560" height="315" loading="lazy" allowfullscreen></iframe>
+	</figure>
+)}

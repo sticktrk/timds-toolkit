@@ -196,6 +196,12 @@ Neither build nor check syncs source. For an existing database, follow the
 site's handover for explicit schema creation; changing seed JSON cannot update
 stored collections. Never rename a writer's collection as an implicit migration.
 
+Article presentation is site-owned source. Read `__SITE__/docs/article-presentation.md`
+and the writer contract before changing the literal region components, HTML
+policy, related-guide card or video player. Keep stored HTML and Portable Text
+bodies intact during field-only updates. The fresh `html` content profile adds
+optional fields at creation; an ordinary upgrade never changes a site's schema.
+
 ## Bring the templates forward
 
 `__SITE__/.timds/emdash.json` records the template version the site was

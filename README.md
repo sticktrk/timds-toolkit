@@ -996,6 +996,12 @@ A system's own website lives in the system's workspace, with no pin:
 npm run timds -- consumer scaffold emdash --workspace
 ```
 
+For a new site receiving machine-authored HTML, add `--content-profile html`
+before first setup. This declares the nine-field article contract, including
+HTML, short answer, optional state, video and related-guide metadata. The
+default `portable-text` profile keeps the four base fields. Both use site-owned
+article regions; profile selection never migrates an installed database.
+
 Run at the root of a Design System workspace, it writes a complete EmDash
 site for Cloudflare Workers into `site/` (`design-system/site/` when
 embedded): its own package with exact versions and a lockfile, the Astro and

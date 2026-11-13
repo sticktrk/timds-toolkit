@@ -6,61 +6,77 @@
     <h1>What an article can hold</h1>
     <p>The summary field, one or two sentences. It sits under the title here and on every card that lists the article.</p>
     <div class="article-meta"><time datetime="2026-11-02">2 November 2026</time> · <span>By Author Name</span></div>
+    <div class="article-meta">Updated <time datetime="2026-11-03">3 November 2026</time></div>
+    <div class="article-note"><strong>Short answer</strong><p>The header can display a separate plain-text answer.</p></div>
     <img src="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2016%209'%20width='1600'%20height='900'%3E%3C/svg%3E" alt="Placeholder for the article's cover image" width="1600" height="900">
   </header>
 
-  <div class="prose">
-    <p>Everything below the header is the article's body, written in the CMS and rendered into this one wrapper. Each element here is one a body may contain, styled by the system, so a writer never picks a font or a color. Starter copy: it describes the page, and real articles replace it.</p>
-    <h2>Headings and paragraphs</h2>
-    <p>The title is the page's only first-level heading, so a body divides into sections under second-level headings. A paragraph may hold an <a href="/about">inline link</a>, <strong>strong emphasis</strong>, <em>emphasis</em>, and <code>inline code</code>.</p>
-    <h3>A subsection</h3>
-    <p>A third-level heading divides a section. A body goes no deeper than this.</p>
-    <h2>Lists</h2>
-    <p>An unordered list holds points in no particular order:</p>
-    <ul>
-      <li>One point per item.</li>
-      <li>Short items, each a phrase or a sentence.</li>
-      <li>No more than a handful before the list wants headings instead.</li>
-    </ul>
-    <p>An ordered list holds steps a reader follows in turn:</p>
-    <ol>
-      <li>Read the step.</li>
-      <li>Do what it says.</li>
-      <li>Move on to the next one.</li>
-    </ol>
-    <h2>Quotes and code</h2>
-    <p>A quotation is set apart from the writer's own words:</p>
-    <blockquote>A quotation from a person or a source, with who said it in the sentence before or after.</blockquote>
-    <p>A code block keeps its spacing and scrolls inside its own box on a narrow screen:</p>
-    <pre><code>const greeting = "Hello";
-console.log(greeting);</code></pre>
-    <h2>Images</h2>
-    <p>An image in the body carries alt text for readers who cannot see it, and a caption when it needs one:</p>
-    <figure>
-      <img src="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2016%209'%20width='1600'%20height='900'%3E%3C/svg%3E" alt="Placeholder for an image in the article body" width="1600" height="900">
-      <figcaption>A caption says what the image shows, and credits who made it.</figcaption>
-    </figure>
-    <h2>Tables</h2>
-    <p>A table has a header row, and sits in a wrapper that scrolls when the table is wider than the screen. This one lists every element above:</p>
-    <div class="table-scroll">
-    <table>
-      <thead>
-        <tr>
-          <th scope="col">Element</th>
-          <th scope="col">Markup</th>
-          <th scope="col">Use it for</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr><td>Heading</td><td><code>h2</code>, <code>h3</code></td><td>Sections and subsections</td></tr>
-        <tr><td>Paragraph</td><td><code>p</code></td><td>Running text, with links, emphasis, and inline code</td></tr>
-        <tr><td>List</td><td><code>ul</code>, <code>ol</code></td><td>Points, and steps in order</td></tr>
-        <tr><td>Quotation</td><td><code>blockquote</code></td><td>Someone else's words</td></tr>
-        <tr><td>Code block</td><td><code>pre</code>, <code>code</code></td><td>Code a reader copies</td></tr>
-        <tr><td>Image</td><td><code>figure</code>, <code>img</code>, <code>figcaption</code></td><td>Pictures, with alt text and an optional caption</td></tr>
-        <tr><td>Table</td><td><code>table</code>, <code>th</code>, <code>td</code>, in a <code>table-scroll</code> wrapper</td><td>Facts compared across rows and columns</td></tr>
-      </tbody>
-    </table>
+  <div class="article-content">
+    <div>
+      <div class="prose">
+        <p>Everything below the header is the article's body, written in the CMS and rendered into this one wrapper. Each element here is one a body may contain, styled by the system, so a writer never picks a font or a color. Starter copy: it describes the page, and real articles replace it.</p>
+        <h2>Headings and paragraphs</h2>
+        <p>The title is the page's only first-level heading, so a body divides into sections under second-level headings. A paragraph may hold an <a href="/about">inline link</a>, <strong>strong emphasis</strong>, <em>emphasis</em>, and <code>inline code</code>.</p>
+        <h3>A subsection</h3>
+        <p>A third-level heading divides a section. A body goes no deeper than this.</p>
+        <h2>Lists</h2>
+        <p>An unordered list holds points in no particular order:</p>
+        <ul>
+          <li>One point per item.</li>
+          <li>Short items, each a phrase or a sentence.</li>
+          <li>No more than a handful before the list wants headings instead.</li>
+        </ul>
+        <p>An ordered list holds steps a reader follows in turn:</p>
+        <ol>
+          <li>Read the step.</li>
+          <li>Do what it says.</li>
+          <li>Move on to the next one.</li>
+        </ol>
+        <h2>Quotes and code</h2>
+        <p>A quotation is set apart from the writer's own words:</p>
+        <blockquote>A quotation from a person or a source, with who said it in the sentence before or after.</blockquote>
+        <p>A code block keeps its spacing and scrolls inside its own box on a narrow screen:</p>
+        <pre><code>const greeting = "Hello";
+    console.log(greeting);</code></pre>
+        <h2>Images</h2>
+        <p>An image in the body carries alt text for readers who cannot see it, and a caption when it needs one:</p>
+        <figure>
+          <img src="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2016%209'%20width='1600'%20height='900'%3E%3C/svg%3E" alt="Placeholder for an image in the article body" width="1600" height="900">
+          <figcaption>A caption says what the image shows, and credits who made it.</figcaption>
+        </figure>
+        <section class="article-scenario" aria-labelledby="guide-scenario">
+          <h2 id="guide-scenario">A guide scenario</h2>
+          <p><span class="article-lede">Introduce the problem the reader needs to solve.</span></p>
+          <ol class="article-steps"><li>Describe the first step.</li><li>Explain what comes next.</li></ol>
+          <ul class="article-risks"><li>Point out a risk that may change the reader’s decision.</li></ul>
+        </section>
+        <h2>Tables</h2>
+        <p>A table has a header row, and sits in a wrapper that scrolls when the table is wider than the screen. This one lists every element above:</p>
+        <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Element</th>
+              <th scope="col">Markup</th>
+              <th scope="col">Use it for</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>Heading</td><td><code>h2</code>, <code>h3</code></td><td>Sections and subsections</td></tr>
+            <tr><td>Paragraph</td><td><code>p</code></td><td>Running text, with links, emphasis, and inline code</td></tr>
+            <tr><td>List</td><td><code>ul</code>, <code>ol</code></td><td>Points, and steps in order</td></tr>
+            <tr><td>Quotation</td><td><code>blockquote</code></td><td>Someone else's words</td></tr>
+            <tr><td>Code block</td><td><code>pre</code>, <code>code</code></td><td>Code a reader copies</td></tr>
+            <tr><td>Image</td><td><code>figure</code>, <code>img</code>, <code>figcaption</code></td><td>Pictures, with alt text and an optional caption</td></tr>
+            <tr><td>Table</td><td><code>table</code>, <code>th</code>, <code>td</code>, in a <code>table-scroll</code> wrapper</td><td>Facts compared across rows and columns</td></tr>
+          </tbody>
+        </table>
+        </div>
+      </div>
+      <aside class="article-note" aria-label="Related guide">
+        <strong>Related guide</strong>
+        <p><a href="/articles/example-article#guide-scenario">How to present a scenario</a></p>
+      </aside>
     </div>
   </div>
 </article>

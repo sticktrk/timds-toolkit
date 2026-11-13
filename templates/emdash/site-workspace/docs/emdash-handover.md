@@ -123,8 +123,11 @@ Copy `src/forms/contact.ts.example` to `src/forms/contact.ts` to opt in.
 If the site already has a handler for `/contact`, keep it and call
 `contactPost(context)` from it where appropriate. The website design owns the
 form and all visitor-facing copy. Give the form `method="post"`,
-`action="/contact"` and `data-timds-contact`. Include fields named `name` and
-`email`, and optionally `message`. Set `data-timds-contact-success` and
+`action="/contact"` and `data-timds-contact`. Include `name` and at least one of
+`email` or `phone`. The `message` field is optional. Set
+`data-timds-contact-id` to a stable identifier, such as `article-sidebar`,
+when multiple forms post to the same address. The script uses the form element
+ID if set and the submission path otherwise. Set `data-timds-contact-success` and
 `data-timds-contact-error` on the form. Add a child with
 `data-timds-contact-status` and `role="status"` for the result.
 
@@ -138,7 +141,8 @@ uses the clicked button's `formaction` and `formmethod` when supplied. It
 announces `timds:contact-result` with `detail.ok` from the form.
 
 Custom Astro layouts can include `SiteTracking.astro` for browser tags and
-conversion reporting. A custom client can POST URL-encoded fields to the
+conversion reporting and public-page attribution. A custom client can POST
+URL-encoded fields to the
 site's contact endpoint with a stable UUID v4 in
 `submission_id` and `analytics_consent=yes|no` or
 `marketing_consent=yes|no` when a choice was made. Reuse the key and fields after an
@@ -165,14 +169,14 @@ verification on the configured HTTPS site. Turnstile responses expire and
 must be refreshed by the design before a subsequent submission.
 
 The default `delivery: "test"` records leads and test jobs in D1 and makes no
-email or advertising calls. Set `delivery: "production"` and set
+email, advertising or webhook calls. Set `delivery: "production"` and set
 `EMDASH_SITE_URL` to the public HTTPS origin to enable configured providers.
 Production delivery and tag loading are suppressed in dev and private
 staging. Use a sending-only Resend API key for a verified sending domain and a
 Meta CAPI access token for the same event source as the pixel.
 
 For standalone deployment, attach the site's D1 database and apply the
-additive contact migration before routing traffic or starting cron:
+initial contact schema for a new site before routing traffic or starting cron:
 
 ```sh
 npx wrangler d1 migrations apply DB --remote
@@ -191,22 +195,52 @@ Inspect `id`, `provider`, `status` and `failure` in `timds_contact_jobs`.
 Scheduled work retries temporary failures with backoff. A failed job can be
 redriven with an authenticated `POST /_scheduled/contact/redrive?job=JOB_ID`
 using the same bearer as scheduled work. The original payload and delivery ID
-are reused. After the retry window expires the job stays failed for operator
-review. Resend retries stop before its 24-hour idempotency window ends. The
+are reused. Resend retries stop before its 24-hour idempotency window ends. The
 contact lead remains in the site's database independently of provider
 delivery.
 
-To adopt on an existing site, generate a template 6 scaffold in a scratch
-Design System. Copy the contact library, migration, tracking component,
-public contact script and handler example. Merge the Worker and integration
-changes and add the tracking component to your active design and article
-layouts. If you already use template 5 contact forms, remove the old
-browser script import from `SiteTracking.astro` so a form submits once.
-Keep existing handlers, consent UI and configuration. For hosted builds,
-merge the new discovery acknowledgment
-into the integration and set `template` to 6 in the site's
-`.timds/emdash.json`. Review the migration and build the existing site before
-publishing. Toolkit upgrades leave site files in place.
+### Optional webhook delivery
+
+Set the public HTTPS receiver endpoint in `TIMDS_CONTACT_WEBHOOK_URL` and the
+authentication header name in `TIMDS_CONTACT_WEBHOOK_HEADER`. Set its value
+as the Worker secret `TIMDS_CONTACT_WEBHOOK_SECRET`. Keep credentials out of
+the endpoint and site source. When using TimDS Cloud, use
+`timds site webhook set --source-id UUID --endpoint URL --header NAME` to apply
+all three as one revision. The command reads the secret from a hidden prompt
+or `--stdin`. Check application with `timds site webhook status --source-id UUID`.
+
+The Worker sends JSON with `submission_id`, `pageUrl`, `submittedAt`,
+`formId`, `referrer`, `fields` (`fullName`, `email`, `phone`, `message`),
+and `meta.first_touch` / `meta.last_touch` (`url`, `referrer`, `at`).
+The submission UUID and server timestamp stay the same on retry. The
+receiver must deduplicate by UUID and return a 2xx JSON response with
+`accepted: true`. Accepted leads with `linked: false` or `duplicate: true`
+are successful deliveries. Failed responses and redirects are retried,
+starting after five minutes and capped at six hours between attempts. The
+queue retains failures after 16 attempts. Requeue them by ID using
+`timds site contact redrive JOB --source-id UUID` on TimDS Cloud or the
+authenticated scheduled endpoint on a standalone site.
+
+The receipt stores the public form page without its query or fragment.
+If the client and same-origin HTTP referrer provide no valid page address,
+it uses the public submission address. The browser records first touch for
+up to 90 days in a first-party cookie and last touch in session storage.
+Internal navigation preserves the session's last acquisition touch unless
+a new campaign or external referrer is present. Analytics consent controls
+touch storage and referral context. Marketing consent also governs `gclid`
+and `fbclid`; the standard `utm_*` campaign fields require analytics consent.
+The server checks that touch URLs share the public site origin. Missing
+or refused browser storage and absent consent can leave touch values null.
+Setting `attribution: false` in contact config disables attribution.
+
+A queued job retains the endpoint and header revision it was created for.
+Rotating the secret for the same endpoint and header preserves the queue.
+If the receiver derives account identity from the secret, rotate it within
+that account. Use a distinct destination endpoint for a different account.
+If either changes, old jobs stay recoverable under the original destination
+and cannot be redirected to the replacement. Inspect pending and failed
+deliveries, oldest pending age and last success with
+`timds site contact status --source-id UUID` on TimDS Cloud.
 
 ## Scheduled work
 

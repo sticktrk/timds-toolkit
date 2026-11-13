@@ -488,7 +488,26 @@ taxonomy attachments. Sections are routable collections: sync writes
 value before setup can create a nonroutable collection. An omitted value uses
 EmDash's default of true. Build and development also validate the seed.
 
-The shared schema accepts 1–32 fields and at most 64 fields across all
+Fresh workspace scaffolds select their content profile before database setup:
+`consumer scaffold emdash --workspace --content-profile html` adds the optional
+`body_html` (text), `short_answer` (text), `state` (string), `video_id` (string)
+and `related_guide` (JSON) fields to `title`, `summary`, Portable Text `body`
+and `cover`. The default `portable-text` profile keeps those four base fields.
+The scaffold records `contentProfile` in `.timds/emdash.json`. Hosted fresh
+creation selects `html`; sixteen sections use 144 physical field definitions.
+Profile selection never updates an installed site or database.
+
+The writer discovers optional fields per collection and always supplies
+Portable Text `body`. Nonempty `body_html` takes display precedence and retains
+its original bytes; unsupported active HTML fails rendering instead of falling
+back to stale content. Related-guide and video field changes render outside the
+body. Article regions and structured metadata are site-owned source; read the
+site's `docs/article-presentation.md` and `docs/content-api.md` before authoring
+these components. A guide uses its pipeline's selected section and prefix;
+`guides` is an example, not a reserved collection. Canonical links and lead
+attribution use the public site origin, independently of the API transport URL.
+
+The shared schema accepts 1–32 fields and at most 144 fields across all
 declared collections, within a 64 KiB section contract measured as UTF-8 bytes. Supported field types
 are `string`, `text`, `url`, `number`, `integer`, `boolean`, `datetime`,
 `select`, `multiSelect`, `portableText`, `image`, `file`, `json` and `slug`.

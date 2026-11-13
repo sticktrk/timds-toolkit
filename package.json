@@ -5,7 +5,7 @@
   "type": "module",
   "hostContract": 2,
   "emdashTemplate": {
-    "version": 6,
+    "version": 7,
     "history": [
       {
         "version": 1,
@@ -49,6 +49,13 @@
         "version": 6,
         "changes": [
           "Makes the contact form browser script available across site pages and mounted previews, with support for shared layouts, dynamically inserted dialogs and submitter overrides."
+        ]
+      },
+      {
+        "version": 7,
+        "changes": [
+          "Adds an explicit HTML content profile, exact-source rendering, site-owned article regions, related guides, video fields and structured article metadata for fresh sites.",
+          "Raises declared collection field capacity to 144 and adds per-site webhook delivery with contact attribution under tracking contract 2."
         ]
       }
     ]
@@ -245,5 +252,5 @@
   "emdashWorkspaceContract": 3,
   "emdashSectionsContract": 2,
   "emdashCompositionContract": 1,
-  "emdashTrackingContract": 1
+  "emdashTrackingContract": 2
 }

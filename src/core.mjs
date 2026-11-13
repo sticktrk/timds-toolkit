@@ -2018,7 +2018,7 @@ Usage:
   timds consumer preview [--app NAME] [--root PATH] [--base REF] [--output DIR] [--no-install] [--ready-timeout SECONDS] [--publish] [--pull-request N] [--portal-url URL]
   timds consumer init [--root PATH] [--system ID [--version VERSION] [--url URL]] [--force] [--skip-install] [--portal-url URL] [--draft-preview]
   timds consumer scaffold emdash --root PATH --design-system GIT_URL [--platform cloudflare|node] [--stylesheet PATH]... [--site-url URL] [--portal-url URL] [--skip-install]
-  timds consumer scaffold emdash --workspace [--root PATH] [--skip-install]
+  timds consumer scaffold emdash --workspace [--root PATH] [--content-profile portable-text|html] [--skip-install]
 
 Invocation and output:
   In npm repositories use npm run timds -- COMMAND; binary repositories use
@@ -2090,6 +2090,8 @@ Authoring and maintenance:
   font literals that match exactly one system token and report other gaps.
   Run check separately for the system. The stock dev server serves the site
   under /site; custom dev commands must provide their own integration.
+  Select --content-profile html before first setup for the nine-field writer
+  contract; the default portable-text profile keeps four base fields.
   Section routes follow site/sections.json and site/section-schema.json; after
   changing them, explicitly run npm run sections:sync inside site/. Build and
   consumer check validate the declaration and seed without synchronizing them.
@@ -2108,6 +2110,8 @@ TimDS Cloud:
   timds site secrets status --source-id UUID [--portal-url URL] [--json]
   timds site secrets set NAME --source-id UUID [--stdin] [--operation-id UUID --site-id UUID] [--portal-url URL] [--json]
   timds site secrets unset NAME --source-id UUID [--operation-id UUID --site-id UUID] [--portal-url URL] [--json]
+  timds site webhook status|set|unset --source-id UUID [--help]
+  timds site contact status|redrive --source-id UUID [--help]
   timds whoami [--portal-url URL] [--json]
   timds systems [--portal-url URL] [--json]
   timds principals [--system-id ID] [--portal-url URL] [--json]

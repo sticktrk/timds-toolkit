@@ -1,0 +1,16 @@
+---
+import { formatDate } from "../../../lib/articles/index";
+import type { ArticleRegionProps } from "../../../lib/articles/presentation";
+
+interface Props extends ArticleRegionProps {}
+
+const { data } = Astro.props.context.entry;
+const answer = typeof data.short_answer === "string" ? data.short_answer.trim() : "";
+const updated = data.publishedAt && data.updatedAt > data.publishedAt && formatDate(data.updatedAt);
+const published = data.publishedAt && formatDate(data.publishedAt);
+---
+
+{updated && published && updated.datetime !== published.datetime && (
+	<div class="article-meta">Updated <time datetime={updated.datetime}>{updated.text}</time></div>
+)}
+{answer && <div class="article-note"><strong>Short answer</strong><p>{answer}</p></div>}
