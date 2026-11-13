@@ -64,7 +64,8 @@ test("shared section schema accepts bounded field data and rejects definitions t
     { defaultValue: "not a number" }, { options: { constructor: "unsafe" } },
   ]) assert.throws(() => normalizeSectionSchema({ ...custom, fields: [...model.fields, { ...field, ...changed }] }), /section-schema.json/);
   assert.throws(() => normalizeSectionSchema({ ...custom, supports: ["drafts", "drafts"] }), /section-schema.json/);
-  assert.throws(() => sectionSchemaFor(Array(16).fill(sections[0]), custom), /at most 64/);
+  const overBudget = { ...custom, fields: [...custom.fields, ...Array.from({ length: 5 }, (_, index) => ({ ...field, slug: `extra_${index}` }))] };
+  assert.throws(() => sectionSchemaFor(Array(16).fill(sections[0]), overBudget), /at most 144/);
   const multilingual = { ...model, fields: Array.from({ length: 4 }, (_, i) => ({ slug: `field_${i}`, label: "Text", type: "string", options: { labels: Array(4).fill("界".repeat(4000)) } })) };
   assert.ok(JSON.stringify(multilingual).length < 64 * 1024);
   assert.throws(() => normalizeSectionSchema(multilingual), /section-schema.json/);
