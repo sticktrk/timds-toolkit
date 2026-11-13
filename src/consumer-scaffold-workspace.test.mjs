@@ -1009,3 +1009,58 @@ test("division source imports are transitive data-only inputs and scoped navigat
   await write(path.join(siteRoot, component), '<nav>Family</nav><style lang="scss">@use "../../../src/styles/system.css";</style>');
   await assert.rejects(checkWorkspaceSite(options), /plain CSS/);
 });
+
+test("consumer check preserves components shared by native pages and division layouts", async (t) => {
+  const root = await temporaryDirectory(t), workspace = await starterWorkspace(path.join(root, "workspace"));
+  await scaffoldWorkspaceEmdashSite(workspace, { skipInstall: true, output: quiet });
+  const siteRoot = path.join(workspace, "site");
+  const division = { id: "studio", prefix: "/studio/", system: "main", design: "studio", pages: "src/divisions/studio/pages", layout: "src/layouts/Studio.astro", collections: [] };
+  await write(path.join(workspace, "src/designs/studio/design.json"), { title: "Studio" });
+  await write(path.join(workspace, "src/designs/studio/layout.html"), '<link rel="stylesheet" href="/styles/studio.css">');
+  await write(path.join(workspace, "src/designs/studio/pages/index.html"), "<h1>Studio reference</h1>");
+  await write(path.join(workspace, "src/styles/studio.css"), ":root{--studio-only:#2457d6}.shared{color:var(--studio-only)}");
+  await fs.appendFile(path.join(workspace, "src/styles/system.css"), "\n.shared{color:var(--color-accent)}\n");
+  await write(path.join(siteRoot, "divisions.json"), { schemaVersion: 1, systems: { main: { workspace: true } }, divisions: [division] });
+  await write(path.join(siteRoot, `${division.pages}/index.html`), "<h1>Studio</h1>");
+  await write(path.join(siteRoot, division.layout), '---\nimport Shared from "../components/Shared.astro";\n---\n<html><head><slot name="head" /></head><body><Shared /><slot /></body></html>');
+  const shared = "src/components/Shared.astro", literal = '<span class="shared" style="color: #2457d6">Shared</span>';
+  await write(path.join(siteRoot, shared), literal);
+  await write(path.join(siteRoot, "src/pages/_ignored.astro"), '---\nimport Missing from "../components/Missing.astro";\n---\n<Missing />');
+  await write(path.join(siteRoot, "src/pages/notes.md"), "# Ordinary Markdown page\n");
+  for (const route of ["src/pages/extra.astro", "src/pages/members/[member].astro", "src/pages/extra.js", "src/pages/extra.ts"]) {
+    const component = path.posix.relative(path.posix.dirname(route), shared);
+    const imports = `import Shared from "${component}";`;
+    await write(path.join(siteRoot, route), route.endsWith(".astro") ? `---\n${imports}\n---\n<Shared />` : `${imports}\nexport const GET = () => new Response(String(Shared));`);
+    const checked = await checkConsumer(siteRoot);
+    assert.equal(checked.status, "failed");
+    assert.ok(checked.workspaceCheck.findings.some((finding) => finding.file === shared && finding.kind === "literal"));
+    assert.deepEqual(checked.workspaceCheck.rewrites, []);
+    assert.equal(await fs.readFile(path.join(siteRoot, shared), "utf8"), literal);
+    await write(path.join(siteRoot, shared), '<span class="shared" style="color: var(--studio-only)">Shared</span>');
+    const missing = await checkConsumer(siteRoot);
+    assert.ok(missing.workspaceCheck.findings.some((finding) => finding.file === shared && finding.kind === "token" && finding.value === "--studio-only"));
+    await write(path.join(siteRoot, shared), literal);
+    await fs.rm(path.join(siteRoot, route));
+  }
+});
+
+test("consumer check recognizes scoped main custom properties and retains token guards", async (t) => {
+  const root = await temporaryDirectory(t), workspace = await starterWorkspace(path.join(root, "workspace"));
+  await scaffoldWorkspaceEmdashSite(workspace, { skipInstall: true, output: quiet });
+  const siteRoot = path.join(workspace, "site");
+  const division = { id: "studio", prefix: "/studio/", system: "main", design: "website", pages: "src/divisions/studio/pages", layout: "src/layouts/Studio.astro", collections: [] };
+  await write(path.join(siteRoot, "divisions.json"), { schemaVersion: 1, systems: { main: { workspace: true } }, divisions: [division] });
+  await write(path.join(siteRoot, `${division.pages}/index.html`), "<h1>Studio</h1>");
+  await write(path.join(siteRoot, division.layout), '<html><head><slot name="head" /></head><body><slot /></body></html>');
+  const base = "src/layouts/Base.astro", original = await fs.readFile(path.join(siteRoot, base), "utf8");
+  await write(path.join(siteRoot, base), `${original}\n<style>body{--local-gap:1rem;padding:var(--local-gap)}</style>`);
+  const valid = await checkConsumer(siteRoot);
+  assert.equal(valid.status, "passed", valid.errors.join("\n"));
+  assert.deepEqual(valid.workspaceCheck.rewrites, []);
+  await write(path.join(siteRoot, base), `${original}\n<style>body{padding:var(--missing-gap)}</style>`);
+  const missing = await checkConsumer(siteRoot);
+  assert.ok(missing.workspaceCheck.findings.some((finding) => finding.file === base && finding.kind === "token" && finding.value === "--missing-gap"));
+  await write(path.join(siteRoot, base), `${original}\n<style>body{--color-accent:inherit;color:var(--color-accent)}</style>`);
+  const override = await checkConsumer(siteRoot);
+  assert.ok(override.workspaceCheck.findings.some((finding) => finding.file === base && finding.kind === "token-override" && finding.property === "--color-accent"));
+});

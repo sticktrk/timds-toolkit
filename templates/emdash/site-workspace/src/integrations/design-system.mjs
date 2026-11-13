@@ -985,7 +985,7 @@ export default function designSystem({ design }) {
       const composition = readDivisionComposition(siteRoot, api.sections, { previousInputs: revalidateRoutes ? lastInputs : null });
       const rendered = renderWorkspaceDesign(systemRoot, { design, base, forms: handlers.keys(), sections: api.sections, sectionsContract: api.sectionsContract, ...routeFiles });
       if (composition) {
-        const sources = compositionSourceContexts(siteRoot, composition, api.sections, { htmlTags, parseImports });
+        const sources = compositionSourceContexts(siteRoot, composition, api.sections, { htmlTags, parseImports, routeFiles });
         const routes = compositionRouteInventory(composition, rendered.inventory, handlers.keys(), routeFiles);
         const divisions = renderDivisions({ siteRoot, systemRoot, base, forms: new Set(handlers.keys()), composition, routes, sections: api.sections, publicFiles: routeFiles.publicFiles, main: rendered });
         Object.assign(rendered, { ...divisions, pages: [...rendered.pages, ...divisions.pages] });

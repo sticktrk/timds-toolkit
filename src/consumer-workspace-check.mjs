@@ -1317,8 +1317,8 @@ export async function checkWorkspaceSite({
     const editable = systems.length === 1 && surfaceFiles.has(relative) && !protectedGlobs.some((glob) => matchesGlob(relative, glob));
     const extension = path.posix.extname(relative).toLowerCase();
     const markup = extension === ".css" ? null : scanMarkup(text, extension);
-    const scoped = contextIds && [...contextIds].some((context) => context !== null) ? markup?.blocks.filter((block) => block.scoped && !block.skipped) ?? [] : [];
-    const localClasses = new Set(scoped.flatMap((block) => [...declaredClasses(block.css)]));
+    const scoped = contextIds ? markup?.blocks.filter((block) => block.scoped && !block.skipped) ?? [] : [];
+    const localClasses = new Set(contextIds && [...contextIds].some((context) => context !== null) ? scoped.flatMap((block) => [...declaredClasses(block.css)]) : []);
     const localTokens = new Set(scoped.flatMap((block) => parseCssTokens(block.css).map((token) => token.name)));
     const edits = [];
     const reportedClasses = new Set();

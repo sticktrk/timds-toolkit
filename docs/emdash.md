@@ -643,10 +643,11 @@ routes. The two-way check reads the styles for each division’s authored
 pages, layout and transitive local imports, and preview routes come from that
 same inventory. Shared article routes and components are checked against every
 context that renders them, including explicitly associated collections outside
-the mount and main-context topic lists. Missing classes or token references in
-any selected context fail the check. A shared file is never automatically
-rewritten to a token from only one context. The stock shared routes load the
-main `Base` and `DesignPage` renderers only for main-context pages; their
+the mount, main-context topic lists and native Astro, HTML, JavaScript and
+TypeScript pages discovered from the route inventory. Missing classes or token
+references in any selected context fail the check. A shared file is never
+automatically rewritten to a token from only one context. The stock shared
+routes load the main `Base` and `DesignPage` renderers only for main-context pages; their
 owner-only markup is checked against the main design.
 
 The build, development server and consumer check read the source dependency
@@ -659,9 +660,10 @@ owner's Design System CSS. Select those styles through `divisions.json`.
 Composition source graphs use plain CSS; stylesheet preprocessors and non-CSS
 Astro `style` languages are refused rather than scanned as a different format.
 Ordinary Astro scoped `<style>` blocks remain available for self-contained
-family navigation: their classes belong to that component. They do not make
-another context's tokens available. Development watches these transitive
-sources and returns 503 until an invalid import is corrected.
+family navigation: their classes belong to that component. Locally declared
+scoped custom properties are recognized in both main and division contexts.
+They do not make another context's tokens available. Development watches these
+transitive sources and returns 503 until an invalid import is corrected.
 Reference pages in the owner system are available for design comparison.
 The generated canonical link and discovery entry assume division pages
 are public and indexable. Sites can use the template without adding a

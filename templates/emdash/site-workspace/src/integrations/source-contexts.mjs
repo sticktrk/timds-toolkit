@@ -1,6 +1,7 @@
 /** Read the local source graph as data; never import a site's modules. */
 import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
+import { pageFileRoute, readSectionRouteFiles } from "./section-routes.mjs";
 
 const MODULE_EXTENSIONS = [".tsx", ".jsx", ".ts", ".mts", ".cts", ".mjs", ".cjs", ".js"];
 const SOURCE_EXTENSIONS = [".astro", ...MODULE_EXTENSIONS, ".vue", ".svelte", ".html", ".css"];
@@ -139,7 +140,13 @@ export function compositionSourceContexts(siteRoot, composition, sections, optio
     }
   };
   const start = (file, context) => { if (stat(path.join(root, file))) visit(file, context); };
-  for (const file of ["src/pages/[...page].astro", "src/pages/404.astro", "src/pages/topics/[slug].astro", "src/layouts/Base.astro", "src/components/DesignPage.astro"]) start(file, null);
+  const routeFiles = options.routeFiles ?? readSectionRouteFiles(root);
+  const mainRoutes = new Set(routeFiles.pageFiles.filter((file) => pageFileRoute(file) && SOURCE_EXTENSIONS.includes(path.extname(file))));
+  for (const { entrypoint } of routeFiles.resolvedRoutes ?? []) {
+    if (typeof entrypoint !== "string" || !entrypoint.startsWith("src/") || /^src\/routes\/articles\/(?:index\.astro|entry\.astro|rss\.xml\.ts)$/.test(entrypoint)) continue;
+    if (SOURCE_EXTENSIONS.includes(path.extname(entrypoint))) mainRoutes.add(entrypoint);
+  }
+  for (const file of [...mainRoutes, "src/layouts/Base.astro", "src/components/DesignPage.astro"]) start(file, null);
   for (const section of sections) for (const file of ["src/routes/articles/index.astro", "src/routes/articles/entry.astro"]) start(file, composition.collectionContexts.get(section.collection) ?? null);
   for (const division of composition.divisions) {
     start("src/pages/[...page].astro", division.id);
