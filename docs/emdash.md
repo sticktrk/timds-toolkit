@@ -426,7 +426,7 @@ having no port yet; the `timds-update-design-system` skill ports it.
 
 ### Article sections
 
-Template version 3 declares its sections in `site/sections.json` with declaration
+Template versions 3 and 4 declare their sections in `site/sections.json` with declaration
 version 2. A fresh
 site has the same single `articles` section. Any non-empty set can replace
 it; `articles` is not mandatory:
@@ -456,7 +456,7 @@ names, including Cloudflare's `cdn-cgi`. Entries belong to exactly one collectio
 canonical address is that section's prefix followed by the entry slug and a
 trailing slash. A feed, when enabled, is `<prefix>rss.xml`.
 
-All routes still use this site's one selected Design System. For the example
+With no divisions declaration, every route uses the site's selected design. For the example
 above, `/commercial-division/` and `/commercial-division/about/` can be ordinary
 design pages, while `/commercial-division/lease-faq/how-to-lease-building/`
 belongs to the `lease_faq` collection. The division prefix does not select
@@ -550,8 +550,9 @@ build integrations can retain the design integration's `api.getSections`
 function and call it after `astro:config:setup` for the same data. Astro strips
 extra integration properties while resolving configuration, so that function
 must be captured from the original configuration. A hosted discovery integration
-must acknowledge the current template/workspace/sections tuple by calling
-`api.acknowledgeHostedSections({ template: 3, workspace: 3, sections: 2 })`
+must acknowledge the installed template, workspace and sections capabilities.
+Template 4 additionally requires the composition capability, through
+`api.acknowledgeHostedSections({ template: 4, workspace: 3, sections: 2, composition: 1 })`
 before configuration resolves. A hosted build without that acknowledgement
 fails; standalone builds do not need it.
 
@@ -592,6 +593,141 @@ template. Writer token scopes apply to every collection, not one section.
 Existing sites receive these stock files by a reviewed manual change; no
 template updater is introduced, and ordinary toolkit upgrades keep the site
 untouched.
+
+### Optional division designs
+
+Template 4 adds an optional `site/divisions.json` declaration. The workspace
+site still uses the owner’s selected Astro integration for ordinary pages,
+the global topics and latest articles, the EmDash database, and the admin.
+A division provides its own presentation for a mount and for the collections
+assigned to it. The collection and its address still come from
+`sections.json`; the shared article schema stays in `section-schema.json`.
+
+```json
+{
+  "schemaVersion": 1,
+  "systems": { "main": { "workspace": true } },
+  "divisions": [
+    {
+      "id": "commercial",
+      "prefix": "/commercial-division/",
+      "system": "main",
+      "design": "commercial-web",
+      "pages": "src/divisions/commercial/pages",
+      "layout": "src/layouts/Commercial.astro",
+      "collections": ["lease_faq"]
+    }
+  ]
+}
+```
+
+Mounts use up to four lowercase, hyphenated segments and a trailing slash.
+The site can declare up to eight divisions. Each division supplies regular
+HTML fragments using the default design-page filenames, including
+`index.html` for the mount itself. A page named `about.html` in this example
+has the canonical address `/commercial-division/about/`. Its layout is an
+owner-authored Astro component with a default slot for content and a slot
+named `head` for the selected design’s stylesheet links and route metadata.
+The layout receives `title`, optional `description`, and `context` with the
+division `prefix`, Astro `base`, and selected `system`, `design` and
+`assetPrefix`. Put the header, footer and navigation in that layout, using
+the selected design as a reference. The division selects the design's
+stylesheet links from its layout or, if absent, its default home page. The
+layout should pass both slots through and leave stylesheet selection to the
+integration.
+
+An absolute in-site link in a division fragment such as `/about/` resolves
+under the division mount when that division owns the target. Links to
+other site routes keep those routes, and asset URLs use a separate
+namespace. A layout can build navigation from `context.base` and
+`context.prefix`; the full site base is required for a link from an Astro
+layout. Form handlers stay in `src/forms/`, named by the full route where
+they handle POST. Development keeps serving the site after a corrected save
+and answers 503 for public composition routes during an invalid save.
+
+Each collection may be associated once. A collection inside a mount must be
+explicitly associated with that division; a collection outside any mount
+can also be associated and keeps its existing prefix. Section lists, entries
+and feeds keep their native addresses. Topic and latest views keep the
+main context and link to entries at the existing canonical URLs. Changing
+or removing a division is a presentation change and does not move content
+or grant division-specific writer access.
+
+The route inventory refuses overlapping mounts and collisions between
+mounted pages, main design pages, collections, public files and Astro
+routes. The two-way check reads the styles for each division’s authored
+pages, layout and transitive local imports, and preview routes come from that
+same inventory. Shared article routes and components are checked against every
+context that renders them, including explicitly associated collections outside
+the mount, main-context topic lists and native Astro, HTML, JavaScript and
+TypeScript pages discovered from the route inventory. Missing classes or token
+references in any selected context fail the check. A shared file is never
+automatically rewritten to a token from only one context. The stock shared
+routes load the main `Base` and `DesignPage` renderers only for main-context pages; their
+owner-only markup is checked against the main design.
+
+The build, development server and consumer check read the source dependency
+graph without executing it. Local imports and re-exports must use literal
+relative paths or site-root paths; packages must be declared in the site's
+package manifest. Computed imports, `import.meta.glob`, local symlinks, and
+imports outside the site from a division's dependency graph are refused.
+This includes a component or a site stylesheet that indirectly imports the
+owner's Design System CSS. Select those styles through `divisions.json`.
+Composition source graphs use plain CSS; stylesheet preprocessors and non-CSS
+Astro `style` languages are refused rather than scanned as a different format.
+Ordinary Astro scoped `<style>` blocks remain available for self-contained
+family navigation: their classes belong to that component. Locally declared
+scoped custom properties are recognized in both main and division contexts.
+They do not make another context's tokens available. Development watches these
+transitive sources and returns 503 until an invalid import is corrected.
+Reference pages in the owner system are available for design comparison.
+The generated canonical link and discovery entry assume division pages
+are public and indexable. Sites can use the template without adding a
+divisions declaration.
+
+The scaffold writes template 4 for a new workspace site. For an existing
+site, generate a comparison scaffold in a disposable workspace and port
+the composition integration, virtual module types, catch-all page, article
+routes and layout wrappers into the existing site while preserving local
+customizations. Keep the site's declaration, seed, collection schema and
+database as they are. Toolkit upgrades leave the site's files in place.
+
+#### If you use TimDS Cloud
+
+A division can use the verified design metadata and styles of a sibling
+Design System's exact published release. Keep `systems.main` as the
+workspace entry and add an alias with a system id and release version.
+
+```json
+"systems": {
+  "main": { "workspace": true },
+  "commercial": { "systemId": "timds-example/commercial", "version": "2026.11.1" }
+}
+```
+
+Set the division's `system` to `commercial` and `design` to a design id
+from that release. The site can reference up to four sibling pins, and
+every declared sibling must be used by a division. The Host stages each
+authorized release in a read-only input directory, verifies the exact
+release files and gives the same staged receipt to builds and live
+previews. For local work with these inputs, use the supplied staging
+directory at `site/.timds-site-inputs/` or point `TIMDS_SITE_INPUTS` at it.
+The build, development server and consumer check verify the declared pins
+and file digests from its receipt, and need no network access. The staged
+directory is generated input and stays outside commits.
+
+The sibling design's default home page in `designs.json` determines its
+stylesheet links. The site's layout and page fragments remain
+owner-authored. Sibling HTML and scripts are reference data and are never
+run by the site. A local consumer preview captures the rendered site
+routes and shows side-by-side reference images only for the owner's
+workspace designs. Selected styles and their verified static files are
+served under a release-specific namespace while relative references
+inside stylesheets keep working. In a division fragment, use
+`/assets/...` or `/fonts/...` to refer to that context's staged assets.
+In an Astro layout, join the asset path to `context.assetPrefix`, which
+already includes the site base. The site cannot build against missing
+inputs, floating versions, missing files or digest mismatches.
 
 ### The check runs both ways
 
@@ -645,8 +781,9 @@ expressions are never guessed at. The module comment of
   literal in a protected file is reported, never rewritten.
 - A literal no token holds (`literal`), one several tokens hold
   (`ambiguous-literal`, listing the candidates), a site declaration of a
-  system custom property (`token-override`), and a class no system stylesheet
-  declares (`class`) are findings. Each fails the check until it is resolved
+  system custom property (`token-override`), a token reference unavailable in
+  a composed file's rendering contexts (`token`), and a class a selected
+  context's stylesheets do not declare (`class`) are findings. Each fails the check until it is resolved
   in the same change by adding to the system (a new token, a new class), or
   by using what the system has; the check never proposes changing an existing
   token's value or an existing class's rules. A suggestion names where to add

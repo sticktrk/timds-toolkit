@@ -1,11 +1,11 @@
 /** One inventory for site routing, consumer checks and preview pairs. */
-import { lstatSync, readdirSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync } from "node:fs";
 import path from "node:path";
 const STOCK_REFERENCES = new Set(["/articles", "/articles/example-article", "/topics", "/topics/example-topic"]);
 const STOCK_PAGE_FILES = new Set(["src/pages/[...page].astro", "src/pages/404.astro", "src/pages/topics/[slug].astro"]);
 const PAGE_EXTENSION = /\.(?:astro|html|markdown|mdown|mkdn|mkd|mdwn|md|mdx|js|ts)$/;
 const normalizedRoute = (route) => route === "/" ? route : route.replace(/\/+$/, "");
-const inNamespace = (route, prefix) => route === prefix.slice(0, -1) || route.startsWith(prefix);
+export const inNamespace = (route, prefix) => route === prefix.slice(0, -1) || route.startsWith(prefix);
 
 /** Inspect route sources without following links or executing site code. */
 export function readSectionRouteFiles(siteRoot, { pagesDirectory = path.join(siteRoot, "src/pages"), publicDirectory = path.join(siteRoot, "public") } = {}) {
@@ -42,8 +42,9 @@ export function pageFileRoute(file) {
   return `/${parts.join("/")}`;
 }
 
-function fileOverlapsNamespace(route, prefix) {
-  const pattern = route.slice(1).split("/"), segments = prefix.slice(1, -1).split("/");
+export function fileOverlapsNamespace(route, prefix, { exact = false } = {}) {
+  const pattern = route === "/" ? [] : normalizedRoute(route).slice(1).split("/");
+  const segments = prefix === "/" ? [] : prefix.slice(1, -1).split("/");
   for (let index = 0; index < segments.length; index++) {
     const part = pattern[index];
     if (!part) return false;
@@ -52,7 +53,7 @@ function fileOverlapsNamespace(route, prefix) {
     const expression = part.split(/(\[[^\]]+\])/).map((piece) => /^\[/.test(piece) ? "[^/]+" : piece.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("");
     if (!new RegExp(`^${expression}$`).test(segments[index])) return false;
   }
-  return true;
+  return !exact || pattern.length === segments.length || pattern.length === segments.length + 1 && /^\[\.\.\.[^\]]+\]$/.test(pattern.at(-1));
 }
 
 export function sectionRouteInventory(sections, designPages = [], { version = 2, pageFiles = [], publicFiles = [], symlinks = [], resolvedRoutes = [] } = {}) {
@@ -93,4 +94,53 @@ export function sectionRouteInventory(sections, designPages = [], { version = 2,
     sections: sections.map((section) => ({ section, list: section.prefix.slice(0, -1), entry: `${section.prefix}[slug]`, sample: `${section.prefix}example-article`, feed: section.feed ? `${section.prefix}rss.xml` : null })),
     topic: "/topics/[slug]",
   };
+}
+
+/** The default state of a website design page. */
+export const DEFAULT_STATE = "default";
+
+function htmlFiles(directory, { strict = false, prefix = "" } = {}) {
+  if (!existsSync(directory)) return [];
+  const found = [];
+  for (const entry of readdirSync(directory, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name))) {
+    const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (strict && !(entry.isDirectory() || entry.isFile())) throw new Error(`Division pages cannot contain a symbolic link or special file: ${relative}.`);
+    if (entry.isDirectory()) found.push(...htmlFiles(path.join(directory, entry.name), { strict, prefix: relative }));
+    else if (entry.isFile() && entry.name.endsWith(".html")) found.push(relative);
+  }
+  return found;
+}
+
+/**
+ * The route of a page file's default state, by the designs catalog's rule:
+ * `about.html` and `about.default.html` are the default of /about,
+ * `index.html` the default of its folder's route. A named state
+ * (`contact.sent.html`), or a name the catalog refuses (`a.b.c.html`), is
+ * null.
+ */
+export function pageRoute(relative) {
+  const segments = relative.split("/");
+  const parts = segments.pop().replace(/\.html$/, "").split(".");
+  if (parts.length > 2) return null;
+  const [name, state = DEFAULT_STATE] = parts;
+  if (state !== DEFAULT_STATE) return null;
+  return `/${(name === "index" ? segments : [...segments, name]).join("/")}`;
+}
+
+/**
+ * The page files of a design's pages/ folder that are a route's default
+ * state, as [route, relative file] pairs. Two files for one route
+ * (`about.html` and `about.default.html`) are refused, as the catalog
+ * refuses them.
+ */
+export function defaultPageFiles(pagesDirectory, { strict = false, literalRoutes = strict } = {}) {
+  const byRoute = new Map();
+  for (const relative of htmlFiles(pagesDirectory, { strict })) {
+    const route = pageRoute(relative);
+    if (!route) continue;
+    if (literalRoutes && !/^\/(?:[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?:\/[a-z][a-z0-9]*(?:-[a-z0-9]+)*)*)?$/.test(route)) throw new Error(`Division page ${relative} has an invalid route.`);
+    if (byRoute.has(route)) throw new Error(`pages/${relative} and pages/${byRoute.get(route)} both describe route ${route}; keep one`);
+    byRoute.set(route, relative);
+  }
+  return [...byRoute];
 }

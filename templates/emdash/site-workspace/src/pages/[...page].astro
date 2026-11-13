@@ -17,9 +17,10 @@
  * and a POST with no handler, gets 405 with the methods the address accepts,
  * so nothing sent to it is taken in silently.
  */
-import { pages } from "virtual:timds/design-system";
+import { pages, mainPage } from "virtual:timds/design-system";
 
-import DesignPage from "../components/DesignPage.astro";
+import Division from "../layouts/Division.astro";
+import { absoluteUrl, siteOrigin, sitePath } from "../lib/articles/index";
 
 export const prerender = false;
 
@@ -34,7 +35,17 @@ if (method !== "GET" && method !== "HEAD") {
 	});
 }
 if (!page) return Astro.rewrite("/404");
+const DesignPage = page.division ? undefined : (await mainPage()).default;
 Astro.response.headers.set("Cache-Control", "public, max-age=300");
 ---
 
-<DesignPage page={page} />
+{
+	page.division ? (
+		<Division division={page.division} title={page.title}>
+			<Fragment slot="head">
+				<link rel="canonical" href={absoluteUrl(sitePath(`${page.route}/`), siteOrigin(Astro.url, Astro.site, Astro.request))} />
+			</Fragment>
+			<Fragment set:html={page.body} />
+		</Division>
+	) : <DesignPage page={page} />
+}

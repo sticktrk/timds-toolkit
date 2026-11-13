@@ -1,0 +1,37 @@
+---
+import { collectionContexts, mainLayout } from "virtual:timds/design-system";
+import Division from "./Division.astro";
+import { absoluteUrl, sectionForPath, siteOrigin, sitePath } from "../lib/articles/index";
+
+interface Props {
+	collection: string;
+	title: string;
+	description?: string;
+}
+
+const { collection, ...props } = Astro.props;
+const division = Object.hasOwn(collectionContexts, collection) ? collectionContexts[collection] : undefined;
+const Base = division ? undefined : (await mainLayout()).default;
+const section = division && sectionForPath(Astro.url.pathname);
+const path = Astro.url.pathname.replace(/\/+$/, "");
+const canonical = section && (path === sitePath(section.prefix.slice(0, -1)) || path === section.prefix.slice(0, -1))
+	? absoluteUrl(sitePath(section.prefix), siteOrigin(Astro.url, Astro.site, Astro.request))
+	: null;
+---
+
+{
+	division ? (
+		<Division division={division} {...props}>
+			<Fragment slot="head">
+				{canonical && <link rel="canonical" href={canonical} />}
+				<slot name="head" />
+			</Fragment>
+			<slot />
+		</Division>
+	) : (
+		<Base {...props}>
+			<slot name="head" slot="head" />
+			<slot />
+		</Base>
+	)
+}

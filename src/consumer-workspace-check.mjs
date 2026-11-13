@@ -102,7 +102,10 @@ import path from "node:path";
 
 import { matchesGlob } from "./consumer.mjs";
 import { applyWritesWithRollback, compileTokenCss } from "./consumer-scaffold.mjs";
-import { designShellStylesheets, runsStarterBuild, selectWorkspaceDesign } from "./consumer-scaffold-workspace.mjs";
+import { readDivisionComposition } from "../templates/emdash/site-workspace/src/integrations/composition.mjs";
+import { divisionStyles, htmlTags } from "../templates/emdash/site-workspace/src/integrations/design-system.mjs";
+import { compositionSourceContexts } from "../templates/emdash/site-workspace/src/integrations/source-contexts.mjs";
+import { designShellStylesheets, readWorkspaceSections, runsStarterBuild, selectWorkspaceDesign } from "./consumer-scaffold-workspace.mjs";
 import { hasContractGroups, readContractGroups } from "./contract-groups.mjs";
 import { declaredClasses } from "./designs.mjs";
 import { classifyToken, importReferences, parseCssTokens, resolveTokens } from "./tokens.mjs";
@@ -111,7 +114,7 @@ import { classifyToken, importReferences, parseCssTokens, resolveTokens } from "
 export const WORKSPACE_CHECK_SCHEMA_VERSION = 1;
 
 /** The finding kinds, in the order the text report lists them. */
-export const WORKSPACE_FINDING_KINDS = Object.freeze(["literal", "ambiguous-literal", "token-override", "class"]);
+export const WORKSPACE_FINDING_KINDS = Object.freeze(["literal", "ambiguous-literal", "token-override", "token", "class"]);
 
 // The starter stylesheet, as `inspectDesignSystem` in consumer-scaffold.mjs
 // recognises it (that constant is not exported).
@@ -449,21 +452,22 @@ function tokenGroupOf(tokens, kind, fallback) {
  * What the Design System offers a site: its stylesheets, the classes they
  * declare, and the document-scope tokens indexed by color and font value.
  */
-async function readSystem({ designSystemRoot, siteRoot, siteImports, stylesheets }) {
-  const manifestText = await readText(path.join(designSystemRoot, "timds.json"));
-  if (manifestText === null) throw new Error(`${designSystemRoot} has no timds.json, so it is not a TimDS Design System workspace`);
-  let manifest;
-  try {
-    manifest = JSON.parse(manifestText);
-  } catch (caught) {
-    throw new Error(`timds.json could not be read as JSON: ${caught.message}`);
+async function readSystem({ designSystemRoot, siteRoot, siteImports, stylesheets, staged }) {
+  let starterBuild = false;
+  if (!staged) {
+    const manifestText = await readText(path.join(designSystemRoot, "timds.json"));
+    if (manifestText === null) throw new Error(`${designSystemRoot} has no timds.json, so it is not a TimDS Design System workspace`);
+    try {
+      starterBuild = runsStarterBuild(JSON.parse(manifestText));
+    } catch (caught) {
+      throw new Error(`timds.json could not be read as JSON: ${caught.message}`);
+    }
   }
-
-  const starterBuild = runsStarterBuild(manifest);
   let design = null;
   let entries;
   if (stylesheets) {
     entries = stylesheets.map((stylesheet) => {
+      if (typeof stylesheet !== "string") return stylesheet;
       const normalized = path.posix.normalize(toPosix(stylesheet));
       return normalized === COMPILED_TOKENS ? normalized : normalized.replace(/^\.\//, "");
     });
@@ -510,7 +514,7 @@ async function readSystem({ designSystemRoot, siteRoot, siteImports, stylesheets
   // import, an `@import`) passes here, so nothing under the built output is
   // ever read, not even through a symbolic link. A root-relative `@import`
   // resolves the way the site serves it: /styles/x.css is src/styles/x.css.
-  const builtRoot = path.join(await fs.realpath(designSystemRoot).catch(() => designSystemRoot), BUILT_OUTPUT);
+  const builtRoot = staged ? null : path.join(await fs.realpath(designSystemRoot).catch(() => designSystemRoot), BUILT_OUTPUT);
   //
   // A sheet the shell links with a `media` other than `all`, or an `@import`
   // with a media query, `supports()` or `layer()`, loads only under that
@@ -527,23 +531,29 @@ async function readSystem({ designSystemRoot, siteRoot, siteImports, stylesheets
       if (earlier !== -1) sources.splice(earlier, 1); // reached unconditionally after all
     }
     seen.set(relative, condition);
-    if (relative === COMPILED_TOKENS) {
-      if (!starterBuild) return;
-      await readTokenSource();
-      if (tokensJson) sources.push({ path: COMPILED_TOKENS, css: compileTokenCss(tokensJson), compiled: true, condition });
-      return;
+    let css;
+    if (staged) {
+      css = staged.files.get(`files/${relative}`)?.toString("utf8") ?? null;
+    } else {
+      if (relative === COMPILED_TOKENS) {
+        if (!starterBuild) return;
+        await readTokenSource();
+        if (tokensJson) sources.push({ path: COMPILED_TOKENS, css: compileTokenCss(tokensJson), compiled: true, condition });
+        return;
+      }
+      if (relative.startsWith("../") || relative.startsWith("/") || isBuiltOutput(relative)) return;
+      const absolute = path.join(designSystemRoot, ...relative.split("/"));
+      if (isInside(siteRoot, absolute)) return;
+      const real = await fs.realpath(absolute).catch(() => null);
+      if (real && isInside(builtRoot, real)) return;
+      css = await readText(absolute);
     }
-    if (relative.startsWith("../") || relative.startsWith("/") || isBuiltOutput(relative)) return;
-    const absolute = path.join(designSystemRoot, ...relative.split("/"));
-    if (isInside(siteRoot, absolute)) return;
-    const real = await fs.realpath(absolute).catch(() => null);
-    if (real && isInside(builtRoot, real)) return;
-    const css = await readText(absolute);
     if (css === null) return;
     for (const { reference, condition: imported } of conditionalImports(css)) {
       const target = reference.split(/[?#]/, 1)[0];
       const under = condition ?? imported;
       if (target.startsWith("/")) {
+        if (staged) continue;
         const served = path.posix.normalize(target);
         const directory = served.split("/")[1];
         if (served === COMPILED_TOKENS) await load(served, depth + 1, under);
@@ -946,7 +956,7 @@ function scanMarkup(text, extension) {
       const lang = tag.attributes.find((attribute) => attribute.name.toLowerCase() === "lang" && attribute.quote !== null && attribute.quote !== "{");
       const language = lang ? text.slice(lang.valueStart, lang.valueEnd).trim() : "";
       const css = text.slice(tag.end, bodyEnd);
-      blocks.push({ start: tag.end, css, skipped: Boolean(language && !/^(?:css|postcss)$/i.test(language)) || css.trim().startsWith("{") });
+      blocks.push({ start: tag.end, css, scoped: extension === ".astro" && !tag.attributes.some((attribute) => ["is:global", "is:inline"].includes(attribute.name.toLowerCase())), skipped: Boolean(language && !/^(?:css|postcss)$/i.test(language)) || css.trim().startsWith("{") });
     }
     return close ? close.index + close[0].length : source.length;
   }
@@ -1228,6 +1238,31 @@ export async function workspaceTokenInventory({
  * @param {string[]|null} [options.stylesheets] Design-System-relative stylesheets to treat as the system's instead of reading the design's links and the site's imports (`/tokens.css` names the compiled tokens; any under dist/ is passed over)
  * @param {(file: string, content: string) => Promise<void>} [options.writeFile] the writer (tests inject a failing one)
  */
+async function compositionImportParser() {
+  const { default: ts } = await import("typescript");
+  return (text, file) => {
+    const kind = file.endsWith(".tsx") ? ts.ScriptKind.TSX : file.endsWith(".jsx") ? ts.ScriptKind.JSX : /\.(?:ts|mts|cts)$/.test(file) ? ts.ScriptKind.TS : ts.ScriptKind.JS;
+    const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, kind);
+    if (source.parseDiagnostics.length) throw new Error(`Composition source ${file} could not be parsed.`);
+    const references = [];
+    const literal = (node) => {
+      if (!node || !ts.isStringLiteralLike(node)) throw new Error("Composition source imports must use literal paths.");
+      references.push(node.text);
+    };
+    const visit = (node) => {
+      if (ts.isImportDeclaration(node) && !node.importClause?.isTypeOnly || ts.isExportDeclaration(node) && node.moduleSpecifier && !node.isTypeOnly) literal(node.moduleSpecifier);
+      if (ts.isImportEqualsDeclaration(node) && !node.isTypeOnly && ts.isExternalModuleReference(node.moduleReference)) literal(node.moduleReference.expression);
+      if (ts.isCallExpression(node)) {
+        if (node.expression.kind === ts.SyntaxKind.ImportKeyword || ts.isIdentifier(node.expression) && node.expression.text === "require") literal(node.arguments[0]);
+        if (ts.isPropertyAccessExpression(node.expression) && ts.isMetaProperty(node.expression.expression) && ["glob", "globEager"].includes(node.expression.name.text)) throw new Error("Composition sources need explicit local imports instead of import.meta.glob.");
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(source);
+    return references;
+  };
+}
+
 export async function checkWorkspaceSite({
   siteRoot: siteRootInput,
   designSystemRoot: designSystemRootInput,
@@ -1242,8 +1277,30 @@ export async function checkWorkspaceSite({
   const siteRoot = path.resolve(siteRootInput);
   const designSystemRoot = path.resolve(designSystemRootInput);
 
-  const { texts, siteImports } = await readSite({ siteRoot, designSystemRoot, designSurface, protectedGlobs });
-  const system = await readSystem({ designSystemRoot, siteRoot, siteImports, stylesheets });
+  const sections = await readWorkspaceSections(siteRoot);
+  const composition = sections && readDivisionComposition(siteRoot, sections);
+  const { texts } = await readSite({ siteRoot, designSystemRoot, designSurface: [...designSurface, ...(composition ? composition.divisions.map(({ pages }) => `${pages}/**`) : [])], protectedGlobs });
+  const surfaceFiles = new Set(texts.keys());
+  const sourceGraph = composition && compositionSourceContexts(siteRoot, composition, sections, { htmlTags, parseImports: await compositionImportParser() });
+  for (const [file, text] of sourceGraph?.texts ?? []) if (isScannable(file)) texts.set(file, text);
+  const selectedDivisions = new Map();
+  for (const division of composition?.divisions ?? []) {
+    const staged = composition.inputs.get(division.system);
+    const linked = divisionStyles(designSystemRoot, division, staged);
+    const entries = linked.map(({ href, media }) => ({
+      path: staged ? href.slice(staged.assetPrefix.length + 1) : href === COMPILED_TOKENS ? href : `src${href}`,
+      condition: media ? `media ${media}` : null,
+    }));
+    selectedDivisions.set(division.id, await readSystem({ designSystemRoot, siteRoot, stylesheets: entries, staged }));
+  }
+  const mainImports = new Set();
+  for (const [relative, text] of texts) {
+    const imports = systemImports(relative, text, { siteRoot, designSystemRoot });
+    if (![...sourceGraph?.contexts.get(relative) ?? []].some((context) => context !== null)) {
+      for (const imported of imports) mainImports.add(imported);
+    } else if (imports.length) throw new Error(`Division source ${relative} imports a Design System stylesheet. Select the design in divisions.json to load its styles.`);
+  }
+  const mainSystem = await readSystem({ designSystemRoot, siteRoot, siteImports: [...mainImports].sort(), stylesheets });
 
   const only = files ? new Set(files.map((file) => path.posix.normalize(toPosix(file)).replace(/^\.\//, ""))) : null;
   const scanned = [...texts.keys()].filter((relative) => !only || only.has(relative));
@@ -1254,20 +1311,28 @@ export async function checkWorkspaceSite({
 
   for (const relative of scanned) {
     const text = texts.get(relative);
-    const editable = !protectedGlobs.some((glob) => matchesGlob(relative, glob));
+    const contextIds = sourceGraph?.contexts.get(relative);
+    const systems = contextIds ? [...contextIds].map((division) => division === null ? mainSystem : selectedDivisions.get(division)) : [mainSystem];
+    const system = systems[0];
+    const editable = systems.length === 1 && surfaceFiles.has(relative) && !protectedGlobs.some((glob) => matchesGlob(relative, glob));
     const extension = path.posix.extname(relative).toLowerCase();
+    const markup = extension === ".css" ? null : scanMarkup(text, extension);
+    const scoped = contextIds ? markup?.blocks.filter((block) => block.scoped && !block.skipped) ?? [] : [];
+    const localClasses = new Set(contextIds && [...contextIds].some((context) => context !== null) ? scoped.flatMap((block) => [...declaredClasses(block.css)]) : []);
+    const localTokens = new Set(scoped.flatMap((block) => parseCssTokens(block.css).map((token) => token.name)));
     const edits = [];
     const reportedClasses = new Set();
+    const reportedTokens = new Set();
     const at = (offset) => ({ file: relative, ...position(text, offset) });
 
     const classFinding = (name, offset, declared) => {
-      if (system.classes.has(name) || reportedClasses.has(name)) return;
+      if (localClasses.has(name) || systems.every((entry) => entry.classes.has(name)) || reportedClasses.has(name)) return;
       reportedClasses.add(name);
       findings.push({
         kind: "class",
         ...at(offset),
         class: name,
-        suggestion: `Add a .${name} rule to ${system.where.classes} in the Design System${declared ? ", moving this rule's declarations there," : ""} without changing any existing rule; then ${declared ? "remove the rule from the site and keep" : "keep"} class="${name}" in the site. If the system already has a class for this, use that class instead.`,
+        suggestion: `Add a .${name} rule to ${(systems.find((entry) => !entry.classes.has(name)) ?? system).where.classes} in each selected Design System that lacks it${declared ? ", moving this rule's declarations there," : ""} without changing any existing rule; then ${declared ? "remove the rule from the site and keep" : "keep"} class="${name}" in the site. If the system already has a class for this, use that class instead.`,
       });
     };
 
@@ -1278,7 +1343,7 @@ export async function checkWorkspaceSite({
       }
       for (const declaration of declarations) {
         if (declaration.atRules.some((name) => DESCRIPTOR_AT_RULES.has(name))) continue;
-        if (declaration.name.startsWith("--") && system.tokenNames.has(declaration.name)) {
+        if (declaration.name.startsWith("--") && systems.some((entry) => entry.tokenNames.has(declaration.name))) {
           findings.push({
             kind: "token-override",
             ...at(base + declaration.nameStart),
@@ -1290,15 +1355,22 @@ export async function checkWorkspaceSite({
         }
         const property = declaration.name;
         const valueOffset = base + declaration.valueStart;
+        if (contextIds) for (const match of maskValue(declaration.value).matchAll(/\bvar\(\s*(--[\w-]+)/g)) {
+          const token = match[1];
+          if (localTokens.has(token) || systems.every((entry) => entry.tokenNames.has(token)) || reportedTokens.has(token)) continue;
+          reportedTokens.add(token);
+          findings.push({ kind: "token", ...at(valueOffset + match.index), property, value: token, suggestion: `The token ${token} is unavailable in at least one context that renders this file. Use a token supplied by every selected context, or port the component separately for that context.` });
+        }
         if (property.toLowerCase() === "font-family") {
           const key = fontStackKey(declaration.value);
           if (!key) continue;
-          const names = [...(system.fonts.get(key) ?? [])].sort();
+          const names = [...(system.fonts.get(key) ?? [])].filter((name) => systems.every((entry) => entry.fonts.get(key)?.has(name))).sort();
           handleLiteral({ property, offset: valueOffset, literal: declaration.value, names, kind: "font", declaration });
           continue;
         }
         for (const literal of colorLiterals(declaration, system)) {
-          const names = [...(system.colors.get(colorKey(literal.text)) ?? [])].sort();
+          const key = colorKey(literal.text);
+          const names = [...(system.colors.get(key) ?? [])].filter((name) => systems.every((entry) => entry.colors.get(key)?.has(name))).sort();
           handleLiteral({ property, offset: valueOffset + literal.offset, literal: literal.text, names, kind: "color", declaration, within: literal.offset });
         }
       }
@@ -1320,7 +1392,7 @@ export async function checkWorkspaceSite({
           property,
           value: literal,
           candidates: names,
-          suggestion: `${literal} is the value of the system token ${names[0]}, but this file is protected, so it is not rewritten. Nothing needs adding to the Design System; change the line to \`${after(`var(${names[0]})`)}\`.`,
+          suggestion: `${literal} is the value of the system token ${names[0]}, but this file is ${systems.length > 1 ? "shared by multiple contexts" : "protected"}, so it is not rewritten. Change the line to \`${after(`var(${names[0]})`)}\` only after checking every rendering context.`,
         });
         return;
       }
@@ -1349,7 +1421,7 @@ export async function checkWorkspaceSite({
     if (extension === ".css") {
       checkCss(text, 0);
     } else {
-      const { blocks, classes, styles } = scanMarkup(text, extension);
+      const { blocks, classes, styles } = markup;
       for (const block of blocks) if (!block.skipped) checkCss(block.css, block.start);
       for (const style of styles) checkCss(style.css, style.start);
       for (const { name, offset } of classes) classFinding(name, offset, false);
@@ -1374,11 +1446,11 @@ export async function checkWorkspaceSite({
     changedFiles,
     scanned,
     system: {
-      design: system.design,
-      stylesheets: system.stylesheets,
-      tokensJson: system.tokensJson,
-      tokenCount: system.tokenNames.size,
-      classCount: system.classes.size,
+      design: mainSystem.design,
+      stylesheets: mainSystem.stylesheets,
+      tokensJson: mainSystem.tokensJson,
+      tokenCount: mainSystem.tokenNames.size,
+      classCount: mainSystem.classes.size,
     },
   };
 }

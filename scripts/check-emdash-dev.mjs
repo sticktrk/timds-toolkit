@@ -68,7 +68,8 @@ async function fixture(name, dependencies) {
     const file = path.join(site, relative);
     let text;
     try { text = await readFile(file, "utf8"); } catch (error) { if (error.code === "EISDIR") continue; throw error; }
-    for (const [before, after] of Object.entries({ __PACKAGE_NAME__: "timds-example-site", __DESIGN_ID__: "website", __LAYOUT_IMPORT__: "../../layouts/Base.astro", __SITE_URL__: "", __SITE_NAME__: "Example site", __WORKER_NAME__: "timds-example-site" })) text = text.replaceAll(before, after);
+    const articlePage = relative.startsWith("src/routes/articles/") && relative.endsWith(".astro");
+    for (const [before, after] of Object.entries({ __PACKAGE_NAME__: "timds-example-site", __DESIGN_ID__: "website", __LAYOUT_IMPORT__: articlePage ? "../../layouts/Article.astro" : "../../layouts/Base.astro", __SECTION_LAYOUT_PROPS__: articlePage ? " collection={section.collection}" : "", __SITE_URL__: "", __SITE_NAME__: "Example site", __WORKER_NAME__: "timds-example-site" })) text = text.replaceAll(before, after);
     await writeFile(file, text);
   }
   const lock = await json(path.join(site, "package-lock.json"));

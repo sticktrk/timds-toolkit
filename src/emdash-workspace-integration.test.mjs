@@ -438,7 +438,7 @@ test("the starter's contact form renders disabled until the site handles it", ()
 
 test("the catch-all route answers 405 to a POST, and the handlers are dispatched ahead of it by middleware", async () => {
   const route = await fs.readFile(path.join(SITE_TEMPLATE, "src/pages/[...page].astro"), "utf8");
-  assert.match(route, /import \{ pages \} from "virtual:timds\/design-system";/);
+  assert.match(route, /import \{ pages, mainPage \} from "virtual:timds\/design-system";/);
   assert.match(route, /if \(method !== "GET" && method !== "HEAD"\)/);
   assert.match(route, /status: 405/);
   assert.match(route, /Allow: "GET, HEAD"/);
@@ -461,8 +461,8 @@ test("hosted discovery acknowledges the current contract while standalone config
   const config = { integrations: [{ name: "timds-host-discovery" }], build: { client: new URL("file:///tmp/timds-example-client/") } };
   const hosted = integration.default({ design: "website" });
   assert.throws(() => hosted.hooks["astro:config:done"]({ config }), /not acknowledged/);
-  assert.throws(() => hosted.api.acknowledgeHostedSections({ template: 2, workspace: 2, sections: 1 }), /must support template 3/);
-  assert.equal(hosted.api.acknowledgeHostedSections({ template: 3, workspace: 3, sections: 2 }), true);
+  assert.throws(() => hosted.api.acknowledgeHostedSections({ template: 2, workspace: 2, sections: 1 }), /must support template 4/);
+  assert.equal(hosted.api.acknowledgeHostedSections({ template: 4, workspace: 3, sections: 2, composition: 1 }), true);
   assert.doesNotThrow(() => hosted.hooks["astro:config:done"]({ config }));
   const standalone = integration.default({ design: "website" });
   assert.doesNotThrow(() => standalone.hooks["astro:config:done"]({ config: { ...config, integrations: [] } }));

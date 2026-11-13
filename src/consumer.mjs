@@ -1080,6 +1080,7 @@ export async function checkConsumer(repoRootInput = process.cwd(), options = {})
         if (!filePath.startsWith(prefix)) return { path: filePath, sitePath: null, status: "system", app: null };
         const sitePath = filePath.slice(prefix.length);
         if (atBase.missing) return { path: filePath, sitePath, status: "allowed", app: null };
+        if (sitePath === "divisions.json") return { path: filePath, sitePath, status: "allowed", app: null };
         return { path: filePath, sitePath, ...classifyConsumerPath(sitePath, scopeManifest) };
       }
       if (adoption.has(filePath)) return { path: filePath, status: "allowed", app: null };
@@ -1109,7 +1110,7 @@ export async function checkConsumer(repoRootInput = process.cwd(), options = {})
     // System pin or the manifest (routes, commands, the surface itself) moved,
     // or, for a workspace site, when the Design System itself changed.
     const manifestPath = (change) => (workspace ? change.sitePath : change.path) === CONSUMER_MANIFEST_FILE;
-    const everyApp = atBase.missing || changes.some((change) => change.status === "pin" || change.status === "system" || manifestPath(change));
+    const everyApp = atBase.missing || changes.some((change) => change.status === "pin" || change.status === "system" || manifestPath(change) || workspace && change.sitePath === "divisions.json");
     const touched = new Set(changes.filter((change) => change.status === "allowed" && change.app).map((change) => change.app));
     previewApps = Object.keys(manifest.apps).filter((name) => everyApp || touched.has(name));
   }

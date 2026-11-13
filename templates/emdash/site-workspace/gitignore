@@ -3,6 +3,7 @@ dist
 .astro
 .wrangler
 .emdash/migrations.json
+.timds-site-inputs/
 
 # Generated types: astro dev and astro build write the first from the
 # content model, npx wrangler types writes the second

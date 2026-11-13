@@ -55,6 +55,8 @@ import path from "node:path";
 import { CONSUMER_MANIFEST_FILE, CONSUMER_SKILL_NAMES, validateConsumerManifest } from "./consumer.mjs";
 import { normalizeSections, normalizeSectionSchema, createSectionSeed, validateSectionSeed, isSectionRoute, writerSectionTable } from "../templates/emdash/site/src/lib/articles/sections.mjs";
 import { sectionRouteInventory, readSectionRouteFiles } from "../templates/emdash/site-workspace/src/integrations/section-routes.mjs";
+import { compositionRouteInventory, readDivisionComposition } from "../templates/emdash/site-workspace/src/integrations/composition.mjs";
+import { divisionStyles } from "../templates/emdash/site-workspace/src/integrations/design-system.mjs";
 import { WORKSPACE_SITE_AGENTS_MARKER, WORKSPACE_SITE_DIRECTORY, WORKSPACE_SITE_MOUNT } from "./workspace-site.mjs";
 
 /** The template directory the workspace mode lays over the shared set. */
@@ -399,8 +401,15 @@ export async function workspaceSectionApps(siteRoot, apps, systemRoot) {
   if (!declaration) return apps;
   const { sections, schemaVersion: version } = declaration;
   const routeFiles = readSectionRouteFiles(siteRoot);
+  const composition = readDivisionComposition(siteRoot, sections);
   const catalog = systemRoot ? await (await import("./designs.mjs")).readDesignCatalog(systemRoot) : { designs: [] };
   const design = systemRoot ? (await selectWorkspaceDesign({ siteRoot, designSystemRoot: systemRoot, designs: catalog.designs, sections })).entry : null;
+  const inventory = composition && sectionRouteInventory(sections, design?.pages ?? [], { version, ...routeFiles });
+  const composedRoutes = composition && compositionRouteInventory(composition, inventory, [], routeFiles);
+  if (composition) {
+    if (!systemRoot) throw new Error("Site divisions require a workspace Design System.");
+    for (const division of composition.divisions) divisionStyles(systemRoot, division, composition.inputs.get(division.system));
+  }
   const result = {};
   for (const [name, app] of Object.entries(apps)) {
     if (app.cwd !== ".") { result[name] = app; continue; }
@@ -412,6 +421,32 @@ export async function workspaceSectionApps(siteRoot, apps, systemRoot) {
     };
     const preview = sectionPreview(rawPreview, sections, design, { version, ...routeFiles });
     preview.designs = Object.fromEntries(Object.entries(preview.designs).map(([route, reference]) => [route, `${design?.id}:${reference}`]));
+    if (composition) {
+      const byId = new Map(composition.divisions.map((division) => [division.id, division]));
+      const pair = (route, divisionId, candidates) => {
+        delete preview.designs[route];
+        const division = byId.get(divisionId);
+        if (division.system !== "main") return;
+        const reference = catalog.designs.find(({ id }) => id === division.design);
+        const paired = candidates.find((candidate) => reference?.pages.some(({ route }) => route === candidate));
+        if (paired) preview.designs[route] = `${division.design}:${paired}`;
+      };
+      for (const { path, division, kind } of composedRoutes) {
+        if (kind !== "page" || !division) continue;
+        const page = composition.pages.get(path.replace(/\/+$/, ""));
+        preview.routes.push(page.route);
+        pair(page.route, division, [page.local]);
+      }
+      for (const { section, list, sample } of inventory.sections) {
+        const division = composition.collectionContexts.get(section.collection);
+        if (!division) continue;
+        const mount = byId.get(division).prefix.slice(0, -1);
+        const local = (route) => route.startsWith(`${mount}/`) ? route.slice(mount.length) : route;
+        pair(list, division, [local(list), list, "/articles"]);
+        pair(sample, division, [local(sample), sample, "/articles/example-article"]);
+      }
+      preview.routes = [...new Set(preview.routes)];
+    }
     result[name] = { ...app, preview };
   }
   return result;
@@ -449,7 +484,7 @@ export function workspaceConsumerManifest({ systemId, design, preview, sections 
           schemes: ["light", "dark"],
           ...(Object.keys(designs).length ? { designs } : {}),
         },
-        designSurface: ["src/layouts/**", "src/components/**", "src/styles/**", "src/pages/**", "src/routes/**", "public/**"],
+        designSurface: ["src/layouts/**", "src/components/**", "src/styles/**", "src/pages/**", "src/routes/**", "src/divisions/**", "public/**"],
       },
     },
   };

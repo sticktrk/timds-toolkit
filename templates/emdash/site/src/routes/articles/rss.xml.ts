@@ -18,11 +18,11 @@ function escapeXml(value: string): string {
 	return value.replace(XML_SPECIAL, (character) => XML_ESCAPES[character] ?? character);
 }
 
-export const GET: APIRoute = async ({ url, site, locals, cache }) => {
+export const GET: APIRoute = async ({ url, site, request, locals, cache }) => {
 	const section = sectionForPath(url.pathname);
 	if (!section?.feed) return new Response("Not found", { status: 404 });
 	if (!await sectionAvailable(section)) return sectionUnavailable();
-	const origin = siteOrigin(url, site);
+	const origin = siteOrigin(url, site, request);
 	const settings = await getSiteSettingsWithCacheHint();
 	const { entries, cacheHint, error } = await getEmDashCollection<string, ArticleData>(section.collection, {
 		orderBy: { published_at: "desc" },

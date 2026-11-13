@@ -433,6 +433,10 @@ function lineWriter(prefix, write) {
 export async function startWorkspaceSite(site, { mount = WORKSPACE_SITE_MOUNT, readyTimeoutMs = DEFAULT_SITE_READY_TIMEOUT_MS, env = process.env, log = (line) => console.log(line), onStop = null, signal = null } = {}) {
   const options = siteServeOptions(site);
   const { command, ready } = options;
+  if (env.TIMDS_SITE_CONFIG) {
+    if (command[0] === "npm" && !command.includes("--")) command.push("--");
+    command.push("--config", env.TIMDS_SITE_CONFIG);
+  }
   const shown = command.join(" ");
   let port = options.port;
   if (await portTaken(port)) {

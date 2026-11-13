@@ -197,7 +197,7 @@ publishes the template version beside `hostContract` and must equal
 would need to receive raises `version` in both places and adds a `history`
 entry saying what changed.
 
-Template version 3 declares article sections in `site/sections.json` (section
+Template version 3 introduced article sections in `site/sections.json` (section
 contract 2) and their shared fields and features in `site/section-schema.json`.
 Declaration version 2 permits single or nested literal prefixes inside one
 Design System; older section contracts are refused.
@@ -221,11 +221,20 @@ current declaration and active exported config selection, preserving authored
 preview pairs to selected-design reference pages and the consumer manifest.
 Workspace requests import the validated virtual section inventory; invalid JSON
 keeps the previous configuration, while dev route conflicts and duplicate
-form handlers return 503 until
-corrected. Hosted discovery must acknowledge the current 3/3/2 tuple; standalone
-builds remain available. Keep package
-`emdashWorkspaceContract: 3` and `emdashSectionsContract: 2` in step with these
-exports. See `docs/emdash.md` for the existing-database boundary.
+form handlers return 503 until corrected. Template 4 adds optional
+`site/divisions.json` without changing the workspace or section schemas.
+Its integration exports composition 1 alongside the unchanged section
+contract; build, consumer checks and preview read the same division inventory.
+The data-only `src/integrations/source-contexts.mjs` graph follows literal
+local imports and re-exports for layouts and shared article renderers. Build
+and dev refuse division dependencies that import outside the site; consumer
+checks validate shared classes and token references against every rendering
+context and never autofix shared source against only one. Scoped Astro family
+navigation styles remain component-local.
+Hosted discovery must acknowledge the installed template and capabilities.
+Keep package `emdashWorkspaceContract: 3`, `emdashSectionsContract: 2` and
+`emdashCompositionContract: 1` in step with these exports. See
+`docs/emdash.md` for the existing-database boundary.
 
 `upgrade --version VERSION` selects one exact tested resolution, restores the
 bounded requirement, runs `npm ci`, synchronizes adopted managed files with the

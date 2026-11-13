@@ -63,7 +63,10 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { readSectionRouteFiles, sectionRouteInventory } from "./section-routes.mjs";
+import { defaultPageFiles, inNamespace, readSectionRouteFiles, sectionRouteInventory } from "./section-routes.mjs";
+
+import { COMPOSITION_CONTRACT, compositionFile, compositionRouteInventory, divisionInputsRoot, readDivisionComposition, retainComposition } from "./composition.mjs";
+import { compositionSourceContexts, moduleImportReferences } from "./source-contexts.mjs";
 
 export const VIRTUAL_MODULE = "virtual:timds/design-system";
 const RESOLVED_MODULE = `\0${VIRTUAL_MODULE}`;
@@ -76,8 +79,7 @@ export const TITLE_MARKER = "\u0000timds-title\u0000";
 const CONTENT_MARKER = "\u0000timds-content\u0000";
 const PLACEHOLDER = /\{\{\s*([a-z]+)\s*\}\}/g;
 const ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-/** The state a page file with no state in its name has, as the designs catalog names it. */
-export const DEFAULT_STATE = "default";
+export { DEFAULT_STATE, defaultPageFiles, pageRoute } from "./section-routes.mjs";
 /** The folder of the site, under src/, whose modules handle the design's posting forms. */
 export const FORMS_DIRECTORY = "forms";
 const FORM_HANDLER_EXTENSIONS = [".ts", ".mjs", ".js"];
@@ -93,8 +95,10 @@ const CONTENT_TYPES = {
   ".js": "text/javascript; charset=utf-8",
   ".json": "application/json; charset=utf-8",
   ".mjs": "text/javascript; charset=utf-8",
+  ".otf": "font/otf",
   ".png": "image/png",
   ".svg": "image/svg+xml",
+  ".ttf": "font/ttf",
   ".webp": "image/webp",
   ".woff": "font/woff",
   ".woff2": "font/woff2",
@@ -372,50 +376,6 @@ export function splitDocument(html) {
   };
 }
 
-function htmlFiles(directory, prefix = "") {
-  if (!existsSync(directory)) return [];
-  const found = [];
-  for (const entry of readdirSync(directory, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name))) {
-    const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
-    if (entry.isDirectory()) found.push(...htmlFiles(path.join(directory, entry.name), relative));
-    else if (entry.isFile() && entry.name.endsWith(".html")) found.push(relative);
-  }
-  return found;
-}
-
-/**
- * The route of a page file's default state, by the designs catalog's rule:
- * `about.html` and `about.default.html` are the default of /about,
- * `index.html` the default of its folder's route. A named state
- * (`contact.sent.html`), or a name the catalog refuses (`a.b.c.html`), is
- * null.
- */
-export function pageRoute(relative) {
-  const segments = relative.split("/");
-  const parts = segments.pop().replace(/\.html$/, "").split(".");
-  if (parts.length > 2) return null;
-  const [name, state = DEFAULT_STATE] = parts;
-  if (state !== DEFAULT_STATE) return null;
-  return `/${(name === "index" ? segments : [...segments, name]).join("/")}`;
-}
-
-/**
- * The page files of a design's pages/ folder that are a route's default
- * state, as [route, relative file] pairs. Two files for one route
- * (`about.html` and `about.default.html`) are refused, as the catalog
- * refuses them.
- */
-export function defaultPageFiles(pagesDirectory) {
-  const byRoute = new Map();
-  for (const relative of htmlFiles(pagesDirectory)) {
-    const route = pageRoute(relative);
-    if (!route) continue;
-    if (byRoute.has(route)) throw new Error(`pages/${relative} and pages/${byRoute.get(route)} both describe route ${route}; keep one`);
-    byRoute.set(route, relative);
-  }
-  return [...byRoute];
-}
-
 /** The names a binding pattern declares (`POST`, `{ POST }`, `[POST]`, `{ a: POST = x }`, `...POST`). */
 function patternNames(pattern) {
   if (!pattern) return [];
@@ -480,7 +440,22 @@ export async function loadModuleParser(siteRoot) {
     throw new Error(`The design system integration reads the site's form handlers with the Vite that Astro runs on, and found no astro install in ${siteRoot}. Run npm ci in ${siteRoot}.`);
   }
   const { parseAst } = await import(pathToFileURL(vite).href);
-  return (code, file) => parseAst(code, { lang: file.endsWith(".ts") ? "ts" : "js" }, file);
+  return (code, file) => parseAst(code, { lang: /\.(?:ts|tsx|jsx)$/.exec(file)?.[0].slice(1) ?? "js" }, file);
+}
+
+async function loadCompositionImportParser(siteRoot) {
+  const astro = createRequire(path.join(siteRoot, "package.json")).resolve("astro/package.json");
+  const vite = createRequire(astro).resolve("vite");
+  const { parseSync } = await import(pathToFileURL(createRequire(vite).resolve("rolldown/utils")).href);
+  return (text, file) => {
+    const lang = /\.(?:mts|cts)$/.test(file) ? "ts" : /\.(?:ts|tsx|jsx)$/.exec(file)?.[0].slice(1) ?? "js";
+    const result = parseSync(file, text, { lang, sourceType: /\.(?:cjs|cts)$/.test(file) ? "commonjs" : "module" });
+    // Astro frontmatter permits top-level return and await together. Keep the
+    // complete module AST; only its return-placement diagnostic is inapplicable.
+    const errors = result.errors.filter((error) => !(file.endsWith(".astro.ts") && error.message === "A 'return' statement can only be used within a function body."));
+    if (errors.length) throw new Error(`Composition source ${file} could not be parsed.`);
+    return moduleImportReferences(result.program);
+  };
 }
 
 /**
@@ -687,6 +662,156 @@ export function renderWorkspaceDesign(systemRoot, { design: designId, base = "/"
   return { system, design: { id: designId, title: String(declared.title || designId), layout: layout !== null }, pages, shell, files, inventory };
 }
 
+/** Resolve the styles linked by the selected reference design without rendering its pages. */
+export function divisionStyles(systemRoot, { design }, input) {
+  if (input) {
+    const designs = input.designs.filter((entry) => entry?.id === design);
+    if (designs.length !== 1 || !Array.isArray(designs[0].pages)) throw new Error(`The pinned sibling release does not have a unique ${design} reference design.`);
+    const pages = designs[0].pages;
+    const home = pages.find((page) => page?.route === "/") ?? pages[0];
+    const state = Array.isArray(home?.states) && home.states.find((entry) => entry?.name === "default");
+    if (typeof state?.html !== "string") throw new Error(`Pinned sibling reference design ${design} requires a default home or first page state.`);
+    const suffix = `/designs/${design}/`;
+    const artifactPrefix = typeof designs[0].url === "string" && designs[0].url.endsWith(suffix) ? designs[0].url.slice(0, -suffix.length) : "";
+    return readStylesheetLinks(state.html, (href) => {
+      if (!href.startsWith("/") || href.startsWith("//")) throw new Error(`Sibling reference design ${design} links an unsupported stylesheet: ${href}.`);
+      const published = href.split(/[?#]/, 1)[0];
+      const relative = artifactPrefix && published.startsWith(`${artifactPrefix}/`) ? published.slice(artifactPrefix.length + 1) : published.slice(1);
+      if (!relative.toLowerCase().endsWith(".css") || !input.files.has(`files/${relative}`)) throw new Error(`Sibling reference design ${design} links a missing verified stylesheet: ${href}.`);
+      return `${input.assetPrefix}/${relative}`;
+    });
+  }
+  const tokensCss = runsStarterBuild(readJson(path.join(systemRoot, "timds.json")));
+  const directory = `src/designs/${design}`;
+  compositionFile(systemRoot, `${directory}/design.json`);
+  const layout = compositionFile(systemRoot, `${directory}/layout.html`, { optional: true });
+  const pages = compositionFile(systemRoot, `${directory}/pages`, { optional: true, directory: true });
+  const defaults = pages ? defaultPageFiles(pages, { strict: true, literalRoutes: false }) : [];
+  const home = (defaults.find(([route]) => route === "/") ?? defaults[0])?.[1];
+  const shell = layout ?? (home && compositionFile(systemRoot, `${directory}/pages/${home}`));
+  if (!shell) throw new Error(`Division reference design ${design} requires a layout or default page.`);
+  return readStylesheetLinks(readFileSync(shell, "utf8"), (href) => {
+    const pathname = href.split(/[?#]/, 1)[0];
+    if (pathname === "/tokens.css" && tokensCss) return pathname;
+    if (!/^\/styles\/(?:[A-Za-z0-9][A-Za-z0-9._-]*\/)*[A-Za-z0-9][A-Za-z0-9._-]*\.css$/i.test(pathname)) {
+      throw new Error(`Division reference design ${design} must link local Design System styles: ${href}.`);
+    }
+    compositionFile(systemRoot, `src${pathname}`);
+    return pathname;
+  });
+}
+
+function readStylesheetLinks(markup, resolve) {
+  const styles = [];
+  for (const tag of htmlTags(markup)) {
+    if (tag.type !== "start" || tag.name !== "link" || !attributeValue(tag, "rel")?.toLowerCase().split(/\s+/).includes("stylesheet")) continue;
+    const href = attributeValue(tag, "href")?.trim();
+    if (!href) continue;
+    const media = attributeValue(tag, "media")?.trim() || null;
+    styles.push({ href: resolve(href), media });
+  }
+  return styles;
+}
+
+/** Page links follow the division mount when it owns the target. Asset URLs stay separate. */
+function divisionMarkup(html, { division, page, pages, sections, forms, base, input }) {
+  const edits = [];
+  const assetUrl = (url) => /^(?:\/)?(?:(?:styles|assets|fonts|scripts)\/|tokens\.css(?:[?#]|$))/.test(url);
+  const rebase = (raw, tag, name) => {
+    if (!raw || /^(?:[#?]|[a-z][a-z0-9+.-]*:|\/\/)/i.test(raw)) return raw;
+    if (assetUrl(raw)) {
+      const relative = raw.replace(/^\//, "");
+      if (!input) return `/${relative}`;
+      const file = relative.split(/[?#]/, 1)[0];
+      if (!input.files.has(`files/${file}`)) throw new Error(`Division page ${page.source} links a missing verified asset: ${raw}.`);
+      return `${input.assetPrefix}/${relative}`;
+    }
+    const anchor = name === "href" && ["a", "area"].includes(tag);
+    if (!raw.startsWith("/") || !(anchor || name === "action" || name === "formaction")) return raw;
+    const [pathname] = raw.split(/[?#]/, 1);
+    if (inNamespace(pathname, division.prefix)) return raw;
+    const mounted = `${division.prefix.slice(0, -1)}${pathname}`;
+    const mountedRoute = mounted.replace(/\/+$/, "");
+    const section = sections.find(({ prefix }) => inNamespace(mounted, prefix));
+    if (pages.has(mountedRoute) || section || forms.has(mountedRoute)) {
+      const suffix = raw.slice(pathname.length);
+      const sectionPage = section && mountedRoute !== `${section.prefix}rss.xml`;
+      const trailingSlash = pages.has(mountedRoute) || sectionPage || mounted.endsWith("/");
+      return `${mountedRoute}${trailingSlash ? "/" : ""}${suffix}`;
+    }
+    return raw;
+  };
+  for (const tag of htmlTags(html)) {
+    if (tag.type !== "start") continue;
+    if (["html", "head", "body", "base", "style"].includes(tag.name) || tag.name === "link" && attributeValue(tag, "rel")?.toLowerCase().split(/\s+/).includes("stylesheet")) {
+      throw new Error(`Division page ${page.source} must be an HTML fragment using its selected layout and styles.`);
+    }
+    for (const attribute of tag.attributes) {
+      if (attribute.valueStart === -1) continue;
+      const { name, value } = attribute;
+      let next;
+      if (URL_ATTRIBUTES.includes(name)) next = value.replace(value.trim(), rebase(value.trim(), tag.name, name));
+      else if (name === "srcset") next = value.split(",").map((part) => part.replace(/^(\s*)(\S+)/, (_all, space, url) => `${space}${rebase(url, tag.name, "src")}`)).join(",");
+      if (next !== undefined && next !== value) edits.push(valueEdit(attribute, next));
+    }
+  }
+  const htmlWithLinks = applyEdits(html, edits);
+  return applyBase(disableUnconnectedForms(htmlWithLinks, { route: `${page.route}/`, handled: forms }), base);
+}
+
+function renderDivisions({ siteRoot, systemRoot, base, forms, composition, routes, sections, publicFiles, main }) {
+  const contexts = Object.create(null);
+  const prefix = basePrefix(base);
+  const mainStyles = new Set();
+  const tokensCss = runsStarterBuild(readJson(path.join(systemRoot, "timds.json")));
+  for (const markup of [...main.pages.map(({ head, body }) => `${head}\n${body}`), main.shell.head, main.shell.before, main.shell.after]) {
+    readStylesheetLinks(markup, (href) => {
+      const url = href.split(/[?#]/, 1)[0];
+      const route = prefix && url.startsWith(`${prefix}/`) ? url.slice(prefix.length) : url;
+      if (route === "/tokens.css" && tokensCss || /^\/styles\/(?:[A-Za-z0-9][A-Za-z0-9._-]*\/)*[A-Za-z0-9][A-Za-z0-9._-]*\.css$/i.test(route)) {
+        mainStyles.add(route);
+      }
+      return route;
+    });
+  }
+  const assets = [...mainStyles].map((path) => ({ path, division: null }));
+  const pages = [];
+  for (const division of composition.divisions) {
+    const layout = readFileSync(compositionFile(siteRoot, division.layout), "utf8");
+    const slots = htmlTags(layout).filter((tag) => tag.type === "start" && tag.name === "slot");
+    if (!slots.some((slot) => attributeValue(slot, "name") === "head") || !slots.some((slot) => !attributeValue(slot, "name"))) {
+      throw new Error(`Division layout ${division.layout} must define head and default slots.`);
+    }
+    readStylesheetLinks(layout, (href) => {
+      if (/^\/(?:styles\/|tokens\.css(?:[?#]|$)|timds-dependencies\/)/.test(href)) {
+        throw new Error(`Division layout ${division.layout} must use the selected context's Design System styles.`);
+      }
+    });
+    const input = composition.inputs.get(division.system);
+    const styles = divisionStyles(systemRoot, division, input);
+    const hrefs = new Set(styles.map(({ href }) => href));
+    for (const href of hrefs) {
+      if (publicFiles.includes(`public${href}`)) throw new Error(`A public file shadows the division stylesheet ${href}.`);
+      assets.push({ path: href, division: division.id });
+    }
+    contexts[division.id] = { prefix: division.prefix, system: division.system, design: division.design, assetPrefix: input?.assetPrefix ?? "", styles };
+    const ownedSections = sections.filter(({ collection }) => composition.collectionContexts.get(collection) === division.id);
+    for (const page of composition.pages.values()) {
+      if (page.division !== division.id) continue;
+      const html = readFileSync(compositionFile(siteRoot, page.source), "utf8");
+      pages.push({
+        ...page,
+        title: pageTitle(html, page.route),
+        htmlAttributes: {},
+        head: "",
+        bodyAttributes: {},
+        body: divisionMarkup(html, { division, page, pages: composition.pages, sections: ownedSections, forms, base, input }),
+      });
+    }
+  }
+  return { pages, contexts, inputs: composition.inputs, composition: retainComposition(composition, routes, assets), collectionContexts: Object.fromEntries(composition.collectionContexts) };
+}
+
 /**
  * One file of the system's src/<directory>/, named by its path segments as
  * they are on disk (no decoding: a file may be called `50%.svg`), or null.
@@ -755,6 +880,31 @@ export async function writeStaticFiles(systemRoot, clientDirectory, tokensCss) {
   return count;
 }
 
+/** Publish the staged styles and their relative assets under a release-specific namespace. */
+async function writeDependencyFiles(inputs, clientDirectory) {
+  let count = 0;
+  for (const { files, assetPrefix } of inputs.values()) {
+    for (const [file, bytes] of files) {
+      if (!file.startsWith("files/")) continue;
+      const target = path.join(clientDirectory, assetPrefix.slice(1), file.slice(6));
+      await mkdir(path.dirname(target), { recursive: true });
+      await writeFile(target, bytes, { flag: "wx" });
+      count++;
+    }
+  }
+  return count;
+}
+
+function requestDependencyFile(inputs, pathname) {
+  for (const { files, assetPrefix } of inputs?.values() ?? []) {
+    if (!pathname.startsWith(`${assetPrefix}/`)) continue;
+    const body = files.get(`files/${pathname.slice(assetPrefix.length + 1)}`);
+    if (!body) return null;
+    return { body, type: CONTENT_TYPES[path.extname(pathname).toLowerCase()] || "application/octet-stream" };
+  }
+  return null;
+}
+
 /**
  * The virtual module's source: the rendered design and the site's form
  * handlers, each as the file the route's log names (relative to the site)
@@ -762,10 +912,17 @@ export async function writeStaticFiles(systemRoot, clientDirectory, tokensCss) {
  */
 export function virtualModuleSource(rendered, handlers, siteRoot, inventory = {}) {
   const forms = [...handlers].map(([route, file]) => `  ${JSON.stringify(route)}: { file: ${JSON.stringify(path.relative(siteRoot, file).split(path.sep).join("/"))}, load: () => import(${JSON.stringify(file.split(path.sep).join("/"))}) },`);
+  const layouts = (rendered.composition?.divisions ?? []).map(({ id, layout }) =>
+    `  ${JSON.stringify(id)}: () => import(${JSON.stringify(path.join(siteRoot, layout).split(path.sep).join("/"))}),`);
   return [
     `export const system = ${JSON.stringify(rendered.system)};`,
     `export const design = ${JSON.stringify(rendered.design)};`,
-    `export const pages = ${JSON.stringify(rendered.pages.map(({ route, title, htmlAttributes, head, bodyAttributes, body }) => ({ route, title, htmlAttributes, head, bodyAttributes, body })))};`,
+    `export const pages = ${JSON.stringify(rendered.pages.map(({ route, title, htmlAttributes, head, bodyAttributes, body, division }) => ({ route, title, htmlAttributes, head, bodyAttributes, body, ...(division ? { division } : {}) })))};`,
+    `export const divisionContexts = ${JSON.stringify(rendered.contexts ?? {})};`,
+    `export const collectionContexts = ${JSON.stringify(rendered.collectionContexts ?? {})};`,
+    `export const divisionLayouts = {\n${layouts.join("\n")}${layouts.length ? "\n" : ""}};`,
+    `export const mainLayout = () => import(${JSON.stringify(path.join(siteRoot, "src/layouts/Base.astro").split(path.sep).join("/"))});`,
+    `export const mainPage = () => import(${JSON.stringify(path.join(siteRoot, "src/components/DesignPage.astro").split(path.sep).join("/"))});`,
     `export const shell = ${JSON.stringify(rendered.shell)};`,
     `export const titleMarker = ${JSON.stringify(TITLE_MARKER)};`,
     `export const sectionsContract = ${JSON.stringify(inventory.sectionsContract ?? 2)};`,
@@ -787,6 +944,7 @@ export default function designSystem({ design }) {
   let clientDirectory;
   let tokensCss = false;
   let parse;
+  let parseImports;
   let logger;
   let development = false;
   let hostAcknowledged = false;
@@ -794,6 +952,7 @@ export default function designSystem({ design }) {
   let resolvedRoutes = [];
   let lastRendered;
   let lastHandlers = new Map();
+  let lastInputs;
   let routeError = null;
   let viteServer;
   const api = {};
@@ -802,8 +961,9 @@ export default function designSystem({ design }) {
   // call it after setup to read the populated inventory.
   const publicApi = {
     getSections: () => api,
+    getComposition: () => lastRendered?.composition ?? null,
     acknowledgeHostedSections(contract) {
-      if (contract?.template !== 3 || contract?.workspace !== 3 || contract?.sections !== 2) throw new Error("Hosted discovery must support template 3, workspace 3 and sections 2.");
+      if (contract?.template !== 4 || contract?.workspace !== 3 || contract?.sections !== 2 || contract?.composition !== COMPOSITION_CONTRACT) throw new Error("Hosted discovery must support template 4, workspace 3, sections 2 and composition 1.");
       hostAcknowledged = true;
       return true;
     },
@@ -818,10 +978,20 @@ export default function designSystem({ design }) {
     }
     viteServer.ws.send({ type: "full-reload" });
   };
-  const render = () => {
+  const render = ({ revalidateRoutes = false } = {}) => {
     try {
       const handlers = formHandlers(siteRoot, { parse, warn: (message) => logger.warn(message) });
-      const rendered = renderWorkspaceDesign(systemRoot, { design, base, forms: handlers.keys(), sections: api.sections, sectionsContract: api.sectionsContract, ...readSectionRouteFiles(siteRoot, routeFilesOptions), resolvedRoutes });
+      const routeFiles = { ...readSectionRouteFiles(siteRoot, routeFilesOptions), resolvedRoutes };
+      const composition = readDivisionComposition(siteRoot, api.sections, { previousInputs: revalidateRoutes ? lastInputs : null });
+      const rendered = renderWorkspaceDesign(systemRoot, { design, base, forms: handlers.keys(), sections: api.sections, sectionsContract: api.sectionsContract, ...routeFiles });
+      if (composition) {
+        const sources = compositionSourceContexts(siteRoot, composition, api.sections, { htmlTags, parseImports, routeFiles });
+        const routes = compositionRouteInventory(composition, rendered.inventory, handlers.keys(), routeFiles);
+        const divisions = renderDivisions({ siteRoot, systemRoot, base, forms: new Set(handlers.keys()), composition, routes, sections: api.sections, publicFiles: routeFiles.publicFiles, main: rendered });
+        Object.assign(rendered, { ...divisions, pages: [...rendered.pages, ...divisions.pages] });
+        rendered.files.push(...[...sources.texts.keys()].map((file) => path.join(siteRoot, file)));
+      }
+      lastInputs = composition ? { systemsKey: composition.systemsKey, inputs: composition.inputs, dependencies: composition.dependencies } : null;
       lastRendered = rendered;
       lastHandlers = handlers;
       routeError = null;
@@ -864,9 +1034,11 @@ export default function designSystem({ design }) {
           if (section.feed) injectRoute({ pattern: `${section.prefix}rss.xml`, entrypoint: path.join(siteRoot, "src/routes/articles/rss.xml.ts"), prerender: false });
         }
         parse = await loadModuleParser(siteRoot);
+        parseImports = await loadCompositionImportParser(siteRoot);
         systemRoot = findDesignSystem(siteRoot);
         if (!systemRoot) throw new Error(`No folder above ${siteRoot} holds timds.json. This site reads the Design System it sits in; keep it inside that Design System's folder.`);
         base = config.base || "/";
+        if (config.trailingSlash === "never" && existsSync(path.join(siteRoot, "divisions.json"))) throw new Error("Site divisions require trailing slash support.");
         tokensCss = runsStarterBuild(readJson(path.join(systemRoot, "timds.json")));
         render();
         // Ahead of page routing, after EmDash's own middleware (registered
@@ -895,13 +1067,17 @@ export default function designSystem({ design }) {
                 // (a page added or removed changes the routes, not one file).
                 // A form handler added or removed changes which forms are
                 // enabled, so src/forms/ rebuilds it too.
-                const designDirectory = path.join(systemRoot, "src", "designs", design);
                 const manifestFile = path.join(systemRoot, "timds.json");
                 const formsDirectory = path.join(siteRoot, "src", FORMS_DIRECTORY);
                 const publicDirectory = routeFilesOptions.publicDirectory;
-                server.watcher.add([designDirectory, manifestFile, formsDirectory, publicDirectory]);
+                const divisionsDirectory = path.join(siteRoot, "src/divisions");
+                const divisionsFile = path.join(siteRoot, "divisions.json");
+                const layoutsDirectory = path.join(siteRoot, "src/layouts");
+                const systemDesigns = path.join(systemRoot, "src/designs");
+                const watchedDirectories = [systemDesigns, formsDirectory, publicDirectory, divisionsDirectory, layoutsDirectory, path.join(siteRoot, "src"), divisionInputsRoot(siteRoot)];
+                server.watcher.add([...watchedDirectories, manifestFile, divisionsFile]);
                 const reload = (file) => {
-                  if (file !== manifestFile && ![designDirectory, formsDirectory, publicDirectory].some((directory) => file === directory || file.startsWith(`${directory}${path.sep}`))) return;
+                  if (file !== manifestFile && file !== divisionsFile && !watchedDirectories.some((directory) => file === directory || file.startsWith(`${directory}${path.sep}`))) return;
                   render();
                   invalidate();
                 };
@@ -913,21 +1089,23 @@ export default function designSystem({ design }) {
                   // Vite takes the base off; both name the same file.
                   const pathname = prefix && url.pathname.startsWith(`${prefix}/`) ? url.pathname.slice(prefix.length) : url.pathname;
                   const sectionRequest = [...api.sections.map((section) => section.prefix), "/topics/"].some((namespace) => pathname === namespace.slice(0, -1) || pathname.startsWith(namespace));
-                  if (sectionRequest) {
+                  const composed = Boolean(lastRendered?.composition) || existsSync(path.join(siteRoot, "divisions.json"));
+                  const dividedRequest = lastRendered?.composition?.divisions.some(({ prefix }) => inNamespace(pathname, prefix));
+                  if (sectionRequest || dividedRequest) {
                     // Vite can serve public assets before Astro middleware,
                     // and a removed asset may not emit another route event.
                     // Recheck here so a collision cannot bypass the guard or
                     // leave it stuck until an unrelated page is requested.
                     const previousError = routeError;
-                    render();
+                    render({ revalidateRoutes: !routeError });
                     if (previousError !== routeError) invalidate();
                   }
-                  if (routeError && sectionRequest) {
+                  if (routeError && (sectionRequest || composed && !pathname.startsWith("/_emdash/"))) {
                     response.writeHead(503, { "Content-Type": "text/plain", "Cache-Control": "no-store" });
                     response.end("Site route configuration needs correction.");
                     return;
                   }
-                  const found = requestStaticFile(systemRoot, pathname, tokensCss);
+                  const found = requestDependencyFile(lastRendered?.inputs, pathname) ?? requestStaticFile(systemRoot, pathname, tokensCss);
                   if (!found) return next();
                   response.writeHead(200, { "Content-Type": found.type, "Cache-Control": "no-store" });
                   response.end(found.body);
@@ -948,11 +1126,13 @@ export default function designSystem({ design }) {
         invalidate();
       },
       "astro:config:done": ({ config }) => {
-        if (config.integrations.some((integration) => integration.name === "timds-host-discovery") && !hostAcknowledged) throw new Error("Hosted discovery has not acknowledged template 3, workspace 3 and sections 2. Update the host before building this site.");
+        if (config.integrations.some((integration) => integration.name === "timds-host-discovery") && !hostAcknowledged) throw new Error("Hosted discovery has not acknowledged template 4, workspace 3, sections 2 and composition 1. Update the host before building this site.");
         clientDirectory = fileURLToPath(config.build.client);
       },
       "astro:build:done": async ({ logger }) => {
-        const count = await writeStaticFiles(systemRoot, clientDirectory, tokensCss);
+        const localCount = await writeStaticFiles(systemRoot, clientDirectory, tokensCss);
+        const dependencyCount = await writeDependencyFiles(lastRendered?.inputs ?? new Map(), clientDirectory);
+        const count = localCount + dependencyCount;
         logger.info(`Wrote ${count} Design System file${count === 1 ? "" : "s"} from ${systemRoot} into the build`);
       },
     },
