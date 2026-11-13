@@ -8,8 +8,8 @@ source paths, so a change to how the site looks is a change to the system.
 
 - Content (articles, topics, media) goes through EmDash: the admin, the REST
   API or the MCP server, never a commit. The writer's contract is
-  `docs/content-api.md`. Nonempty `body_html` is exact-source HTML and takes
-  precedence over Portable Text; never silently sanitize or overwrite it.
+  `docs/content-api.md`. Valid `body_html` renders with its original bytes.
+  Missing, blank or rejected HTML uses the Portable Text body.
   Read `docs/article-presentation.md` for literal site-owned article regions,
   structured metadata, related-guide and video fields. Content profile selection
   happens only when scaffolding, before database setup.

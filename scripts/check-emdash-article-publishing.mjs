@@ -140,7 +140,7 @@ try {
 	assert.equal(publicImage.status, 200);
 	assert.deepEqual(Buffer.from(await publicImage.arrayBuffer()), image);
 	const firstNode = "\n <H2 id='evidence'>HTML source &amp; anchor</H2>";
-	const rest = `\r\n <p class="article-lede">The original lead.</p>\n <figure><img src="${upload.item.url}" alt="Body image"><figcaption>Image note</figcaption></figure>\n <iframe title="Example embed" src="https://www.youtube-nocookie.com/embed/abcdefghijk" allowfullscreen></iframe>\n`;
+	const rest = `\r\n <p class="article-lede">The original lead. <a href="https://example.com/guides/shared/">External guide</a></p>\n <figure><img src="${upload.item.url}" alt="Body image"><figcaption>Image note</figcaption></figure>\n <iframe title="Example embed" src="https://www.youtube-nocookie.com/embed/abcdefghijk" allowfullscreen></iframe>\n`;
 	const source = firstNode + rest;
 	const created = await create(api, "articles", "shared", { body_html: source, short_answer: "<b>Plain answer</b>", video_id: "ABCDEFGHIJK", related_guide: { url: "/guides/shared/", title: "Guide title" } });
 	const guide = await create(api, "manuals", "shared", { body_html: '<p class="article-lede">Guide source</p>' });
@@ -186,18 +186,40 @@ try {
 	const clearedPage = await (await request("/articles/shared/")).text();
 	assert.ok(clearedPage.includes(firstNode) && clearedPage.includes(rest) && !clearedPage.includes("Guide title") && !clearedPage.includes("/embed/ABCDEFGHIJK"));
 
-	const unsafe = await create(api, "articles", "unsafe", { body_html: "<p>Ignored frame</p><iframe srcdoc='<script>0</script>'></iframe>" });
+	const relatedGuide = { url: "/guides/shared/", title: "Guide card title" };
+	const answerBox = "<section id='answer-box'><h2>Short answer</h2><p>Answer from the original body</p></section>";
+	const bodyGuideLink = `<p><a href="${PUBLIC_ORIGIN}/guides/shared?ref=article#details">Guide in the body</a></p>`;
+	const duplicates = await create(api, "articles", "body-regions", {
+		body_html: answerBox + bodyGuideLink, short_answer: "Answer from the field", related_guide: relatedGuide,
+	});
+	await publish(api, `/content/articles/${duplicates.item.id}`, duplicates._rev);
+	const deduplicated = await request("/articles/body-regions/");
+	assert.equal(deduplicated.status, 200);
+	const deduplicatedPage = await deduplicated.text();
+	assert.ok(deduplicatedPage.includes(answerBox) && deduplicatedPage.includes(bodyGuideLink));
+	assert.ok(!deduplicatedPage.includes("Answer from the field") && !deduplicatedPage.includes("Guide card title"));
+
+	const rejectedHtml = answerBox + bodyGuideLink + "<iframe srcdoc='<script>0</script>'></iframe>";
+	const unsafe = await create(api, "articles", "unsafe", {
+		body_html: rejectedHtml, short_answer: "Fallback answer", related_guide: relatedGuide,
+	});
 	await publish(api, `/content/articles/${unsafe.item.id}`, unsafe._rev);
+	assert.equal((await api(`/content/articles/${unsafe.item.id}`)).item.data.body_html, rejectedHtml);
 	const invalid = await request("/articles/unsafe/");
-	assert.equal(invalid.status, 500);
-	assert.equal(invalid.headers.get("cache-control"), "no-store");
-	assert.match(invalid.headers.get("content-type"), /^text\/plain/);
-	assert.equal(await invalid.text(), "Article content is unavailable.");
+	assert.equal(invalid.status, 200);
+	assert.match(invalid.headers.get("content-type"), /^text\/html/);
+	const fallback = await invalid.text();
+	assert.match(fallback, /<p>Portable body<\/p>/);
+	assert.ok(fallback.includes("Fallback answer") && fallback.includes("Guide card title"));
+	assert.ok(!fallback.includes("Answer from the original body") && !fallback.includes("Guide in the body") && !fallback.includes("srcdoc="));
 
 	await api("/redirects", { method: "POST", data: { source: "/articles/shared/", type: 410 }, status: 201 });
 	const gone = await request("/articles/shared/");
 	assert.equal(gone.status, 410);
-	assert.match(await gone.text(), /This page has been removed/);
+	assert.match(gone.headers.get("content-type"), /^text\/html/);
+	const gonePage = await gone.text();
+	assert.match(gonePage, /^<!doctype html>\s*<html\b/i);
+	assert.match(gonePage, /This page has been removed/);
 	const goneHead = await request("/articles/shared/", { method: "HEAD" });
 	assert.equal(goneHead.status, 410);
 	assert.equal(await goneHead.text(), "");
@@ -211,7 +233,7 @@ try {
 	const portablePage = await portable.request("/articles/plain/");
 	assert.equal(portablePage.status, 200);
 	assert.match(await portablePage.text(), /<p>Portable body<\/p>/);
-	console.log("Fresh article publishing passed for both profiles, including exact HTML, revisions, optional regions, canonical identity, drafts and native 410s.");
+	console.log("Fresh article publishing passed for both profiles, including exact HTML, Portable Text fallback, region deduplication, revisions, canonical identity, drafts and native 410s.");
 } catch (error) {
 	console.error(output);
 	throw error;

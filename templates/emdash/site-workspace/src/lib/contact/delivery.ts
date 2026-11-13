@@ -1,6 +1,6 @@
 import { contact } from "./config";
 import { providerDelivery, type ContactEnv } from "./runtime";
-import { webhookDestination } from "./webhook";
+import { UNBOUND_WEBHOOK_DESTINATION, webhookDestination } from "./webhook";
 
 const MAX_ATTEMPTS = 8;
 const WEBHOOK_ATTEMPTS = 16;
@@ -9,10 +9,10 @@ const WEBHOOK_ACK_BYTES = 8192;
 const WEBHOOK_BACKOFF = 5 * 60_000;
 const WEBHOOK_BACKOFF_CAP = 6 * 60 * 60_000;
 const webhookFailures = new Set([
-  "destination_changed", "missing_credential", "provider_unavailable", "provider_rejected",
+  "destination_changed", "destination_unconfigured", "missing_credential", "provider_unavailable", "provider_rejected",
   "invalid_acknowledgment", "redirect", "retry_limit",
 ]);
-type DeliveryResult = { status: "sent" | "pending" | "failed"; failure?: string };
+type DeliveryResult = { status: "sent" | "pending" | "failed"; failure?: string; deferred?: boolean };
 const EMAIL_WINDOW = 23 * 60 * 60_000;
 const META_WINDOW = 47 * 60 * 60_000;
 const windowFor = (provider: string) => provider === "resend" ? EMAIL_WINDOW : META_WINDOW;
@@ -50,11 +50,12 @@ async function acknowledged(response: Response) {
 
 async function deliverWebhook(env: ContactEnv, job: Job): Promise<DeliveryResult> {
   const destination = await webhookDestination(env);
-  if (!destination || destination.revision !== job.destination_revision) {
+  if (!destination) return { status: "pending", failure: "destination_unconfigured", deferred: true };
+  if (destination.revision !== job.destination_revision) {
     return { status: "failed", failure: "destination_changed" };
   }
   const secret = env.TIMDS_CONTACT_WEBHOOK_SECRET;
-  if (!secret) return { status: "failed", failure: "missing_credential" };
+  if (!secret) return { status: "pending", failure: "missing_credential", deferred: true };
   try {
     const response = await fetch(destination.endpoint, {
       method: "POST",
@@ -127,18 +128,18 @@ export async function drainContact(env: ContactEnv, origin: string) {
     const expires = webhook ? Infinity : (job.provider === "meta" ? job.created_at : job.first_attempt) + windowFor(job.provider);
     const limit = webhook ? WEBHOOK_ATTEMPTS : MAX_ATTEMPTS;
     const expired = Date.now() + 8000 >= expires;
-    const result = expired || job.attempts > limit
+    const result: DeliveryResult = expired || job.attempts > limit
       ? { status: "failed", failure: expired ? "retry_window_expired" : "retry_limit" }
       : await deliver(env, job);
     const completedAt = Date.now();
     const due = completedAt + (webhook
       ? Math.min(WEBHOOK_BACKOFF * 2 ** (job.attempts - 1), WEBHOOK_BACKOFF_CAP)
       : Math.min(60_000 * 2 ** (job.attempts - 1), 60 * 60_000));
-    const exhausted = result.status === "pending" && (job.attempts >= limit || due + 8000 >= expires);
+    const exhausted = result.status === "pending" && !result.deferred && (job.attempts >= limit || due + 8000 >= expires);
     const failure = exhausted && !webhook ? (job.attempts >= limit ? "retry_limit" : "retry_window_expired") : result.failure;
-    await db.prepare(`UPDATE timds_contact_jobs SET status = ?, failure = ?, due_at = ?, lease = NULL, delivered_at = ?
+    await db.prepare(`UPDATE timds_contact_jobs SET status = ?, failure = ?, due_at = ?, lease = NULL, delivered_at = ?, attempts = attempts - ?
       WHERE id = ? AND lease = ?`).bind(exhausted ? "failed" : result.status, failure ?? null, due,
-      result.status === "sent" ? completedAt : null, job.id, lease).run();
+      result.status === "sent" ? completedAt : null, Number(result.deferred ?? false), job.id, lease).run();
   }));
   return jobs.length;
 }
@@ -152,8 +153,9 @@ export async function redriveContact(env: ContactEnv, request: Request) {
     if (!providerDelivery(env, new URL(request.url).origin) || contact.delivery !== "production"
       || !destination || !env.TIMDS_CONTACT_WEBHOOK_SECRET) return new Response(null, { status: 409 });
     const job = await env.DB.prepare(`UPDATE timds_contact_jobs SET status = 'pending', attempts = 0,
-      due_at = ?, failure = NULL WHERE id = ? AND status = 'failed' AND destination_revision = ? RETURNING id`)
-      .bind(now, id, destination.revision).first();
+      due_at = ?, failure = NULL, destination_revision = ? WHERE id = ? AND provider = 'webhook' AND status = 'failed'
+      AND (destination_revision = ? OR (destination_revision = ? AND failure = 'destination_unconfigured')) RETURNING id`)
+      .bind(now, destination.revision, id, destination.revision, UNBOUND_WEBHOOK_DESTINATION).first();
     return new Response(null, { status: job ? 202 : 409, headers: { "Cache-Control": "no-store" } });
   }
   // Keep the original idempotency clock, even after an explicit redrive.

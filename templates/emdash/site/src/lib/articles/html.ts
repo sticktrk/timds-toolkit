@@ -63,6 +63,14 @@ export function sameSitePath(value: unknown): value is string {
 	return url?.pathname === value;
 }
 
+export function linksToSitePath(links: readonly string[], path: string, origin: string): boolean {
+	const target = path.replace(/\/$/, "");
+	return links.some((link) => {
+		const url = webUrl(link, origin);
+		return url?.origin === origin && url.pathname.replace(/\/$/, "") === target;
+	});
+}
+
 function linkAllowed(value: string, origin: string): boolean {
 	return !UNSAFE_URL.test(value) && (/^(?:#|mailto:|tel:)/i.test(value) || Boolean(webUrl(value, origin)));
 }
@@ -97,14 +105,17 @@ function validateElement(node: DefaultTreeAdapterTypes.Element, policy: HtmlPoli
 	if (tagName === "a" && values.get("target") === "_blank" && /(?:^|\s)opener(?:\s|$)/i.test(values.get("rel") ?? "")) invalid();
 	if (tagName === "img" && (!values.has("alt") || !imageAllowed(values.get("src") ?? "", policy))) invalid();
 	if (tagName === "iframe" && (!values.get("title")?.trim() || !iframeAllowed(values.get("src") ?? "") || node.childNodes.length)) invalid();
+	return values;
 }
 
 /** Validate the parsed fragment, then use source offsets to retain its exact bytes. */
-export function articleHtml(source: string, policy: HtmlPolicy): { source: string; boundaries: number[] } {
+export function articleHtml(source: string, policy: HtmlPolicy) {
 	if (source.length > MAX_SOURCE_BYTES || new TextEncoder().encode(source).length > MAX_SOURCE_BYTES || source.includes("\0")) invalid();
 	const fragment = parseFragment(source, { sourceCodeLocationInfo: true, onParseError: invalid });
 	const classes = new Set([...STOCK_CLASSES, ...(policy.classes ?? [])]);
 	const ids = new Set<string>();
+	const links: string[] = [];
+	let hasAnswerBox = false;
 	const whitespace = (start: number, end: number) => /^[\t\n\f\r ]*$/.test(source.slice(start, end));
 
 	const visit = (node: Node, start: number, end: number, depth: number): number => {
@@ -116,7 +127,10 @@ export function articleHtml(source: string, policy: HtmlPolicy): { source: strin
 		}
 		if (!loc || loc.startOffset < start || loc.endOffset > end || !whitespace(start, loc.startOffset)) return invalid();
 		if ("tagName" in node) {
-			validateElement(node, policy, classes, ids);
+			const attrs = validateElement(node, policy, classes, ids);
+			if (node.tagName === "section" && attrs.get("id") === "answer-box") hasAnswerBox = true;
+			const href = attrs.get("href");
+			if (node.tagName === "a" && href) links.push(href);
 			const startTag = node.sourceCodeLocation?.startTag;
 			const endTag = node.sourceCodeLocation?.endTag;
 			if (!startTag || (!VOID_ELEMENTS.has(node.tagName) && !endTag)) return invalid();
@@ -142,5 +156,5 @@ export function articleHtml(source: string, policy: HtmlPolicy): { source: strin
 		return node.nodeName !== "#comment" && !(node.nodeName === "#text" && "value" in node && !node.value.trim());
 	});
 	if (contentEnds.length) contentEnds[contentEnds.length - 1] = source.length;
-	return { source, boundaries: contentEnds };
+	return { source, boundaries: contentEnds, links, hasAnswerBox };
 }

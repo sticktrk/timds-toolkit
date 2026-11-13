@@ -1,5 +1,8 @@
 import type { ContactEnv } from "./runtime";
 
+// This marker cannot match a destination revision, which is a SHA-256 hex digest.
+export const UNBOUND_WEBHOOK_DESTINATION = "unbound";
+
 const RESERVED_HEADERS = /^(?:accept-encoding|connection|content-(?:encoding|length|type)|cookie2?|expect|host|keep-alive|origin|referer|te|trailer|transfer-encoding|upgrade|via|(?:cf|proxy|sec)-.*)$/;
 
 export async function webhookDestination(env: ContactEnv) {

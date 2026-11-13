@@ -3,7 +3,7 @@ import { env } from "cloudflare:workers";
 import { contactUrl, readTouch } from "./attribution";
 import { browserTags, consentAllows, contact } from "./config";
 import { contactDelivery, migrateContact, providerDelivery, publicContactOrigin, type ContactEnv } from "./runtime";
-import { webhookDestination } from "./webhook";
+import { UNBOUND_WEBHOOK_DESTINATION, webhookDestination } from "./webhook";
 
 const MAX_BODY = 24 * 1024;
 const BUCKET_MS = 10 * 60_000;
@@ -148,9 +148,14 @@ export const contactPost: APIRoute = async ({ request }) => {
     const notification = mode === "production" && from && to
       ? { from, to: [to], subject, ...(email ? { reply_to: email } : {}), text: [name, email, phone, message].filter(Boolean).join("\n\n") }
       : null;
-    const enqueue = (provider: string, payload: object, destination: string | null = null) => db.prepare(`INSERT INTO timds_contact_jobs
-      (id, lead_id, provider, payload, due_at, destination_revision) SELECT ?, id, ?, ?, ?, ? FROM timds_contact_leads WHERE id = ?`)
-      .bind(`${provider}/${id}`, provider, JSON.stringify(payload), now, destination, id);
+    const enqueue = (provider: string, payload: object, destination: string | null = null) => {
+      const unbound = destination === UNBOUND_WEBHOOK_DESTINATION;
+      return db.prepare(`INSERT INTO timds_contact_jobs
+        (id, lead_id, provider, payload, due_at, destination_revision, status, failure)
+        SELECT ?, id, ?, ?, ?, ?, ?, ? FROM timds_contact_leads WHERE id = ?`)
+        .bind(`${provider}/${id}`, provider, JSON.stringify(payload), now, destination,
+          unbound ? "failed" : "pending", unbound ? "destination_unconfigured" : null, id);
+    };
     const statements = [db.prepare(`INSERT INTO timds_contact_leads
       (id, request_key, fingerprint, name, email, phone, message, analytics, marketing, created_at, page_url, form_id, referrer, first_touch, last_touch)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(request_key) DO NOTHING`)
@@ -158,10 +163,9 @@ export const contactPost: APIRoute = async ({ request }) => {
         firstTouch && JSON.stringify(firstTouch), lastTouch && JSON.stringify(lastTouch))];
     if (mode === "production") {
       const destination = await webhookDestination(runtime);
-      if (!destination && (runtime.TIMDS_CONTACT_WEBHOOK_URL || runtime.TIMDS_CONTACT_WEBHOOK_HEADER)) {
-        return response(503, { error: "contact_unavailable" });
-      }
-      if (destination) statements.push(enqueue("webhook", {
+      const webhookConfigured = runtime.TIMDS_CONTACT_WEBHOOK_URL || runtime.TIMDS_CONTACT_WEBHOOK_HEADER
+        || runtime.TIMDS_CONTACT_WEBHOOK_SECRET;
+      if (webhookConfigured) statements.push(enqueue("webhook", {
         submission_id: key,
         pageUrl,
         submittedAt: new Date(now).toISOString(),
@@ -169,7 +173,7 @@ export const contactPost: APIRoute = async ({ request }) => {
         referrer,
         fields: { fullName: name, email, phone, message },
         meta: { first_touch: firstTouch, last_touch: lastTouch },
-      }, destination.revision));
+      }, destination?.revision ?? UNBOUND_WEBHOOK_DESTINATION));
     }
     if (mode === "test" || notification) statements.push(enqueue(notification ? "resend" : "test-resend", notification ?? {}));
     if (marketing && (mode === "test" || (pixel && /^v\d+\.\d+$/.test(contact.meta.graphVersion)))) {

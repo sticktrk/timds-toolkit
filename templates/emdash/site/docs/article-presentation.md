@@ -17,10 +17,10 @@ follow them and verify their classes in each division where they render.
 | Region | Placement and use |
 | --- | --- |
 | `Head.astro` | Additional head metadata. The route emits the canonical link and the Article and breadcrumb objects. |
-| `Header.astro` | Below the summary and byline. The stock component shows the plain-text answer and the updated date when it differs from the publication date. |
+| `Header.astro` | Below the summary and byline. The stock component shows the plain-text answer unless the rendered HTML already contains `<section id="answer-box">`. It shows the updated date when it differs from the publication date. |
 | `BeforeBody.astro` | Above the prose. The stock component displays the approved video player when the entry has a valid `video_id`. |
 | `WithinBody.astro` | Between complete top-level HTML nodes or Portable Text block groups. Use an authored link or call to action. |
-| `AfterBody.astro` | Below the prose. The stock component shows the related guide when its title and path are valid. This is also a place for an author card or footer disclaimer. |
+| `AfterBody.astro` | Below the prose. The stock component shows the related guide when its title and path are valid and the rendered HTML has no link to that path. This is also a place for an author card or footer disclaimer. |
 | `Sidebar.astro` | Beside the body on a wide screen when the component renders an `aside`. Put an authored contact prompt or form here. |
 
 Enable an in-body region by setting `withinBody: 0.25` in
@@ -102,14 +102,14 @@ Use the public site's URLs in the source, including image URLs. Rendering
 keeps the source unchanged and may insert a site-owned region at a complete
 node boundary. Root-relative URLs keep their literal values in a mounted
 preview. Executable content, inline style, forms, arbitrary frames and
-unapproved classes or media sources cause a plain 500 response without
-rendering the fragment. Change the source in the CMS and publish a new
-revision to correct it.
+unapproved classes or media sources cause the renderer to use the Portable
+Text body. The CMS keeps the original HTML field. Change the source in the
+CMS and publish a new revision to correct it.
 
 ## Designed Gone response
 
 For a workspace site, set `TIMDS_DESIGNED_GONE=1` in the environment when
 starting Astro or building the Worker. Customize `src/components/Gone.astro`
-with the site's layout and copy. The outer middleware adds a body to a
-bodyless native 410 for GET requests. EmDash still owns rule matching and
+with the site's layout and copy. The outer middleware renders a full HTML
+document for a bodyless native 410 on GET. EmDash still owns rule matching and
 the response status. HEAD requests stay bodyless.

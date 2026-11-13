@@ -65,11 +65,11 @@ Report skipped fields without treating them as publishing failures.
 | `summary` | Field | `text` | One or two sentences under the title and on every card. Also the meta description. |
 | `body` | Field | `portableText` | Portable Text body. See [The body](#the-body). |
 | `cover` | Field | `image` | Optional. The header image and the social image. See [Cover media](#cover-media). |
-| `body_html` | Field | `text` | Optional original HTML source. Nonempty HTML takes precedence over `body`. |
-| `short_answer` | Field | `text` | Optional plain text shown in the article header. Leave the answer card out of the HTML when using this field. |
+| `body_html` | Field | `text` | Optional original HTML source. Nonempty HTML that passes the site's policy takes precedence over `body`. |
+| `short_answer` | Field | `text` | Optional plain text shown in the article header unless the rendered HTML already contains `<section id="answer-box">`. |
 | `state` | Field | `string` | Optional two uppercase letters. Omit the field when the article has no applicable geography. |
 | `video_id` | Field | `string` | Optional 11-character YouTube video identifier. The site builds the player outside the body. |
-| `related_guide` | Field | `json` | Optional `{"url":"/guides/example/","title":"Example guide"}`. The URL is a same-site path with no query or fragment. |
+| `related_guide` | Field | `json` | Optional `{"url":"/guides/example/","title":"Example guide"}`. The URL is a same-site path with no query or fragment. The card is hidden when the rendered HTML already links to that path. |
 
 The collection supports drafts, revisions, previews, scheduling, search and
 the SEO panel. The SEO panel's title, description and image, when an editor
@@ -156,9 +156,8 @@ Through REST, send Portable Text JSON; REST does not convert Markdown.
 For a collection that declares `body_html`, send the source as a string in
 `data.body_html`. [HTML policy version 1](article-presentation.md#html-policy-version-1)
 defines the allowed elements, classes, media and embeds. Validate before
-sending. The public renderer refuses unsupported HTML and returns a plain
-error response. It never repairs the source or substitutes the Portable
-Text body for rejected HTML. Omitted, null or blank HTML selects `body`.
+sending. The public renderer uses `body` when the HTML is missing, blank or
+fails the policy. The stored source remains available in the CMS.
 
 Compare `data.item.data.body_html` from the API to the exact submitted
 string, including whitespace, entity spellings and attribute order. Check

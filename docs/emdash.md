@@ -498,10 +498,11 @@ creation selects `html`; sixteen sections use 144 physical field definitions.
 Profile selection never updates an installed site or database.
 
 The writer discovers optional fields per collection and always supplies
-Portable Text `body`. Nonempty `body_html` takes display precedence and retains
-its original bytes; unsupported active HTML fails rendering instead of falling
-back to stale content. Related-guide and video field changes render outside the
-body. Article regions and structured metadata are site-owned source; read the
+Portable Text `body`. Nonempty `body_html` renders with its original bytes
+when it passes the site's policy. Missing, blank or rejected HTML uses the
+Portable Text body. The stock regions hide duplicate answer and related-guide
+cards when the rendered HTML already contains the answer box or guide link.
+Article regions and structured metadata are site-owned source. Read the
 site's `docs/article-presentation.md` and `docs/content-api.md` before authoring
 these components. A guide uses its pipeline's selected section and prefix;
 `guides` is an example, not a reserved collection. Canonical links and lead
@@ -614,15 +615,16 @@ untouched.
 
 ### Contact forms and tracking
 
-Workspace template 5 adds an opt-in contact handler and support for Meta Pixel,
-GA4 and Google Ads. The optional `requireConsent` flag defaults off. The site
-stores contact receipts and delivery jobs in its D1 database. Its scheduled
-Worker delivers Resend notifications and Meta Lead events permitted by the
-site’s consent setting. Template 6 loads form handling on every site page,
-including custom Astro pages, and supports actions under the mounted preview.
-See the
+The workspace template includes an opt-in contact handler and support for Meta
+Pixel, GA4 and Google Ads. The optional `requireConsent` flag defaults off.
+Form handling loads on every site page, including custom Astro pages, and
+supports actions under the mounted preview. The site stores contact receipts
+and delivery jobs in its D1 database. Its scheduled Worker delivers Resend
+notifications and Meta Lead events permitted by the site’s consent setting.
+Template 7 adds per-site webhook delivery and attribution through tracking
+contract 2. Set up that contact schema with a fresh site database. The
 [workspace handover](../templates/emdash/site-workspace/docs/emdash-handover.md#contact-forms-and-browser-tags)
-for configuration, deployment and adopting it on an existing site.
+covers configuration and deployment.
 
 ### Optional division designs
 

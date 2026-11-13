@@ -32,6 +32,8 @@ export interface ArticleRegionProps {
 			origin: string;
 			sectionUrl: string;
 			bodyFormat: "html" | "portable-text";
+			hasBodyAnswerBox: boolean;
+			bodyLinks: readonly string[];
 		};
 	};
 }

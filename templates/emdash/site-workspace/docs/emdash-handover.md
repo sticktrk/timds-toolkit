@@ -108,9 +108,9 @@ change stored patterns as an automatic migration. Removing a section only
 removes its routes; retained content needs a separate explicit decision.
 Writer scopes are global across collections.
 
-TimDS hosted discovery acknowledges template 6, workspace 3, sections 2, composition 1 and tracking 1
-before building. An older host without that acknowledgement is refused;
-standalone builds do not require a host integration.
+TimDS hosted discovery acknowledges template 7, workspace 3, sections 2,
+composition 1 and tracking 2 before building. Standalone builds require no
+host integration.
 
 Verify each declared list, a published entry and every enabled feed at its
 prefix. A missing collection fails the page instead of appearing as an empty
@@ -234,11 +234,17 @@ or refused browser storage and absent consent can leave touch values null.
 Setting `attribution: false` in contact config disables attribution.
 
 A queued job retains the endpoint and header revision it was created for.
+Delivery pauses while destination settings or the secret are missing, then
+resumes with the same endpoint and header. The pause uses none of the delivery
+attempts. If a lead arrives while only part of the destination is configured,
+the site records the lead and a failed `destination_unconfigured` job. After
+completing configuration, an administrator can explicitly redrive that job
+to bind it to the configured endpoint and header for the first time.
 Rotating the secret for the same endpoint and header preserves the queue.
 If the receiver derives account identity from the secret, rotate it within
 that account. Use a distinct destination endpoint for a different account.
-If either changes, old jobs stay recoverable under the original destination
-and cannot be redirected to the replacement. Inspect pending and failed
+If either changes, affected jobs require the original endpoint and header
+and an explicit redrive. Inspect pending and failed
 deliveries, oldest pending age and last success with
 `timds site contact status --source-id UUID` on TimDS Cloud.
 
