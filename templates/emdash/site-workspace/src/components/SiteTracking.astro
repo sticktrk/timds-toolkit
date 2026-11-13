@@ -8,6 +8,3 @@ const tags = contact.delivery === "production" && providerDelivery(env as unknow
 ---
 
 <div hidden data-timds-tracking={JSON.stringify(tags)} data-timds-consent-required={String(contact.requireConsent)}></div>
-<script>
-	import "../lib/contact/browser";
-</script>

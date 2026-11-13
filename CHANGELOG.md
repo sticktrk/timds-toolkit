@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Let EmDash contact forms post from any site page, including shared sidebars and dynamically inserted dialogs. Honor submitter overrides and rebase the contact action in mounted previews.
+
 - Add opt-in workspace-site contact forms with durable Resend and Meta CAPI delivery, Meta Pixel, GA4 and Google Ads with configurable consent enforcement, and hosted site credential commands (#174).
 
 - Align CLI help, installed skills, MCP guides, scaffold instructions and published Use pages with the current command and file-ownership contracts. Document automation output, workspace-site checks and section synchronization, correct starter and consumer boundaries, and make nested `-h` safe without a workspace. Record shipped fragment hashes so ordinary starter sync can deliver the guidance updates.

@@ -1,44 +1,27 @@
-import { consentAllows } from "./config";
-
-type Consent = { analytics?: boolean; marketing?: boolean };
-type Tags = { pixel: string; analytics: string; ads: string; lead: string };
-type TagWindow = Window & {
-  timdsConsent?: Consent;
-  dataLayer?: unknown[];
-  fbq?: Pixel;
-  _fbq?: Pixel;
-};
-type Pixel = ((...args: unknown[]) => void) & {
-  callMethod?: (...args: unknown[]) => void;
-  queue: unknown[][];
-  push?: Pixel;
-  loaded?: boolean;
-  version?: string;
-};
-
-const tagWindow: TagWindow = window;
-const node = document.querySelector<HTMLElement>("[data-timds-tracking]");
-const tags: Tags | null = JSON.parse(node?.dataset.timdsTracking ?? "null");
-const requireConsent = node?.dataset.timdsConsentRequired === "true";
-const enabled = new Set<string>();
-const queued = new WeakSet<HTMLFormElement>();
-const requests = new WeakMap<HTMLFormElement, { id: string; signature: string; consent: Consent }>();
-const converted = new Set<string>();
+let tags = null;
+let requireConsent = true;
+const enabled = new Set();
+const queued = new WeakSet();
+const requests = new WeakMap();
+const converted = new Set();
+const submissionFields = new Set(["cf-turnstile-response", "submission_id", "analytics_consent", "marketing_consent"]);
+// The module is served from the site root at either deployment base.
+const base = new URL(".", import.meta.url).pathname.replace(/\/+$/, "");
+const consentAllows = (value) => value === true || (!requireConsent && value !== false);
 const consent = () => ({
-  analytics: consentAllows(tagWindow.timdsConsent?.analytics, requireConsent),
-  marketing: consentAllows(tagWindow.timdsConsent?.marketing, requireConsent),
+  analytics: consentAllows(window.timdsConsent?.analytics),
+  marketing: consentAllows(window.timdsConsent?.marketing),
 });
 
-function load(url: string) {
+function load(url) {
   const script = document.createElement("script");
   script.async = true;
   script.src = url;
   document.head.append(script);
 }
 
-function google(..._args: unknown[]) {
-  // Google reads the arguments object in dataLayer.
-  (tagWindow.dataLayer ??= []).push(arguments);
+function google() {
+  (window.dataLayer ??= []).push(arguments);
 }
 
 function configure() {
@@ -67,26 +50,26 @@ function configure() {
     }
   }
   if (tags.pixel && allowed.marketing && !enabled.has("pixel")) {
-    const pixel: Pixel = Object.assign((...args: unknown[]) => {
+    const pixel = Object.assign((...args) => {
       if (pixel.callMethod) pixel.callMethod(...args);
       else pixel.queue.push(args);
-    }, { queue: [] as unknown[][], loaded: true, version: "2.0" });
+    }, { queue: [], loaded: true, version: "2.0" });
     pixel.push = pixel;
-    tagWindow.fbq = tagWindow._fbq = pixel;
+    window.fbq = window._fbq = pixel;
     enabled.add("pixel");
     pixel("init", tags.pixel);
     pixel("trackSingle", tags.pixel, "PageView");
     load("https://connect.facebook.net/en_US/fbevents.js");
   }
-  if (enabled.has("pixel")) tagWindow.fbq?.("consent", allowed.marketing ? "grant" : "revoke");
+  if (enabled.has("pixel")) window.fbq?.("consent", allowed.marketing ? "grant" : "revoke");
 }
 
-function conversions(receipt: { receipt: string; analytics: boolean; marketing: boolean }) {
+function conversions(receipt) {
   if (!tags || converted.has(receipt.receipt)) return;
   // Keep duplicate conversion suppression through a refresh in the same tab.
   try {
     const key = "timds:contact-conversions";
-    const recent: string[] = JSON.parse(sessionStorage.getItem(key) ?? "[]");
+    const recent = JSON.parse(sessionStorage.getItem(key) ?? "[]");
     if (recent.includes(receipt.receipt)) return;
     sessionStorage.setItem(key, JSON.stringify([...recent.slice(-49), receipt.receipt]));
   } catch {}
@@ -96,26 +79,26 @@ function conversions(receipt: { receipt: string; analytics: boolean; marketing: 
     google("event", "generate_lead", { send_to: tags.analytics });
   }
   if (allowed.marketing && receipt.marketing) {
-    if (enabled.has("pixel")) tagWindow.fbq?.("trackSingle", tags.pixel, "Lead", {}, { eventID: receipt.receipt });
+    if (enabled.has("pixel")) window.fbq?.("trackSingle", tags.pixel, "Lead", {}, { eventID: receipt.receipt });
     if (enabled.has(tags.ads) && tags.lead) {
       google("event", "conversion", { send_to: `${tags.ads}/${tags.lead}`, transaction_id: receipt.receipt });
     }
   }
 }
 
-async function submit(form: HTMLFormElement, target: URL) {
+async function submit(form, target, submitter) {
   const fields = new URLSearchParams();
-  for (const [name, value] of new FormData(form)) {
+  for (const [name, value] of new FormData(form, submitter)) {
     if (typeof value === "string") fields.append(name, value);
   }
-  const signature = JSON.stringify([...fields].filter(([name]) => !["cf-turnstile-response", "submission_id", "analytics_consent", "marketing_consent"].includes(name)));
+  const signature = JSON.stringify([target.href, [...fields].filter(([name]) => !submissionFields.has(name))]);
   const previous = requests.get(form);
-  const choices = tagWindow.timdsConsent;
+  const choices = window.timdsConsent;
   const pending = previous?.signature === signature ? previous : {
     id: crypto.randomUUID(), signature, consent: { analytics: choices?.analytics, marketing: choices?.marketing },
   };
   requests.set(form, pending);
-  for (const category of ["analytics", "marketing"] as const) {
+  for (const category of ["analytics", "marketing"]) {
     const field = `${category}_consent`;
     const choice = pending.consent[category];
     if (typeof choice === "boolean") fields.set(field, choice ? "yes" : "no");
@@ -142,7 +125,7 @@ async function submit(form: HTMLFormElement, target: URL) {
   } finally {
     queued.delete(form);
     form.removeAttribute("aria-busy");
-    const status = form.querySelector<HTMLElement>("[data-timds-contact-status]");
+    const status = form.querySelector("[data-timds-contact-status]");
     if (status) status.textContent = (success ? form.dataset.timdsContactSuccess : form.dataset.timdsContactError) ?? "";
     form.dispatchEvent(new CustomEvent("timds:contact-result", { bubbles: true, detail: { ok: success } }));
   }
@@ -150,14 +133,32 @@ async function submit(form: HTMLFormElement, target: URL) {
 
 document.addEventListener("submit", (event) => {
   const form = event.target;
-  if (!(form instanceof HTMLFormElement) || !form.hasAttribute("data-timds-contact") || form.method !== "post") return;
-  if (event.defaultPrevented) return;
-  const submitter = (event as SubmitEvent).submitter;
-  if (submitter?.hasAttribute("formmethod") || submitter?.hasAttribute("formaction")) return;
-  const target = new URL(form.action);
+  if (event.defaultPrevented || !(form instanceof HTMLFormElement)
+    || !form.hasAttribute("data-timds-contact") || form.dataset.timdsForm === "not-connected") return;
+
+  const submitter = event.submitter;
+  const method = submitter?.hasAttribute("formmethod") ? submitter.formMethod : form.method;
+  if (method !== "post") return;
+  const action = (submitter?.getAttribute("formaction") ?? form.getAttribute("action"))?.trim();
+  let target;
+  try { target = new URL(action || location.href, document.baseURI); }
+  catch { return; }
   if (target.origin !== location.origin) return;
+  if (base && action?.startsWith("/") && !action.startsWith("//")
+    && target.pathname !== base && !target.pathname.startsWith(`${base}/`)) {
+    target.pathname = base + target.pathname;
+  }
+  target.hash = "";
   event.preventDefault();
-  if (!queued.has(form)) void submit(form, target);
+  if (!queued.has(form)) void submit(form, target, submitter);
 });
+function readTracking() {
+  const node = document.querySelector("[data-timds-tracking]");
+  tags = JSON.parse(node?.dataset.timdsTracking ?? "null");
+  requireConsent = node?.dataset.timdsConsentRequired !== "false";
+  configure();
+}
+
 window.addEventListener("timds:consent", configure);
-configure();
+if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", readTracking, { once: true });
+else readTracking();

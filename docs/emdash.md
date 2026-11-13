@@ -410,9 +410,8 @@ mentions POST does not; `export *` does not either, so name `POST`. When a
 request comes, the middleware checks that `POST` is a function; if it is not,
 the address answers 405 and the server log names the module. EmDash turns
 Astro's cross-origin form check off, so a handler that should accept only the
-site's own form compares the request's `Origin` itself. The template ships no
-handler: what a submission does (mail, a queue, a CRM) is the site's
-decision.
+site's own form compares the request's `Origin` itself. Template 5 and later
+include an opt-in contact handler. A form can use it from any page on the site.
 
 Editing a design or a token changes the site on the next request in
 development and on the next build, with no sync and no version to move. The
@@ -600,7 +599,9 @@ Workspace template 5 adds an opt-in contact handler and support for Meta Pixel,
 GA4 and Google Ads. The optional `requireConsent` flag defaults off. The site
 stores contact receipts and delivery jobs in its D1 database. Its scheduled
 Worker delivers Resend notifications and Meta Lead events permitted by the
-site’s consent setting. See the
+site’s consent setting. Template 6 loads form handling on every site page,
+including custom Astro pages, and supports actions under the mounted preview.
+See the
 [workspace handover](../templates/emdash/site-workspace/docs/emdash-handover.md#contact-forms-and-browser-tags)
 for configuration, deployment and adopting it on an existing site.
 

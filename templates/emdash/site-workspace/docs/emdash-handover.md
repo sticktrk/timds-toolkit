@@ -108,7 +108,7 @@ change stored patterns as an automatic migration. Removing a section only
 removes its routes; retained content needs a separate explicit decision.
 Writer scopes are global across collections.
 
-TimDS hosted discovery acknowledges template 5, workspace 3, sections 2, composition 1 and tracking 1
+TimDS hosted discovery acknowledges template 6, workspace 3, sections 2, composition 1 and tracking 1
 before building. An older host without that acknowledgement is refused;
 standalone builds do not require a host integration.
 
@@ -126,12 +126,25 @@ form and all visitor-facing copy. Give the form `method="post"`,
 `action="/contact"` and `data-timds-contact`. Include fields named `name` and
 `email`, and optionally `message`. Set `data-timds-contact-success` and
 `data-timds-contact-error` on the form. Add a child with
-`data-timds-contact-status` and `role="status"` for the result. The form uses
-JavaScript to submit and announces `timds:contact-result` with `detail.ok`.
-A custom client can send URL-encoded fields with a stable UUID v4 in
+`data-timds-contact-status` and `role="status"` for the result.
+
+Use the same `action="/contact"` in a shared sidebar, on an article, or in a
+dialog added after the page loads. The single handler receives every POST to
+that address. A GET page at `/contact` is optional. The site loads the form
+script on each page, including custom Astro pages, and adds the site base
+when a form uses a root-relative action in a mounted preview. Submit buttons
+can live outside the form when their `form` attribute names it. The script
+uses the clicked button's `formaction` and `formmethod` when supplied. It
+announces `timds:contact-result` with `detail.ok` from the form.
+
+Custom Astro layouts can include `SiteTracking.astro` for browser tags and
+conversion reporting. A custom client can POST URL-encoded fields to the
+site's contact endpoint with a stable UUID v4 in
 `submission_id` and `analytics_consent=yes|no` or
 `marketing_consent=yes|no` when a choice was made. Reuse the key and fields after an
-uncertain response. A 200 response includes the committed receipt.
+uncertain response. A 200 response includes the committed receipt. For Meta
+CAPI, the source URL uses the referring page when it is on the same origin,
+with query parameters and fragments omitted.
 
 Configure public IDs and the notification sender and recipient in
 `src/lib/contact/config.ts`. Connect your consent UI by setting
@@ -183,12 +196,15 @@ review. Resend retries stop before its 24-hour idempotency window ends. The
 contact lead remains in the site's database independently of provider
 delivery.
 
-To adopt on an existing site, generate a template 5 scaffold in a scratch
-Design System. Copy the contact library, migration, tracking component and
-handler example. Merge the Worker changes and add the tracking component to
-your active design and article layouts. Keep existing handlers, consent UI
-and configuration. For hosted builds, merge the new discovery acknowledgment
-into the integration and set `template` to 5 in the site's
+To adopt on an existing site, generate a template 6 scaffold in a scratch
+Design System. Copy the contact library, migration, tracking component,
+public contact script and handler example. Merge the Worker and integration
+changes and add the tracking component to your active design and article
+layouts. If you already use template 5 contact forms, remove the old
+browser script import from `SiteTracking.astro` so a form submits once.
+Keep existing handlers, consent UI and configuration. For hosted builds,
+merge the new discovery acknowledgment
+into the integration and set `template` to 6 in the site's
 `.timds/emdash.json`. Review the migration and build the existing site before
 publishing. Toolkit upgrades leave site files in place.
 

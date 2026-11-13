@@ -5,7 +5,7 @@
   "type": "module",
   "hostContract": 2,
   "emdashTemplate": {
-    "version": 5,
+    "version": 6,
     "history": [
       {
         "version": 1,
@@ -43,6 +43,12 @@
         "changes": [
           "Adds opt-in contact forms, durable delivery through Resend and Meta CAPI, and Meta Pixel, GA4 and Google Ads tags with configurable consent enforcement.",
           "Adds the contact schema migration and hosted discovery tracking contract 1."
+        ]
+      },
+      {
+        "version": 6,
+        "changes": [
+          "Makes the contact form browser script available across site pages and mounted previews, with support for shared layouts, dynamically inserted dialogs and submitter overrides."
         ]
       }
     ]

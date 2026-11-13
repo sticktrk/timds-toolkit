@@ -58,9 +58,37 @@ function saved(receipt: Receipt, fingerprint: string) {
     : response(409, { error: "submission_conflict" });
 }
 
+// The hosted live proxy replaces the request URL with a loopback URL and
+// supplies its public origin. Trust that origin only for same-origin browser
+// requests in the mounted development preview.
+function submissionOrigin(request: Request, url: URL) {
+  if (import.meta.env.DEV && import.meta.env.BASE_URL.replace(/\/+$/, "") === "/site"
+    && request.headers.get("Sec-Fetch-Site") === "same-origin") {
+    const forwarded = request.headers.get("X-TimDS-Preview-Origin");
+    if (forwarded) {
+      try {
+        const preview = new URL(forwarded);
+        if (preview.protocol === "https:" && preview.origin === forwarded) return preview.origin;
+      } catch {}
+    }
+  }
+  return url.origin;
+}
+
+function sourcePage(request: Request, url: URL) {
+  const referrer = request.headers.get("Referer");
+  if (referrer) {
+    try {
+      const page = new URL(referrer);
+      if (page.origin === url.origin) return page.origin + page.pathname;
+    } catch {}
+  }
+  return url.origin + url.pathname;
+}
+
 export const contactPost: APIRoute = async ({ request }) => {
   const url = new URL(request.url);
-  if (request.headers.get("Origin") !== url.origin || request.headers.get("Sec-Fetch-Site") === "cross-site") {
+  if (request.headers.get("Origin") !== submissionOrigin(request, url) || request.headers.get("Sec-Fetch-Site") === "cross-site") {
     return response(403, { error: "origin" });
   }
   const fields = await readFields(request);
@@ -128,7 +156,7 @@ export const contactPost: APIRoute = async ({ request }) => {
         body: {
           data: [{
             event_name: "Lead", event_id: id, event_time: Math.floor(now / 1000), action_source: "website",
-            event_source_url: url.origin + url.pathname, user_data: { em: [em], client_user_agent: userAgent },
+            event_source_url: sourcePage(request, url), user_data: { em: [em], client_user_agent: userAgent },
           }],
           ...(contact.meta.testEventCode ? { test_event_code: contact.meta.testEventCode } : {}),
         },

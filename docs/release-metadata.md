@@ -220,7 +220,8 @@ a version has no entry.
 Hosted workspace templates use `emdashWorkspaceContract: 3` and
 `emdashSectionsContract: 2`. Template 4 adds
 `emdashCompositionContract: 1`. Template 5 adds `emdashTrackingContract: 1`
-for the contact schema. The host selects the acknowledgment from the site's
+for the contact schema. Template 6 retains that tracking contract and extends
+contact forms to mounted previews and custom layouts. The host selects the acknowledgment from the site's
 recorded template and verifies the matching build metadata. Standalone Astro
 builds run without a host acknowledgment. The section declaration stays at
 version 2 and permits nested literal prefixes.
