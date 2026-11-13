@@ -137,15 +137,13 @@ release CI delete the build's source `node_modules` after packaging, then run
 both builtins-only smoke drivers from the runner's temporary directory.
 The driver uses Node to orchestrate assertions; all tested TimDS commands and
 their children use the moved executable with no JavaScript toolchain on PATH.
-Both native targets run through these checks. A successful
-local macOS proof is not Linux evidence: the Linux job must pass before the
-release can publish. The binary pipeline gates npm publication, and both the
-published-release event and the manual release path use the exact same release
-commit. The attachment step checks the tag against package.json, checks both
+Both native targets run through these checks. The release workflow
+publishes to npm before either binary build starts. Both the
+published-release event and the manual release path build the exact commit
+published to npm. Both native builds must pass before distribution. The
+attachment step checks the tag against package.json, checks both
 platform identities, the clean source commit and manifest/lockfile hashes, and verifies executable hashes before creating SHA256SUMS.
-The same verification runs before the executables are uploaded to the public
-download host, which npm publication waits on; see
-[binary-hosting.md](binary-hosting.md).
+The same verification runs before upload to the [public download host](binary-hosting.md).
 
 ## Signing
 

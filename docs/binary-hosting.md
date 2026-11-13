@@ -23,12 +23,12 @@ the public URL before it succeeds.
 
 ## How a release uses it
 
-`release.yml` runs `host-binaries` after the signed, notarized executables are
-built and before `publish`. That job verifies the release
-(`scripts/binary-release.mjs`), then uploads it with
-`node scripts/binary-host.mjs upload <version>`. If the upload or the
-read-back fails, npm does not publish, so no npm version ever lacks its
-executables. `attach-binaries` still attaches them to the GitHub Release.
+`release.yml` publishes to npm first, then builds and verifies the native
+executables, including signing and notarizing the macOS build. Once both builds
+pass, `host-binaries` verifies the release (`scripts/binary-release.mjs`) and
+uploads it with `node scripts/binary-host.mjs upload <version>`. In parallel,
+`attach-binaries` attaches the executables to the GitHub Release. The npm version
+can be available while the executable builds or public download upload are pending.
 
 ## Release configuration
 

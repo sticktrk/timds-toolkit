@@ -48,11 +48,11 @@ Releases: `npm run release` (or `-- 0.2.0`, `-- --dry-run`; `release.sh`
 also takes `--yes`) bumps, tags `v<version>`, pushes, and creates a GitHub
 Release. `.github/workflows/release.yml` also cuts a release itself on
 `workflow_dispatch` from master (`npm run release -- --yes`; its `dry_run`
-input only probes npm trusted publishing), refuses to start without the six
-Apple signing secrets, builds, signs and notarizes both executables through
-`binary.yml`, publishes to npm via trusted publisher only when they built,
-and attaches them with `SHA256SUMS` to the release. Never `npm publish` by
-hand.
+input only probes npm trusted publishing) and publishes to npm via the
+trusted publisher. It then checks the six Apple signing secrets, builds and
+verifies both executables through `binary.yml` with signing and notarization
+on macOS, and attaches them with `SHA256SUMS` to the release. Never
+`npm publish` by hand.
 
 Existing tests use `node:test` with `mkdtemp` fixtures and real `git` subprocesses;
 they assert against the version read from `package.json`, never a hardcoded
@@ -489,9 +489,9 @@ Npm installations retain the bounded requirement and resolved lockfile.
 
 Run `npm run binary:smoke` and `npm run binary:smoke:video` after a binary build.
 Native macOS arm64 and Linux x64 CI runs the complete suite and these clean-PATH
-checks before either release path publishes. Clients download executables
-from the public R2 host (`BINARY_DOWNLOAD_BASE`, uploaded by
-`scripts/binary-host.mjs` before npm publishes), never from GitHub Releases;
-see `docs/binary-hosting.md`. See `docs/binary-installation.md`
+checks before either release path distributes executables. Clients download
+executables from the public R2 host (`BINARY_DOWNLOAD_BASE`, uploaded by
+`scripts/binary-host.mjs` after npm publishes). See `docs/binary-hosting.md`.
+See `docs/binary-installation.md`
 and `docs/binary-packaging.md` for installation, migration, cache integrity,
 platform floors, external prerequisites and actual signing status.
