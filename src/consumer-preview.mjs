@@ -93,8 +93,14 @@ export const PREVIEW_LIMITS = Object.freeze({
 });
 
 const PREVIEW_HELP = `Usage:
-  timds consumer preview --app NAME [--root PATH] [--output DIR] [--no-install] [--base REF]
-                         [--ready-timeout SECONDS] [--publish] [--pull-request N] [--portal-url URL]`;
+  timds consumer preview [--app NAME] [--root PATH] [--output DIR] [--no-install] [--base REF]
+                         [--ready-timeout SECONDS] [--publish] [--pull-request N] [--portal-url URL]
+
+--app is required when the manifest declares more than one app. A workspace
+site uses --root site from its Design System; routes and design pairs follow
+the active design and declared sections without rewriting the manifest.
+Published bundles validate design pairs but cannot supply reference captures;
+a checkout or workspace source is needed for side-by-side design captures.`;
 
 const noop = () => {};
 

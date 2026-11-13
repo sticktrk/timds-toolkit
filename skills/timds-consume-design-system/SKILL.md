@@ -86,9 +86,14 @@ __PIN_RULES__
   the design file is editing the page, and a page added to the design is a
   page of the site. Only a page's default state is served; its other states
   stay references.
-- `__SITE__/sections.json` declares article collections and their address prefixes.
-  Changing sections is a developer change: run the site's `npm run sections:sync`,
-  then the consumer check, and arrange schema creation for an existing database.
+- `__SITE__/sections.json` declaration version 2 names the article
+  collections and literal address prefixes, including nested prefixes;
+  `section-schema.json` owns their shared fields and features. Public design
+  pages, Astro routes and public files cannot occupy collection namespaces.
+  Mark additional sample pages with `site: "reference"` in `design.json`.
+  Changing sections is a developer change: run `npm run sections:sync` in
+  the site, then the consumer check and build, and arrange schema creation
+  for an existing database. Those checks never silently sync source.
 - The article, topic, and 404 routes render inside the design's
   `layout.html` (without one, its home page with the content of its `<main>`
   taken out) through `__SITE__/src/layouts/Base.astro`.
@@ -338,8 +343,11 @@ It checks the site against its manifest and against the system, both ways:
 every site file in the design surface (stylesheets whole; in `.astro`,
 `.html`, `.jsx`, `.tsx`, `.vue`, and `.svelte` files the `<style>` blocks,
 static `style="..."` attributes, and static class names) is compared with
-what the system declares. Colors, font families, custom properties, and
-classes are checked; lengths and other values are not, so take those from
+the source styles the site actually loads: the selected design's linked
+stylesheets, their imports, compiled tokens when it links `/tokens.css`, and
+system sheets imported by site source. Unlinked sheets, `bundle.include` and
+`dist/` do not make a token or class available. Colors, font families, custom
+properties, and classes are checked; lengths and other values are not, so take those from
 the system's tokens yourself. With `--json` the results are
 `workspaceCheck.rewrites` and `workspaceCheck.findings`, each with `file`,
 `line`, and `column` relative to `__SITE__/`.

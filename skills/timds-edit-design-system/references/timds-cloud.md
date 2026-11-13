@@ -18,9 +18,11 @@ are `timds start`, `join`, `pull`, `update`, `submit`, `claim`,
 `active-work`, `whoami`, `systems`, `principals`, `draft create|list|close`,
 and `sessions close`. When the human names a design system you have no id
 for, `timds systems` lists every system the signed-in person can see.
-Outside a session workspace, `active-work`, `principals` and `draft`
-commands need `--system-id ID` and `--portal-url URL`: only `start`, `join`,
-`whoami` and `systems` fall back to the saved login.
+Outside a session workspace, `active-work`, `principals`, `draft` and
+`rollback` need `--system-id ID`. They fall back to the saved login host,
+like `start`, `join`, `whoami` and `systems`; `--portal-url URL`,
+`TIMDS_PORTAL_URL` and a workspace provider take precedence, in that order.
+Pass the known host explicitly when working across systems.
 
 Join before you start. When the human names an open session (a session id, a
 Studio link, or "the session I have open"), attach to it and send work with

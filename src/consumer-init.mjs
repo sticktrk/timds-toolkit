@@ -104,7 +104,7 @@ const INIT_HELP = `Usage:
 Writes timds.consumer.json (apps discovered from package.json files one
 directory down, and the root package.json when it has a dev, start, preview,
 or build script), selects @dtconcepts/timds in the root package.json, and
-installs the consumer skill, the preview and designer-change workflows,
+installs both consumer skills, the preview and designer-change workflows,
 .claude/launch.json entries, and the Design System read MCP server in
 .mcp.json (at --portal-url, default ${DEFAULT_PORTAL_URL}). An existing
 manifest is kept; --force regenerates it and replaces customized managed
@@ -125,7 +125,15 @@ The standalone timds-cli records its exact release in .timds/installation.json
 and fetches published bundles directly, without changing package.json or
 running a package manager. --skip-install skips that first bundle sync.
 Existing npm consumers adopt explicitly with installation adopt --binary;
-product install/build commands and existing npm hooks keep their semantics.`;
+product install/build commands and existing npm hooks keep their semantics.
+
+--draft-preview explicitly adds the product-owned browser module and, when a
+root HTML entry exists, its draft-preview hook. Ordinary upgrade never edits
+those product files; draft updates replace only the ignored bundle.
+
+A Design System's own site uses consumer scaffold emdash --workspace instead.
+Do not run consumer init inside a Design System or its workspace site: the
+site has no pin or toolkit of its own. Run upgrade at the system's root.`;
 
 const DEFAULT_POSTINSTALL = "timds consumer sync";
 

@@ -15,7 +15,21 @@ A third mode, `--existing`, is withdrawn: the command refuses the flag, says
 to use `--workspace`, and writes nothing ([adding EmDash to an existing
 site](#adding-emdash-to-an-existing-site)).
 
+Use the Design System root's selected `npm run timds --` command, or
+`timds-cli` for binary mode. The site still needs Node and npm for its own
+Astro/EmDash package. Scaffold output is prose; it has no `--json` contract.
+For a read-only workspace-site check, use
+`npm --silent run timds -- consumer check --root site --no-fix --json`
+(`--root design-system/site` for an embedded system). Omitting `--no-fix`
+permits the documented token substitutions in site source.
+
 ## A new site repository
+
+For an agent, inspect `consumer scaffold emdash --help` from the selected
+toolkit release before creating the destination. The command requires Git,
+Node and npm for EmDash's generator and product toolchain even when TimDS
+runs as `timds-cli`. `--skip-install` skips the product's final `npm install`;
+it still runs the generator and adds the Design System submodule.
 
 `--root` must not exist, or be empty, and must sit outside any git repository.
 The scaffold initializes the repository, adds the Design System as the
@@ -26,10 +40,14 @@ The scaffold initializes the repository, adds the Design System as the
   submodule and styles the site shell with the token that fills each brand
   role (`var(--…)`, never a literal). A role nothing fills leaves its
   declaration out and is listed for the developer.
-- `src/utils/design-system.ts`, only for a system that still runs the starter
-  build: that build writes `tokens.css` from `tokens.json` into `dist/`, so
+- `src/utils/design-system.ts`, only when the system's `workspace.build` is
+  exactly `["node", "scripts/build.mjs"]`: that starter build writes
+  `tokens.css` from `tokens.json` into `dist/`, so
   the site compiles the pinned `tokens.json` by the same `--group-name` rule
-  and `src/layouts/Base.astro` puts the result on every page.
+  and `src/layouts/Base.astro` puts the result on every page. Other build
+  commands, including the binary starter command, are not currently detected
+  for token-module generation; their selected stylesheets must supply the
+  tokens the site needs.
 - Relative symlinks in `public/` for the Design System's top-level `public/`
   files and directories. Root-relative stylesheet URLs such as
   `/fonts/example.woff2` and `/images/background.svg` reach those pinned
@@ -84,19 +102,14 @@ pin. The rest of this section describes the mode as it was built. It is kept
 because the workspace mode installs the same template set, and it goes when
 the mode's code is removed.
 
-```bash
-npx --yes @dtconcepts/timds@0.1.x consumer scaffold emdash --existing \
-  --root /path/to/site [--platform cloudflare|node] [--layout PATH] \
-  [--site-url URL] [--skip-install]
-```
-
-`--existing` is for an Astro site that already consumes a Design System
+The retained `scaffoldExistingEmdashSite` function and its tests describe an
+Astro site that already consumes a Design System
 through `timds.consumer.json` (adopt it with `timds consumer init` first). It
 installs the shared EmDash template set, so the site gains an articles
 section whose entries arrive through EmDash's REST API or MCP server. It
 writes no default pages: an existing site already ports its own from its
-system. The fresh scaffold will move onto the same template set, so a fix
-found on one site lands in one place.
+system. This is historical implementation documentation, not an available
+CLI workflow; use one of the two supported modes above.
 
 The files install at the site root: the folder of the manifest's only app, or
 of its root app (`"cwd": "."`) when it declares several. It writes:
@@ -220,8 +233,10 @@ designs init` adds the starter's sample), when `.agents` or `.agents/skills`
 at the repository root is not a directory, when a consumer skill folder there
 holds anything but the bytes it would write, and when the system's
 `AGENTS.md` is not a regular file. `--existing` is withdrawn and refused
-everywhere; `--design-system`, `--stylesheet`, `--portal-url`, `--layout` and
-`--site-url` belong to the fresh mode and are refused, and so is any `--platform` but `cloudflare`. A
+everywhere. `--design-system`, `--stylesheet`, `--portal-url` and `--site-url`
+belong to the fresh mode and are refused here. `--layout` belonged to the
+withdrawn mode and is refused in both supported modes, as is any workspace
+`--platform` but `cloudflare`. A
 failed write removes the site and restores the files outside it. Then, unless
 `--skip-install`, it runs `npm ci` in `site/`; a failed install leaves the
 files in place, and the scaffold is not rerun (it refuses a folder that is
@@ -249,7 +264,8 @@ where a file at the same path replaces the shared one:
 - `package.json`, generated: private, named `<system id>-site` (slugged), the
   exact versions `templates/emdash/site.json` lists for every mode plus the
   workspace block, and the scripts `dev` (`astro dev`), `build`, `preview` and
-  `worker`. The site is its own package, not an npm workspace of the root, and
+  `worker`, plus the explicit `sections:sync` command. The site is its own
+  package, not an npm workspace of the root, and
   declares no toolkit: it uses the workspace's.
 - `timds.consumer.json` and `.timds/emdash.json` (both below).
 

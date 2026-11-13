@@ -45,6 +45,10 @@ the previous executable for rollback. Then invoke that release's
 `timds-cli upgrade --version EXACT_VERSION` to select it and synchronize the
 managed files. A plain `upgrade` only synchronizes the already selected
 release. There is no implicit self-update or resolution of `latest`.
+Selection requires a clean worktree. If its synchronization or checks fail,
+the command restores the previous selection and the files in its rollback
+boundary. Use `timds-cli upgrade --version EXACT_VERSION --json` for a machine
+receipt; check its exit status and `ok` before treating the selection as done.
 Rollback uses the retained executable and an explicit upgrade to its exact
 version; review the managed diff just as for an upgrade. Restore the prior
 workspace commit when authored migration changes also need rolling back.
@@ -62,9 +66,9 @@ package and native binaries from the same commit before distribution.
 
 ## Download and install
 
-Choose an exact released version: `npm view @dtconcepts/timds version` prints
-the current one. Every release from 0.1.478 on is served, unchanged and never
-overwritten, under `https://downloads.timds.com/timds-cli/v<version>/` (see
+Choose an exact released version: when npm is available,
+`npm view @dtconcepts/timds version` prints the current one. Published executable
+releases use the immutable path `https://downloads.timds.com/timds-cli/v<version>/` (see
 [binary-hosting.md](binary-hosting.md)). The initial supported downloads are macOS Apple Silicon (`darwin-arm64`) and
 Linux x86-64 with glibc (`linux-x64`). No package-manager command is needed:
 

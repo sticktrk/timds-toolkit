@@ -135,10 +135,10 @@ repository that reads the system through a pin.
 of the Design System workspace at --root (default: the current folder; an
 embedded system's design-system/ folder is used the way the workspace
 commands use it). The site has no pin: it reads the system's stylesheets and
-tokens from their source paths, and builds every page of the system's
-website design that is not an article, topic or list route from the design
-file, with the article routes inside the design's layout, so a change to the
-system is a change to the site on its next build. site/ is its own package
+tokens from their source paths. Public pages come from the selected website
+design; collection routes follow the site's declared sections and render
+inside the design's layout. Stock samples and pages marked site: "reference"
+remain nonpublic. A system change reaches the site on its next build. site/ is its own package
 (package.json and package-lock.json with exact versions, not an npm
 workspace of the root); its manifest is site/${CONSUMER_MANIFEST_FILE} with
 designSystem { "workspace": true, "systemId": ... }, and ${EMDASH_RECORD_PATH}
@@ -148,7 +148,14 @@ files for the same workspace. It refuses a folder that is not in a Design
 System workspace, a site/ that exists and is not empty, and a system with no
 website design, before writing anything; then, unless --skip-install, it
 runs npm ci in site/. Article routes whose classes the system's stylesheets
-do not declare are listed as having no port yet.`;
+do not declare are listed as having no port yet.
+
+For a workspace site, edit site/sections.json and site/section-schema.json,
+then explicitly run npm run sections:sync inside site/. Build, dev and
+consumer check validate that declaration and its seed; they never synchronize
+source implicitly. Upgrade at the Design System root leaves site/ and the
+scaffolded consumer guidance untouched. --workspace cannot combine with
+--design-system, --stylesheet, --site-url, --portal-url or --layout.`;
 
 // ---------------------------------------------------------------------------
 // Small helpers

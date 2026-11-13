@@ -7,10 +7,17 @@ or copy rendering, staging, composition registration, or producer runtime code
 into client repositories. A generated client-owned snapshot of the visual
 Remotion components is source, not copied runtime.
 
-Before committing changes, run:
+## Testing policy for agents
+
+- Never run the full test suite (`npm test` or an equivalent command). The
+  full suite runs in PR CI.
+- Run targeted tests only when necessary to verify the change.
+- Do not write or extend unit tests. Any new tests must be smoke tests that
+  exercise public commands or workflows.
+
+Before committing changes, run the package-content check:
 
 ```bash
-npm test
 npm run pack:check
 ```
 
@@ -49,8 +56,8 @@ supported export: hosts preparing toolkit upgrades load it from the selected
 release to describe that package's own templates and skills.
 
 Keep package releases cohesive. A version must carry compatible CLI behavior,
-templates, workflows, and skill instructions together. Update or add tests
-whenever managed-file behavior changes.
+templates, workflows, and skill instructions together. When managed-file
+behavior changes need new coverage, add smoke tests only; do not write unit tests.
 
 Npm client repositories select the bounded `0.1.x` package line, commit the exact
 resolved lockfile, and execute `npm run timds --`. Binary clients instead select
@@ -396,9 +403,10 @@ When adding a view, a page, or a catalog:
    lists; CI runs the check and fails on a gap. A new authored page under a
    starter view goes in `starterManagedFragments`; a new stylesheet the
    layout must link goes in the plumbing table and the layout link list.
-4. Update the starter assertions in `src/core.test.mjs` (page ids, page
-   counts, rendered tables) and `src/mcp.test.mjs` (the stylesheet list),
-   then run `npm test` and `npm run pack:check`.
+4. When verification is necessary, smoke-test the affected scaffold and
+   rendered output through the CLI. Do not write unit tests or run the full
+   suite; PR CI runs the existing starter and MCP assertions. Run
+   `npm run pack:check` before committing.
 
 ## The brand kit mirrors its slot contract
 

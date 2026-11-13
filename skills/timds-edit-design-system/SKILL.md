@@ -10,7 +10,8 @@ surface. Work only in the client repository supplied by the user.
 
 ## Installation mode
 
-Read `.timds/installation.json` before installing tools. With `mode: "binary"`,
+Read `.timds/installation.json` under the Design System root (the folder
+holding `timds.json`) before installing tools. With `mode: "binary"`,
 use `timds-cli` at its exact `version` in place of `npm run timds --`; skip npm
 installation and npm dependency-upgrade steps for the stock system. Check
 `timds-cli --version` and `timds-cli doctor`. Select another executable release
@@ -45,6 +46,20 @@ retain their declared prerequisites. The agent runs these steps for the designer
    `machine` entries of `timds.json` are design configuration an editing
    agent may change.
 
+Run commands from the repository root; authored paths below are relative to
+the Design System root (`design-system/` for an embedded system). Its
+`.timds/installation.json` is under that same Design System root; the npm
+script and managed skills are at repository root. When running elsewhere,
+pass `--root /absolute/path/to/repository` to select the intended workspace.
+Read this installed release's `--help`, `consumer --help` or `video --help`
+before using an unfamiliar command. For structured inspection use
+`doctor --json`, `brand --json`, `starter status --json` and, during an
+explicitly requested upgrade, `upgrade --json`; these commands write one JSON
+document on stdout and progress on stderr. In npm mode, put npm's `--silent`
+option before `run` when capturing stdout so lifecycle banners do not precede
+the JSON. Check the exit status as well as the result; a failed upgrade still emits its JSON report. Do not assume every
+command supports `--json`.
+
 ## Authored and generated contract files
 
 When `.timds/contract-layout.json` exists (every system scaffolded or
@@ -68,8 +83,9 @@ and `design-handoff` writes the brief a developer ports a release from.
 
 ## Start from a fresh scaffold
 
-The ordinary starter ships a dependency-free viewer whose colors, fonts, and
-copy are neutral placeholders. It passes `check` with two expected warnings:
+The ordinary starter uses the renderer in the toolkit package, with authored
+pages, styles and catalogs under `src/`. Its colors, fonts and copy are
+neutral placeholders. It passes `check` with two expected warnings:
 no `brand/voice` page and no annotated logo. Turning it into the client's
 system is ordinary design work:
 
@@ -145,8 +161,9 @@ use the sample wordmark or the Bold treatment, while an invalid explicit
 path fails. Run check and review the reported fallback keys, assumed
 voice diagnostic, missing-logo gap, and all four treatments on the actual
 palette. The Voice page already carries guidance; do not mark it planned to
-recreate the ordinary starter's warning. Designs begin empty; author whole
-pages there when requested. Run the toolkit for the designer, then prepare
+recreate the ordinary starter's warning. The kit seeds a `website` design
+with default pages, article references and journeys on its own stylesheets;
+replace those samples with the client's content and preserve useful states. Run the toolkit for the designer, then prepare
 the released reference for the developer's port into the product.
 
 ## Shape pages for the derived layer
@@ -154,9 +171,10 @@ the released reference for the developer's port into the product.
 `check` reads the built HTML and CSS, never authored source, and derives
 `index.json`, `tokens.json`, `brand.json`, `formats.json`, `designs.json`,
 `changelog.json` (with the `/changelog/` page, rendered from `CHANGELOG.md`),
-`bundle.json` with the `bundle/` copies, `llms.txt`, `llms-full.txt`, a
-Markdown mirror of every page, and a `robots.txt` at the site root that
-names `llms.txt`. Video, product repositories, consumer agents, and anyone
+`bundle.json` with the `bundle/` copies when `bundle.include` is configured,
+`llms.txt`, `llms-full.txt`, and a Markdown mirror of every page. When the
+artifact entry is at the site root, extraction also writes a missing
+`robots.txt` naming `llms.txt`; it preserves one the build already wrote. Video, product repositories, consumer agents, and anyone
 given the system's public link read only that layer, so structure the pages
 for it whatever the framework:
 
@@ -190,7 +208,8 @@ for it whatever the framework:
 The system is designer-owned down to the pages. A website, or any set of
 screens, is designed under `src/designs/<design>/` in HTML with JavaScript on the
 system's own stylesheets; an engineer ports it to production. The design is
-the reference the port must match, never the production site itself.
+the reference a separate product's port must match. An optional EmDash site
+inside this workspace renders the design source directly, as described below.
 
 - `design.json` names the design (`title`, `summary`, optional `pages` titles
   by route). An optional `layout.html` with `{{content}}` is the shell;
@@ -239,6 +258,42 @@ the reference the port must match, never the production site itself.
   stylesheet when the system still uses the starter's token names; otherwise
   it names the classes the sample needs.
 
+## A website inside this workspace
+
+When `site/timds.consumer.json` under the Design System root declares
+`designSystem.workspace: true`, the system has its own EmDash site with no
+pin. Its selected website design, token source and linked stylesheets are
+read directly; ordinary design pages become site pages, while non-default
+states, stock article samples and pages marked `site: "reference"` remain
+references. Read the site's `AGENTS.md`, `DESIGN_SYSTEM.md` and the two
+consumer skills the scaffold installed before changing it.
+
+The site is a separate npm package (`site/` in a standalone system,
+`design-system/site/` in an embedded one). Run `npm ci` in that folder;
+root `dev` serves it under `/site/`, while root `check` checks only the
+Design System. Run `consumer check --root SITE_PATH --no-fix --json` for
+findings without writes, or omit `--no-fix` for the documented exact-token
+rewrites. Run that check and the site's build after changing shared design
+source; never put the site's dependencies into the root package.
+
+When the user asks to add this site, run
+`npm run timds -- consumer scaffold emdash --workspace` from repository
+root. It writes new product source, two site-specific consumer skills and a
+marked section in the system's `AGENTS.md`; ordinary upgrade does not refresh
+those or anything under the site. `--existing` is withdrawn and writes
+nothing. To create a separate pinned product, use the separate-repository
+`consumer scaffold emdash --root PATH --design-system GIT_URL` flow.
+
+Article sections are developer-owned `sections.json` declaration version 2
+and `section-schema.json` inside the site. To change them, read the site's
+contract, run `npm run sections:sync` in that folder, then its consumer check
+and build. Build, dev and consumer check validate without syncing the seed.
+Nested literal prefixes are supported within the selected design; public
+pages, routes or files may not collide with section namespaces. A configured
+database needs an explicit schema plan; changing the seed alone cannot
+migrate it. Content work uses EmDash's admin, REST or MCP contract rather
+than source commits.
+
 ## The starter is synced by upgrade
 
 `.timds/starter.json` records the starter plumbing (the `scripts/build.mjs`,
@@ -265,7 +320,8 @@ the sync refuses to run over uncommitted changes to the files it writes.
 Treat planned pages that
 appear after an upgrade as primitives to author. When a change needs a stock
 script, prefer `tokens/*.json`, `system.css`, and the pages; a local script
-change leaves that file behind on every later upgrade. An extra build step is
+change is replaced in toolkit mode and kept as customized only in recorded
+mode. An extra build step is
 a command in `timds.json` `workspace.after.build` (argv arrays run from the
 design-system root after every stock build), never an edit to the build
 script.
@@ -277,8 +333,9 @@ not change what visitors see. A visible step waits for `starter migrate
 --accept <id>` or `--decline <id>`: ask the person who publishes the system
 which, and run it only on their answer. In a hosted session, run the same
 command in the session workspace when the host asks for it. A system whose
-record has no `level` (or none at all) predates starter levels: upgrade,
-starter sync, starter migrate and feed refuse it with `below_floor`. Do not
+starter record is missing, has no `level`, or has a level below the floor is
+unsupported: upgrade, starter sync, starter migrate, feed and shoot refuse
+it with `below_floor` before writing. Check and doctor only warn. Do not
 work around that; tell the person it must be regenerated from the current
 starter, which is a separate, reviewed piece of work.
 
@@ -318,8 +375,9 @@ media, designs or configuration. This is the editable exception under `.timds/`
 for remote editing tools; `run_check` validates it before publication.
 
 `.timds/parent.json` is protected ancestry: schemaVersion 1, parent `systemId`,
-source UUID `sourceId`, release `version`, source `commit`, `mode`, and
-`baseline: {site, formats}`. Never hand-edit it or remove it through a session.
+source UUID `sourceId`, release `version`, source `commit`, `mode`,
+`baseline: {site, formats}`, and `files`, the hashes of declared stock last
+written into the child. Never hand-edit it or remove it through a session.
 Starter sync and upgrade preserve it and update toolkit plumbing without
 merging the toolkit's catalogs or fragments into an offshoot. Layout
 maintenance remains limited to missing stock stylesheet links.

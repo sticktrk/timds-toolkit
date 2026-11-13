@@ -9,13 +9,15 @@ only.
 
 ## Commands
 
+Never run the full test suite (`npm test` or an equivalent command); it runs
+in PR CI. Run targeted tests only when necessary to verify the change. Do not
+write or extend unit tests: any new tests must be smoke tests that exercise
+public commands or workflows.
+
 ```bash
-npm test                      # tsc --noEmit, then node --test over .github/scripts/*.test.mjs, src/*.test.mjs and video/*.test.mjs, then tsx --test video/*.test.tsx
 npm run typecheck             # tsc --noEmit (tsconfig only includes video/remotion.tsx)
 npm run pack:check            # npm pack --dry-run; verifies the `files` allowlist in package.json
-node --test src/core.test.mjs # one test file
-node --test --test-name-pattern="upgrade" src/core.test.mjs   # one test by name
-tsx --test video/remotion.test.tsx                            # the React component test
+node --test --test-name-pattern="TEST_NAME" src/core.test.mjs # an existing targeted test, only when necessary
 node bin/timds.mjs <command> --root /path/to/client-design-system   # run the CLI from source
 node bin/timds.mjs starter sync --root /path/to/client-design-system  # re-sync a starter-based system (every upgrade does it too)
 ```
@@ -32,12 +34,13 @@ files and the two workflows; and `video/`, `templates/`, `skills/`, the
 video, starter, brand-kit and core modules and the proof scripts) or on a
 manual run. A release rebuilds and verifies the executables in `release.yml`;
 the upgrade proof never runs there. A newer push to a pull request cancels
-its running checks. Run tests and the pack check before committing.
+its running checks. Agents leave the full suite to PR CI and run the package
+check before committing.
 
 The starter-history check fails when a starter plumbing file or managed
 fragment changes after a release without its shipped hash in
-`legacyStarterFileHashes` (`src/starter.mjs`, empty at the starter floor; the
-check walks the releases from the first that carries starter levels): after
+`legacyStarterFileHashes` (`src/starter.mjs`; the check walks the releases
+from the first that carries starter levels): after
 changing one, run
 `node scripts/check-starter-history.mjs --print` and add the entries it lists.
 
@@ -51,10 +54,10 @@ Apple signing secrets, builds, signs and notarizes both executables through
 and attaches them with `SHA256SUMS` to the release. Never `npm publish` by
 hand.
 
-Tests use `node:test` with `mkdtemp` fixtures and real `git` subprocesses;
+Existing tests use `node:test` with `mkdtemp` fixtures and real `git` subprocesses;
 they assert against the version read from `package.json`, never a hardcoded
 one. `src/video.fixture.mjs` builds a complete video workspace fixture; reuse
-it rather than hand-writing contract JSON in new video tests.
+it when smoke coverage needs a video workspace. Do not add unit tests.
 
 ## Architecture
 
@@ -64,7 +67,7 @@ is `video/remotion.test.tsx`, and `templates/emdash/design-system.ts` is a
 shipped template, not toolkit code). Hand-written `.d.mts` files ship type
 declarations for the data-contract modules consumers import (brand, bundle,
 changelog, derived, designs, formats, tokens, runtime, offshoot-contract,
-brand-kit, and the video producer, transport, boards, footage and board
+brand-kit, release-metadata, and the video producer, transport, boards, footage and board
 layouts); the CLI, MCP, consumer and hosted exports have none.
 `package.json` `exports` and `files` are curated allowlists; a new public module
 must be added to both.
@@ -79,19 +82,22 @@ branch: `version`, `run`, `init`, the hosted session set (`start`, `pull`,
 `systems`, `principals`, `claim`, `active-work`, `draft create|list|close`,
 `rollback`), `upgrade`, `dependencies check`, `login` and `auth
 login|status|logout`, `skills install`, `defaults`, `designs init`, `starter
-sync`, `shoot`, `feed`, `sever`, `installation adopt`, `doctor`, `brand`,
-`dev`, `check`, `extract`, `publish`, `preview`, `diff`, `assets` (alias
+sync|status|migrate`, `shoot`, `feed`, `sever`, `installation adopt`, `doctor`, `brand`,
+`dev`, `check`, `extract`, `publish`, `artifact publish`, `preview`, `diff`, `assets` (alias
 `media`) `list|add|backfill-metadata|publish|pull`, `video` (its own
 `VIDEO_HELP` in `src/video.mjs`), `mcp [edit]` and `mcp read`, `submit`, and
 `consumer …` (delegated to `runConsumerCli` in `src/consumer.mjs`). Keep the
-help text and this list in step with the dispatcher.
+help text and this list in step with the dispatcher. `--help` and `-h` run
+without a workspace; `src/cli-help.test.mjs` smoke-tests representative help
+paths through real CLI subprocesses from an empty directory. For automation, prefer the selected
+release's help over a command mentioned only in a proposal.
 
-The workspace commands (`doctor`, `brand`, `dev`, `check`, `extract`,
-`publish`, `preview`, `diff`, `assets`, `submit`, `video`, `mcp`, `upgrade`,
-`defaults`, `designs init`, `starter sync`, `feed`, `sever`) call
-`loadWorkspace`; `version`, `run`, `init`, `auth`/`login`, `skills install`,
-`installation adopt`, `shoot` (which loads only the new destination), the
-hosted session set (`runHostedCommand`) and `consumer` do not.
+Design System commands generally call `loadWorkspace`; help, version and
+bootstrap commands run before that requirement. Hosted commands resolve
+their session or system context through `runHostedCommand`; consumer commands
+use the product manifest. `mcp read --published` needs no local workspace.
+Read the dispatch branch before assuming a command is read-only: ordinary
+workspace loading can regenerate compatibility views.
 `loadWorkspace`:
 
 1. Finds the repo root (`findRepositoryRoot`): the nearest ancestor holding
@@ -101,11 +107,14 @@ hosted session set (`runHostedCommand`) and `consumer` do not.
 2. Picks the layout: `timds.json` at root is **standalone**; otherwise the
    design system lives in `design-system/` (**embedded**). `scopePath` drives
    git pathspecs for `diff`/`submit`.
-3. Validates `timds.json` (`validateManifest`, schema versions 1 and 2),
-   requires `tokens.json`, and reads the media catalog (`media.json`).
+3. Enforces the selected binary installation when applicable, validates
+   `timds.json` (`validateManifest`, schema versions 1 and 2), regenerates
+   grouped token/media compatibility views (except with `editing: true`),
+   requires `tokens.json`, reads `media.json`, and validates the parent record.
 
 Design-system build/dev/check are delegated to the commands declared in
-`timds.json` `workspace.*`; TimDS never builds authored source itself.
+`timds.json` `workspace.*`; the stock commands invoke the package viewer.
+Custom build steps belong in `workspace.after.build`.
 `checkWorkspace` (`check`) validates the offshoot records, runs the workspace
 `build`, renders the designs (`buildWorkspaceDesigns`) and the changelog
 (`buildWorkspaceChangelog`), runs the workspace `check` command, checks the
@@ -253,8 +262,9 @@ lifecycle belong to the host.
 - `src/starter.mjs` implements `timds starter sync`, the recurring starter
   migration `upgrade` runs on every starter-based system at or above the
   starter floor (one below it, from before starter levels, is refused with
-  `below_floor` and regenerated): stock plumbing replaced
-  by recorded hash, `src/site.json` and `src/formats.json` merged against the
+  `below_floor` and requires regeneration): stock plumbing restored on every
+  sync in `toolkit` mode, or refreshed by recorded/known stock hash in
+  `recorded` mode, and `src/site.json` and `src/formats.json` merged against the
   baseline in `.timds/starter.json` (the catalogs are serialized in the
   starter's one-entry-per-line style so diffs stay reviewable), managed
   overview fragments written for added or planned pages, a missing stylesheet
@@ -270,7 +280,8 @@ lifecycle belong to the host.
   sync and parent feeds never move the front page.
   `init` records a fresh scaffold at the current level. The `starter` field
   selects the stock catalogs and managed fragments; absent means the ordinary
-  `starter`. `legacyStarterFileHashes` in `src/starter.mjs` lists every stock
+  `starter`. The brand kit has no managed fragments: its pages are seed-only.
+  `legacyStarterFileHashes` in `src/starter.mjs` lists every stock
   version a release at or above the floor shipped of each plumbing file and
   managed fragment, so a system at an older release's bytes is still
   refreshed; `scripts/check-starter-history.mjs`
@@ -309,13 +320,14 @@ catalog's default-state rule, held equal by
 disabled until the site has a handler under `src/forms/`. `templates/starter/` is the standalone repo scaffold including
 its release scripts; `templates/*.yml` are the stock workflows.
 `templates/brand-kit/` overlays only the second starter's catalogs, token and
-copy samples, stock declaration, styles, layout, pages and empty Designs
-structure. `init --starter brand-kit` records that kind; it never copies the
+copy samples, stock declaration, styles, layout, pages and its own seeded
+website design. `init --starter brand-kit` records that kind; it never copies the
 ordinary starter's authored page tree or sample design into the overlay.
 `src/brand-kit.mjs` is the public pure-data slot contract, exported as
 `@dtconcepts/timds/brand-kit` with `.d.mts` declarations; the package viewer
 imports it, so slot rules, samples, page ids and stock paths have one source.
-The starter is client-owned once copied, except the plumbing and catalogs
+The starter is client-owned once copied, except the plumbing, catalogs,
+ordinary starter's managed fragments and narrow layout/step boundaries
 `starter sync` keeps current (see above). The renderer is not copied:
 `scripts/build.mjs`, `check.mjs` and `dev.mjs` are stubs that call
 `@dtconcepts/timds/viewer` (`src/viewer.mjs`) with the system's root, falling
@@ -398,8 +410,8 @@ version of the release automation files a release shipped, consulted by the
 `--auto-release` migration and by every later upgrade of adopted automation
 (including the dated-version migration of `release.sh` and
 `check-versions.mjs`). When a template or skill
-changes, update the tests in `src/core.test.mjs` that assert managed-file
-behavior.
+changes need new coverage, add a smoke test of the affected CLI workflow;
+leave the full suite to PR CI and do not write unit tests.
 
 ### Hosted sessions, publication, upgrade and consumer review
 

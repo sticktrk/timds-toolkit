@@ -1,6 +1,6 @@
 <span class="eyebrow">Use</span>
 <h1 class="page-title">Install</h1>
-<p class="lede">Put {{name}} in front of the tool you work with. A one-off piece of work needs nothing installed: paste one address. Ongoing work connects an agent once. A website or app pins a release. Every way in reads the same published release, so choose by the job, not by the tool.</p>
+<p class="lede">Put {{name}} in front of the tool you work with. A one-off piece of work needs nothing installed: paste one address. Ongoing work connects an agent once. A website or app pins a release. Each way reads the system's guidance; a product keeps its selected release until a developer moves the pin. Choose by the job, not by the tool.</p>
 <div class="rule"></div>
 
 <section class="block" id="choose">
@@ -13,7 +13,7 @@
     <tbody>
       <tr><td><strong>One piece of work</strong>: a post, an email, a deck, a one-page site, a quick question about the brand</td><td><a href="#one-url">1 · Paste one address</a></td><td>Nothing</td></tr>
       <tr><td><strong>Ongoing work in a repository</strong> with an agent: Claude Code, Codex, Cursor, Gemini CLI, VS Code, or any MCP client</td><td><a href="#agent">2 · Connect the agent over MCP</a></td><td>One server entry; the CLI runs at <code>@latest</code></td></tr>
-      <tr><td><strong>A website or app</strong> built on the system</td><td><a href="#product">3 · Pin a release in the product</a></td><td>A manifest, a dev dependency, a skill, and the MCP entry</td></tr>
+      <tr><td><strong>A website or app</strong> built on the system</td><td><a href="#product">3 · Pin a release in the product</a></td><td>A manifest, a locked dev dependency, consumer skills, and review configuration</td></tr>
       <tr><td><strong>Changing the system itself</strong>: a designer, or an agent working for one</td><td><a href="#contribute">4 · Give the agent the designer skills</a></td><td>Skills in the folder the agent works from</td></tr>
     </tbody>
   </table>
@@ -39,7 +39,7 @@
 <section class="block step" id="agent">
   <div class="block__head">
     <h2 class="h2">Connect your agent over MCP</h2>
-    <p>For ongoing work in a repository, add the system's read server to the agent once. The entry runs the TimDS CLI at <code>@latest</code> against the published copy, so there is no version to maintain, no sign-in, and no token: the server is read-only and never sees authored source. It is named <code>timds-design-system-read</code>; its first calls are <code>get_consumer_guide</code>, then <code>describe_system</code>, and every result names the release it read. Pick the tool, copy the snippet, and start a new conversation in the repository.</p>
+    <p>For ongoing work in a repository, add the system's read server to the agent once. Snippets 1 to 6 run the TimDS CLI at <code>@latest</code> against this public copy, with no sign-in or token: the server reads the derived layer and never edits authored source. An installed binary can instead run <code>timds-cli mcp read --published URL</code> with this system's public URL. It is named <code>timds-design-system-read</code>; its first calls are <code>get_consumer_guide</code>, then <code>describe_system</code>, and system reads name the release they read. Pick the tool, copy the snippet, and start a new conversation in the repository.</p>
   </div>
   <table class="spec">
     <thead><tr><th>Tool</th><th>Where the entry goes</th><th>Snippet</th></tr></thead>
@@ -50,7 +50,7 @@
       <tr><td><strong>Gemini CLI</strong></td><td><code>.gemini/settings.json</code> in the repository</td><td>4</td></tr>
       <tr><td><strong>VS Code</strong></td><td><code>.vscode/mcp.json</code> in the repository</td><td>5</td></tr>
       <tr><td><strong>Any other MCP client</strong></td><td>Its stdio server configuration</td><td>6</td></tr>
-      <tr><td><strong>No local install</strong></td><td>A TimDS host answers read-only MCP over HTTP at <code>/mcp</code> on this public origin</td><td>7</td></tr>
+      <tr><td><strong>No local install</strong></td><td>If you use TimDS Cloud and this public origin exposes <code>/mcp</code>, connect to its HTTP read server</td><td>7</td></tr>
     </tbody>
   </table>
   <div class="tabs" data-tabs aria-label="Agent">
@@ -107,15 +107,15 @@ npx -y @dtconcepts/timds@latest mcp read --published <span data-root>https://THI
 }</pre>
     </div>
   </div>
-  <p class="note">Snippets 1 to 6 give the agent the whole consumer tool set: brand roles, tokens, guidance search, pages, formats, designs, and media; <a href="{{page:use/compose}}#mcp">Compose</a> lists every tool. Snippet 7 needs nothing on the machine and carries the host's published read tools, <code>describe_system</code>, <code>get_tokens</code>, <code>read_page</code> and <code>read_derived_layer</code>, each taking this system's id, <code><span data-system-id>SYSTEM-ID</span></code>, as <code>systemId</code> and an optional <code>version</code>.</p>
-  <p class="note">First reads, in order: <code>get_consumer_guide</code> once per conversation, then <code>describe_system</code> and note the version. For a color or a font ask <code>resolve_role</code>, not a token name; for marks and imagery <code>get_brand</code> and <code>list_media</code>; for copy <code>search_guidance</code>; for a size <code>list_formats</code>. Report what was used, and name anything the system could not answer rather than guessing it.</p>
+  <p class="note">Snippets 1 to 6 give the agent the whole consumer tool set: brand roles, tokens, guidance search, pages, formats, designs, and media; <a href="{{page:use/compose}}#mcp">Compose</a> lists every tool. If you use TimDS Cloud, snippet 7 needs no local CLI when the host exposes that endpoint. Discover its advertised tools before calling them; the host may offer <code>describe_system</code>, <code>get_tokens</code>, <code>read_page</code> and <code>read_derived_layer</code>, each taking this system's id, <code><span data-system-id>SYSTEM-ID</span></code>, as <code>systemId</code> and an optional <code>version</code>. Historical selection depends on the host; a local or fixed-URL reader uses <code>version</code> only to assert its served release.</p>
+  <p class="note">For the toolkit read server, first reads in order: <code>get_consumer_guide</code> once per conversation, then <code>describe_system</code> and note the version. For a color or a font ask <code>resolve_role</code>, not a token name; for marks and imagery <code>get_brand</code> and <code>list_media</code>; for copy <code>search_guidance</code>; for a size <code>list_formats</code>. Report what was used, and name anything the system could not answer rather than guessing it.</p>
   <p class="note">When the release is an offshoot, <code>describe_system</code> and the derived layer's provenance carry <code>lineage</code>: its parent system, source, release, commit, and creation mode. A <code>null</code> lineage is supported for ordinary systems and older releases. Ancestry describes where the system began; use the served system's guidance and assets.</p>
 </section>
 
 <section class="block step" id="product">
   <div class="block__head">
     <h2 class="h2">Pin a release in a website or app</h2>
-    <p>A product never copies the system. One command at the product's root pins the current release in <code>timds.consumer.json</code>, wires a digest-verified fetch of the consumer bundle into <code>npm install</code>, installs the <code>timds-consume-design-system</code> skill that tells an agent how to make a design change in the product, and writes the MCP entry from step 2. A clone and an install is then all a developer, or an agent working in the product, needs.</p>
+    <p>A product never copies the system. One command at the product's root pins the current release in <code>timds.consumer.json</code>, wires a digest-verified fetch of the consumer bundle into <code>npm install</code>, installs <code>timds-consume-design-system</code> for design changes and <code>timds-update-design-system</code> for developer pin updates, and writes launch and review configuration. It also registers the hosted read-MCP entry, which needs host authorization when used. A clone and an install is then all a developer, or an agent working in the product, needs.</p>
   </div>
   <pre data-copy>npx --yes @dtconcepts/timds@latest consumer init --system <span data-system-id>SYSTEM-ID</span> --url <span data-root-bare>https://THIS-SYSTEM</span>
 npm ci</pre>
@@ -123,17 +123,17 @@ npm ci</pre>
     <thead><tr><th>Then</th><th>Command</th><th>Does</th></tr></thead>
     <tbody>
       <tr><td><strong>Move the pin</strong></td><td><code>npm run timds -- consumer update</code></td><td>Moves to the current release, or to the version named after it. A pin of <code>current</code> follows every release at the next install.</td></tr>
-      <tr><td><strong>Check</strong></td><td><code>npm run timds -- consumer check</code></td><td>Validates the manifest and the pin, and that a branch stays inside the product's declared design surface.</td></tr>
-      <tr><td><strong>Review</strong></td><td><code>npm run timds -- consumer preview --app NAME</code></td><td>Captures each route at desktop and phone widths beside its paired design.</td></tr>
+      <tr><td><strong>Check</strong></td><td><code>npm run timds -- consumer check --base REF</code></td><td>Validates the manifest and the pin, and that a branch stays inside the product's declared design surface.</td></tr>
+      <tr><td><strong>Review</strong></td><td><code>npm run timds -- consumer preview --app NAME</code></td><td>Captures the configured routes, widths and schemes. Paired design captures need a Design System checkout or symlink; a published bundle shows the product routes only.</td></tr>
     </tbody>
   </table>
-  <p class="note">In product CSS use a token by name, never by its literal value, so the product follows the pin. <code>SYSTEM-ID</code> is this system's id, the one <code>.timds-artifact.json</code> beside this page names; a browser fills it in above. <a href="{{page:use/compose}}#products">Compose</a> has the full product workflow.</p>
+  <p class="note">Replace <code>REF</code> with the review base, such as <code>origin/main</code>. Run from the product root using its selected toolkit. For this system's own site, <code>consumer scaffold emdash --workspace</code> writes <code>site/</code> under its Design System root with no pin; follow the site's installed consumer skills and run its own check and build. The pinned-product commands above apply to separate products. Binary consumers use <code>timds-cli</code> instead of <code>npm run timds --</code> and explicitly run <code>timds-cli consumer sync</code> to fetch the pin; keep the product's own install/build commands. In product CSS use a token by name, never by its literal value, so the product follows the pin. <code>SYSTEM-ID</code> is this system's id, the one <code>.timds-artifact.json</code> beside this page names; a browser fills it in above. <a href="{{page:use/compose}}#products">Compose</a> has the full product workflow.</p>
 </section>
 
 <section class="block step" id="contribute">
   <div class="block__head">
     <h2 class="h2">Give your agent the designer skills</h2>
-    <p>Changing the system is a different job from using it: it happens in the system's repository, through a session the host reviews, and this published copy is read-only. Install the designer skills once in the folder the agent works from, with the authenticated host your operator gives you. The skill has the agent sign in as you, start a session, bring up the local preview, and submit for review when you say so.</p>
+    <p>This published copy is read-only. To change a local or Git system, open its repository and follow its <code>AGENTS.md</code> and installed <code>design-start</code> skill; <code>init</code> and <code>upgrade</code> manage those skills. If you use TimDS Cloud, install the hosted skills with the command below from a separate working folder, outside any Design System, consumer repository or session. That skill signs in, starts or joins a session, opens the local preview and submits for review when you ask.</p>
   </div>
   <pre data-copy>npx --yes @dtconcepts/timds@latest skills install --portal-url https://YOUR-HOST --system-id <span data-system-id>SYSTEM-ID</span></pre>
   <p class="note">The skills land in <code>.agents/skills/</code>, <code>.claude/skills/</code> and <code>.cursor/skills/</code>; <code>--global</code> puts them under the home folder instead. <code>YOUR-HOST</code> is the host's authenticated origin, not this public address: Studio's <b>Send your agent…</b> button produces a brief with it filled in. <a href="{{page:use/compose}}#change">Compose</a> covers the other ways the system changes.</p>
@@ -143,22 +143,22 @@ npm ci</pre>
 <section class="block" id="updates">
   <div class="block__head">
     <h2 class="h2">Stay current</h2>
-    <p>Every way in reads the current release by default, and nothing above pins the toolkit. Each merged change becomes a new release that the next read picks up.</p>
+    <p>Public reads follow the release at their configured address. Products pin a Design System release and an exact toolkit resolution in their lockfile or binary installation record. Moving either selection is an explicit update; a new publication does not silently move a product's pin.</p>
   </div>
   <table class="spec">
     <thead><tr><th>Way in</th><th>On a new release</th></tr></thead>
     <tbody>
       <tr><td><strong>One address</strong></td><td>Nothing to do. The files are regenerated with each release.</td></tr>
-      <tr><td><strong>An agent over MCP</strong></td><td>Nothing to do. The server runs at <code>@latest</code> and serves the current release; pass <code>version</code> to read an earlier one.</td></tr>
+      <tr><td><strong>An agent over MCP</strong></td><td>The fixed-URL server reads the release at that address; <code>version</code> asserts that release. Selecting an earlier release is available only when the connected host supports it.</td></tr>
       <tr><td><strong>A pinned product</strong></td><td>Move the pin with <code>consumer update</code> when the developers are ready; <a href="/changelog/">the changelog</a> lists what changed in between.</td></tr>
-      <tr><td><strong>Designer skills</strong></td><td>Rerun <code>skills install</code>; it refreshes unmodified files and keeps edits.</td></tr>
+      <tr><td><strong>Designer skills</strong></td><td>In a repository, use its selected toolkit's <code>upgrade</code>. In a separate skills folder, rerun <code>skills install</code>; it refreshes unmodified files and keeps edits.</td></tr>
     </tbody>
   </table>
   <p class="note">This copy is {{version}}. A read that fails means the current guidance could not be verified: say so, rather than working from an earlier result.</p>
 </section>
 
 <section class="block" id="kit-designs">
-<div class="block__head"><h2 class="h2">This kit’s whole pages</h2><p>The Designs directory begins empty. A designer’s agent authors whole pages for this system on its components.</p></div>
+<div class="block__head"><h2 class="h2">This kit’s whole pages</h2><p>The Designs directory starts with a website: default pages, article references and journeys on the kit’s components. A designer’s agent replaces the sample content and develops those pages for this system.</p></div>
 <table class="spec"><thead><tr><th>Work</th><th>Owner</th></tr></thead><tbody>
 <tr><td>Design</td><td>The designer works in the Design System repository and reviews the page with its states.</td></tr>
 <tr><td>Release</td><td>The operator merges and publishes the reference.</td></tr>

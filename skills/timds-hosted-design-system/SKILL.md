@@ -80,9 +80,12 @@ already said. Then pick one:
   `timds draft list --system-id __SYSTEM_ID__ --portal-url __HOST_ORIGIN__`
   shows the open drafts.
 
-Outside a session folder these `active-work`, `principals` and `draft`
-commands need `--portal-url __HOST_ORIGIN__`: only `start`, `join`, `whoami`
-and `systems` fall back to the saved sign-in.
+Outside a session folder, `active-work`, `principals`, `draft` and `rollback`
+need `--system-id __SYSTEM_ID__`. They reuse the selected saved sign-in when
+no host is supplied, as `start`, `join`, `whoami` and `systems` do. Keep
+`--portal-url __HOST_ORIGIN__` in this system's commands to select its host
+explicitly; `TIMDS_PORTAL_URL` or a workspace provider otherwise takes
+precedence over the saved sign-in.
 
 If the host refuses a join (a not-found or 403 answer), the signed-in
 principal has no access to that session. Report the id from `timds whoami`
@@ -142,7 +145,9 @@ Everything from here runs inside the workspace folder.
    Never overwrite someone else's work to make a conflict go away.
 
 `timds status` shows the session's members, claims, submissions and live URL;
-`timds history` lists what happened and who did it.
+`timds history` lists what happened and who did it. Use `--json` for these
+commands when inspecting their results programmatically; use the process exit
+status to detect failure and preserve any conflict details before retrying.
 
 ## Submit and stop
 
@@ -188,9 +193,12 @@ only when the designer asks.
   publisher's grant and an explicit confirmation; your session membership
   grants neither.
 - Pin a toolkit version. The CLI is always `@dtconcepts/timds@latest`.
-- Edit generated or protected paths: `dist/`, `.timds/`, `node_modules/`,
-  `package-lock.json`, or anything the workspace's `AGENTS.md` marks
-  generated or protected.
+- Hand-edit generated or protected paths: `dist/`, `.timds/`,
+  `node_modules/`, `package-lock.json`, or anything the workspace's `AGENTS.md`
+  marks generated or protected. The designer-authored `.timds/stock.json`
+  declaration is the exception under `.timds/`; follow the editing skill's
+  exact-file contract. Dependency installation may generate the lockfile as
+  described above; never edit it to change the selected toolkit.
 - Touch files another agent has claimed, or start a second session for work
   that has an open one.
 - Run git in the workspace, or put a token, a credential or a sign-in code

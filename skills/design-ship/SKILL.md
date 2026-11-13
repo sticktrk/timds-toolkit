@@ -12,7 +12,8 @@ are other people's decisions, and you say so when asked.
 
 ## Installation mode
 
-Read `.timds/installation.json` before installing tools. With `mode: "binary"`,
+Read `.timds/installation.json` under the Design System root (the folder
+holding `timds.json`) before installing tools. With `mode: "binary"`,
 use `timds-cli` at its exact `version` in place of `npm run timds --`; skip npm
 installation and npm dependency-upgrade steps for the stock system. Check
 `timds-cli --version` and `timds-cli doctor`. Select another executable release
@@ -39,12 +40,21 @@ retain their declared prerequisites. The agent runs these steps for the designer
    journey in that design's `design.json` (`journeys: [{ id, title,
    steps: [{ title, screens: [{ page, state? }], branches? }] }]`), so the
    storyboard at `/designs/<design>/journeys/<id>/` shows them in order.
-2. Run `npm run timds -- brand` and note any gap the change was meant to
+2. If this system has a workspace site (`site/timds.consumer.json` with
+   `designSystem.workspace: true`), root `check` excludes it. Follow its
+   consumer skill, run `consumer check --root SITE_PATH --base REF` using
+   its site folder and review base, then build the site's own package and
+   review the affected routes under `/site/`. Ship the site and system changes
+   together; no pin moves, and deployment remains separate.
+3. Run `npm run timds -- brand` and note any gap the change was meant to
    close that is still open.
-3. In a Git checkout, run `npm run timds -- diff` to see exactly what will
+4. In a Git checkout, run `npm run timds -- diff` to see exactly what will
    ship, and confirm it is only this change. Unrelated files, protected
-   tooling, `dist/`, media originals, and credentials never go in. (A
-   hosted workspace has no Git; see "If you use TimDS Cloud".)
+   tooling, media originals, and credentials never go in. A standalone
+   system keeps `dist/` out of source changes; an embedded system commits
+   its rebuilt `design-system/dist/` with the authored change so CI's
+   `check --require-clean-dist` can verify it. A hosted workspace has no
+   Git; see "If you use TimDS Cloud".
 
 ## Look at it
 
@@ -101,8 +111,10 @@ production once, in order:
    number that day) with its notes on the changelog page. An embedded
    system's workflow only validates; its release is whatever the product's
    own process does.
-2. The product site keeps using the version it pins until a developer moves
-   that pin and ports what changed. The `design-handoff` skill writes the
+2. A separate product site keeps using the version it pins until a developer
+   moves that pin and ports what changed. A workspace EmDash site has no pin:
+   its next build reads this system's source, and deploying it is still a
+   separate decision. The `design-handoff` skill writes the
    brief that developer needs; offer to run it once the release exists.
 
 Do not mark the pull request ready for review, merge it, or run `publish`
@@ -110,8 +122,8 @@ unless the person asking is authorized to and says so.
 
 ## If you use TimDS Cloud
 
-- `submit` publishes staged media to the TimDS host first; an
-  unauthenticated media publish needs the designer's one-time
+- In a Git checkout, `submit` publishes staged media to the TimDS host first;
+  an unauthenticated media publish needs the designer's one-time
   `npm run timds -- auth login`.
 - In a hosted workspace (`timds.json` has a hosted provider, or
   `.timds/session.json` exists) there is no Git: `timds status` and the

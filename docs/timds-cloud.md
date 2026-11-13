@@ -9,22 +9,28 @@ documented in the host repository. Everything in the main
 
 ## Getting started with a hosted system
 
-Use the host URL supplied by your Studio installation. Sign in once, then start an editing workspace:
+Use the host URL supplied by your Studio installation. An agent signs in
+once, then starts an editing workspace with the current hosted CLI:
 
 ```sh
-npm install --global @dtconcepts/timds@latest
-timds auth login --portal-url https://YOUR-HOST --oauth
-timds start example/core --root ./core
+npx --yes @dtconcepts/timds@latest auth login --portal-url https://YOUR-HOST --oauth
+npx --yes @dtconcepts/timds@latest start example/core --root ./core
 cd core
 npm ci
-timds doctor
-timds dev
+npx --yes @dtconcepts/timds@latest doctor --json
+npx --yes @dtconcepts/timds@latest dev
 # After editing:
-timds check
-timds submit --note "Describe the change"
+npx --yes @dtconcepts/timds@latest check
+npx --yes @dtconcepts/timds@latest submit --note "Describe the change" --json
 ```
 
 If the workspace has no lockfile, use `npm install` instead of `npm ci`.
+Below, `timds` is shorthand for that hosted invocation. In a local/Git npm
+client use its selected `npm run timds --` command. For binary mode use the
+verified `timds-cli` release selected in `.timds/installation.json`; adopting
+an npm source snapshot requires the explicit
+[binary migration](binary-installation.md), and binary version changes are
+never implicit. Designers direct the agent rather than running these steps.
 Login reuses an existing credential (refreshing OAuth when needed); use
 `--force` to authorize again or switch accounts. The last successful login
 remembers the host outside your repository, so `start` needs no repeated portal
@@ -76,7 +82,7 @@ or a consumer repository, whose skills `init`, `consumer init` and
 `upgrade` manage, and in a hosted session workspace, where the files would
 be submitted with the system.
 
-upgrade-managed files have separate policies and hashes.
+Repository skills managed by `upgrade` have separate policies and hashes.
 
 ## Hosted design sessions
 
@@ -84,8 +90,8 @@ A `provider` setting in `timds.json` selects the workflow. `{ "kind": "local" }`
 keeps authoring on disk; `{ "kind": "git" }` keeps the existing branch and pull
 request submission; `{ "kind": "hosted", "url": "https://timds.com" }` uses the
 host API. Existing manifests without a provider keep their git submission
-behavior. Hosted commands without a configured host fail with one message
-that names local and git modes; they never fall back to git.
+behavior. Hosted commands without a configured or saved host fail with the
+sign-in command and `--portal-url` remedy; they never fall back to git.
 
 Humans direct work and use five verbs: `login`, `status`, `history`, `publish`,
 and `rollback`. Agents write with the CLI commands below, which the hosted
@@ -97,8 +103,12 @@ operations for hosts and MCP clients, beside `timds_status`,
 `timds_history`, and `timds_publish` for the human verbs.
 
 `timds auth login` (also `timds login`) selects `--portal-url` first, then the
-nearest workspace's host (its open session's, else `timds.json` `provider.url`), then `TIMDS_PORTAL_URL` or
-`https://timds.com`. Status and logout select the same host. A host advertising
+nearest workspace's host (its open session's, else `timds.json` `provider.url`),
+then `TIMDS_PORTAL_URL`, then the
+saved selected login, and finally `https://timds.com`. Status and logout
+select the same host. When several saved logins have no selected host, supply
+`--portal-url` to avoid that default.
+A host advertising
 `/.well-known/oauth-authorization-server` uses authorization code with PKCE S256
 and a temporary `127.0.0.1` callback. The CLI registers a public client when the
 host permits it; otherwise supply its registered `--client-id`. It requests the
@@ -267,9 +277,12 @@ npm run timds -- auth login
 npm run timds -- assets publish
 ```
 
-`submit` also publishes staged media before it builds and opens the pull
-request. Only the stable key, checksum, metadata, and public CDN URL are written
-to `media.json`. Timed media is inspected with `ffprobe` during `assets add`, so
+Git-provider `submit` also publishes staged media before it builds and opens
+the pull request. Hosted `submit` sends the session change set and freezes a
+submission; publish staged assets explicitly before submitting it. Only the
+stable key, checksum, metadata, and public CDN URL enter the media catalog
+(`media/*.json` with a generated `media.json` view on grouped systems).
+Timed media is inspected with `ffprobe` during `assets add`, so
 video and audio records also carry their measured duration; video records carry
 dimensions, frame rate, and codec when available. The raw file and
 `.timds/local-media.json` remain ignored.
@@ -431,9 +444,11 @@ host never merges or deploys the product.
 Automatic consumer previews are **off by default**. To enable
 `.github/workflows/timds-consumer-preview.yml`, set the repository variable
 `TIMDS_PREVIEWS_ENABLED` to `true` and configure the `TIMDS_ACCESS_TOKEN`
-repository secret. Also configure `DESIGN_SYSTEM_DEPLOY_KEY` (a read-only
-deploy key) or `TIMDS_CONSUMER_SUBMODULE_TOKEN` (with `contents:read`) so CI can
-check out the private Design System submodule. An unset or false variable
+repository secret. For a private submodule pin, also configure
+`DESIGN_SYSTEM_DEPLOY_KEY` (a read-only deploy key) or
+`TIMDS_CONSUMER_SUBMODULE_TOKEN` (with `contents:read`) so CI can check out
+that submodule. Published pins do not need a submodule credential.
+An unset or false variable
 skips all preview jobs without allocating a runner. With the variable enabled
 but no publishing token, only a short token-presence job runs; checkout,
 installation, validation, rendering, artifact upload, and comments are skipped.
@@ -478,10 +493,12 @@ snapshot API continues to transfer full file contents.
 
 ## Hosted sources and offshoots
 
-For a new hosted source use `timds init --standalone --provider hosted
---portal-url https://timds.com`. It emits `wrangler.jsonc` with top-level
-`assets.directory: "./dist"`, an empty `previews` block, Wrangler `^4.135.0`
-as a development dependency, and a root `_headers` file copied into `dist/`
+For a new hosted source scaffold use `timds init --standalone --provider hosted
+--portal-url https://timds.com`. This writes local source; it does not provision
+a remote Design System, register it or publish it. It emits `wrangler.jsonc`
+with top-level `assets.directory: "./dist"`, an empty `previews` block,
+Wrangler `^4.135.0` as an npm development dependency (omitted in binary mode),
+and a root `_headers` file copied into `dist/`
 with `X-Robots-Tag: noindex`. It emits no GitHub workflows. Local and git
 scaffolds keep their existing automation. `publish --skip-build --skip-push`
 remains available to the host's publication path.
@@ -493,7 +510,10 @@ independent group changes do not create aggregate-file conflicts.
 ## Session API version 1
 
 The public provider interface is exported from `@dtconcepts/timds/hosted`:
-`start`, `pull`, `submit`, `update`, `status`, `history`, `close`, claims, members, drafts and rollback. API
+`createHostProvider` supplies sessions (`start`, `pull`, `submit`, `update`,
+`status`, `history`, `close`, `claim`, `join`), identity/system discovery,
+drafts, publication, rollback, release-source reads and consumer registration
+and receipts. API
 version 1 uses the following relative endpoints with a TimDS Bearer token
 and `X-TimDS-API-Version: 1`:
 
@@ -510,6 +530,8 @@ and `X-TimDS-API-Version: 1`:
 | GET | `/api/timds/design-systems/:id/active-work` | Members, claims, submissions and live URLs |
 | GET | `/api/timds/design-systems/:id/principals` | People and agents who can be invited |
 | GET | `/api/timds/me` | The signed-in principal `{id,type,name,admin}` |
+| GET | `/api/timds/design-systems` | Systems visible to the signed-in principal |
+| GET | `/api/timds/design-systems/:id/releases/:label/source` | Immutable source export for `shoot` / `feed` |
 | GET/POST | `/api/timds/design-systems/:id/drafts` | List, or create `{name,from,idempotencyKey?}` |
 | GET | `/api/timds/design-systems/:id/drafts/:name/snapshot` | Authenticated draft source |
 | POST | `/api/timds/design-systems/:id/drafts/:name/close` | Close draft and live resources |
