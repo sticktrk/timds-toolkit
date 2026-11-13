@@ -491,6 +491,25 @@ editing `read_file` tool for authored local files. A conflict leaves local files
 unchanged and can be resolved with `timds_update`. The version-1 host HTTP
 snapshot API continues to transfer full file contents.
 
+## Workspace site credentials
+
+A host administrator can inspect or change integration bindings on a published
+EmDash workspace site. The command selects `--portal-url`,
+`TIMDS_PORTAL_URL` or the saved selected login.
+
+```sh
+timds site secrets status --source-id UUID
+timds site secrets set RESEND_API_KEY --source-id UUID
+timds site secrets unset META_CAPI_ACCESS_TOKEN --source-id UUID
+```
+
+The set command prompts without echo. Use `--stdin` to pipe a value from
+secret storage. The host applies the change asynchronously. Check status for
+each binding. After an uncertain response, retry the same command with the
+printed `--operation-id` and `--site-id`. The toolkit supports `RESEND_API_KEY`,
+`META_CAPI_ACCESS_TOKEN` and `TURNSTILE_SECRET_KEY`. Configure public tag IDs
+and consent in the [workspace site](emdash.md#contact-forms-and-tracking).
+
 ## Hosted sources and offshoots
 
 For a new hosted source scaffold use `timds init --standalone --provider hosted

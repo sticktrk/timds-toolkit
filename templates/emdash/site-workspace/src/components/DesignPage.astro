@@ -1,4 +1,5 @@
 ---
+import SiteTracking from "./SiteTracking.astro";
 /**
  * One page of the Design System's website design as a whole document, as the
  * design system integration read it from the design file.
@@ -18,5 +19,6 @@ const { page } = Astro.props;
 	</head>
 	<body {...page.bodyAttributes}>
 		<Fragment set:html={page.body} />
+		<SiteTracking />
 	</body>
 </html>

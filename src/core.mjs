@@ -2105,6 +2105,9 @@ TimDS Cloud:
   timds auth login [--portal-url URL] [--token TOKEN] [--oauth|--device] [--force] [--no-browser] [--client-id ID] [--scope SCOPES] [--timeout-seconds N]
   timds auth status [--portal-url URL]
   timds auth logout [--portal-url URL]
+  timds site secrets status --source-id UUID [--portal-url URL] [--json]
+  timds site secrets set NAME --source-id UUID [--stdin] [--operation-id UUID --site-id UUID] [--portal-url URL] [--json]
+  timds site secrets unset NAME --source-id UUID [--operation-id UUID --site-id UUID] [--portal-url URL] [--json]
   timds whoami [--portal-url URL] [--json]
   timds systems [--portal-url URL] [--json]
   timds principals [--system-id ID] [--portal-url URL] [--json]
@@ -2304,6 +2307,10 @@ export async function runCli(argv) {
     return result;
   }
   if (command === 'login') return runCli(['auth', 'login', ...rest]);
+  if (command === "site") {
+    const { runSiteSecrets } = await import("./site-secrets.mjs");
+    return runSiteSecrets(rest, { output });
+  }
   if (command === "consumer") {
     // Consumer subcommands own their flags (see consumer.mjs).
     const { runConsumerCli } = await import("./consumer.mjs");

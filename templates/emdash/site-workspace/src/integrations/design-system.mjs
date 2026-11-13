@@ -963,7 +963,7 @@ export default function designSystem({ design }) {
     getSections: () => api,
     getComposition: () => lastRendered?.composition ?? null,
     acknowledgeHostedSections(contract) {
-      if (contract?.template !== 4 || contract?.workspace !== 3 || contract?.sections !== 2 || contract?.composition !== COMPOSITION_CONTRACT) throw new Error("Hosted discovery must support template 4, workspace 3, sections 2 and composition 1.");
+      if (contract?.template !== 6 || contract?.tracking !== 1 || contract?.workspace !== 3 || contract?.sections !== 2 || contract?.composition !== COMPOSITION_CONTRACT) throw new Error("Hosted discovery must support template 6, workspace 3, sections 2, composition 1 and tracking 1.");
       hostAcknowledged = true;
       return true;
     },
@@ -1008,7 +1008,7 @@ export default function designSystem({ design }) {
     name: "timds-design-system",
     api: publicApi,
     hooks: {
-      "astro:config:setup": async ({ config, command, updateConfig, addMiddleware, injectRoute, addWatchFile, logger: integrationLogger }) => {
+      "astro:config:setup": async ({ config, command, updateConfig, addMiddleware, injectRoute, injectScript, addWatchFile, logger: integrationLogger }) => {
         siteRoot = fileURLToPath(config.root);
         logger = integrationLogger;
         development = command === "dev";
@@ -1038,6 +1038,10 @@ export default function designSystem({ design }) {
         systemRoot = findDesignSystem(siteRoot);
         if (!systemRoot) throw new Error(`No folder above ${siteRoot} holds timds.json. This site reads the Design System it sits in; keep it inside that Design System's folder.`);
         base = config.base || "/";
+        // Load from public/ so mounted previews need no access to Vite source
+        // routes. Register on every page, including custom Astro layouts.
+        const contactScript = JSON.stringify(`${basePrefix(base)}/timds-contact.js`).replaceAll("<", "\\u003c");
+        injectScript("head-inline", `import(${contactScript});`);
         if (config.trailingSlash === "never" && existsSync(path.join(siteRoot, "divisions.json"))) throw new Error("Site divisions require trailing slash support.");
         tokensCss = runsStarterBuild(readJson(path.join(systemRoot, "timds.json")));
         render();
@@ -1126,7 +1130,7 @@ export default function designSystem({ design }) {
         invalidate();
       },
       "astro:config:done": ({ config }) => {
-        if (config.integrations.some((integration) => integration.name === "timds-host-discovery") && !hostAcknowledged) throw new Error("Hosted discovery has not acknowledged template 4, workspace 3, sections 2 and composition 1. Update the host before building this site.");
+        if (config.integrations.some((integration) => integration.name === "timds-host-discovery") && !hostAcknowledged) throw new Error("Hosted discovery has not acknowledged template 6, workspace 3, sections 2, composition 1 and tracking 1. Update the host before building this site.");
         clientDirectory = fileURLToPath(config.build.client);
       },
       "astro:build:done": async ({ logger }) => {

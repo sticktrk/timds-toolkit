@@ -105,24 +105,30 @@ export function createHostProvider({ url, token, resolveToken, fetchImpl = fetch
         const refreshed = await resolveToken({ rejectedToken: accessToken });
         if (refreshed && refreshed !== accessToken) continue;
       }
-      const conflict = response.status === 409 && Array.isArray(payload.conflicts);
+      const siteSecrets = suffix.endsWith("/site/secrets");
+      const conflict = !siteSecrets && response.status === 409 && Array.isArray(payload.conflicts);
       const busy = response.status === 409 && !conflict && (payload.code === "operation_busy" || payload.error === SESSION_BUSY_MESSAGE);
       if (recoverable && attempt < HOST_RETRY_ATTEMPTS && ([502, 524].includes(response.status) || busy)) {
         const delay = Math.min(2000 * 2 ** (attempt - 1), 30_000);
         if (clock.now() + delay < deadline) { await clock.sleep(delay); continue; }
       }
       if (!response.ok && !conflict) {
-        const error = new Error(`TimDS host returned ${response.status}: ${String(payload.error || "request failed")}`);
-        error.status = response.status; error.details = payload; throw error;
+        const error = new Error(`TimDS host returned ${response.status}: ${String(siteSecrets ? "site secret request failed" : payload.error || "request failed")}`);
+        error.status = response.status;
+        if (!siteSecrets) error.details = payload;
+        throw error;
       }
       if (payload.apiVersion !== HOST_API_VERSION) throw new Error("Unsupported TimDS host API version; update the CLI and host together.");
       return payload;
     }
   }
+  const siteSecretsPath = (id) => `/${encodeURIComponent(id)}/site/secrets`;
   const sessionPath = (id) => `/${encodeURIComponent(id)}`;
   return {
     me: () => request("GET", "", undefined, 'me'),
     systems: () => request("GET", "", undefined, 'design-systems'),
+    siteSecrets: (id) => request("GET", siteSecretsPath(id), undefined, "sources"),
+    changeSiteSecret: (id, input) => request("POST", siteSecretsPath(id), input, "sources"),
     consumers: (id) => request("GET", `/${encodeURIComponent(id)}/consumers`, undefined, 'sources'),
     registerConsumer: (id, input) => request("POST", `/${encodeURIComponent(id)}/consumers`, input, 'sources'),
     consumer: (id, consumerId) => request("GET", `/${encodeURIComponent(id)}/consumers/${encodeURIComponent(consumerId)}`, undefined, 'sources'),

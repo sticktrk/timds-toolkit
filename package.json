@@ -5,7 +5,7 @@
   "type": "module",
   "hostContract": 2,
   "emdashTemplate": {
-    "version": 4,
+    "version": 6,
     "history": [
       {
         "version": 1,
@@ -36,6 +36,19 @@
           "Validates and exports the resolved composition as a separate versioned contract shared by development, consumer checks, previews and hosted builds.",
           "Accepts verified offline inputs for pinned sibling Design Systems and publishes their passive styles and assets in a release-specific namespace.",
           "Checks transitive composition sources and shared article components against their rendering contexts, refuses imported system styles, and preserves scoped family navigation."
+        ]
+      },
+      {
+        "version": 5,
+        "changes": [
+          "Adds opt-in contact forms, durable delivery through Resend and Meta CAPI, and Meta Pixel, GA4 and Google Ads tags with configurable consent enforcement.",
+          "Adds the contact schema migration and hosted discovery tracking contract 1."
+        ]
+      },
+      {
+        "version": 6,
+        "changes": [
+          "Makes the contact form browser script available across site pages and mounted previews, with support for shared layouts, dynamically inserted dialogs and submitter overrides."
         ]
       }
     ]
@@ -162,6 +175,7 @@
     "src/publication-snapshot.mjs",
     "src/git-blobs.mjs",
     "src/hosted.mjs",
+    "src/site-secrets.mjs",
     "src/contract-groups.mjs",
     "src/offshoots.mjs",
     "src/offshoot-contract.mjs",
@@ -230,5 +244,6 @@
   },
   "emdashWorkspaceContract": 3,
   "emdashSectionsContract": 2,
-  "emdashCompositionContract": 1
+  "emdashCompositionContract": 1,
+  "emdashTrackingContract": 1
 }
