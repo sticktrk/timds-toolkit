@@ -23,20 +23,19 @@ function evaluate(source, context, cancelled = false) {
   return new Evaluator(parsed, expressionData(context), functions).evaluate().coerceString();
 }
 
-test('releases require all six signing settings before creating tags or building while PRs remain unsigned', () => {
+test('release builds require all six signing settings while PRs remain unsigned', () => {
   assert.equal(binary.on.workflow_call.inputs.require_apple_signing.type, 'boolean');
   assert.equal(binary.on.workflow_call.inputs.require_apple_signing.default, false);
   assert.equal(ci.jobs['native-binaries'].secrets, undefined);
   assert.equal(ci.jobs['native-binaries'].with?.require_apple_signing, undefined);
   assert.equal(release.jobs.binaries.with.require_apple_signing, true);
-  assert.ok([release.jobs['create-release'].needs].flat().includes('signing-preflight'));
   assert.ok(release.jobs.binaries.needs.includes('signing-preflight'));
   const preflight = release.jobs['signing-preflight'];
-  for (const [event, dryRun, expected] of [['release', false, 'true'], ['workflow_dispatch', false, 'true'], ['workflow_dispatch', true, 'false']]) {
-    assert.equal(evaluate(preflight.if, { github: { event_name: event }, inputs: { dry_run: dryRun } }), expected);
+  for (const [result, expected] of [['success', 'true'], ['failure', 'false'], ['skipped', 'false']]) {
+    assert.equal(evaluate(preflight.if, { needs: { publish: { result } } }), expected);
   }
-  for (const [event, result, expected] of [['release', 'failure', 'false'], ['release', 'success', 'true'], ['workflow_dispatch', 'failure', 'false'], ['workflow_dispatch', 'success', 'true']]) {
-    assert.equal(evaluate(release.jobs.binaries.if, { github: { event_name: event }, needs: { 'create-release': { result: 'success' }, 'signing-preflight': { result } } }), expected);
+  for (const [result, expected] of [['success', 'true'], ['failure', 'false'], ['skipped', 'false']]) {
+    assert.equal(evaluate(release.jobs.binaries.if, { needs: { 'signing-preflight': { result } } }), expected);
   }
   const gate = preflight.steps[0];
   assert.deepEqual(Object.keys(gate.env), names);
@@ -101,17 +100,19 @@ test('release gating includes a separate secret-free quarantined download and fu
   const javascript = script.slice(script.indexOf("<<'NODE'\n") + "<<'NODE'\n".length).replace(/\nNODE\s*$/, '');
   const syntax = spawnSync(process.execPath, ['--input-type=module', '--check'], { input: javascript, encoding: 'utf8' });
   assert.equal(syntax.status, 0, syntax.stderr);
-  assert.ok(release.jobs.publish.needs.includes('binaries'));
   assert.ok(release.jobs['attach-binaries'].needs.includes('binaries'));
 });
 
-test('npm publishes only after the executables are served from the public download host', () => {
+test('npm publishes before signing checks, executable hosting, and GitHub attachment', () => {
   const host = release.jobs['host-binaries'];
   assert.deepEqual(host.needs, ['create-release', 'binaries']);
-  assert.ok(release.jobs.publish.needs.includes('host-binaries'));
-  for (const [result, expected] of [['success', 'true'], ['failure', 'false'], ['skipped', 'false']]) {
-    const context = { github: { event_name: 'release' }, needs: { 'create-release': { result: 'skipped' }, binaries: { result: 'success' }, 'host-binaries': { result } } };
-    assert.equal(evaluate(release.jobs.publish.if, context), expected, result);
+  assert.equal(release.jobs['create-release'].needs, undefined);
+  assert.equal(release.jobs.publish.needs, 'create-release');
+  assert.equal(release.jobs['signing-preflight'].needs, 'publish');
+  assert.ok(release.jobs['attach-binaries'].needs.includes('publish'));
+  for (const [event, result, expected] of [['release', 'skipped', 'true'], ['workflow_dispatch', 'success', 'true'], ['workflow_dispatch', 'failure', 'false'], ['workflow_dispatch', 'skipped', 'false']]) {
+    const context = { github: { event_name: event }, needs: { 'create-release': { result } } };
+    assert.equal(evaluate(release.jobs.publish.if, context), expected);
   }
   const verify = host.steps.findIndex(step => step.run === 'node scripts/binary-release.mjs');
   const upload = host.steps.findIndex(step => /scripts\/binary-host\.mjs upload/.test(step.run || ''));

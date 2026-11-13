@@ -1175,25 +1175,27 @@ click **Run workflow**, leave the branch set to **master**, and click **Run work
 again. No version input is needed: the workflow checks out the latest `master`,
 runs the checks above, bumps the patch version in `package.json` and the lockfile,
 pushes the release commit and matching tag, creates a GitHub Release with generated
-notes, builds, signs, notarizes and verifies the native macOS arm64 and Linux
-x64 executables (`binary.yml`), publishes to npm only when both built, and
-attaches the executables with their `SHA256SUMS` to the release. The `dry_run`
+notes, and publishes to npm. After npm publishes successfully, `binary.yml`
+builds and verifies the native macOS arm64 and Linux x64 executables, including
+signing and notarizing the macOS build. The release workflow uploads the
+executables to the public download host and attaches them with their
+`SHA256SUMS` to the GitHub Release. The `dry_run`
 input only exchanges the workflow's OIDC token with npm and prints the
 answer, with no release and no publish. Release runs are serialized. If
 `master` changes during validation, the push fails without publishing a stale
 release; start a new run against the updated branch.
 
 The workflow uses the built-in GitHub token to create the release and the existing
-npm trusted publisher for `release.yml` to publish. It refuses to start
-without the six Apple signing secrets (`TIMDS_MACOS_CERTIFICATE_BASE64`,
+npm trusted publisher for `release.yml` to publish. The binary build requires
+the six Apple signing secrets (`TIMDS_MACOS_CERTIFICATE_BASE64`,
 `TIMDS_MACOS_CERTIFICATE_PASSWORD`, `TIMDS_CODESIGN_IDENTITY`,
 `TIMDS_NOTARY_APPLE_ID`, `TIMDS_NOTARY_TEAM_ID`, `TIMDS_NOTARY_PASSWORD`; see
-[signing](docs/binary-packaging.md)), and it publishes to npm only after the
-executables are uploaded to the public download host, which needs the
+[signing](docs/binary-packaging.md)). The upload to the public download host requires the
 `TIMDS_DOWNLOAD_ENDPOINT`, `TIMDS_DOWNLOAD_ACCESS_KEY_ID` and `TIMDS_DOWNLOAD_SECRET_ACCESS_KEY`
-secrets ([download host](docs/binary-hosting.md)). If npm publishing fails after the
-release was created, use **Re-run failed jobs** to retry publishing the same
-version. **Run workflow** or **Re-run all jobs** creates another patch release.
+secrets ([download host](docs/binary-hosting.md)). If publishing or a binary job
+fails after the release was created, use **Re-run failed jobs** to continue the
+same release. On a manual release, **Run workflow** or **Re-run all jobs**
+creates another patch release.
 
 You can also cut a release locally from a clean, synced `master`:
 
