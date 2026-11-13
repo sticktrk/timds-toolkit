@@ -889,3 +889,48 @@ test("division routes and checks use the selected design without changing sectio
   await save(siteRoot, "divisions.json", { ...declaration, divisions: [division, { ...division, id: "second", prefix: "/our-studio/sub/" }] });
   await assert.rejects(loadConsumer(siteRoot), /overlapping mount/);
 });
+
+test("pinned sibling references are checked against verified bytes and never become site pages", async (t) => {
+  const root = await temporaryDirectory(t);
+  const workspace = await starterWorkspace(path.join(root, "workspace"));
+  await scaffoldWorkspaceEmdashSite(workspace, { skipInstall: true, output: quiet });
+  const siteRoot = path.join(workspace, "site");
+  const staged = path.join(siteRoot, ".timds-site-inputs");
+  const write = async (root, relative, body) => {
+    const file = path.join(root, relative);
+    await fs.mkdir(path.dirname(file), { recursive: true });
+    await fs.writeFile(file, typeof body === "string" ? body : JSON.stringify(body));
+  };
+  const systemId = "example/sibling";
+  const version = "2026.11.1";
+  const digest = "a".repeat(64);
+  const division = { id: "studio", prefix: "/studio/", system: "sibling", design: "website", pages: "src/divisions/studio/pages", layout: "src/layouts/Studio.astro", collections: [] };
+  const declaration = { schemaVersion: 1, systems: { main: { workspace: true }, sibling: { systemId, version } }, divisions: [division] };
+  const files = {
+    "bundle.json": JSON.stringify({ schemaVersion: 1, system: { id: systemId, version } }),
+    "designs.json": JSON.stringify({ schemaVersion: 1, system: { id: systemId, version }, designs: [{ id: "website", url: "/design-system/designs/website/", pages: [
+      { route: "/", states: [{ name: "default", html: '<link rel="stylesheet" href="/design-system/styles/brand.css"><script>throw Error("reference-only")</script>' }] },
+      { route: "/sample", states: [{ name: "default", html: "<h1>Reference only</h1>" }] },
+    ] }] }),
+    "files/styles/brand.css": '@import "colors.css"; .sibling-only { color: var(--accent); }',
+    "files/styles/colors.css": ":root { --accent: #789abc; }",
+  };
+  await write(siteRoot, "divisions.json", declaration);
+  await write(siteRoot, `${division.pages}/index.html`, '<h1 class="sibling-only">Owner-authored</h1>');
+  await write(siteRoot, division.layout, '<html><head><slot name="head" /></head><body><slot /></body></html>');
+  const { loadConsumer } = await import("./consumer.mjs");
+  await assert.rejects(loadConsumer(siteRoot), /Stage the exact sibling/);
+  for (const [file, bytes] of Object.entries(files)) await write(staged, `sibling/${file}`, bytes);
+  const dependency = {
+    alias: "sibling", sourceId: "11111111-1111-4111-8111-111111111111", systemId, version, commit: "b".repeat(40), contentDigest: digest, manifestDigest: "c".repeat(64),
+    files: Object.entries(files).map(([file, bytes]) => ({ path: file, size: Buffer.byteLength(bytes), sha256: sha256(bytes) })),
+  };
+  await write(staged, "receipt.json", { schemaVersion: 1, dependencies: [dependency] });
+  const app = (await loadConsumer(siteRoot)).apps.site;
+  assert.ok(app.preview.routes.includes("/studio"));
+  assert.ok(!app.preview.routes.includes("/studio/sample"));
+  const { checkWorkspaceSite } = await import("./consumer-workspace-check.mjs");
+  assert.deepEqual((await checkWorkspaceSite({ siteRoot, designSystemRoot: workspace, designSurface: app.designSurface, files: [`${division.pages}/index.html`], fix: false })).findings, []);
+  await write(staged, "sibling/files/styles/colors.css", files["files/styles/colors.css"].replace("789abc", "000000"));
+  await assert.rejects(loadConsumer(siteRoot), /pins and digests/);
+});

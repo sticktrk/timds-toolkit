@@ -98,9 +98,19 @@ function environmentOrigin(): string {
 /**
  * The production origin. Astro's `site` wins, then the origin the scaffold
  * recorded, then EMDASH_SITE_URL at run time, then the request's own origin
- * (local development, previews).
+ * (local development, previews). A mounted development preview may receive
+ * its HTTPS origin from the preview proxy.
  */
-export function siteOrigin(url: URL, site?: URL): string {
+export function siteOrigin(url: URL, site?: URL, request?: Request): string {
+	if (import.meta.env.DEV && BASE === "/site") {
+		const forwarded = request?.headers.get("x-timds-preview-origin");
+		if (forwarded) {
+			try {
+				const preview = new URL(forwarded);
+				if (preview.protocol === "https:" && forwarded === preview.origin) return preview.origin;
+			} catch { /* An invalid preview header leaves the origin unchanged. */ }
+		}
+	}
 	if (site) return site.origin;
 	if (CONFIGURED_SITE_URL && CONFIGURED_SITE_URL !== UNKNOWN_SITE_URL) return CONFIGURED_SITE_URL.replace(TRAILING_SLASHES, "");
 	return environmentOrigin() || url.origin;

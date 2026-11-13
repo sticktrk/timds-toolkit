@@ -451,17 +451,17 @@ function tokenGroupOf(tokens, kind, fallback) {
  * What the Design System offers a site: its stylesheets, the classes they
  * declare, and the document-scope tokens indexed by color and font value.
  */
-async function readSystem({ designSystemRoot, siteRoot, siteImports, stylesheets }) {
-  const manifestText = await readText(path.join(designSystemRoot, "timds.json"));
-  if (manifestText === null) throw new Error(`${designSystemRoot} has no timds.json, so it is not a TimDS Design System workspace`);
-  let manifest;
-  try {
-    manifest = JSON.parse(manifestText);
-  } catch (caught) {
-    throw new Error(`timds.json could not be read as JSON: ${caught.message}`);
+async function readSystem({ designSystemRoot, siteRoot, siteImports, stylesheets, staged }) {
+  let starterBuild = false;
+  if (!staged) {
+    const manifestText = await readText(path.join(designSystemRoot, "timds.json"));
+    if (manifestText === null) throw new Error(`${designSystemRoot} has no timds.json, so it is not a TimDS Design System workspace`);
+    try {
+      starterBuild = runsStarterBuild(JSON.parse(manifestText));
+    } catch (caught) {
+      throw new Error(`timds.json could not be read as JSON: ${caught.message}`);
+    }
   }
-
-  const starterBuild = runsStarterBuild(manifest);
   let design = null;
   let entries;
   if (stylesheets) {
@@ -513,7 +513,7 @@ async function readSystem({ designSystemRoot, siteRoot, siteImports, stylesheets
   // import, an `@import`) passes here, so nothing under the built output is
   // ever read, not even through a symbolic link. A root-relative `@import`
   // resolves the way the site serves it: /styles/x.css is src/styles/x.css.
-  const builtRoot = path.join(await fs.realpath(designSystemRoot).catch(() => designSystemRoot), BUILT_OUTPUT);
+  const builtRoot = staged ? null : path.join(await fs.realpath(designSystemRoot).catch(() => designSystemRoot), BUILT_OUTPUT);
   //
   // A sheet the shell links with a `media` other than `all`, or an `@import`
   // with a media query, `supports()` or `layer()`, loads only under that
@@ -530,23 +530,29 @@ async function readSystem({ designSystemRoot, siteRoot, siteImports, stylesheets
       if (earlier !== -1) sources.splice(earlier, 1); // reached unconditionally after all
     }
     seen.set(relative, condition);
-    if (relative === COMPILED_TOKENS) {
-      if (!starterBuild) return;
-      await readTokenSource();
-      if (tokensJson) sources.push({ path: COMPILED_TOKENS, css: compileTokenCss(tokensJson), compiled: true, condition });
-      return;
+    let css;
+    if (staged) {
+      css = staged.files.get(`files/${relative}`)?.toString("utf8") ?? null;
+    } else {
+      if (relative === COMPILED_TOKENS) {
+        if (!starterBuild) return;
+        await readTokenSource();
+        if (tokensJson) sources.push({ path: COMPILED_TOKENS, css: compileTokenCss(tokensJson), compiled: true, condition });
+        return;
+      }
+      if (relative.startsWith("../") || relative.startsWith("/") || isBuiltOutput(relative)) return;
+      const absolute = path.join(designSystemRoot, ...relative.split("/"));
+      if (isInside(siteRoot, absolute)) return;
+      const real = await fs.realpath(absolute).catch(() => null);
+      if (real && isInside(builtRoot, real)) return;
+      css = await readText(absolute);
     }
-    if (relative.startsWith("../") || relative.startsWith("/") || isBuiltOutput(relative)) return;
-    const absolute = path.join(designSystemRoot, ...relative.split("/"));
-    if (isInside(siteRoot, absolute)) return;
-    const real = await fs.realpath(absolute).catch(() => null);
-    if (real && isInside(builtRoot, real)) return;
-    const css = await readText(absolute);
     if (css === null) return;
     for (const { reference, condition: imported } of conditionalImports(css)) {
       const target = reference.split(/[?#]/, 1)[0];
       const under = condition ?? imported;
       if (target.startsWith("/")) {
+        if (staged) continue;
         const served = path.posix.normalize(target);
         const directory = served.split("/")[1];
         if (served === COMPILED_TOKENS) await load(served, depth + 1, under);
@@ -1251,9 +1257,13 @@ export async function checkWorkspaceSite({
   const selectedDivisions = new Map();
   const divisionFiles = new Map();
   for (const division of composition?.divisions ?? []) {
-    const linked = divisionStyles(designSystemRoot, division);
-    const entries = linked.map(({ href, media }) => ({ path: href === COMPILED_TOKENS ? href : `src${href}`, condition: media ? `media ${media}` : null }));
-    selectedDivisions.set(division.id, await readSystem({ designSystemRoot, siteRoot, stylesheets: entries }));
+    const staged = composition.inputs.get(division.system);
+    const linked = divisionStyles(designSystemRoot, division, staged);
+    const entries = linked.map(({ href, media }) => ({
+      path: staged ? href.slice(staged.assetPrefix.length + 1) : href === COMPILED_TOKENS ? href : `src${href}`,
+      condition: media ? `media ${media}` : null,
+    }));
+    selectedDivisions.set(division.id, await readSystem({ designSystemRoot, siteRoot, stylesheets: entries, staged }));
     for (const [relative] of texts) {
       if (relative !== division.layout && !relative.startsWith(`${division.pages}/`)) continue;
       const ids = divisionFiles.get(relative) ?? [];

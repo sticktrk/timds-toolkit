@@ -42,8 +42,9 @@ export function pageFileRoute(file) {
   return `/${parts.join("/")}`;
 }
 
-export function fileOverlapsNamespace(route, prefix) {
-  const pattern = route.slice(1).split("/"), segments = prefix.slice(1, -1).split("/");
+export function fileOverlapsNamespace(route, prefix, { exact = false } = {}) {
+  const pattern = route === "/" ? [] : normalizedRoute(route).slice(1).split("/");
+  const segments = prefix === "/" ? [] : prefix.slice(1, -1).split("/");
   for (let index = 0; index < segments.length; index++) {
     const part = pattern[index];
     if (!part) return false;
@@ -52,7 +53,7 @@ export function fileOverlapsNamespace(route, prefix) {
     const expression = part.split(/(\[[^\]]+\])/).map((piece) => /^\[/.test(piece) ? "[^/]+" : piece.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("");
     if (!new RegExp(`^${expression}$`).test(segments[index])) return false;
   }
-  return true;
+  return !exact || pattern.length === segments.length || pattern.length === segments.length + 1 && /^\[\.\.\.[^\]]+\]$/.test(pattern.at(-1));
 }
 
 export function sectionRouteInventory(sections, designPages = [], { version = 2, pageFiles = [], publicFiles = [], symlinks = [], resolvedRoutes = [] } = {}) {

@@ -410,7 +410,7 @@ having no port yet; the `timds-update-design-system` skill ports it.
 
 ### Article sections
 
-Template version 3 declares its sections in `site/sections.json` with declaration
+Template versions 3 and 4 declare their sections in `site/sections.json` with declaration
 version 2. A fresh
 site has the same single `articles` section. Any non-empty set can replace
 it; `articles` is not mandatory:
@@ -440,7 +440,7 @@ names, including Cloudflare's `cdn-cgi`. Entries belong to exactly one collectio
 canonical address is that section's prefix followed by the entry slug and a
 trailing slash. A feed, when enabled, is `<prefix>rss.xml`.
 
-All routes still use this site's one selected Design System. For the example
+With no divisions declaration, every route uses the site's selected design. For the example
 above, `/commercial-division/` and `/commercial-division/about/` can be ordinary
 design pages, while `/commercial-division/lease-faq/how-to-lease-building/`
 belongs to the `lease_faq` collection. The division prefix does not select
@@ -641,8 +641,10 @@ The route inventory refuses overlapping mounts and collisions between
 mounted pages, main design pages, collections, public files and Astro
 routes. The two-way check reads the styles for each division’s authored
 pages and layout, and preview routes come from that same inventory.
-Reference pages are available for design comparison. Sites can use the
-template without adding a divisions declaration.
+Reference pages in the owner system are available for design comparison.
+The generated canonical link and discovery entry assume division pages
+are public and indexable. Sites can use the template without adding a
+divisions declaration.
 
 The scaffold writes template 4 for a new workspace site. For an existing
 site, generate a comparison scaffold in a disposable workspace and port
@@ -650,6 +652,43 @@ the composition integration, virtual module types, catch-all page, article
 routes and layout wrappers into the existing site while preserving local
 customizations. Keep the site's declaration, seed, collection schema and
 database as they are. Toolkit upgrades leave the site's files in place.
+
+#### If you use TimDS Cloud
+
+A division can use the verified design metadata and styles of a sibling
+Design System's exact published release. Keep `systems.main` as the
+workspace entry and add an alias with a system id and release version.
+
+```json
+"systems": {
+  "main": { "workspace": true },
+  "commercial": { "systemId": "timds-example/commercial", "version": "2026.11.1" }
+}
+```
+
+Set the division's `system` to `commercial` and `design` to a design id
+from that release. The site can reference up to four sibling pins, and
+every declared sibling must be used by a division. The Host stages each
+authorized release in a read-only input directory, verifies the exact
+release files and gives the same staged receipt to builds and live
+previews. For local work with these inputs, use the supplied staging
+directory at `site/.timds-site-inputs/` or point `TIMDS_SITE_INPUTS` at it.
+The build, development server and consumer check verify the declared pins
+and file digests from its receipt, and need no network access. The staged
+directory is generated input and stays outside commits.
+
+The sibling design's default home page in `designs.json` determines its
+stylesheet links. The site's layout and page fragments remain
+owner-authored. Sibling HTML and scripts are reference data and are never
+run by the site. A local consumer preview captures the rendered site
+routes and shows side-by-side reference images only for the owner's
+workspace designs. Selected styles and their verified static files are
+served under a release-specific namespace while relative references
+inside stylesheets keep working. In a division fragment, use
+`/assets/...` or `/fonts/...` to refer to that context's staged assets.
+In an Astro layout, join the asset path to `context.assetPrefix`, which
+already includes the site base. The site cannot build against missing
+inputs, floating versions, missing files or digest mismatches.
 
 ### The check runs both ways
 

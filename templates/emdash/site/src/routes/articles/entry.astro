@@ -48,7 +48,7 @@ if (Astro.cache?.enabled) Astro.cache.set(cacheHint);
 Astro.response.headers.set("Cache-Control", cacheControl(Astro.locals, Astro.url, isPreview));
 
 const { data } = entry;
-const origin = siteOrigin(Astro.url, Astro.site);
+const origin = siteOrigin(Astro.url, Astro.site, Astro.request);
 const coverSrc = imageFieldUrl(data.cover, Astro.locals);
 const seo = getSeoMeta(entry, {
 	siteUrl: origin,

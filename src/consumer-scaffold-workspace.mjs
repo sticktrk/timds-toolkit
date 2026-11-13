@@ -408,7 +408,7 @@ export async function workspaceSectionApps(siteRoot, apps, systemRoot) {
   const composedRoutes = composition && compositionRouteInventory(composition, inventory, [], routeFiles);
   if (composition) {
     if (!systemRoot) throw new Error("Site divisions require a workspace Design System.");
-    for (const division of composition.divisions) divisionStyles(systemRoot, division);
+    for (const division of composition.divisions) divisionStyles(systemRoot, division, composition.inputs.get(division.system));
   }
   const result = {};
   for (const [name, app] of Object.entries(apps)) {
