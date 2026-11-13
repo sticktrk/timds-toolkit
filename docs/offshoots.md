@@ -8,12 +8,13 @@ They also maintain the layout's missing stock stylesheet links, within the
 starter's existing narrow layout boundary.
 Uncommitted catalogs and authored fragments do not block this plumbing sync;
 its cleanliness check covers only the plumbing, layout and starter record it
-may write. Feed checks its own catalog and plumbing write paths separately.
+may write. Feed checks its catalog, declared-stock and parent-record write
+paths separately; it never writes plumbing.
 
-The host provisions hosted offshoots and owns grants, source identities and
-publication lineage. These commands create and maintain a local repository.
-They do not register a source, publish it, or change the host catalog.
-Designers direct their agent; the agent runs the commands.
+These commands create and maintain a local repository from a committed Git
+parent or an immutable source export. Designers direct their agent; the agent
+runs the commands. If you use TimDS Cloud, the host separately owns source
+registration and hosted publication; these commands do neither.
 
 Local `shoot` currently runs through the npm distribution. After reviewing and
 committing the new npm offshoot, binary users explicitly adopt it with
@@ -84,9 +85,7 @@ Full copies every exported source layer, including authored content, before
 setting the new identity and immediate parent record. Local Git export refuses
 secrets, generated directories and submodules rather than importing them.
 
-Structure retains verified plumbing and exact designer-declared stock. The host's
-matching transform revision is 2; its recorded revision 1 remains available for
-operations bound before composer and copy-file support:
+Structure retains verified plumbing and exact designer-declared stock:
 
 - `.timds/starter.json` must have `plumbing:"toolkit"` and hashes matching
   the parent's build, check, dev and viewer scripts. Only recorded
@@ -165,7 +164,7 @@ Only catalogs, the parent's declared stock and `.timds/parent.json` can
 change. Feed carries no code: it never writes plumbing (the stub scripts, the
 composer script, the viewer and canvas stylesheets) or the child's
 `.timds/starter.json`, whatever the parent recorded, because a system's code
-is its own toolkit selection and only `upgrade` writes it. Tokens, media,
+is its own toolkit selection, maintained by `starter sync` and `upgrade`. Tokens, media,
 designs, Evidence and every file the parent does not declare are never
 copied. Ordinary starter sync and upgrade take only the `code` starter steps
 on an offshoot; `defaults` steps run on the parent and reach the child
@@ -235,11 +234,11 @@ the feed writes), `check_failed` (the workspace check failed and the feed was
 rolled back), `not_offshoot` (no `.timds/parent.json`), `parent_mismatch` (the
 source belongs to another parent, is older than the recorded release, disagrees
 with its own release identity, or the baseline is not the recorded release),
-`baseline_required` (a record shot before stock hashes and no baseline) or
-`feed_failed` (anything else). The hosted
-feed operation, its reconciler, publication gate and lineage advance, a
-proposal flow back to the parent, and moving pages between views are host or
-later work, not performed here.
+`baseline_required` (a record shot before stock hashes and no baseline),
+`below_floor` (the parent or child predates the supported starter floor), or
+`feed_failed` (anything else). This command updates the local workspace; it
+does not publish, change hosted lineage, propose changes back to the parent,
+or move pages between views.
 
 ## Records and readers
 

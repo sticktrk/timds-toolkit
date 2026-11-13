@@ -1,5 +1,10 @@
 # Platform descriptions
 
+Commands below use `timds` as shorthand for the repository's selected CLI:
+`npm run timds --` in npm mode or `timds-cli` in binary mode. Run them from
+the repository root and read the Design System's `.timds/installation.json`
+before selecting the executable.
+
 `contract.json` owns `publishing.targets`: `youtube_short`, `facebook_reel`,
 and `instagram_reel`. Each has a writing `brief` and a final `maxCharacters`
 budget plus a `maxCopyCharacters` budget for the authored text. A target may override `shortBridge`, `shortDisclaimer`, and

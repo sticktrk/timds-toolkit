@@ -12,7 +12,8 @@ they can complete.
 
 ## Installation mode
 
-Read `.timds/installation.json` before installing tools. With `mode: "binary"`,
+Read `.timds/installation.json` under the Design System root (the folder
+holding `timds.json`) before installing tools. With `mode: "binary"`,
 use `timds-cli` at its exact `version` in place of `npm run timds --`; skip npm
 installation and npm dependency-upgrade steps for the stock system. Check
 `timds-cli --version` and `timds-cli doctor`. Select another executable release
@@ -42,14 +43,22 @@ retain their declared prerequisites. The agent runs these steps for the designer
    (`starter: "brand-kit"` in `.timds/starter.json`) authors its Voice page
    and instead warns that its voice is assumed, still reports no annotated
    logo, and lists the stock media slots it is falling back on.
-5. Start the authoring server with `npm run timds -- dev` in the background
+5. If the Design System root contains `site/timds.consumer.json` with
+   `designSystem.workspace: true`, read that site's `AGENTS.md` and
+   `DESIGN_SYSTEM.md` and run `npm ci` in its own folder. It has no pin;
+   root `check` excludes it. Use the installed consumer skills for site
+   changes and run `consumer check --root SITE_PATH` separately, where
+   `SITE_PATH` is `site` or `design-system/site` from repository root.
+6. Start the authoring server with `npm run timds -- dev` in the background
    and give the designer the URL it prints (the starter serves
    `http://127.0.0.1:4321`, with website designs under `/designs/`; a system
    with no `workspace.dev` command falls back to `preview` on 4400). If that
    port is busy, use `npm run timds -- dev --port 4322`; do not stop another
    workspace's server. The starter server does not watch files: after every
    edit you make, rerun `npm run timds -- check` and tell the designer to
-   reload. A framework dev server may reload on its own; say which applies.
+   reload. A workspace site's pages read design source on each request and
+   appear under `/site/` on the same port; the system's guidance still needs
+   rebuilding. A framework dev server may reload on its own; say which applies.
 
 ### If you use TimDS Cloud
 

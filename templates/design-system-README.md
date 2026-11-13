@@ -61,9 +61,10 @@ static artifact that TimDS will publish.
 
 ## Starter viewer
 
-New contracts include a dependency-free starter viewer under `src/` and
-deterministic Node.js commands under `scripts/`. The starter exists so the
-contract builds and validates immediately; replace its neutral tokens and
+New contracts include authored pages, styles and catalogs under `src/` and
+small build, check and dev stubs under `scripts/`. Those stubs run the renderer
+from the selected TimDS release. The starter exists so the contract builds
+and validates immediately; replace its neutral tokens and
 examples with approved client foundations rather than treating them as brand
 guidance. It is organized as views (Brand, Web DS, Digital DS, Social DS,
 Print DS, Use), each a list of pages, all rendered into one shared shell. Some pages are authored from the starter
@@ -106,9 +107,10 @@ The overview is preserved at `/overview/` with the default home choice.
 The promoted “Start making” action opens Compose, whose presets include every
 kit format, including Print, Events and Decks. Landing cards select a format
 for the composer. Foundation and channel pages show previews before the Spec
-drawers with slot evidence and technical tables. Whole-page Designs
-begin empty and are authored for this system before a developer ports a release
-into the product. An upgrade keeps shared plumbing current and preserves these
+drawers with slot evidence and technical tables. The kit seeds a `website`
+design with default pages, article references and journeys on its own styles.
+Replace the samples with this system's content; a separate product ports them,
+and an optional workspace EmDash site renders their source directly. An upgrade keeps shared plumbing current and preserves these
 authored values and pages.
 
 ## Website designs
@@ -122,7 +124,8 @@ allows JavaScript interactions and refuses inline styles,
 undeclared classes, relative references. The ordinary starter ships one sample design
 whose copy is to replace: a home page, the default pages (About, Contact, Privacy,
 Terms, 404), and the article designs (list, article, topic) at fixed sample routes
-a site can seed and preview against; a brand kit begins with an empty Designs directory; a system scaffolded before designs existed adopts them with
+a site can seed and preview against. The brand kit seeds the same kinds of
+pages on its own classes. A system scaffolded before designs existed adopts them with
 `__TIMDS_CLI__ designs init`. `AGENTS.md` holds the rules.
 
 The scaffold itself stays current: `.timds/starter.json` records the starter kind and its
@@ -133,6 +136,35 @@ to them is replaced and reported) and appends new views, planned pages, and
 formats without touching what this system declares.
 `__TIMDS_CLI__ starter status` reports the starter level; a step that changes what visitors see waits for
 `__TIMDS_CLI__ starter migrate --accept ID` or `--decline ID`.
+A missing starter record, missing level or level below the supported floor
+requires regeneration from the current starter. Upgrade, sync, migrate,
+feed and shoot refuse it with `below_floor` before writing; check and doctor
+warn without migrating it.
+
+## A website in this workspace
+
+`__TIMDS_CLI__ consumer scaffold emdash --workspace` creates the system's own
+EmDash site under `site/`, with no pin. In an embedded repository the folder
+is `design-system/site/`. The selected website design's public default-state
+pages, tokens and linked stylesheets are read from source at build time;
+article routes use the site's templates and EmDash content. The site and
+system are reviewed together, and deployment remains a separate decision.
+
+The site is its own npm package. Install with `npm ci` in that folder, then
+run the system's `dev` command to review it under `/site/`. Root `check`
+excludes the site: also run `consumer check --root SITE_PATH --no-fix --json`
+using its path from repository root and `npm run build` inside the site.
+Without `--no-fix`, the site check rewrites supported exact-token literals.
+Follow the site's `AGENTS.md`, `DESIGN_SYSTEM.md` and installed consumer skills.
+
+Section declarations and shared schema live in the site's `sections.json`
+and `section-schema.json`. An authorized developer change runs
+`npm run sections:sync` there, then consumer check and build; an existing
+database needs explicit schema setup too. Normal checks do not sync source.
+The site, its consumer skills and its marked guidance are product source;
+ordinary root upgrade never refreshes them. `--existing` is withdrawn.
+For a separate pinned site repository, use `consumer scaffold emdash --root
+PATH --design-system GIT_URL` instead.
 
 ## Offshoots
 
@@ -266,9 +298,11 @@ __TIMDS_CLI__ video render TOPIC
 ```
 
 `video lab` previews a `video/lab/` compile request the way an automated Video
-Lab ships it: compiled through the `producer` block, timed silently, footage
-and cover chosen from the registered catalog, and opened in Remotion Studio
-with this repository's components. `video check` compiles every lab input.
+Lab ships it: compiled through the `producer` block, narrated with measured
+word timings, footage and cover chosen from the registered catalog, and opened
+in Remotion Studio with this repository's components. `--plan` estimates timing
+without generating audio; `--silent` explicitly requests a silent preview.
+`video check` compiles every lab input.
 
 TimDS supplies the default Remotion component set. To begin with an identical
 client-owned copy that can evolve independently, generate one snapshot:
@@ -385,12 +419,16 @@ The CLI runs from `node_modules`; do not commit that directory or a copied
 installation record, an upgrade writes only what the starter sync above
 owns: the stock scripts and viewer stylesheets, entries appended to
 `src/site.json` and `src/formats.json`, the managed overview and Use
-fragments while they are unmodified, a missing stylesheet or changelog link
-in `src/layout.html`, the `.timds/starter.json` record, and the generated
-`tokens.json` and `media.json` views when it migrates the aggregates into
-groups. It never rewrites `timds.json`, the authored token and media groups,
-other pages, `system.css`, framework configuration, this documentation, or
-the generated artifact. Review and commit the tooling diff separately.
+fragments while they are unmodified, missing stock stylesheet links in
+`src/layout.html`, and `.timds/starter.json`. The explicit contract-layout
+migration also creates authored token and media groups from the old aggregates,
+records `.timds/contract-layout.json`, and regenerates the root `tokens.json`
+and `media.json` views. Validation rebuilds the generated artifact. Upgrade
+never replaces existing authored groups, `timds.json`, other pages,
+`system.css`, framework configuration or this documentation. Adopted stock
+release automation is refreshed within its recorded boundary; customized
+managed files require explicit replacement. Review and commit the tooling
+diff separately.
 
 
 ## Multiplayer source contract
@@ -420,7 +458,7 @@ product consumes the committed `design-system/dist/` directly.
 
 After committing and pushing source changes, an authorized operator runs
 `__TIMDS_CLI__ publish` to build, push the declared artifact ref and request portal
-publication. Sign in with `__TIMDS_CLI__ login`, or configure an unbound
+publication. Sign in with `__TIMDS_CLI__ auth login`, or configure an unbound
 operator `TIMDS_ACCESS_TOKEN` in CI. Designer/website and consumer tokens cannot
 promote a release.
 The artifact ref must be separate from the remote default branch. Publication
@@ -440,12 +478,13 @@ advances.
 Authenticate once and upload the staged file to public TimDS object storage:
 
 ```bash
-__TIMDS_CLI__ login
+__TIMDS_CLI__ auth login
 __TIMDS_CLI__ assets publish
 ```
 
-`submit` performs the publish step automatically before building and preparing
-the pull request. Git receives only the stable public record in the media
+Git `submit` performs the publish step automatically before building and
+preparing the pull request. A hosted `submit` does not; publish staged media
+explicitly before submitting there. Git receives only the stable public record in the media
 catalog (`media/<group>.json`, with `media.json` regenerated from it).
 Staging remembers the catalog checksum. Publication refuses stale replacements,
 including older staging entries without a baseline, and never removes another
@@ -474,10 +513,11 @@ Feed and sever run outside hosted sessions. A severed hosted system
 additionally needs its host catalog lineage updated before publication;
 `sever` does not change the host catalog.
 
-Humans direct work, inspect status/history, publish and roll back. In hosted
-systems the agent uses `timds_*` MCP tools to claim paths, start or join a
-session, update and submit with the human intent in `note`. Claims are advisory.
-A named draft has members and no expiry; `start --draft NAME` targets it.
-Read active work before editing. Resolve exactly the returned conflict key
-with `PATH#KEY=mine|theirs`; never replace unrelated changes. Return the live
-URL and frozen submission preview to the human.
+Humans direct work, inspect status/history, publish and roll back. The agent
+follows the installed hosted skill through the CLI: start or join a session,
+read `active-work`, claim paths, then update and submit with `--note INTENT`.
+Claims are advisory. A named draft has members and no expiry; `start --draft
+NAME` targets it. `status --json` and `history --json` expose structured session
+results. Resolve exactly the returned conflict with
+`update --resolve 'PATH#KEY=mine|theirs' --note INTENT`; never replace unrelated
+changes. Return the live URL and frozen submission preview to the human.

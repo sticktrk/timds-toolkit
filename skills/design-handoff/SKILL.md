@@ -15,13 +15,21 @@ deliverable.
 
 ## Installation mode
 
-Read `.timds/installation.json` before installing tools. With `mode: "binary"`,
+Read `.timds/installation.json` under the Design System root (the folder
+holding `timds.json`) before installing tools. With `mode: "binary"`,
 use `timds-cli` at its exact `version` in place of `npm run timds --`; skip npm
 installation and npm dependency-upgrade steps for the stock system. Check
 `timds-cli --version` and `timds-cli doctor`. Select another executable release
 only through `timds-cli upgrade --version EXACT_VERSION`. Existing npm mode
 keeps its bounded requirement and committed lockfile. Custom product tools
 retain their declared prerequisites. The agent runs these steps for the designer.
+
+A site inside this Design System's workspace (`site/timds.consumer.json`
+with `designSystem.workspace: true`) has no release pin or bundle to adopt.
+For that site, report the changed source routes, article templates, section
+schema or form handlers that need developer work, and the checks and deployment
+still needed. Follow its installed `timds-update-design-system` skill for
+that work; the pinned-product comparison below applies to separate consumers.
 
 ## Find the two ends
 
@@ -47,7 +55,11 @@ standalone system, `design-system/` in an embedded one.
    notes; the top of `CHANGELOG.md` shows anything newer still unreleased.
    Where the managed standalone release workflow or `scripts/release.mjs`
    runs, releases are commits titled `Release <version>` on the default
-   branch; find the pinned one with `git log --grep "^Release <version>$"`.
+   branch; resolve each endpoint with
+   `git log --all --format='%H %s' --fixed-strings --grep='Release VERSION'`
+   and verify the candidate's `timds.json` version. Replace `VERSION` with
+   the literal release label; do not assume the checkout's `HEAD` is the
+   requested release.
    If you use TimDS Cloud: a hosted system has no Git history in the
    session; `timds history` and the published `changelog.json` are its
    record.
@@ -66,8 +78,12 @@ tree, when the designer wants a preview of unreleased work), gather:
   `/changelog/` page, so a developer without this checkout reads it there.
   A version is its UTC release day and number that day (`2026.10.12-1`);
   older releases may carry `MAJOR.MINOR.PATCH`.
-- Website designs: `git diff --stat <pinned>..HEAD -- src/designs/` lists
-  the routes and states that changed or were added, and `design.json` any
+- Website designs: from the Design System root,
+  `git diff --stat PINNED_COMMIT RELEASE_COMMIT -- src/designs/` lists
+  the routes and states that changed or were added; use the verified commit
+  hashes from above. For an explicitly requested preview of unreleased work,
+  `git diff --stat PINNED_COMMIT -- src/designs/` also includes tracked working
+  changes; inspect untracked designs with `git status --short`. `design.json` lists any
   renamed titles and the journeys that changed or were added (a journey is
   the pages a visitor moves through in order, with its steps, screens, and
   branches; its storyboard is `/designs/<design>/journeys/<id>/`). A route

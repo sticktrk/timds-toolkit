@@ -48,7 +48,8 @@ const PROTECTED_DIRECTORIES = [".git", ".timds", ".agents", ".github", "node_mod
 const PROTECTED_FILES = ["package.json", "package-lock.json", "timds.json", "media.json", ".gitignore"];
 // Release automation the toolkit installs from templates/starter/scripts and
 // replaces through `upgrade --auto-release`. Other scripts, such as the build,
-// dev, and check scripts timds.json runs, stay client-authored.
+// dev, and check scripts timds.json runs, remain accessible here; stock
+// starter stubs still follow their toolkit/recorded plumbing ownership.
 const RELEASE_AUTOMATION_FILES = [
   "scripts/release.mjs",
   "scripts/release.sh",
@@ -92,9 +93,10 @@ const DIRECTORY_PURPOSES = {
 const EDITING_GUIDE = `# Edit a TimDS Design System through MCP
 
 You are editing a client's repository-owned TimDS Design System through the
-\`timds-design-system\` tools. You have no checkout: every read, write, and
-check goes through these tools, and the host records each write as a reviewed
-change. Work only in the Design System the user gave you.
+\`timds-design-system\` tools. Read, write, and check through these tools,
+whether the server is bound to a local checkout or a hosted draft. A local
+write changes the checkout; a hosted write follows the host's draft lifecycle.
+Neither is a publication. Work only in the Design System the user gave you.
 
 ## Start
 
@@ -121,9 +123,11 @@ change. Work only in the Design System the user gave you.
   commands, release automation, and workflows change only when the operator
   updates TimDS. The build, dev, and check scripts stay editable, but they are
   stubs that call the renderer in the package, and they,
-  \`src/styles/viewer.css\`, and \`src/styles/canvas.css\` are stock starter
-  plumbing that \`upgrade\` refreshes while unmodified; a local change leaves
-  that file behind on later upgrades. Add a build step as a
+  \`src/scripts/compose.js\`, \`src/styles/viewer.css\`, and
+  \`src/styles/canvas.css\` are stock starter plumbing. In the default
+  \`toolkit\` plumbing mode, every sync or upgrade restores stock bytes,
+  including local customizations. Only \`recorded\` mode keeps customized
+  plumbing until explicit replacement. Add a build step as a
   \`workspace.after.build\` command in \`timds.json\` (an operator change)
   instead of editing the build script, and prefer \`tokens/*.json\`, \`system.css\`, and the pages. When a change needs a protected file, say so in your hand-off
   instead of working around it.
@@ -138,10 +142,17 @@ change. Work only in the Design System the user gave you.
   \`timds.consumer.json\`, \`.timds/\`, build output and local state
   (\`dist/\`, \`.astro/\`, \`.wrangler/\`, \`.emdash/\`) and secrets (\`.env\`,
   \`.dev.vars\`) are protected. \`run_check\` checks the system only; the
-  site's own build and \`timds consumer check\` run in \`site/\`.
+  site's own build and \`timds consumer check\` run separately for \`site/\`.
+  These editing tools do not run those site checks. Report that verification
+  need in the hand-off; \`consumer check --no-fix --json\` inspects the site's
+  styles without the ordinary check's automatic token replacements.
 - Edit authored tokens, source, documentation, components, navigation, and
   lightweight assets. Preserve the framework and visual language unless the
   user asks for a migration or redesign.
+- When the system uses contract groups, author \`tokens/*.json\` and
+  \`media/*.json\`. Root \`tokens.json\` and \`media.json\` are generated
+  compatibility views and are protected. Keep token references and media
+  keys valid; \`run_check\` validates the groups and regenerates the views.
 - Website designs live under \`src/designs/<design>/\`: whole pages in HTML
   with system stylesheets and optional JavaScript, one file per route and state
   (\`pages/contact.html\`, \`pages/contact.sent.html\`), with an optional
@@ -202,8 +213,9 @@ change. Work only in the Design System the user gave you.
   a thumbnail must resolve to an optimized derivative, never a large original.
   CSS sizing does not reduce downloaded bytes.
 - Small optimized logos, icons, and fonts may be written as authored files
-  when the client contract allows it. Adding or replacing catalog media is not
-  available through these tools yet: describe what is needed in the hand-off.
+  when the client contract allows it. Authored \`media/*.json\` records may
+  reference reviewed existing assets, but these tools cannot upload or
+  publish staged originals: describe new uploads needed in the hand-off.
 - Shared brand imagery belongs to the Design System; consumers use its
   reviewed asset URLs or media keys.
 

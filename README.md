@@ -12,7 +12,7 @@ editing sessions, Studio review, publication, media storage and hosted MCP),
 is described in one section at the end and in
 [docs/timds-cloud.md](docs/timds-cloud.md).
 
-Client repositories select the bounded `0.1.x` package line in
+Npm client repositories select the bounded `0.1.x` package line in
 `devDependencies`. The lockfile records the exact resolved release. The CLI runs
 from `node_modules`; client Git repositories do not carry a copied `.timds/cli`
 tree. TimDS also installs the managed skills under `.agents/skills/` (the
@@ -36,11 +36,16 @@ and package imports keep their current contract.
 
 ## Add TimDS to a repository
 
+Bootstrap with `@latest`, or resolve and use one exact release. Once the
+repository exists, use its selected toolkit command and commit the exact
+lockfile; npm scaffolds retain the bounded `0.1.x` dependency requirement.
+
 Create a preferred standalone Design System repository:
 
 ```bash
-npx --yes @dtconcepts/timds@0.1.x init --standalone --root /path/to/client-design-system
+npx --yes @dtconcepts/timds@latest init --standalone --root /path/to/client-design-system
 cd /path/to/client-design-system
+git init -b main   # only when the destination is not already a Git repository
 npm install
 npm run timds -- doctor
 npm run timds -- check
@@ -52,7 +57,7 @@ To link a standalone Design System to a product repository that consumes it,
 declare the consumer during initialization:
 
 ```bash
-npx --yes @dtconcepts/timds@0.1.x init --standalone \
+npx --yes @dtconcepts/timds@latest init --standalone \
   --root /path/to/client-design-system \
   --consumer-repository OWNER/CLIENT-SITE \
   --consumer-branch main \
@@ -75,15 +80,15 @@ depends on a release tag.
 Create an embedded root `design-system/` contract in an existing client app:
 
 ```bash
-npx --yes @dtconcepts/timds@0.1.x init --root /path/to/client-application
+npx --yes @dtconcepts/timds@latest init --root /path/to/client-application
 cd /path/to/client-application
 npm install
 npm run timds -- doctor
 npm run timds -- check
 ```
 
-New contracts include a small authored viewer, deterministic build/check/dev
-scripts, starter tokens, and a validated initial artifact. They also include
+New contracts include authored viewer pages and styles, build/check/dev stubs
+that call the package renderer, starter tokens, and a validated initial artifact. They also include
 the agent entry points: `AGENTS.md` (the working contract: a start sequence,
 a map of the scaffold, how pages reach the machine-readable layer, a first
 design pass, and the protected tooling), a `CLAUDE.md` that imports it for
@@ -116,14 +121,17 @@ its dated version, the built system renders the history at `/changelog/`
 slot-driven brand kit for a website-to-kit parent, with nine channel views
 (Brand, Web, Social, Ads, Email, Print, Events, Decks, Use), an authored
 Voice page, copy slots in `src/copy.json`, media slots, template formats
-rendered in Minimal, Accent, Bold and Photo treatments, and an empty Designs
-directory. Its slot contract is exported as `@dtconcepts/timds/brand-kit`;
-`.timds/starter.json` records the kind, and starter sync keeps each kind's
-catalogs and managed fragments. See [the brand kit](docs/brand-kit.md).
+rendered in Minimal, Accent, Bold and Photo treatments, and a seeded website
+design with general pages, article and topic references, and journeys.
+Its slot contract is exported as `@dtconcepts/timds/brand-kit`;
+`.timds/starter.json` records the kind. Starter sync keeps its plumbing and
+catalogs current; kit pages are seed-only and become authored source after
+init, so no upgrade refreshes them. See [the brand kit](docs/brand-kit.md).
 
 ## Designer workflow
 
-After repository access and Node.js 20+ are configured:
+The designer directs the agent; the agent runs these commands. For npm
+installations, configure repository access and Node.js 20.10 or newer:
 
 ```bash
 git clone git@github.com:ORG/CLIENT-design-system.git
@@ -182,14 +190,36 @@ npx --yes @dtconcepts/timds@latest skills install
 ```
 
 This writes the system-independent skills into `.agents/skills/`,
-`.claude/skills/` and `.cursor/skills/` (`--global` installs under the home
-folder instead) and records every written file's digest in
-`.timds/skills.json`. Rerun the same command at `@latest` to refresh:
+`.claude/skills/` and `.cursor/skills/` and records every written file's digest
+in `.timds/skills.json`. `--global` writes those skill directories under the
+home folder and records digests in `$XDG_CONFIG_HOME/timds/skills.json`
+(default `~/.config/timds/skills.json`). Rerun the same command at `@latest` to refresh:
 unmodified files are replaced, files a release no longer ships are removed,
 and a file someone edited is kept and reported unless `--force`. The command
-refuses to run in a Design System repository or a consumer repository, whose
-skills `init`, `consumer init` and `upgrade` manage. The per-system hosted
+refuses to run in a Design System repository, a consumer repository or a
+hosted session workspace. Repository skills belong to `init`, `consumer init`
+and `upgrade`. The per-system hosted
 skill is part of [TimDS Cloud](#timds-cloud).
+
+An agent starts with the workspace's `AGENTS.md` and installed skill, then
+checks the selected CLI's help before using a command. Use `npm run timds --`
+in a local/Git npm repository and `timds-cli` in a binary repository; do not substitute
+an independently installed CLI for the repository's selected release.
+`--root PATH` selects the workspace explicitly. `--help` lists implemented
+commands and flags; `consumer --help` and `video --help` cover those families.
+There is no separate man page.
+
+For automation, use `doctor --json` to inspect a Design System and
+`consumer check --no-fix --json` to inspect a product. In a workspace site,
+ordinary `consumer check` can rewrite eligible literal styles to tokens;
+`--no-fix` reports them without rewriting. `starter status --json` reports
+the starter floor and pending decisions; `upgrade --json` and `feed --json`
+return structured reports with failure codes. Only request `--json` where
+the command's help lists it, and check the process exit status as well as the
+report. When capturing JSON through npm, use
+`npm --silent run timds -- COMMAND --json` to suppress npm's lifecycle banner.
+Read the installed skill for the authorized edit surface and delivery
+steps; a proposed command in a design document is not an available capability.
 
 ## Machine-readable artifacts
 
@@ -492,8 +522,10 @@ not visible or has nothing to change, and a step that changes what visitors
 see waits for `starter migrate --accept` or `--decline`. This release is
 level 1 with floor 1 and no steps. A starter-based system from before starter
 levels (a record without `level`, or none) is below the floor: `upgrade`,
-`starter sync`, `starter migrate` and `feed` refuse it with `below_floor`, and
-it is regenerated from the current starter rather than carried forward.
+`starter sync`, `starter migrate` and `feed` refuse it with `below_floor`;
+`shoot` also refuses a parent below the floor. `check` and `doctor` warn.
+Regenerate such a system from the current starter rather than carrying it
+forward or inventing a starter record.
 
 The renderer is never copied: the stub scripts call the package, and a system
 that needs an extra build step declares it as a command in `timds.json`:
@@ -514,7 +546,7 @@ the status `starter status --json` reports.
 
 Together `index.json`, `tokens.json`, `brand.json`, `llms.txt`,
 `llms-full.txt`, and, when the system keeps them, `formats.json`,
-`designs.json`, and `bundle.json` are the
+`designs.json`, `changelog.json`, and `bundle.json` are the
 **derived layer**: generated on every `check`, published on every
 `extract --publish`, and the only thing a consumer — an MCP server, a render
 host, a pipeline, another agent — needs. Nothing in it is authored by hand,
@@ -608,7 +640,7 @@ storage (`assets publish`, which Git `submit` also runs), restoring it
 (`assets pull`) and `assets backfill-metadata` work on media published to a
 TimDS host; see [TimDS Cloud](#timds-cloud).
 
-Never commit tokens, storage credentials, object keys, expiring signed URLs,
+Never commit access tokens, storage credentials, object keys, expiring signed URLs,
 `.timds/local-media.json`, or anything except the README under `media-local/`.
 
 ## Remote editing through MCP
@@ -618,7 +650,7 @@ MCP-capable agent, bound to the current checkout. The server is named
 `timds-design-system` and provides:
 
 - `get_editing_guide` (also resource `timds://guide`): the editing rules for an
-  agent working without a checkout.
+  agent using the editing tools against a checkout or hosted draft.
 - `describe_workspace`: system, layout, authored directories, protected paths,
   workspace commands, and the brand kit report.
 - `list_files`, `read_file`, `write_file`, `delete_file`: guarded access to the
@@ -634,8 +666,13 @@ The guard is enforced, not requested. The tools refuse `.git/`, `.timds/`,
 `video-local/`, the release automation scripts (`scripts/release.mjs`,
 `scripts/release.sh`, `scripts/check-versions.mjs`,
 `scripts/prepare-merge-release.mjs`, `scripts/prepare-merge-release.test.mjs`),
-symbolic links, and anything outside the authored surface. Build, dev, and
-check scripts stay editable. A workspace site (`site/` with a workspace-form
+symbolic links, and anything outside the authored surface. The one editable
+exception under `.timds/` is `.timds/stock.json`, validated against the
+[offshoot stock contract](docs/offshoots.md). In grouped systems, root
+`tokens.json` is also protected; author `tokens/*.json` and `media/*.json`
+instead. Build, dev, and check scripts are accessible, but starter sync
+restores them in `toolkit` plumbing mode; add custom build steps through an
+operator-reviewed `workspace.after.build` command. A workspace site (`site/` with a workspace-form
 `timds.consumer.json`) is editable with the system, except its
 `package.json`, `package-lock.json`, `timds.consumer.json`, `.timds/`, build
 output and local state (`dist/`, `.astro/`, `.wrangler/`, `.emdash/`) and
@@ -662,10 +699,12 @@ read-only apart from `report_gap`, and never sees authored source:
 
 - `get_consumer_guide` (also resource `timds://consumer-guide`): how to use a
   system to produce on-brand work.
-- `list_design_systems`, `describe_system`: what is in scope, the served and
-  published versions (the current published version is always the default;
-  `version` selects an earlier release), the page directory, counts, and the
-  consumer bundle a website loads with the immutable copy to pin.
+- `list_design_systems`, `describe_system`: what is in scope, the source and
+  served, published and pinned versions, lineage, the page directory, counts,
+  recent release notes, video board kinds, and the consumer bundle with its
+  immutable copy to pin. A local or fixed-URL reader serves its configured
+  source; `version` only asserts that version. A hosted reader can select an
+  earlier release when its resolver supports it.
 - `resolve_role`: a brand role (`color.accent`, `font.display`, ...) to the
   token that fills it and its value; an unfilled role is a reported gap, never
   a guessed value.
@@ -676,6 +715,8 @@ read-only apart from `report_gap`, and never sees authored source:
   canvas with its size, bleed, and safe margin.
 - `list_pages`, `read_page`: the page directory and one page or block as
   Markdown or structured blocks.
+- `list_designs`, `read_design`: website designs and journeys, and a selected
+  route and state as authored HTML with its stylesheet, script and media references.
 - `search_guidance`: the blocks that answer a question, guidance groups first,
   every result cited by page and block.
 - `list_media`: the published media catalog by tag or kind.
@@ -689,9 +730,9 @@ Resources `timds://brand.json`, `timds://tokens.json`, `timds://index.json`,
 A host that serves consumers imports the tools from
 `@dtconcepts/timds/mcp/read`. `registerDesignSystemReadTools(server, {
 resolveSystem, listSystems, hooks })` registers them on an `McpServer`.
-`resolveSystem({ systemId, version })` returns `{ layer, media, published,
+`resolveSystem({ systemId, version, draft })` returns `{ layer, media, published,
 pinned }`; with `hooks.remote` every tool takes an optional `systemId` and
-`version`, and resources live under `timds://systems/{system}/...` with the
+`version` or `draft` (mutually exclusive), and resources live under `timds://systems/{system}/...` with the
 system id percent-encoded. `hooks.fileGap({ system, gap })` receives each
 reported gap.
 
@@ -717,8 +758,9 @@ that version's bundle (the stylesheets, scripts, and small assets the system
 declares in its `bundle.include`) from the public prefix into the gitignored
 `design-system/` directory under the same paths the files have in the Design
 System tree, verifying every digest, and records what it fetched in
-`design-system/.timds-bundle.json`. A clone and `npm ci` is all a website or
-an agent needs; nobody needs access to the Design System repository.
+`design-system/.timds-bundle.json`. A clone and `npm ci` is all an npm consumer
+or its agent needs; a binary-only consumer runs `timds-cli consumer sync`
+explicitly. Neither needs access to the Design System repository.
 Published-mode `consumer init` and `consumer migrate` resolve a missing or
 older toolkit lock to the running release while keeping the `0.1.x` requirement.
 Init installs that resolution with `npm ci` before postinstall runs. With
@@ -754,7 +796,7 @@ reviewable change: it reads the version the checked-out submodule declares
 the installation without writing, then removes the submodule (deinit,
 gitlink, `.git/modules`, the `.gitmodules` section, the checkout), pins the
 version, applies init's plan so `postinstall`, `.gitignore`, and the managed
-skill follow, installs the verified bundle, and warns about
+skills follow, installs the verified bundle, and warns about
 any tracked symlink into the directory the bundle leaves dangling. It edits
 no product-owned file: a deploy script or hook that still mentions the
 submodule is listed at the end for a developer. The working tree must be
@@ -794,13 +836,14 @@ design in the pinned Design System, as `"<design>:<route>"`:
 ```
 
 Every paired route must be in `routes`; `consumer check` verifies each pairing
-against the pin's `src/designs/`. The preview then builds the pin's artifact
-with its own declared commands when it is not built yet, renders its designs,
-and captures the design page at the same widths and schemes into `designs/`,
-so the gallery and the portal show the design beside the route: the reference
-on one side, the product on the other. `preview.json` records the pairing on
-each route as `design` and the outcome under `designs`; a pin that cannot be
-shown is reported there and never fails the preview.
+against the published bundle's design-route summary, or a checkout's
+`src/designs/`. Side-by-side design captures require a checkout (a submodule
+or a linked local system). The preview builds that checkout's artifact with
+its declared commands when needed, renders its designs, and captures the
+reference at the same widths and schemes into `designs/`. A published bundle
+alone supplies pairing validation but no reference captures. `preview.json`
+records the pairing on each route as `design` and the outcome under `designs`;
+an unavailable reference is reported there and never fails the product preview.
 
 In crawl mode, `preview.discover` adds routes beyond `routes`: starting from
 `from` (default `["/"]`), it follows same-origin `<a href>` links breadth-first
@@ -872,7 +915,7 @@ Declared `routes` always come first and always stay.
   portal's upload limits, the least useful images are left out and listed
   under `dropped`.
 - `timds consumer init [--skip-install] [--portal-url URL]` writes a manifest
-  skeleton and installs the managed consumer skill, the preview and
+  skeleton and installs both managed consumer skills, the preview and
   designer-change workflows, `.claude/launch.json` entries, and the
   `timds-design-system-read` HTTP MCP server in `.mcp.json` (authorized with
   `TIMDS_ACCESS_TOKEN` from the environment). Merged entries beside your own
@@ -913,7 +956,7 @@ the portal after successfully pushing the change. It uses the official
 `openai/codex-action@v1` with `workspace-write` and `drop-sudo`.
 
 To upgrade a consumer, run `npm run timds -- upgrade` at the product root:
-it refreshes the consumer skill, the two consumer workflows, and the tracked
+it refreshes both consumer skills, the two consumer workflows, and the tracked
 launch and MCP entries from the installed toolkit, replacing only what nobody
 edited since TimDS wrote it (customized files are refused, customized entries
 kept, until `--force`), and records the new version in
@@ -938,7 +981,7 @@ repository. That makes an EmDash site an ordinary consumer, and one command
 creates it already wired to a Design System:
 
 ```bash
-npx --yes @dtconcepts/timds@0.1.x consumer scaffold emdash \
+npx --yes @dtconcepts/timds@latest consumer scaffold emdash \
   --root /path/to/client-site \
   --design-system git@github.com:ORG/CLIENT-design-system.git \
   --site-url https://www.client.example
@@ -1088,13 +1131,13 @@ Graphic scenes, chapters and static files, the board catalog, brand colors and f
 
 ## Upgrade a client repository
 
-An operator selects the approved release line. Keep the manifest on `0.1.x`,
-refresh its resolved lockfile version, and then synchronize the repository-local
-skill and installation record:
+An operator selects an approved release. In an npm repository,
+`upgrade --version` resolves it once, keeps the manifest on `0.1.x`, updates
+the lockfile, runs `npm ci`, and synchronizes managed files with that selected
+CLI. Use an exact release in place of `0.1.x` when one has been approved:
 
 ```bash
-npm update @dtconcepts/timds
-npm run timds -- upgrade --root .
+npm run timds -- upgrade --version 0.1.x --root . --json
 npm run timds -- defaults
 npm run timds -- defaults --apply
 npm run timds -- doctor
@@ -1107,10 +1150,15 @@ skills), and re-syncs the starter of a starter-based system (see "The
 starter stays current through upgrade"); one below the starter floor is
 refused before anything is written. It refuses locally modified managed files
 unless `--force` is explicitly supplied (that flag never extends to starter
-files; `starter sync --force <path>` is the only way to replace those) and never
-rewrites `timds.json`,
-tokens, media records, authored source outside the recorded starter boundary,
-framework config, documentation, or artifacts.
+files). In `toolkit` plumbing mode, sync restores stock plumbing automatically;
+in `recorded` mode, explicit replacement names files with
+`starter sync --force <path>`. Upgrade preserves `timds.json`, authored source
+outside the recorded starter boundary, framework configuration and authored
+documentation. The explicit contract-layout migration splits eligible legacy
+token and media aggregates into groups without changing their values;
+existing group files remain authored. Validation rebuilds the generated
+artifact. Binary repositories use `timds-cli upgrade --version EXACT_VERSION`;
+see [binary installation](docs/binary-installation.md).
 
 `upgrade --json` and its error codes, one dependency selection, runtime ownership, component consolidation, consumer and runtime compatibility, dependency PR automation, shared publishing defaults and `--auto-release` are described in [docs/upgrade.md](docs/upgrade.md).
 
@@ -1150,7 +1198,7 @@ version. **Run workflow** or **Re-run all jobs** creates another patch release.
 You can also cut a release locally from a clean, synced `master`:
 
 ```bash
-npm run release              # bump the patch: 0.1.403 -> 0.1.404
+npm run release              # bump the current patch version
 npm run release -- 0.2.0     # release an explicit version
 npm run release -- --dry-run # run every check, change nothing
 ```
@@ -1193,8 +1241,9 @@ without it. The full command reference is
 [docs/timds-cloud.md](docs/timds-cloud.md).
 
 **Sign in.** `timds auth login` (also `timds login`) selects `--portal-url`
-first, then the nearest workspace's hosted `provider.url`, then
-`TIMDS_PORTAL_URL` or `https://timds.com`. It uses OAuth with PKCE on a host
+first, then the nearest session's recorded host (or the workspace's hosted
+`provider.url` outside a session), then
+`TIMDS_PORTAL_URL`, the saved selected login, or `https://timds.com`. It uses OAuth with PKCE on a host
 that advertises it and the portal's device login otherwise (`--oauth`,
 `--device`, `--no-browser`). Credentials stay outside the repository in the
 owner-only TimDS credentials file; `TIMDS_ACCESS_TOKEN` is the
@@ -1209,22 +1258,28 @@ select the same host.
 `sessions close`:
 
 ```sh
-npm install --global @dtconcepts/timds@latest
-timds auth login --portal-url https://YOUR-HOST --oauth
-timds start example/core --root ./core
+npx --yes @dtconcepts/timds@latest auth login --portal-url https://YOUR-HOST
+npx --yes @dtconcepts/timds@latest start example/core --root ./core
 cd core
 npm ci
-timds dev
+npx --yes @dtconcepts/timds@latest dev
 # After editing:
-timds check
-timds submit --note "Describe the change"
+npx --yes @dtconcepts/timds@latest check
+npx --yes @dtconcepts/timds@latest submit --note "Describe the change" --json
 ```
+
+Hosted session agents follow the per-system hosted skill and use `@latest`.
+If a workspace enforces a binary selection, use that exact verified executable;
+never rewrite the installation record to bypass it. Use `npm install` instead
+of `npm ci` when the fetched source has no lockfile.
 
 `timds skills install --portal-url https://YOUR-HOST --system-id example/core`
 adds the per-system hosted skill (`timds-<system>`, rendered from
 `skills/timds-hosted-design-system/`) beside the designer skills. `timds init
---standalone --provider hosted --portal-url https://timds.com` creates a new
-hosted source. The `live` block in `timds.json` opts a system into native
+--standalone --provider hosted --portal-url https://timds.com` scaffolds local
+source configured for a host; it does not create or register a system there.
+Hosted creation through `systems create` is not an implemented command.
+The `live` block in `timds.json` opts a system into native
 hot module replacement in hosted live previews.
 
 **Publish.** In a hosted workspace, `timds publish` publishes the latest

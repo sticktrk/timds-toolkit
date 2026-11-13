@@ -2,7 +2,60 @@
 
 The upgrade commands are in the [README](../README.md#upgrade-a-client-repository).
 
+Agents run the repository's selected release: `npm run timds --` in an npm
+client, or `timds-cli` when `.timds/installation.json` selects binary mode.
+Read `doctor --json` and `starter status --json` before choosing a migration.
+Use plain `upgrade` to synchronize the selected release; `upgrade --version`
+is the explicit release-selection operation. Binary selection requires the
+exact version of the verified running executable, never `0.1.x` or `latest`;
+see [binary installation](binary-installation.md).
+
+## Write boundary
+
+Upgrade refreshes the managed skills, installation record, adopted automation
+and starter boundary. It creates `.claude/skills -> ../.agents/skills` only
+when nothing exists there. Starter plumbing recorded as `"toolkit"` returns
+to stock on every sync, with local replacements reported. In `"recorded"`
+mode, only unchanged stock bytes advance automatically: a customized script
+or stylesheet is kept until a terminal decision or `starter sync --force PATH`
+explicitly replaces that file. `upgrade --force` does not extend into starter
+files. Customized overview fragments remain authored under either mode.
+Catalogs use their recorded three-way merge, and the layout only gains missing
+stock stylesheet links. An offshoot keeps its parent's catalog baselines and
+stock; toolkit sync updates its plumbing and missing layout links only.
+
+There is one explicit authored-contract migration: initialization and upgrade
+split aggregate tokens and media into `tokens/*.json` and `media/*.json` key
+maps and record `.timds/contract-layout.json`. Those maps become authored;
+later upgrades never replace them. Root `tokens.json` and `media.json` remain
+generated compatibility views. Conflicting existing maps are refused; invalid
+group references leave the aggregate layout in place with a diagnostic. Edit
+the maps once the record exists, not the generated views. Checks may rebuild
+the generated artifact in `dist/`; that does not grant upgrade permission to
+rewrite authored pages, styles, documentation, components or `timds.json`.
+
+Consumer repositories have their own smaller boundary: the two consumer
+skills, preview/designer-change workflows, TimDS launch and MCP entries, and
+the installation record. Upgrade retains the product manifest, Design System
+pin, other launch/MCP entries and product source. `--version` also selects the
+toolkit dependency and exact lockfile; it does not select a Design System
+release.
+
+A workspace site (`site/timds.consumer.json` with `designSystem.workspace:
+true`) is product source inside a Design System, not a pinned consumer
+installation. Run upgrades at the Design System root: they never touch
+`site/`, its two root consumer skills, or the scaffolded site section in
+`AGENTS.md`. Those extra files are recorded in `site/.timds/emdash.json` and
+remain outside the managed release metadata. An upgrade run inside the site
+refuses and names the workspace root. Template updates currently require a
+reviewed manual change; see [EmDash sites](emdash.md#the-record).
+
 ## Machine-readable upgrade results
+
+For a parser, invoke `npm --silent run timds -- upgrade --json` (or
+`timds-cli upgrade --json`) and capture stdout separately from stderr. The
+`--silent` npm option suppresses its script banner. Check the process exit
+status and `ok`; do not interpret progress text as a result.
 
 `upgrade --json` prints one JSON object on stdout and nothing else (progress
 goes to stderr) for a host job or script that runs the upgrade: the previous
@@ -11,7 +64,10 @@ managed files written and the release automation files updated, the starter
 sync (the files written, current, and customized, the catalog views, pages,
 and formats it merged, and which customized files `starter sync --force` may
 replace), the publishing defaults available, the designs setup state, and the
-check the upgrade ran itself. A committed customization of a starter file is
+check the upgrade ran itself, plus `contractMigration: { migrated, reason? }`.
+The `check` field is null when that invocation ran no check; run `check`
+explicitly before delivery rather than treating `ok` as a build receipt.
+A committed customization of a recorded starter file is
 not a failure: the file is kept, listed under `starter.customized` (and
 `starter.replaceable` when `starter sync --force` may replace it), and the
 result is still `"ok": true`. The `starter` object also carries the starter

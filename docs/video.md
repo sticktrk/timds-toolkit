@@ -2,6 +2,16 @@
 
 The overview, `video init` and the component model are in the [README](../README.md#contract-driven-video).
 
+Agents use the selected `npm run timds -- video` command, or `timds-cli video`
+in binary repositories; `video --help` is the current command inventory.
+Video commands do not implement `--json`. `video components migrate` prints
+a JSON inventory even without that flag and changes files only with `--apply`.
+For lab review, `--plan` compiles and finalizes with estimated timings;
+`--prepare` and `--render` stage assets and generate measured narration unless
+`--silent` is explicit. A successful plan is not a render or visual-review
+receipt. Keep generated output under `video-local/` and review the frames
+before delivering the authored contract or production records.
+
 ## Graphic scenes, chapters, and static files
 
 A scene may carry a client-drawn board instead of, or over, footage once the
@@ -347,7 +357,7 @@ preparation and rendering generate each scene's narration with Edge TTS,
 then finalize footage and captions using the measured word timings. A speech
 failure stops the render instead of returning a silent video.
 
-Use Python with `edge-tts` installed. TimDS selects `--python`, then
+Use Python with `edge-tts` installed. For lab narration TimDS selects `--python`, then
 `TIMDS_PYTHON`, then the client's `.venv-tts` Python if present, then `python3`.
 The default voice is `en-US-AriaNeural`; override it with `--voice` or declare
 `voiceover: { "voice": "en-US-AriaNeural", "rate": "+0%", "pitch": "+0Hz" }`
@@ -355,6 +365,9 @@ in `video/contract.json`. Generated takes stay under ignored
 `video-local/lab/NAME/voiceover/`, keyed by the exact script, voice settings,
 and generator. Edits get new audio and timings; incomplete caches regenerate.
 Authored production scripts and locked takes remain untouched.
+The separate `video voiceover SLUG` command uses `--python` or `python3`,
+reads voice settings from the production's `script.json`, and respects its
+locked take unless `--force`; it does not use the lab's Python lookup.
 
 Shorts use each master's published `vertical` derivative by default. A client
 can set `producer.footage.allowShortCrop: true` to use the published master

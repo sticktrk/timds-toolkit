@@ -1,5 +1,10 @@
 # Video lab inputs
 
+Run the commands below from the repository root. Read the Design System's
+`.timds/installation.json` first: in binary mode use `timds-cli` in place of
+`npm run timds --`; the executable supplies the runtime. In npm mode use the
+repository's committed lockfile and selected package release.
+
 Each JSON file here is one compile request for the `producer` block in
 `../contract.json`: the exact question, a two-to-four-word topic label, the
 engagement question when the block requires one, the `topic.solution` the
@@ -24,7 +29,7 @@ that lab would ship through this Design System's components.
 npm run timds -- video lab                   # first input here, in Remotion Studio
 npm run timds -- video lab NAME              # NAME.json in the studio
 npm run timds -- video lab NAME --plan       # compile + finalize; print the plan
-npm run timds -- video lab NAME --prepare    # stage media and write the entry only
+npm run timds -- video lab NAME --prepare    # synthesize narration, stage media, write the entry; no studio
 npm run timds -- video lab NAME --render     # render the video and cover locally
 npm run timds -- video lab --list            # inputs and ready productions
 npm run timds -- video lab --serve           # local Video Lab web app: draft, edit, plan, render, download
@@ -41,9 +46,10 @@ best match the narration — stages brand files and published media under ignore
 
 Planning and checks only estimate timing; renders include speech unless you
 choose **Silent preview** in the browser or pass `--silent`. Use Python with
-`edge-tts` installed (`--python`, `TIMDS_PYTHON`, the client's `.venv-tts`, or
-`python3`). Set the contract's `voiceover` voice/rate/pitch or use `--voice` to
-select a voice. TimDS caches generated audio by script and voice, regenerates
+`edge-tts` installed: both lab interfaces use `TIMDS_PYTHON`, then the client's
+`.venv-tts`, then `python3`. The CLI lab additionally accepts `--python PATH`
+and `--voice NAME`; the browser lab ignores those flags and uses the contract's
+`voiceover` voice, rate and pitch. TimDS caches generated audio by script and voice, regenerates
 missing files, and fails visibly if narration cannot be generated.
 
 An input is a preview fixture, not a production. It carries no source,

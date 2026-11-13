@@ -4,30 +4,32 @@ The `brand-kit` starter is selected explicitly with `init --starter brand-kit`.
 Its slot export, overlay, renderer, sync behavior and authoring guidance ship
 together in the same toolkit release.
 
-A second starter template, `templates/brand-kit/`, scaffolds the **stock
-parent** a website-to-kit pipeline shoots structure-mode offshoots from. The
-result for a visitor is a brand design system built from their website: the
-foundations a designer would set, the templates such a pipeline promises (posts,
-ads, email, print, decks, a launch page on the brand's components), and a
-composer that makes the first
-one. Where `templates/starter/` is structured for an agency-scale system, the
-brand kit is sized to one brand and built so an automated pass can fill it.
+A second starter template, `templates/brand-kit/`, scaffolds a system sized
+to one brand: foundations, posts, ads, email, print, decks, a launch-page demo
+on the brand's components, and a composer. It works in a local or Git
+repository and on TimDS Cloud. An agent can fill its slots from reviewed
+evidence, or a website-to-kit pipeline can use it as the stock parent for
+structure offshoots. Crawling and inference are separate integrations, not
+commands this toolkit supplies.
 
 The kit provides Minimal, Accent, Bold and Photo treatments, canvases with
 safe areas, mark and photo slots in every template, and copy supplied by the
 brand. A kit should get there from a crawl plus stated
 assumptions, and the owner should see which is which.
 
-## 1. The chain
+## 1. Initialize directly or reuse a parent
+
+Initialize a kit with `init --standalone --starter brand-kit`, then author its
+data and pages in that repository. A reusable parent adds this optional path:
 
 ```
-toolkit ──init --starter brand-kit──▶ published brand-kit parent (host)
-                                            │ shoot --mode structure (per visitor)
+toolkit ──init --starter brand-kit──▶ released brand-kit parent (Git or Cloud)
+                                            │ shoot --mode structure
                                             ▼
-                                   candidate kit: parent structure + crawl data
-                                            │ owner reviews; a designer finishes in a session
+                                   child kit: parent structure + reviewed data
+                                            │ owner reviews; a designer finishes the system
                                             ▼
-                                   the brand's own published system (llms.txt, MCP, composer)
+                                   the brand's own system (llms.txt, MCP, composer)
                                             │ feed when the parent gains a template
 ```
 
@@ -37,7 +39,7 @@ and brand roles (values become `initial`), the files `.timds/stock.json`
 declares, and the recorded plumbing. Everything else is dropped. The kit is the
 deliberate design of those five, plus the data contract the builder fills.
 
-## 2. The split: the starter owns pages, the builder owns data
+## 2. The split: the parent owns stock pages, the builder owns data
 
 Pages and data have separate owners so shared guidance can advance without
 replacing the brand's values:
@@ -385,11 +387,11 @@ ordinary toolkit sync refreshes plumbing only. Children follow the parent's
 pages through `feed`, which refreshes each declared file while the child's
 copy is unmodified and keeps the child's grafts (see `docs/offshoots.md`).
 
-Publishing a stock parent is an operator action after scaffolding with
-`--provider hosted`: provision the source through the advanced route, publish
-`main`, then reserve a structure grant for the pipeline's service principal.
-The toolkit does not provision that parent or reserve grants. A Studio starter
-kind is separate host work.
+For a Git parent, commit and release the reviewed kit before running `shoot`
+against its exact ref. If you use TimDS Cloud, source provisioning, grants and
+publication follow the host's workflow; `init --provider hosted` only creates
+the source scaffold. It does not create a remote Design System. See
+[TimDS Cloud](timds-cloud.md#hosted-sources-and-offshoots).
 
 ## 9. Decisions taken (2026-11-03)
 
@@ -419,6 +421,6 @@ the text color, an accent below 3:1 on the background, and a fixed type scale
 whose steps are out of order, so a designer corrects the slot rather than the
 page.
 
-Structure offshoots retain the Start page’s `layout: "landing"` metadata, so
+Structure offshoots retain the Landing page’s `layout: "landing"` metadata, so
 the native viewer keeps its full-width landing treatment when creating a kit.
 Page promotion metadata is retained too, including Compose’s Start making action.

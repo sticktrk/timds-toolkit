@@ -13,7 +13,8 @@ procedure, those are the rules.
 
 ## Installation mode
 
-Read `.timds/installation.json` before installing tools. With `mode: "binary"`,
+Read `.timds/installation.json` under the Design System root (the folder
+holding `timds.json`) before installing tools. With `mode: "binary"`,
 use `timds-cli` at its exact `version` in place of `npm run timds --`; skip npm
 installation and npm dependency-upgrade steps for the stock system. Check
 `timds-cli --version` and `timds-cli doctor`. Select another executable release

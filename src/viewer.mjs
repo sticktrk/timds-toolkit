@@ -29,8 +29,8 @@
 // client's own pages.
 //
 // Website designs under src/designs/ are whole pages on the system's own
-// stylesheets, rendered by TimDS (see build.mjs). The viewer only lists them:
-// the app bar links /designs/ and the overview's sitemap names each one.
+// stylesheets. build() invokes the package's design and changelog renderers;
+// the app bar links /designs/ and the overview's sitemap names each design.
 import { spawn } from "node:child_process";
 import { createReadStream, existsSync } from "node:fs";
 import { access, cp, lstat, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";

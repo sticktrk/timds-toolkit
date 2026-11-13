@@ -8,10 +8,11 @@
 // consumer has pinned, and where a reported gap is filed.
 //
 // One tool surface, two transports: `timds mcp read` serves it over stdio
-// against the current checkout's `dist/` or a published base URL, and a host
+// against the current checkout's `dist/`, a published base URL, or a named
+// draft snapshot, and a host
 // registers the same tools on its own server with
 // `registerDesignSystemReadTools`, resolving each call's `systemId` and
-// `version` to a derived layer.
+// `version` or `draft` to a derived layer.
 
 import { promises as fs } from "node:fs";
 import process from "node:process";
@@ -42,8 +43,10 @@ const CONSUMER_GUIDE = `# Read a TimDS Design System through MCP
 
 You are producing something for a client whose brand is defined by a TimDS
 Design System. The \`timds-design-system-read\` tools serve that system's
-published, derived layer: the brand kit, the design tokens, the guidance
-pages, and the media catalog. Nothing here is editable; use it to be on-brand.
+derived layer: the brand kit, the design tokens, the guidance pages, and the
+media catalog when available. The server may serve a local checkout, a
+published release, or an explicitly selected draft. Nothing here is editable;
+use it to be on-brand.
 
 ## Start
 
@@ -51,12 +54,18 @@ pages, and the media catalog. Nothing here is editable; use it to be on-brand.
    \`describe_system\` for the system you are producing for. It reports the
    version being served, the currently published version, and what the
    system contains.
-2. The current published version is always served by default: the client
-   wants the latest brand. Every result names the version it was read from.
-   Pass \`version\` only when the user asks for a specific earlier release.
-   When \`pinned\` is present it names the version the client's application
-   is built against; mention it if the user is producing for that
-   application and it trails the published version.
+2. Read the result's \`system.source\`, \`system.version\`,
+   \`system.published\`, and \`system.pinned\` before choosing a release.
+   A hosted published reader defaults
+   to the current publication; a local reader serves its checkout's last
+   checked artifact, and a draft reader serves its selected draft and
+   \`system.revision\`. A local or fixed-URL reader cannot fetch another version:
+   \`version\` only asserts the served version there. On a host that supports
+   historical releases, pass \`version\` when the user requests one. Select
+   \`draft\` only for explicitly requested draft work, never together with
+   \`version\`; reading a draft does not move the product's pin. When
+   \`pinned\` trails \`published\`, report the difference before porting a
+   release into the application.
 3. \`lineage\` names an offshoot's parent system, source, release, commit and
    creation mode when that release records ancestry; it is \`null\` for an
    ordinary system or an older release. Use the served system's own guidance
@@ -374,10 +383,13 @@ function normalizeResolved(resolved) {
  * `fetchDerivedLayer`), `media` an optional media catalog (`{ assets }`),
  * `published` the version label currently published, and `pinned` the version
  * the caller's application is built against, when the host knows one, for
- * information only: the default served version is the published one. With
+ * information only. The resolver selects the default source: the current
+ * publication on a host, or the configured local, published, or draft source
+ * in the stdio server. With
  * `hooks.remote` every tool takes an optional `systemId` (the host resolves a
  * missing one when the caller has exactly one system) and an optional
- * `version`; otherwise tools take only `version`. `listSystems()` backs
+ * `version` or `draft`; local tools also accept `version` or `draft` to
+ * assert their configured source. `listSystems()` backs
  * `list_design_systems`. `hooks.fileGap({ system, gap })` files a reported gap
  * and returns what the agent should be told; without it `report_gap` reports
  * that no intake exists.
@@ -388,7 +400,7 @@ export function registerDesignSystemReadTools(server, { resolveSystem, listSyste
   const scopeShape = {
     ...(remote ? { systemId: z.string().min(1).max(300).optional().describe("The Design System's systemId from list_design_systems; may be omitted when only one system is in scope") } : {}),
     draft: z.string().min(1).max(100).optional().describe("A named prerelease draft; never changes the product pin"),
-    version: z.string().min(1).max(100).optional().describe("A specific version label. Defaults to the current published version"),
+    version: z.string().min(1).max(100).optional().describe("A specific published version when the host supports selection; local or fixed-URL readers only assert their served version. Omit for the server's default source; cannot combine with draft"),
   };
   const systemFor = async (args) => {
     if (args.version && args.draft) throw new Error("Choose a published version or a draft");
@@ -811,7 +823,8 @@ function checkVersion(layer, version) {
 /**
  * An McpServer named `timds-design-system-read` serving one system: the
  * current checkout's derived layer and media catalog, or, with `published`,
- * the derived layer at a published base URL.
+ * the derived layer at a published base URL, or, with `draft`, a checked
+ * hosted draft snapshot refreshed when its revision changes.
  */
 export async function createDesignSystemReadMcpServer({ root = process.cwd(), published = null, draft = null, systemId, portalUrl, token, credentialsPath, fetchImpl = fetch, build } = {}) {
   const server = new McpServer({ name: DESIGN_SYSTEM_READ_MCP_SERVER_NAME, version: await packageVersion() });

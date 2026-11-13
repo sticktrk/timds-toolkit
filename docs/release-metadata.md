@@ -207,7 +207,12 @@ site records in `.timds/emdash.json`; `history` has one entry per version from
 it is in the registry document, so `npm view @dtconcepts/timds emdashTemplate`
 reads it without unpacking the package. It is not part of the
 `release-metadata` export: the site's files are product source, outside the
-managed resources above. For maintainers: a template change an installed site
+managed resources above. The workspace scaffold's two consumer skills at the
+repository root and its delimited site section in `AGENTS.md` are excluded
+too: they are rendered for the site's manifest, which root `upgrade` does
+not read. Their hashes live in the site's `workspaceFiles` and
+`workspaceSections` record; no template update command exists yet.
+For maintainers: a template change an installed site
 would need to receive raises `version` in both places and adds a `history`
 entry; `src/emdash-template-metadata.test.mjs` fails when the two disagree or
 a version has no entry.

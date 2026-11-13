@@ -34,6 +34,11 @@ review routes, and the routes paired with a design.
 
 ## Move the pin
 
+Before updating, record the old manifest version and copy the existing
+`__DESIGN_SYSTEM_PATH__/.timds-bundle.json` outside the synced directory when
+it exists. Updating replaces that record; it is the previous resolved version
+and file-digest baseline, especially when the manifest pins `current`.
+
 __PIN_UPDATE__
 
 When the pin is `current`, the product already follows every release:
@@ -150,8 +155,12 @@ yet: it is installed and renders, unstyled where the class is missing.
 The scaffold printed those routes and their missing classes under "No port
 yet"; no command lists them again. To find them, compare the classes in each
 route's file and its components with the rules in the linked stylesheets.
-`npm run timds -- consumer check --root __SITE__` is not that list: it
-accepts a class declared in any system stylesheet, linked or not.
+`npm run timds -- consumer check --root __SITE__ --no-fix --json` reports
+missing classes and tokens against the source the site loads: the selected
+design's linked stylesheets and imports, compiled tokens when `/tokens.css`
+is linked, and system stylesheets imported by site source. An unlinked sheet,
+`bundle.include` or `dist/` cannot satisfy that check. The check reports source
+findings, not the scaffold's route-by-route port inventory.
 
 ## Port each route
 
@@ -174,6 +183,19 @@ rules of an existing class, and never change the design's pages to suit a
 route. Never copy a design's HTML into `__SITE__/src/pages/` or write a
 color or font literal in the site.
 
+## Change article sections only when requested
+
+`__SITE__/sections.json` uses declaration version 2 and names collections with
+literal prefixes, including nested prefixes within this selected design.
+`section-schema.json` owns shared fields and features. Keep actual public
+pages, Astro routes and public files out of collection namespaces; additional
+design samples use `site: "reference"` in `design.json`. After an authorized
+change, run `npm run sections:sync` inside `__SITE__/`, commit the declaration,
+seed and writer-table changes together, then run the consumer check and build.
+Neither build nor check syncs source. For an existing database, follow the
+site's handover for explicit schema creation; changing seed JSON cannot update
+stored collections. Never rename a writer's collection as an implicit migration.
+
 ## Bring the templates forward
 
 `__SITE__/.timds/emdash.json` records the template version the site was
@@ -193,9 +215,12 @@ site by hand. The templates are in the same package under
 on top), with placeholders the scaffold filled in for this system. A file
 whose sha256 still equals its `files` entry is as the scaffold wrote it; one
 that differs was edited here, so keep the edit and add the change to it.
-Then set `template` to the version reached and each changed file's hash to
-its new sha256, so a later update can still tell a stock file from an
-edited one.
+Advance `template` only after the version's changes are complete and
+verified. Recorded hashes describe toolkit-rendered stock, not arbitrary local
+edits: never hash an authored customization into the stock baseline. Update a
+file's stock hash only against the matching template rendered for this site;
+keep customized files distinguishable. Apply the same rule to `workspaceFiles`
+and `workspaceSections` when updating the scaffolded guidance outside the site.
 
 ## Verify
 

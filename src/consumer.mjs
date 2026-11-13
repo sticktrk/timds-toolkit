@@ -89,13 +89,35 @@ const CONSUMER_HELP = `Usage:
   timds consumer updates [LABEL] [--portal-url URL] [--consumer-id UUID] [--root PATH] [--json]
   timds consumer sync [--root PATH]
   timds consumer update [VERSION] [--root PATH]
+  timds consumer update --draft NAME [--portal-url URL] [--root PATH]
   timds consumer migrate [--version VERSION] [--url URL] [--root PATH] [--force] [--skip-sync]
-  timds consumer preview --app NAME [--root PATH] [--output DIR] [--base REF] [--publish] [--pull-request N]
-  timds consumer init [--root PATH] [--system ID] [--version VERSION] [--url URL] [--force] [--skip-install] [--portal-url URL]
-  timds consumer scaffold emdash --root PATH --design-system GIT_URL [--stylesheet PATH]... [--site-url URL] [--portal-url URL] [--skip-install]
+  timds consumer preview [--app NAME] [--root PATH] [--output DIR] [--base REF] [--no-install] [--ready-timeout SECONDS] [--publish] [--pull-request N] [--portal-url URL]
+  timds consumer init [--root PATH] [--system ID [--version VERSION] [--url URL]] [--force] [--skip-install] [--portal-url URL] [--draft-preview]
+  timds consumer scaffold emdash --root PATH --design-system GIT_URL [--platform cloudflare|node] [--stylesheet PATH]... [--site-url URL] [--portal-url URL] [--skip-install]
   timds consumer scaffold emdash --workspace [--root PATH] [--skip-install]
   timds consumer notes [--root PATH] [--app NAME] [--pull-request N] [--all] [--json] [--portal-url URL]
-  timds consumer notes resolve ID [ID...] [--commit SHA] [--dismiss]`;
+  timds consumer notes resolve ID [ID...] [--commit SHA] [--dismiss] [--root PATH] [--portal-url URL]
+
+Use npm run timds -- consumer COMMAND in npm repositories, or timds-cli consumer
+COMMAND in binary repositories. Append --help or -h to a subcommand for details;
+help does not require a workspace. preview and notes require --app when several
+apps exist; check without --app checks all apps. Only check, register, updates,
+and notes without resolve support --json. --require-token,
+--surface and --stylesheet may repeat. init --version/--url require --system.
+update without VERSION selects the current published release; --draft replaces
+only the ignored bundle. --allow-pin-update LABEL requires --base and permits
+only that exact published version to change, preserving all other manifest
+values. --draft-preview explicitly adds product-owned browser integration.
+
+A --workspace scaffold lives in site/ of its Design System and has no pin.
+Run consumer commands with --root site (design-system/site when embedded),
+using the enclosing system's toolkit. check may rewrite matching color/font
+literals there by default, including with --json; --no-fix reports without
+rewriting. It also validates declared sections and their seed. sync, update,
+migrate, register and init need a pin and do not apply to workspace sites.
+Run upgrade and installation adoption at the Design System root; they never
+refresh the site's source or its scaffolded consumer skills. --existing is
+withdrawn; use scaffold emdash --workspace for a system's own site.`;
 
 // ---------------------------------------------------------------------------
 // Manifest validation
@@ -1210,9 +1232,10 @@ function checkReport(result) {
   return lines.join("\n");
 }
 
-/** `timds consumer <check|sync|update|preview|init|scaffold|notes> ...` */
+/** `timds consumer <check|register|updates|sync|update|migrate|preview|init|scaffold|notes> ...` */
 export async function runConsumerCli(args = [], { env = process.env, output = defaultOutput } = {}) {
-  const [subcommand = "help", ...rest] = args;
+  const [subcommand = "help", ...rawRest] = args;
+  const rest = rawRest.map(value => value === "-h" ? "--help" : value);
   if (["help", "--help", "-h"].includes(subcommand)) {
     output(CONSUMER_HELP);
     return;

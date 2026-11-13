@@ -1,7 +1,7 @@
 // The brand-kit starter's public data contract. The slot vocabulary, stock
 // samples, page structure and stock declarations change together in a release.
-// This pure module is also copied to scripts/brand-kit.mjs as shared starter
-// plumbing, so the viewer has the same defaults before npm dependencies exist.
+// The package viewer imports this pure module directly, so the viewer and
+// integrations share one contract without copying it into a client repository.
 // It contains no crawling, inference, publishing, or client-specific behavior.
 //
 // A token slot's sample is the stock parent's own value and mirrors the
