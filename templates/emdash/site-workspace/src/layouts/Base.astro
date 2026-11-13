@@ -1,4 +1,5 @@
 ---
+import SiteTracking from "../components/SiteTracking.astro";
 /**
  * The layout the article, topic and 404 routes render inside: the shell of
  * the Design System's website design (its layout.html, or for a design
@@ -35,5 +36,6 @@ const head = [
 		<Fragment set:html={shell.before} />
 		<slot />
 		<Fragment set:html={shell.after} />
+		<SiteTracking />
 	</body>
 </html>

@@ -1,4 +1,5 @@
 ---
+import SiteTracking from "../components/SiteTracking.astro";
 /** Render owner-authored layout and navigation with the selected design's styles. */
 import { divisionContexts, divisionLayouts } from "virtual:timds/design-system";
 
@@ -21,4 +22,5 @@ const Layout = (await divisionLayouts[division]()).default;
 		<slot name="head" />
 	</Fragment>
 	<slot />
+	<SiteTracking />
 </Layout>

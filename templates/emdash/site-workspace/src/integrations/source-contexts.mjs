@@ -5,7 +5,7 @@ import { pageFileRoute, readSectionRouteFiles } from "./section-routes.mjs";
 
 const MODULE_EXTENSIONS = [".tsx", ".jsx", ".ts", ".mts", ".cts", ".mjs", ".cjs", ".js"];
 const SOURCE_EXTENSIONS = [".astro", ...MODULE_EXTENSIONS, ".vue", ".svelte", ".html", ".css"];
-const DATA_EXTENSION = /\.(?:json|svg|png|jpe?g|webp|gif|avif|ico|woff2?|ttf|otf)$/i;
+const DATA_EXTENSION = /\.(?:sql|json|svg|png|jpe?g|webp|gif|avif|ico|woff2?|ttf|otf)$/i;
 const inside = (root, file) => { const relative = path.relative(root, file); return !relative.startsWith("..") && !path.isAbsolute(relative); };
 const stat = (file) => { try { return lstatSync(file); } catch (error) { if (error.code === "ENOENT" || error.code === "ENOTDIR") return null; throw error; } };
 const attribute = (tag, name) => tag.attributes.find((entry) => entry.name === name)?.value;

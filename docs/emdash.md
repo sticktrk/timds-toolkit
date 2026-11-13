@@ -594,6 +594,16 @@ Existing sites receive these stock files by a reviewed manual change; no
 template updater is introduced, and ordinary toolkit upgrades keep the site
 untouched.
 
+### Contact forms and tracking
+
+Workspace template 5 adds an opt-in contact handler and support for Meta Pixel,
+GA4 and Google Ads. The optional `requireConsent` flag defaults off. The site
+stores contact receipts and delivery jobs in its D1 database. Its scheduled
+Worker delivers Resend notifications and Meta Lead events permitted by the
+site’s consent setting. See the
+[workspace handover](../templates/emdash/site-workspace/docs/emdash-handover.md#contact-forms-and-browser-tags)
+for configuration, deployment and adopting it on an existing site.
+
 ### Optional division designs
 
 Template 4 adds an optional `site/divisions.json` declaration. The workspace

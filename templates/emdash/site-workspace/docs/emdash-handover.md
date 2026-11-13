@@ -108,7 +108,7 @@ change stored patterns as an automatic migration. Removing a section only
 removes its routes; retained content needs a separate explicit decision.
 Writer scopes are global across collections.
 
-TimDS hosted discovery acknowledges template 3, workspace 3 and sections 2
+TimDS hosted discovery acknowledges template 5, workspace 3, sections 2, composition 1 and tracking 1
 before building. An older host without that acknowledgement is refused;
 standalone builds do not require a host integration.
 
@@ -116,6 +116,81 @@ Verify each declared list, a published entry and every enabled feed at its
 prefix. A missing collection fails the page instead of appearing as an empty
 list. Topic pages merge all sections, newest first, with cursors that retain
 a position for each collection.
+
+## Contact forms and browser tags
+
+Copy `src/forms/contact.ts.example` to `src/forms/contact.ts` to opt in.
+If the site already has a handler for `/contact`, keep it and call
+`contactPost(context)` from it where appropriate. The website design owns the
+form and all visitor-facing copy. Give the form `method="post"`,
+`action="/contact"` and `data-timds-contact`. Include fields named `name` and
+`email`, and optionally `message`. Set `data-timds-contact-success` and
+`data-timds-contact-error` on the form. Add a child with
+`data-timds-contact-status` and `role="status"` for the result. The form uses
+JavaScript to submit and announces `timds:contact-result` with `detail.ok`.
+A custom client can send URL-encoded fields with a stable UUID v4 in
+`submission_id` and `analytics_consent=yes|no` or
+`marketing_consent=yes|no` when a choice was made. Reuse the key and fields after an
+uncertain response. A 200 response includes the committed receipt.
+
+Configure public IDs and the notification sender and recipient in
+`src/lib/contact/config.ts`. Connect your consent UI by setting
+`window.timdsConsent = { analytics, marketing }` to explicit booleans and
+dispatching `new Event("timds:consent")` on `window` after a change.
+The `requireConsent` feature flag defaults to `false`. Configured production
+tags and conversions can run without a consent UI when the flag is off.
+An explicit denial suppresses its category. With the flag on, GA4 requires
+an analytics grant and Meta and Google Ads require a marketing grant.
+Meta Pixel and CAPI use the same pixel and the same opaque Lead event ID.
+Set a supported Meta Graph API version explicitly. For a dedicated test
+event source, `meta.testEventCode` sends its CAPI events to Meta's Test
+Events view. Use that event source's pixel ID for the browser too. Configure
+Google Ads with its tag ID and conversion label, and GA4 with its measurement
+ID. Optional Turnstile requires a widget in the design with action `contact`
+and a `TURNSTILE_SECRET_KEY` binding. Enable `turnstile.required` to require
+verification on the configured HTTPS site. Turnstile responses expire and
+must be refreshed by the design before a subsequent submission.
+
+The default `delivery: "test"` records leads and test jobs in D1 and makes no
+email or advertising calls. Set `delivery: "production"` and set
+`EMDASH_SITE_URL` to the public HTTPS origin to enable configured providers.
+Production delivery and tag loading are suppressed in dev and private
+staging. Use a sending-only Resend API key for a verified sending domain and a
+Meta CAPI access token for the same event source as the pixel.
+
+For standalone deployment, attach the site's D1 database and apply the
+additive contact migration before routing traffic or starting cron:
+
+```sh
+npx wrangler d1 migrations apply DB --remote
+npx wrangler secret put RESEND_API_KEY
+npx wrangler secret put META_CAPI_ACCESS_TOKEN
+npx wrangler secret put TURNSTILE_SECRET_KEY
+```
+
+Set only the bindings used by the site. The local dev handler prepares its
+local schema automatically. When using TimDS Cloud, private staging verifies
+the contact schema and an administrator configures bindings with
+`timds site secrets set NAME --source-id UUID`. Check application with
+`timds site secrets status --source-id UUID`.
+
+Inspect `id`, `provider`, `status` and `failure` in `timds_contact_jobs`.
+Scheduled work retries temporary failures with backoff. A failed job can be
+redriven with an authenticated `POST /_scheduled/contact/redrive?job=JOB_ID`
+using the same bearer as scheduled work. The original payload and delivery ID
+are reused. After the retry window expires the job stays failed for operator
+review. Resend retries stop before its 24-hour idempotency window ends. The
+contact lead remains in the site's database independently of provider
+delivery.
+
+To adopt on an existing site, generate a template 5 scaffold in a scratch
+Design System. Copy the contact library, migration, tracking component and
+handler example. Merge the Worker changes and add the tracking component to
+your active design and article layouts. Keep existing handlers, consent UI
+and configuration. For hosted builds, merge the new discovery acknowledgment
+into the integration and set `template` to 5 in the site's
+`.timds/emdash.json`. Review the migration and build the existing site before
+publishing. Toolkit upgrades leave site files in place.
 
 ## Scheduled work
 
@@ -128,7 +203,7 @@ HTTP instead:
 curl -X POST -H "Authorization: Bearer $SCHEDULED_TASKS_SECRET" https://<origin>/_scheduled
 ```
 
-The answer is `{"published": N}`, the number of entries the run published.
+The answer counts published entries and claimed contact jobs.
 The path answers 404, like a missing page, to any other method, to a wrong
 or missing secret, and to every request while `SCHEDULED_TASKS_SECRET` is
 unset. The secret is compared in constant time. Call it about once a minute.

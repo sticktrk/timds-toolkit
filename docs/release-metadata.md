@@ -217,15 +217,13 @@ would need to receive raises `version` in both places and adds a `history`
 entry; `src/emdash-template-metadata.test.mjs` fails when the two disagree or
 a version has no entry.
 
-A release that writes template version 3 declares `emdashWorkspaceContract: 3`
-and `emdashSectionsContract: 2`. Its fresh `sections.json` uses declaration
-version 2 for nested literal prefixes inside one Design System; builds export
-section contract 2. This first hosted-site release supports only that current
-contract; historical declaration versions are refused. Hosts must accept the
-complete capability tuple before scaffolding and acknowledge section contract 2
-during hosted builds. Standalone Astro builds need no host acknowledgement.
-The contract does not require an `articles` collection. Recorded template
-history describes development revisions, not supported deployment formats.
+Hosted workspace templates use `emdashWorkspaceContract: 3` and
+`emdashSectionsContract: 2`. Template 4 adds
+`emdashCompositionContract: 1`. Template 5 adds `emdashTrackingContract: 1`
+for the contact schema. The host selects the acknowledgment from the site's
+recorded template and verifies the matching build metadata. Standalone Astro
+builds run without a host acknowledgment. The section declaration stays at
+version 2 and permits nested literal prefixes.
 
 ## Compatibility and verification
 

@@ -1,0 +1,5 @@
+// Copy to src/forms/contact.ts and connect the design form as described in
+// docs/emdash-handover.md.
+import { contactPost } from "../lib/contact/handler";
+
+export const POST = contactPost;

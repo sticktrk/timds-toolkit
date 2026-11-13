@@ -176,12 +176,12 @@ to `var()`), as does `compileTokenCss` in `src/consumer-scaffold.mjs`, and
 names design pages by the catalog's default-state rule in `src/designs.mjs`;
 `src/emdash-workspace-integration.test.mjs` holds them equal, so change them
 together. A posting form in a design renders disabled until the site has a
-handler under `src/forms/`; the template never ships one. Two builds share one
-repository: any command that walks the Design System root (build, check,
-extract, doctor, upgrade, the bundle walk, offshoots, the MCP guard) must
-skip the workspace site (`src/workspace-site.mjs` locates it), and
-`src/workspace-site.test.mjs`, which proves the system's results are the same
-with and without `site/`, must keep passing. An embedded system's `submit`
+handler under `src/forms/`; template 5 ships an opt-in contact handler example.
+Two builds share one repository. Any command that walks the Design System
+root (build, check, extract, doctor, upgrade, the bundle walk, offshoots, the
+MCP guard) must skip the workspace site (`src/workspace-site.mjs` locates it).
+`src/workspace-site.test.mjs` verifies the system's results with and without
+`site/`. An embedded system's `submit`
 carries the two root consumer skills only while the site's record lists them
 in `workspaceFiles` and the repository root is not itself a consumer
 (`workspaceSiteSkillFolders`); a product's own consumer skills never enter a

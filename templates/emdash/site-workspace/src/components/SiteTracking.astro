@@ -1,0 +1,13 @@
+---
+import { env } from "cloudflare:workers";
+import { browserTags, contact } from "../lib/contact/config";
+import { providerDelivery, type ContactEnv } from "../lib/contact/runtime";
+
+const tags = contact.delivery === "production" && providerDelivery(env as unknown as ContactEnv, Astro.url.origin)
+	? browserTags() : null;
+---
+
+<div hidden data-timds-tracking={JSON.stringify(tags)} data-timds-consent-required={String(contact.requireConsent)}></div>
+<script>
+	import "../lib/contact/browser";
+</script>

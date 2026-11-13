@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add opt-in workspace-site contact forms with durable Resend and Meta CAPI delivery, Meta Pixel, GA4 and Google Ads with configurable consent enforcement, and hosted site credential commands (#174).
+
 - Align CLI help, installed skills, MCP guides, scaffold instructions and published Use pages with the current command and file-ownership contracts. Document automation output, workspace-site checks and section synchronization, correct starter and consumer boundaries, and make nested `-h` safe without a workspace. Record shipped fragment hashes so ordinary starter sync can deliver the guidance updates.
 
 - Add article sections with nested prefixes in one Design System for the first hosted-site release. Keep collection schemas immutable, preserve authored preview references and localized topic metadata, reject conflicting static/native routes, and retain validated development routes across invalid saves. Single-segment addresses remain supported; multi-system routing is deferred.
