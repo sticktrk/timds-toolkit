@@ -1,10 +1,22 @@
 let tags = null;
 let requireConsent = true;
+let captureAttribution = false;
 const enabled = new Set();
 const queued = new WeakSet();
 const requests = new WeakMap();
 const converted = new Set();
-const submissionFields = new Set(["cf-turnstile-response", "submission_id", "analytics_consent", "marketing_consent"]);
+const submissionFields = new Set([
+  "cf-turnstile-response", "submission_id", "analytics_consent", "marketing_consent",
+  "page_url", "form_id", "referrer", "first_touch", "last_touch",
+]);
+const campaignParams = [
+  "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "utm_id",
+  "utm_source_platform", "utm_creative_format", "utm_marketing_tactic",
+];
+const clickIds = ["gclid", "fbclid"];
+const firstTouchCookie = "timds_first_touch";
+const lastTouchKey = "timds:contact:last-touch";
+const touchLifetime = 90 * 24 * 60 * 60;
 // The module is served from the site root at either deployment base.
 const base = new URL(".", import.meta.url).pathname.replace(/\/+$/, "");
 const consentAllows = (value) => value === true || (!requireConsent && value !== false);
@@ -12,6 +24,92 @@ const consent = () => ({
   analytics: consentAllows(window.timdsConsent?.analytics),
   marketing: consentAllows(window.timdsConsent?.marketing),
 });
+
+function referrerUrl() {
+  try {
+    const url = new URL(document.referrer);
+    if (["http:", "https:"].includes(url.protocol) && !url.username && !url.password) return url.origin + url.pathname;
+  } catch {}
+  return null;
+}
+
+function storedTouch(serialized) {
+  const touch = JSON.parse(serialized ?? "null");
+  if (!touch || typeof touch.url !== "string" || Date.now() - Date.parse(touch.at) >= touchLifetime * 1000
+    || !Number.isFinite(Date.parse(touch.at)) || new URL(touch.url).origin !== location.origin) return null;
+  return touch;
+}
+
+function writeFirstTouch(touch, maxAge) {
+  document.cookie = `${firstTouchCookie}=${touch ? encodeURIComponent(JSON.stringify(touch)) : ""}; Path=/; Max-Age=${maxAge}; SameSite=Lax; Secure`;
+}
+
+function readFirstTouch() {
+  const entry = document.cookie.split("; ").find((cookie) => cookie.startsWith(firstTouchCookie + "="));
+  return storedTouch(entry ? decodeURIComponent(entry.slice(firstTouchCookie.length + 1)) : null);
+}
+
+function currentTouch(marketing) {
+  const url = new URL(location.href);
+  const referrer = referrerUrl();
+  const address = new URL(url.origin + url.pathname);
+  for (const name of marketing ? [...campaignParams, ...clickIds] : campaignParams) {
+    const value = url.searchParams.get(name);
+    if (value && value.length <= 256 && !/[\x00-\x1f\x7f]/.test(value)) address.searchParams.set(name, value);
+  }
+  return { url: address.href, referrer, at: new Date().toISOString() };
+}
+
+function withoutClickIds(touch) {
+  if (!touch) return null;
+  const address = new URL(touch.url);
+  for (const name of clickIds) address.searchParams.delete(name);
+  return { ...touch, url: address.href };
+}
+
+function attribution() {
+  if (!captureAttribution) return null;
+  const { analytics, marketing } = consent();
+  if (!analytics) {
+    try { if (readFirstTouch()) writeFirstTouch(null, 0); } catch {}
+    try { sessionStorage.removeItem(lastTouchKey); } catch {}
+    return null;
+  }
+
+  const current = currentTouch(marketing);
+  let first = null;
+  let last = null;
+  try {
+    first = readFirstTouch();
+    if (!first) {
+      // Keep cookie size within browser limits even with unusually long URLs.
+      if (encodeURIComponent(JSON.stringify(current)).length <= 3800) {
+        writeFirstTouch(current, touchLifetime);
+        first = readFirstTouch();
+      }
+    } else if (!marketing) {
+      const reduced = withoutClickIds(first);
+      if (reduced.url !== first.url) {
+        const remaining = Math.max(0, touchLifetime - Math.ceil((Date.now() - Date.parse(first.at)) / 1000));
+        writeFirstTouch(reduced, remaining);
+        first = reduced;
+      }
+    }
+  } catch {}
+  try {
+    last = storedTouch(sessionStorage.getItem(lastTouchKey));
+    // Internal navigation keeps the latest acquisition touch unless a new
+    // campaign or external referrer establishes another one.
+    if (!last || new URL(current.url).search || (current.referrer && new URL(current.referrer).origin !== location.origin)) {
+      sessionStorage.setItem(lastTouchKey, JSON.stringify(current));
+      last = current;
+    } else if (!marketing) {
+      last = withoutClickIds(last);
+      sessionStorage.setItem(lastTouchKey, JSON.stringify(last));
+    }
+  } catch {}
+  return first || last ? { referrer: current.referrer, first, last } : null;
+}
 
 function load(url) {
   const script = document.createElement("script");
@@ -91,7 +189,8 @@ async function submit(form, target, submitter) {
   for (const [name, value] of new FormData(form, submitter)) {
     if (typeof value === "string") fields.append(name, value);
   }
-  const signature = JSON.stringify([target.href, [...fields].filter(([name]) => !submissionFields.has(name))]);
+  const formId = form.dataset.timdsContactId || form.id;
+  const signature = JSON.stringify([target.href, location.origin + location.pathname, formId, [...fields].filter(([name]) => !submissionFields.has(name))]);
   const previous = requests.get(form);
   const choices = window.timdsConsent;
   const pending = previous?.signature === signature ? previous : {
@@ -105,6 +204,13 @@ async function submit(form, target, submitter) {
     else fields.delete(field);
   }
   fields.set("submission_id", pending.id);
+  fields.set("page_url", location.origin + location.pathname);
+  if (formId) fields.set("form_id", formId);
+  const context = attribution();
+  for (const [name, value] of [["referrer", context?.referrer], ["first_touch", context?.first], ["last_touch", context?.last]]) {
+    fields.delete(name);
+    if (value) fields.set(name, typeof value === "string" ? value : JSON.stringify(value));
+  }
   queued.add(form);
   form.setAttribute("aria-busy", "true");
   let success = false;
@@ -156,9 +262,14 @@ function readTracking() {
   const node = document.querySelector("[data-timds-tracking]");
   tags = JSON.parse(node?.dataset.timdsTracking ?? "null");
   requireConsent = node?.dataset.timdsConsentRequired !== "false";
+  captureAttribution = node?.dataset.timdsAttribution === "true";
+  attribution();
   configure();
 }
 
-window.addEventListener("timds:consent", configure);
+window.addEventListener("timds:consent", () => {
+  attribution();
+  configure();
+});
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", readTracking, { once: true });
 else readTracking();

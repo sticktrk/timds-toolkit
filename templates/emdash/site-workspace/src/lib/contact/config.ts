@@ -2,6 +2,7 @@
 export const contact = {
   delivery: "test" as "test" | "production",
   requireConsent: false,
+  attribution: true,
   notification: { from: "", to: "", subject: "Website contact" },
   meta: { pixelId: "", graphVersion: "", testEventCode: "" },
   ga4: { measurementId: "" },

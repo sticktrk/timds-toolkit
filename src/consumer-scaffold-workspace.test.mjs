@@ -180,10 +180,11 @@ test("--workspace writes a complete site into site/ of a starter workspace", asy
   for (const [route, designRoute] of Object.entries(set.preview.designs)) assert.equal(app.preview.designs[route], `website:${designRoute}`);
   assert.deepEqual(app.designSurface, ["src/layouts/**", "src/components/**", "src/styles/**", "src/pages/**", "src/routes/**", "src/divisions/**", "public/**"]);
 
-  // The record: template version, platform, mode, and a hash of every template file as written.
+  // The record includes the selected content profile and hashes of the template files as written.
   const record = JSON.parse(await fs.readFile(path.join(site, EMDASH_RECORD_PATH), "utf8"));
-  assert.deepEqual(Object.keys(record), ["template", "platform", "mode", "files", "workspaceFiles", "workspaceSections"]);
-  assert.deepEqual({ template: record.template, platform: record.platform, mode: record.mode }, { template: set.version, platform: "cloudflare", mode: "workspace" });
+  assert.deepEqual(Object.keys(record), ["template", "platform", "mode", "contentProfile", "files", "workspaceFiles", "workspaceSections"]);
+  const { template, platform, mode, contentProfile } = record;
+  assert.deepEqual({ template, platform, mode, contentProfile }, { template: set.version, platform: "cloudflare", mode: "workspace", contentProfile: "portable-text" });
   assert.deepEqual(Object.keys(record.files).sort(), templatePaths.filter((file) => file !== "package-lock.json"));
   for (const [file, hash] of Object.entries(record.files)) assert.equal(hash, sha256(await fs.readFile(path.join(site, file))), `${file} is recorded as written`);
   assert.deepEqual(result.record, record);
@@ -368,7 +369,7 @@ test("runConsumerScaffold parses --workspace and refuses the other modes' flags 
   assert.ok(!existsSync(path.join(workspace, "site")));
   const help = [];
   await runConsumerScaffold(["--help"], { output: (line) => help.push(line) });
-  assert.match(help.join("\n"), /timds consumer scaffold emdash --workspace \[--root PATH\] \[--skip-install\]/);
+  assert.match(help.join("\n"), /timds consumer scaffold emdash --workspace \[--root PATH\] \[--content-profile portable-text\|html\] \[--skip-install\]/);
   const result = await runConsumerScaffold(["emdash", "--workspace", "--root", workspace, "--platform", "cloudflare", "--skip-install"], { output: quiet });
   assert.equal(result.mode, "workspace");
 });

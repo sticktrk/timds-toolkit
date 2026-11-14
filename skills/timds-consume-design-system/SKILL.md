@@ -77,6 +77,12 @@ __PIN_RULES__
   existing class: every page of the system and of the site uses them. The
   additions are in the diff and are reviewed with the rest of the change.
 
+Article presentation is site-owned source. Read `__SITE__/docs/article-presentation.md`
+and the writer contract before changing the literal region components, HTML
+policy, related-guide card or video player. Keep stored HTML and Portable Text
+bodies intact during field-only updates. The fresh `html` content profile adds
+optional fields at creation; an ordinary upgrade never changes a site's schema.
+
 ## Pages are the system's designs
 
 - The site is built from the website design that

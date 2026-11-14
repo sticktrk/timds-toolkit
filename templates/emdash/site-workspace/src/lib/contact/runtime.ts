@@ -9,16 +9,22 @@ export type ContactEnv = {
   RESEND_API_KEY?: string;
   META_CAPI_ACCESS_TOKEN?: string;
   TURNSTILE_SECRET_KEY?: string;
+  TIMDS_CONTACT_WEBHOOK_URL?: string;
+  TIMDS_CONTACT_WEBHOOK_HEADER?: string;
+  TIMDS_CONTACT_WEBHOOK_SECRET?: string;
 };
 
-export function providerDelivery(env: ContactEnv, origin: string) {
+export function publicContactOrigin(env: ContactEnv) {
   try {
     const site = new URL(env.EMDASH_SITE_URL ?? "");
-    return !import.meta.env.DEV && env.TIMDS_SITE_STAGING !== "1"
-      && site.protocol === "https:" && site.origin === origin && !site.username && !site.password;
+    return site.protocol === "https:" && !site.username && !site.password ? site.origin : null;
   } catch {
-    return false;
+    return null;
   }
+}
+
+export function providerDelivery(env: ContactEnv, origin: string) {
+  return !import.meta.env.DEV && env.TIMDS_SITE_STAGING !== "1" && publicContactOrigin(env) === origin;
 }
 
 export function migrateContact(env: ContactEnv) {

@@ -1,0 +1,7 @@
+[
+  { "slug": "body_html", "label": "HTML body", "type": "text" },
+  { "slug": "short_answer", "label": "Short answer", "type": "text" },
+  { "slug": "state", "label": "State", "type": "string", "validation": { "pattern": "^[A-Z]{2}$" } },
+  { "slug": "video_id", "label": "YouTube video ID", "type": "string", "validation": { "pattern": "^[A-Za-z0-9_-]{11}$" } },
+  { "slug": "related_guide", "label": "Related guide", "type": "json" }
+]

@@ -285,7 +285,11 @@ nothing. To create a separate pinned product, use the separate-repository
 `consumer scaffold emdash --root PATH --design-system GIT_URL` flow.
 
 Article sections are developer-owned `sections.json` declaration version 2
-and `section-schema.json` inside the site. To change them, read the site's
+and `section-schema.json` inside the site. Fresh machine-authored sites can select
+`--content-profile html` during workspace scaffolding. It adds the declared
+HTML, short-answer, state, video and related-guide fields before setup; it is
+not an installed-site migration. Read the site's `docs/content-api.md` and
+`docs/article-presentation.md` for body fidelity and site-owned regions. To change them, read the site's
 contract, run `npm run sections:sync` in that folder, then its consumer check
 and build. Build, dev and consumer check validate without syncing the seed.
 Nested literal prefixes are supported within the selected design; public

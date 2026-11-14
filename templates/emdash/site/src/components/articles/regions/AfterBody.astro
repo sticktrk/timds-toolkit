@@ -1,0 +1,17 @@
+---
+import { linksToSitePath, sameSitePath } from "../../../lib/articles/html";
+import { sitePath } from "../../../lib/articles/index";
+import type { ArticleRegionProps } from "../../../lib/articles/presentation";
+
+interface Props extends ArticleRegionProps {}
+
+const { entry: { data: { related_guide: guide } }, presentation: { bodyLinks, origin } } = Astro.props.context;
+const link = sameSitePath(guide?.url) && typeof guide.title === "string" && guide.title.trim() ? guide : null;
+---
+
+{link && !linksToSitePath(bodyLinks, link.url, origin) && (
+	<aside class="article-note" aria-label="Related guide">
+		<strong>Related guide</strong>
+		<p><a href={sitePath(link.url)}>{link.title}</a></p>
+	</aside>
+)}

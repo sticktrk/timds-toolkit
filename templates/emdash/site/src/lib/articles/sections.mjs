@@ -62,7 +62,7 @@ export function normalizeSections(document) {
 
 export function sectionSchemaFor(sections, model) {
   const { fields, supports } = normalizeSectionSchema(model);
-  if (sections.length * fields.length > 64) throw new Error("Sections may declare at most 64 collection fields in total.");
+  if (sections.length * fields.length > 144) throw new Error("Sections may declare at most 144 collection fields in total.");
   const sectionSchema = { fields, supports, taxonomies: [{ name: "topic", label: "Topics", labelSingular: "Topic", hierarchical: false, collections: sections.map((section) => section.collection) }] };
   if (new TextEncoder().encode(JSON.stringify({ sections, sectionSchema })).byteLength > 64 * 1024) invalidSchema();
   return structuredClone(sectionSchema);

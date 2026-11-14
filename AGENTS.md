@@ -231,6 +231,12 @@ and dev refuse division dependencies that import outside the site; consumer
 checks validate shared classes and token references against every rendering
 context and never autofix shared source against only one. Scoped Astro family
 navigation styles remain component-local.
+Template 7 adds a fresh-only `--content-profile html` option (nine fields),
+site-owned article regions and HTML rendering, and tracking contract 2 with
+per-site webhook delivery and attribution. The default profile remains the
+four-field Portable Text model. Shared schema capacity is 144 physical fields
+across sixteen sections. Hosted fresh creation selects the HTML profile; no
+existing-site schema migration or compatibility adapter is supplied.
 Hosted discovery must acknowledge the installed template and capabilities.
 Keep package `emdashWorkspaceContract: 3`, `emdashSectionsContract: 2` and
 `emdashCompositionContract: 1` in step with these exports. See

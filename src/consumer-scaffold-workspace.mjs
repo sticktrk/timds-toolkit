@@ -71,6 +71,7 @@ const DEV_PORT = 4380;
 const DEV_SEED_ROUTE = "/_emdash/api/setup/dev-bypass";
 const LOCKFILE = "package-lock.json";
 const DEFAULT_SECTIONS = normalizeSections(JSON.parse(readFileSync(new URL("../templates/emdash/site/sections.json", import.meta.url), "utf8")));
+const CONTENT_PROFILES = new Set(["portable-text", "html"]);
 // Injected routes share these modules regardless of their declared prefix.
 function articleRouteFiles(sections) {
   return Object.fromEntries([
@@ -497,7 +498,8 @@ export function workspaceConsumerManifest({ systemId, design, preview, sections 
  * its bytes, decided without writing anything. Refuses a system with no
  * website design to build pages from.
  */
-export async function planWorkspaceSite(designSystemRoot, { templatesRoot, repoRoot = designSystemRoot, defaultBranch = "main" }) {
+export async function planWorkspaceSite(designSystemRoot, { templatesRoot, repoRoot = designSystemRoot, defaultBranch = "main", contentProfile = "portable-text" }) {
+  if (!CONTENT_PROFILES.has(contentProfile)) throw new Error("--content-profile must be portable-text or html.");
   const { planEmdashTemplates, readEmdashTemplateSet } = await import("./consumer-scaffold.mjs");
   const manifest = await readJsonFile(path.join(designSystemRoot, "timds.json"), "timds.json");
   const systemId = String(manifest?.systemId || "").trim();
@@ -543,10 +545,19 @@ export async function planWorkspaceSite(designSystemRoot, { templatesRoot, repoR
   });
   const seedFile = plan.files.find((file) => file.path === "seed/seed.json");
   const schemaFile = plan.files.find((file) => file.path === "section-schema.json");
-  const model = normalizeSectionSchema(JSON.parse(String(schemaFile.content)));
+  const schema = JSON.parse(String(schemaFile.content));
+  if (contentProfile === "html") {
+    const extraFields = await readJsonFile(path.join(templatesRoot, "content-profile-html.json"), "content-profile-html.json");
+    if (!Array.isArray(extraFields)) throw new Error("The html content profile must declare its optional fields.");
+    schema.fields.push(...extraFields);
+    schemaFile.content = toJson(normalizeSectionSchema(schema));
+  }
+  const model = normalizeSectionSchema(schema);
   seedFile.content = toJson(createSectionSeed(JSON.parse(String(seedFile.content)), sections, model));
   const writerFile = plan.files.find((file) => file.path === "docs/content-api.md");
-  writerFile.content = String(writerFile.content).replace(/<!-- timds:sections -->[\s\S]*?<!-- \/timds:sections -->/, () => writerSectionTable(sections));
+  writerFile.content = String(writerFile.content)
+    .replace("<!-- timds:content-profile -->", () => `This site selected the \`${contentProfile}\` profile at scaffold time.`)
+    .replace(/<!-- timds:sections -->[\s\S]*?<!-- \/timds:sections -->/, () => writerSectionTable(sections));
   const packageJson = workspacePackageJson(set, { name });
   const ports = await articleRoutePorts({ designSystemRoot, design, templatesRoot, sections });
   const siteManifest = workspaceConsumerManifest({ systemId, design, preview: set.preview, sections, sectionsContract });
@@ -558,7 +569,7 @@ export async function planWorkspaceSite(designSystemRoot, { templatesRoot, repoR
     .map((file) => [file.path, sha256(file.content)])
     .sort(([left], [right]) => left.localeCompare(right)));
   const root = await planWorkspaceRootFiles({ repoRoot, designSystemRoot, templatesRoot, siteFolder, siteManifest, designId: design.id, binary, siteCheck, defaultBranch });
-  const record = { template: set.version, platform: "cloudflare", mode: "workspace", files: hashed, workspaceFiles: root.workspaceFiles, workspaceSections: root.workspaceSections };
+  const record = { template: set.version, platform: "cloudflare", mode: "workspace", contentProfile, files: hashed, workspaceFiles: root.workspaceFiles, workspaceSections: root.workspaceSections };
   const { EMDASH_RECORD_PATH } = await import("./consumer-scaffold.mjs");
   files.push({ path: EMDASH_RECORD_PATH, content: toJson(record) });
   files.sort((left, right) => left.path.localeCompare(right.path));
@@ -689,6 +700,7 @@ async function defaultRunInstall(cwd) {
  */
 export async function scaffoldWorkspaceEmdashSite(rootInput, {
   skipInstall = false,
+  contentProfile,
   templatesRoot,
   writeFile,
   runInstall = defaultRunInstall,
@@ -708,7 +720,7 @@ export async function scaffoldWorkspaceEmdashSite(rootInput, {
   }
 
   const { consumerDefaultBranch } = await import("./consumer-init.mjs");
-  const plan = await planWorkspaceSite(designSystemRoot, { templatesRoot: templates, repoRoot: workspace.repoRoot, defaultBranch: await consumerDefaultBranch(workspace.repoRoot) });
+  const plan = await planWorkspaceSite(designSystemRoot, { templatesRoot: templates, repoRoot: workspace.repoRoot, defaultBranch: await consumerDefaultBranch(workspace.repoRoot), contentProfile });
   output(`Writing the EmDash site (template version ${plan.set.version}, cloudflare) into ${siteRoot}, built from the ${plan.design.id} design of ${plan.systemId}...`);
   // One rollback for both: a failed write removes the site and restores the root files.
   await applyWritesWithRollback(workspace.repoRoot, [

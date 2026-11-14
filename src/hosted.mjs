@@ -123,12 +123,17 @@ export function createHostProvider({ url, token, resolveToken, fetchImpl = fetch
     }
   }
   const siteSecretsPath = (id) => `/${encodeURIComponent(id)}/site/secrets`;
+  const siteContactPath = (id, operation) => `/${encodeURIComponent(id)}/site/contact/${operation}`;
   const sessionPath = (id) => `/${encodeURIComponent(id)}`;
   return {
     me: () => request("GET", "", undefined, 'me'),
     systems: () => request("GET", "", undefined, 'design-systems'),
     siteSecrets: (id) => request("GET", siteSecretsPath(id), undefined, "sources"),
     changeSiteSecret: (id, input) => request("POST", siteSecretsPath(id), input, "sources"),
+    siteWebhook: (id) => request("GET", siteContactPath(id, "webhook"), undefined, "sources"),
+    changeSiteWebhook: (id, input) => request("POST", siteContactPath(id, "webhook"), input, "sources"),
+    siteContactStatus: (id) => request("GET", siteContactPath(id, "status"), undefined, "sources"),
+    redriveSiteContact: (id, job) => request("POST", siteContactPath(id, "redrive"), { job }, "sources"),
     consumers: (id) => request("GET", `/${encodeURIComponent(id)}/consumers`, undefined, 'sources'),
     registerConsumer: (id, input) => request("POST", `/${encodeURIComponent(id)}/consumers`, input, 'sources'),
     consumer: (id, consumerId) => request("GET", `/${encodeURIComponent(id)}/consumers/${encodeURIComponent(consumerId)}`, undefined, 'sources'),

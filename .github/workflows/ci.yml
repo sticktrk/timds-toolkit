@@ -29,6 +29,7 @@ jobs:
     outputs:
       binaries: ${{ steps.filter.outputs.binaries }}
       upgrades: ${{ steps.filter.outputs.upgrades }}
+      emdash: ${{ steps.filter.outputs.emdash }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -53,6 +54,7 @@ jobs:
           matches() { if printf '%s\n' "$changed" | grep -Eq "$1"; then echo true; else echo false; fi; }
           echo "binaries=$(matches '^(scripts/binary-|src/(binary-|executable|runtime)|package\.json$|package-lock\.json$|\.github/workflows/(ci|binary)\.yml$)')" >> "$GITHUB_OUTPUT"
           echo "upgrades=$(matches '^(video/|templates/|skills/|src/(video|starter|brand-kit|core\.mjs$)|scripts/check-(shared-upgrades|brand-kit-rendering)\.mjs$|\.github/workflows/ci\.yml$)')" >> "$GITHUB_OUTPUT"
+          echo "emdash=$(matches '^(templates/(emdash|starter|brand-kit)/|src/(consumer|core\.mjs$)|bin/timds\.mjs$|scripts/check-emdash-article-publishing\.mjs$|package(-lock)?\.json$|\.github/workflows/ci\.yml$)')" >> "$GITHUB_OUTPUT"
           cat "$GITHUB_OUTPUT"
 
   validate:
@@ -75,6 +77,20 @@ jobs:
     needs: changes
     if: needs.changes.outputs.binaries == 'true'
     uses: ./.github/workflows/binary.yml
+
+  emdash-publishing:
+    needs: changes
+    if: needs.changes.outputs.emdash == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - run: npm ci
+      - run: node scripts/check-emdash-article-publishing.mjs
 
   shared-upgrades:
     needs: changes

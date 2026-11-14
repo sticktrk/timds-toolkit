@@ -7,6 +7,7 @@
  */
 import type { ContentBylineCredit, PortableTextBlock, TaxonomyTerm } from "emdash";
 
+import { runtimeSiteUrl } from "./site-environment";
 import { sections as declaredSections } from "./sections-data";
 export interface Section { collection: string; prefix: string; label: string; singularLabel: string; feed: boolean; urlPattern: string; }
 export const sections: Section[] = declaredSections;
@@ -34,6 +35,11 @@ export interface ArticleData {
 	summary?: string | null;
 	body?: PortableTextBlock[] | null;
 	cover?: ArticleImage | null;
+	body_html?: string | null;
+	short_answer?: string | null;
+	state?: string | null;
+	video_id?: string | null;
+	related_guide?: { url: string; title: string } | null;
 	createdAt: Date;
 	updatedAt: Date;
 	publishedAt: Date | null;
@@ -84,12 +90,12 @@ export function topicPath(slug: string): string {
 	return sitePath(`/topics/${encodeURIComponent(slug)}/`);
 }
 
-/** EMDASH_SITE_URL from the runtime environment (process.env on Node, and on Workers with nodejs_compat). */
 function environmentOrigin(): string {
-	const value = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.EMDASH_SITE_URL;
+	const value = runtimeSiteUrl();
 	if (!value) return "";
 	try {
-		return new URL(value).origin;
+		const url = new URL(value);
+		return ["https:", "http:"].includes(url.protocol) && !url.username && !url.password ? url.origin : "";
 	} catch {
 		return "";
 	}

@@ -34,6 +34,8 @@ export default defineConfig({
 			// the Worker attaches the database and the bucket to them.
 			database: d1({ binding: "DB", session: "auto", coalesce: true }),
 			storage: r2({ binding: "MEDIA" }),
+			// Optional designed body for a native 410. See docs/article-presentation.md.
+			...(process.env.TIMDS_DESIGNED_GONE === "1" ? { middleware: { outer: "./src/gone-middleware.ts" } } : {}),
 			// A deploy with pending core migrations answers 503 instead of
 			// migrating on a visitor's request: run `npx emdash migrate` before
 			// the Worker goes live. Development keeps migrating on its own.

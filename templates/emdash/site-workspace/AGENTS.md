@@ -8,7 +8,11 @@ source paths, so a change to how the site looks is a change to the system.
 
 - Content (articles, topics, media) goes through EmDash: the admin, the REST
   API or the MCP server, never a commit. The writer's contract is
-  `docs/content-api.md`.
+  `docs/content-api.md`. Valid `body_html` renders with its original bytes.
+  Missing, blank or rejected HTML uses the Portable Text body.
+  Read `docs/article-presentation.md` for literal site-owned article regions,
+  structured metadata, related-guide and video fields. Content profile selection
+  happens only when scaffolding, before database setup.
 - `sections.json` declares the collections and their address prefixes;
   version 2 permits nested prefixes within this one selected design, while
   ordinary parent and sibling pages stay public. Public design pages or
