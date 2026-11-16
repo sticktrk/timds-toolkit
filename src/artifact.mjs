@@ -37,7 +37,7 @@ import path from "node:path";
 import process from "node:process";
 
 import { resolveAccessToken } from "./auth.mjs";
-import { portalEndpoint, portalJson, putMultipartFile, putSingleFile } from "./media.mjs";
+import { portalEndpoint, portalJson, putMultipartFile, putSingleFile, resolveMediaPortalUrl } from "./media.mjs";
 
 const ARTIFACT_UPLOADS_PATH = "/api/operator/design-system-artifacts/uploads";
 
@@ -338,7 +338,7 @@ export async function publishExtractedIndex(workspace, options = {}) {
     );
   }
 
-  const portalUrl = options.portalUrl || workspace.manifest.media?.portalUrl || process.env.TIMDS_PORTAL_URL || "https://timds.com";
+  const portalUrl = await resolveMediaPortalUrl(workspace, options);
   const token = await resolveAccessToken(portalUrl, options);
   if (!token) throw new Error("Sign in with `timds auth login` or set TIMDS_ACCESS_TOKEN before publishing the machine index");
   const fetchImpl = options.fetchImpl || fetch;

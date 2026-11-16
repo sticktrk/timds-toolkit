@@ -7,9 +7,6 @@
   "artifact": {
     "entry": "index.html"__PUBLISH_REF__
   }__CONSUMER__,
-  "media": {
-    "portalUrl": "https://timds.com"
-  },
   "workspace": {
     "dev": ["node", "scripts/dev.mjs"],
     "build": ["node", "scripts/build.mjs"],

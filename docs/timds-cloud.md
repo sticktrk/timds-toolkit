@@ -269,8 +269,11 @@ manifest, and release preparation changes only its version.
 
 ## Hosted media upload
 
-Stage a file with `assets add` as the [README](../README.md#large-public-images-video-audio-and-b-roll) describes. Authenticate
-once through the operator portal, then upload changed staged files:
+Stage a file with `assets add` as the [README](../README.md#large-public-images-video-audio-and-b-roll) describes. Sign in
+to the system's TimDS host once, then upload changed staged files. In a
+hosted session the upload goes to the session's host; elsewhere to
+`--portal-url`, `TIMDS_PORTAL_URL`, `timds.json` `media.portalUrl` (skipping
+the retired `https://timds.com` older scaffolds recorded), or the saved login:
 
 ```bash
 npm run timds -- auth login

@@ -84,10 +84,11 @@ restage an older original over an optimized derivative.
 Publishing staged media needs a TimDS host:
 
 - The first time on a machine, `npm run timds -- auth login` opens a browser
-  sign-in only the designer can complete (add `--portal-url` with the host in
-  `timds.json` `media.portalUrl` when it is not the default;
-  `TIMDS_ACCESS_TOKEN` is the non-interactive alternative): ask them to
-  finish it, then run `npm run timds -- assets publish`.
+  sign-in only the designer can complete (add `--portal-url` with the
+  system's TimDS host the first time; `TIMDS_ACCESS_TOKEN` is the
+  non-interactive alternative): ask them to finish it, then run
+  `npm run timds -- assets publish`. In a hosted session the upload goes to
+  the session's host.
 - In a Git checkout `submit` also publishes staged files, so a designer who
   ships right away loses nothing if this step waits. A hosted `submit` does
   not: publish before submitting there, and keep large files out of the

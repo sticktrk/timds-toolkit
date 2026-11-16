@@ -2770,6 +2770,10 @@ export async function runCli(argv) {
     return result;
   }
   if (command === "extract") {
+    // A hosted session's host builds and publishes the derived layer itself.
+    if (options.publish && (await workspaceProvider(root))?.kind === "hosted") {
+      throw new Error("This is a hosted session: its TimDS host publishes the machine index. Submit the change and run `timds publish` instead of `extract --publish`.");
+    }
     const workspace = await loadWorkspace(root);
     if (!options.skipBuild) await runWorkspaceCommand(workspace, "build");
     await buildWorkspaceDesigns(workspace);
