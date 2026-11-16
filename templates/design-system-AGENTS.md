@@ -765,8 +765,8 @@ developer changes that pin.
 ## If you use TimDS Cloud
 
 Everything above works with a local or Git checkout and no host. When this
-system publishes media or releases through a TimDS host (the one
-`media.portalUrl` in `timds.json` names) or works in hosted sessions, these
+system publishes media or releases through a TimDS host (a hosted session's
+host, else the one you signed in to) or works in hosted sessions, these
 additions apply; `.agents/skills/timds-edit-design-system/references/timds-cloud.md`
 at the repository root has the detail.
 

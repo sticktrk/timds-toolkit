@@ -18,7 +18,9 @@
 // `resolveMediaSource` and `localMediaResponse` serve staged files to a
 // framework viewer during authoring; the starter viewer only uses a catalog
 // entry's optional src/assets/ copy. Credentials come from auth.mjs, and
-// nothing here is design-system specific.
+// nothing here is design-system specific. Uploads go to the host an open
+// hosted session names before any origin `timds.json` records, and never to
+// the retired portal origin older scaffolds stamped into `media.portalUrl`.
 
 import { hasContractGroups, readContractGroups, writeGroupedMedia } from "./contract-groups.mjs";
 import { createHash } from "node:crypto";
@@ -28,7 +30,8 @@ import path from "node:path";
 import process from "node:process";
 import { Readable } from "node:stream";
 import { promisify } from "node:util";
-import { resolveAccessToken } from "./auth.mjs";
+import { resolveAccessToken, savedPortalUrl } from "./auth.mjs";
+import { workspaceProvider } from "./hosted.mjs";
 
 const MAX_MEDIA_ASSETS = 5_000;
 const MAX_MEDIA_BYTES = 5 * 1024 ** 4;
@@ -426,8 +429,30 @@ async function portalJson(fetchImpl, url, token, { body, method = "GET" } = {}) 
   return payload;
 }
 
+// Every scaffold before this release wrote this origin into timds.json
+// media.portalUrl. Its Design System routes are retired (they answer 410), so
+// a recorded copy of it is treated as unset rather than as a choice.
+const RETIRED_PORTAL_ORIGIN = "https://timds.com";
+
+/**
+ * The host media uploads go to: --portal-url, else the open hosted session's
+ * host, else TIMDS_PORTAL_URL, else a non-retired timds.json media.portalUrl,
+ * else the saved login. Shared by `extract --publish`.
+ */
+export async function resolveMediaPortalUrl(workspace, options = {}) {
+  if (options.portalUrl) return String(options.portalUrl);
+  const provider = await workspaceProvider(workspace.designSystemRoot);
+  if (provider?.kind === "hosted") return provider.url;
+  if (process.env.TIMDS_PORTAL_URL) return process.env.TIMDS_PORTAL_URL;
+  const recorded = String(workspace.manifest.media?.portalUrl || "").trim();
+  if (recorded && new URL(recorded).origin !== RETIRED_PORTAL_ORIGIN) return recorded;
+  const saved = await savedPortalUrl(options);
+  if (saved) return saved;
+  throw new Error("Select a TimDS host: run `timds auth login --portal-url https://YOUR-HOST`, or pass --portal-url URL");
+}
+
 function portalEndpoint(portalUrl, pathname) {
-  const base = new URL(String(portalUrl || "https://timds.com"));
+  const base = new URL(String(portalUrl));
   if (!["http:", "https:"].includes(base.protocol)) throw new Error("TimDS portal URL must use HTTP or HTTPS");
   return new URL(pathname, `${base.origin}/`).toString();
 }
@@ -509,9 +534,9 @@ async function uploadLocalAsset(workspace, local, options) {
   if (!currentInfo.isFile() || currentInfo.size !== local.bytes || await fileSha256(filePath) !== local.sha256) {
     throw new Error(`Local media ${local.key} changed after staging; run assets add again`);
   }
-  const portalUrl = options.portalUrl || workspace.manifest.media?.portalUrl || process.env.TIMDS_PORTAL_URL || "https://timds.com";
+  const portalUrl = await resolveMediaPortalUrl(workspace, options);
   const token = await resolveAccessToken(portalUrl, options);
-  if (!token) throw new Error("Sign in with `timds auth login` or set TIMDS_ACCESS_TOKEN before publishing media");
+  if (!token) throw new Error(`Sign in to ${new URL(portalUrl).origin} with \`timds auth login\` or set TIMDS_ACCESS_TOKEN before publishing media`);
   const fetchImpl = options.fetchImpl || fetch;
   const { baseSha256, ...uploadMetadata } = local;
   const created = await portalJson(fetchImpl, portalEndpoint(portalUrl, "/api/operator/design-system-assets/uploads"), token, {

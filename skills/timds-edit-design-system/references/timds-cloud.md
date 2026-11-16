@@ -106,8 +106,10 @@ resolves `{{media:KEY}}` to the catalog record's regular `src/assets/` path
 published-only asset is referenced by the stable `publicUrl` in its record.
 A framework viewer can resolve keys with `resolveMediaSource` and serve
 staged files with `localMediaResponse` from `@dtconcepts/timds/media`.
-Authenticate through the operator portal (`auth login --portal-url` with
-`timds.json` `media.portalUrl` when it is not the default host) and upload:
+Sign in to the system's TimDS host once (`auth login --portal-url URL`) and
+upload. In a hosted session the upload goes to the session's host; elsewhere
+to `--portal-url`, `TIMDS_PORTAL_URL`, `timds.json` `media.portalUrl`, or the
+saved login, in that order:
 
 ```bash
 npm run timds -- auth login

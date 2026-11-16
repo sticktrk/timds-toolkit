@@ -1302,8 +1302,11 @@ the derived layer and consumer bundle to the host's CDN.
 **Media.** `timds assets publish` uploads staged `media-local/` files to the
 host's public storage (Git `submit` does this first); `assets pull KEY`
 restores one and `assets backfill-metadata` measures older catalog entries
-from their public URLs. `media.portalUrl` in `timds.json` names the host
-these uploads and publication use.
+from their public URLs. Uploads and `extract --publish` go to the open hosted
+session's host, else `--portal-url`, `TIMDS_PORTAL_URL`, `timds.json`
+`media.portalUrl`, or the saved login; the retired `https://timds.com` portal
+that older scaffolds recorded there is skipped, and `extract --publish`
+refuses in a hosted session, whose host publishes the derived layer.
 
 **Consumers.** `timds consumer register` and `timds consumer updates` enrol a
 product for hosted pin updates and read their receipts; `timds consumer

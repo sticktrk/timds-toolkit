@@ -446,9 +446,9 @@ developer changes that pin.
 
 Everything above works with a local or Git checkout and no host. The rest of
 this section applies when the system publishes media or releases through a
-TimDS host, or works in hosted sessions. `media.portalUrl` in `timds.json`
-names the host used for media upload, `extract --publish`, and release
-publication.
+TimDS host, or works in hosted sessions. Media upload and `extract --publish`
+use the hosted session's host, else `--portal-url`, `TIMDS_PORTAL_URL`, an
+optional `media.portalUrl` in `timds.json`, or the host you signed in to.
 
 ### Release publication (standalone repositories)
 
