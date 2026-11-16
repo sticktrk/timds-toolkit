@@ -737,6 +737,10 @@ workspace entry and add an alias with a system id and release version.
 }
 ```
 
+`systemId` is the sibling's full system id as its `timds.json` declares it,
+with or without slash-separated segments: `timds-example-commercial` is as
+valid as `timds-example/commercial`.
+
 Set the division's `system` to `commercial` and `design` to a design id
 from that release. The site can reference up to four sibling pins, and
 every declared sibling must be used by a division. The Host stages each
