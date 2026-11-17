@@ -508,7 +508,8 @@ stage, error and recent deployments, including output for a failed build.
 The command finds the source from a hosted workspace. From elsewhere, pass
 `--source-id UUID`; `timds systems --json` lists source UUIDs under `id`.
 Host selection uses `--portal-url`, `TIMDS_PORTAL_URL`, the workspace's
-host, then the selected saved login.
+host, then the selected saved login. Pass both `--source-id` and
+`--portal-url` to address a site on a different host from the open session.
 
 ```sh
 timds site show --source-id UUID --json
@@ -520,11 +521,13 @@ timds site retry --source-id UUID
 
 `--wait` follows the requested commit it first sees, or the full commit SHA
 you supply. It polls every five seconds for up to 30 minutes by default
-and exits nonzero on failure, supersession, or timeout. The JSON report adds
-`siteDeployment` with the outcome for that commit.
+and exits nonzero on failure, supersession, or timeout. The timeout includes
+looking up the workspace's source ID. The JSON report adds `siteDeployment`
+with the outcome for that commit.
 
-After a hosted publication, `timds publish` reports the deployment
-separately and prints a follow command pinned to the published commit.
+After a hosted publication, `timds publish` reports the deployment separately.
+When it can resolve the published commit, it prints a follow command pinned
+to that commit.
 Use `--wait-site` to wait inline; a nonzero site wait result still includes
 the successful Design System publication. The wait has the same default and
 supports `--timeout-seconds`. A host administrator can request

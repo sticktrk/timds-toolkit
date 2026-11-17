@@ -20,6 +20,7 @@ const operationId = randomUUID();
 const systemId = "example/core";
 const oldCommit = "a".repeat(40);
 const newCommit = "b".repeat(40);
+const laterCommit = "c".repeat(40);
 const siteRoute = `/api/timds/sources/${sourceId}/site`;
 const sourceRoute = `/api/timds/design-systems/${sourceId}`;
 const publishRoute = `/api/timds/submissions/${submissionId}/publish`;
@@ -163,9 +164,86 @@ test("site show waits for a pinned commit and times out while an older commit is
   assert.equal(reads, 2);
 });
 
+test("site show reports a failure before the deployment starts and ignores an earlier commit's error", async t => {
+  const failure = {
+    ...site, sourceCommit: newCommit, status: "failed", stage: "load",
+    error: "Site operation failed before the build started.",
+  };
+  let currentSite = failure;
+  const f = await fixture(t, ({ url }) => url === siteRoute && { payload: { site: currentSite } });
+  const args = ["site", "show", "--wait", "--commit", newCommit, "--timeout-seconds", "1", "--json"];
+
+  const failed = await f.run(...args);
+  assert.equal(failed.code, 1);
+  assert.deepEqual(JSON.parse(failed.stdout).siteDeployment, {
+    sourceCommit: newCommit, status: "failed", stage: "load", error: failure.error,
+  });
+
+  // The desired pointer can change before the host resets the old error.
+  currentSite = { ...failedSite, sourceCommit: laterCommit };
+  const waiting = await f.run("site", "show", "--wait", "--commit", laterCommit, "--timeout-seconds", "1", "--json");
+  assert.equal(waiting.code, 1);
+  assert.equal(JSON.parse(waiting.stdout).siteDeployment.status, "timeout");
+});
+
+test("site show detects a superseded commit without a deployment row", async t => {
+  let reads = 0;
+  const f = await fixture(t, ({ url }) => {
+    if (url === siteRoute) return { payload: { site: ++reads === 1
+      ? { ...site, sourceCommit: newCommit, status: "deploying" }
+      : { ...site, sourceCommit: laterCommit, deployedCommit: laterCommit },
+    } };
+    if (url === sourceRoute) return { payload: {
+      currentVersion: { sourceCommit: laterCommit },
+      versions: [{ sourceCommit: newCommit }],
+    } };
+  });
+  const args = ["site", "show", "--wait", "--timeout-seconds", "8", "--json"];
+  const observed = await f.run(...args);
+  assert.equal(observed.code, 1);
+  assert.equal(JSON.parse(observed.stdout).siteDeployment.status, "superseded");
+  assert.equal(JSON.parse(observed.stdout).siteDeployment.sourceCommit, newCommit);
+  assert.equal(reads, 2);
+  assert.equal(f.requests.some(request => request.url === sourceRoute), false);
+
+  const pinned = await f.run(...args, "--commit", newCommit);
+  assert.equal(pinned.code, 1);
+  assert.equal(JSON.parse(pinned.stdout).siteDeployment.status, "superseded");
+  assert.equal(f.requests.at(-1).url, sourceRoute);
+});
+
+test("site show includes source discovery in the wait deadline", async t => {
+  const lookup = `/api/timds/design-systems/${encodeURIComponent(systemId)}`;
+  const f = await fixture(t, ({ url }) => url === lookup && { hang: true });
+  await rm(f.state);
+  const result = await f.run("site", "show", "--wait", "--timeout-seconds", "1", "--json");
+  assert.equal(result.code, 1);
+  assert.deepEqual(JSON.parse(result.stdout).siteDeployment, {
+    sourceCommit: null, status: "timeout",
+    error: "Timed out after 1 seconds waiting for the site deployment.",
+  });
+  assert.deepEqual(f.requests.map(request => request.url), [lookup]);
+});
+
+test("site show honors an explicit source and host from another host's session", async t => {
+  const remote = await fixture(t, ({ url }) => url === siteRoute && { payload: { site } }, { workspace: false });
+  const local = await fixture(t, () => undefined);
+  const implicit = await local.run("site", "show", "--portal-url", remote.portal, "--json");
+  assert.equal(implicit.code, 1);
+  assert.match(implicit.stderr, /Session belongs to a different TimDS host/);
+  assert.equal(remote.requests.length, 0);
+
+  const explicit = await local.run("site", "show", "--source-id", sourceId, "--portal-url", remote.portal, "--json");
+  assert.equal(explicit.code, 0, explicit.stderr);
+  assert.deepEqual(JSON.parse(explicit.stdout).site, site);
+  assert.deepEqual(remote.requests.map(request => request.url), [siteRoute]);
+  assert.equal(local.requests.length, 0);
+});
+
 test("publish follows its release ID and preserves a successful publication on site failure", async t => {
   let currentSite = site;
   let stall = false;
+  let siteUnavailable = false;
   const f = await fixture(t, ({ url, body }) => {
     if (url === publishRoute && (body.preflight || body.dryRun)) return { payload: {
       preflight: { submissionId, sessionId, systemId, version: "2026.11.17-1" },
@@ -175,7 +253,11 @@ test("publish follows its release ID and preserves a successful publication on s
         publicRoot, version: "2026.11.17-1", publication: { version_id: publicationId },
       } },
     } };
-    if (url === siteRoute) return stall ? { hang: true } : { payload: { site: currentSite } };
+    if (url === siteRoute) {
+      if (stall) return { hang: true };
+      if (siteUnavailable) return { status: 503, payload: { error: "Temporary site read failure" } };
+      return { payload: { site: currentSite } };
+    }
     if (url === sourceRoute) return { payload: {
       currentVersion: { id: randomUUID(), sourceCommit: oldCommit },
       versions: [{ id: publicationId, sourceCommit: newCommit }],
@@ -204,8 +286,19 @@ test("publish follows its release ID and preserves a successful publication on s
   assert.equal(noSite.code, 0, noSite.stderr);
   assert.equal(JSON.parse(noSite.stdout).site, null);
   assert.equal(f.requests.at(-1).url, siteRoute);
+
+  siteUnavailable = true;
+  const unavailable = await f.run("publish", "--submission", submissionId, "--yes", "--json");
+  assert.equal(unavailable.code, 0, unavailable.stderr);
+  const unavailableReport = JSON.parse(unavailable.stdout);
+  assert.equal(unavailableReport.siteDeployment.status, "unknown");
+  assert.equal(unavailableReport.siteDeployment.sourceCommit, newCommit);
+  assert.match(unavailableReport.siteFollowCommand, new RegExp(`--wait --commit ${newCommit}$`));
+
   stall = true;
   const timeout = await f.run("publish", "--submission", submissionId, "--yes", "--wait-site", "--timeout-seconds", "1", "--json");
   assert.equal(timeout.code, 1);
-  assert.equal(JSON.parse(timeout.stdout).siteDeployment.status, "timeout");
+  const timeoutReport = JSON.parse(timeout.stdout);
+  assert.equal(timeoutReport.siteDeployment.status, "timeout");
+  assert.equal(timeoutReport.siteFollowCommand, undefined);
 });

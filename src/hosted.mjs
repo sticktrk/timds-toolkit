@@ -9,7 +9,7 @@ import { assertBinaryInstallation } from "./binary-installation.mjs";
 import { isBinaryRuntime } from "./executable.mjs";
 import { isLineagePath } from "./offshoot-contract.mjs";
 import { findWorkspaceSite } from "./workspace-site.mjs";
-import { followSite, readSite, reportPublishedSite, retrySite, siteFollowCommand, siteUuid } from "./hosted-site.mjs";
+import { reportPublishedSite, runSiteCommand, siteFollowCommand } from "./hosted-site.mjs";
 
 export const HOST_API_VERSION = 1;
 export const SESSION_FILE = ".timds/session.json";
@@ -421,24 +421,23 @@ export async function runHostedCommand(command, { root = process.cwd(), fixedRoo
   // login the way start, join, whoami and systems do.
   const systemScoped = ["active-work", "principals", "draft-create", "draft-list", "draft-close", "rollback"].includes(command);
   const siteCommand = command === "site-show" || command === "site-retry";
-  const explicitTarget = (siteCommand && sourceId !== undefined) || (command === "publish" && Boolean(submission));
-  if (siteCommand && sourceId === undefined && !state && configured?.kind !== "hosted") {
+  const explicitSite = siteCommand && sourceId !== undefined;
+  const explicitTarget = explicitSite || command === "publish" && Boolean(submission);
+  if (siteCommand && !explicitSite && !state && configured?.kind !== "hosted") {
     throw new Error("Provide --source-id UUID or run inside a hosted workspace.");
   }
   const url = portalUrl || process.env.TIMDS_PORTAL_URL || configured?.url || pending?.provider?.url || (destination || identityOnly || systemScoped || explicitTarget ? await savedPortalUrl({ credentialsPath }) : null);
   if (!url || !identityOnly && !explicitTarget && configured && configured.kind !== "hosted") throw new Error(NO_HOST);
   const provider = normalizeProvider({ kind: "hosted", url });
-  if (!identityOnly && state && state.provider.url !== provider.url) throw new Error("Session belongs to a different TimDS host");
+  if (!identityOnly && !explicitSite && state && state.provider.url !== provider.url) throw new Error("Session belongs to a different TimDS host");
   const host = createHostProvider({ url: provider.url, token,
     resolveToken: options => resolveAccessToken(provider.url, { token, credentialsPath, fetchImpl, ...options }), fetchImpl });
   const selectedSystem = systemId || state?.session?.systemId || state?.session?.sourceId || manifest?.systemId;
   if (siteCommand) {
-    let selectedSource = sourceId ?? state?.session?.sourceId;
-    if (!selectedSource && selectedSystem) selectedSource = (await host.source(selectedSystem)).source?.id;
-    if (!siteUuid.test(selectedSource ?? "")) throw new Error("Provide a valid --source-id UUID for this hosted source.");
-    selectedSource = selectedSource.toLowerCase();
-    if (command === "site-retry") return retrySite(host, selectedSource);
-    return waitSite ? followSite(host, selectedSource, { commit: siteCommit, timeoutMs: siteTimeoutMs }) : readSite(host, selectedSource);
+    return runSiteCommand(command, host, {
+      sourceId: sourceId ?? (state?.session?.sourceId || undefined), systemId: selectedSystem,
+      waitSite, commit: siteCommit, timeoutMs: siteTimeoutMs,
+    });
   }
   if (command === "rollback") {
     if (!selectedSystem || !version) throw new Error("rollback requires VERSION and a design system (--system-id)");
