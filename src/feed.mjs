@@ -108,7 +108,8 @@ export async function feedOffshoot({ designSystemRoot, source, baseline = null, 
   const declaredPlumbing = (declared?.paths ?? []).filter((relative) => isPlumbingPath(relative));
   const stockPaths = (declared?.paths ?? []).filter((relative) => !isPlumbingPath(relative));
   const manifest = sourceJson(sourceFiles, "timds.json");
-  if (manifest?.systemId !== identity.systemId || manifest?.version !== identity.version) throw Object.assign(new Error("The parent source identity or version disagrees with its release"), { failureCode: "parent_mismatch" });
+  // An unversioned parent's release label is its host's; only a declared version must agree.
+  if (manifest?.systemId !== identity.systemId || manifest?.version != null && manifest.version !== identity.version) throw Object.assign(new Error("The parent source identity or version disagrees with its release"), { failureCode: "parent_mismatch" });
   const rawSite = sourceJson(sourceFiles, STARTER_SITE_FILE);
   const formats = sourceJson(sourceFiles, STARTER_FORMATS_FILE, false);
   // Reuse the contract validator to reject malformed source identity/catalogs

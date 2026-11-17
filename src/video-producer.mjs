@@ -370,13 +370,17 @@ export function createVideoAuthoringContract({ contract, manifest, designSystemI
   }
   const systemId = text(manifest?.systemId, "timds manifest systemId");
   const systemName = text(manifest?.name, "timds manifest name");
-  const version = text(provenance?.version || manifest?.version, "video authoring Design System version");
+  // A Design System without a version authors against its commit alone; a
+  // version supplied (the manifest's, or a host label in provenance) is kept.
+  const declaredVersion = provenance?.version || manifest?.version;
+  const version = declaredVersion === undefined || declaredVersion === null ? null : text(declaredVersion, "video authoring Design System version");
   const commit = text(provenance?.commit, "video authoring Design System commit");
   if (!/^[0-9a-f]{40}$/u.test(commit)) throw new Error("video authoring Design System commit must be a full Git SHA");
   const index = object(designSystemIndex, "published Design System index");
   const indexSystem = object(index.system, "published Design System index.system");
   if (indexSystem.id !== systemId) throw new Error(`published Design System ${String(indexSystem.id)} does not match ${systemId}`);
-  if (indexSystem.version !== version) throw new Error(`published Design System ${String(indexSystem.version)} does not match pinned ${version}`);
+  // An unversioned index cannot repeat a label; one that names a version must match it.
+  if ((indexSystem.version !== undefined || version === null) && indexSystem.version !== (version ?? undefined)) throw new Error(`published Design System ${String(indexSystem.version)} does not match pinned ${version ?? "unversioned"}`);
   if (!Array.isArray(index.pages)) throw new Error("published Design System index.pages must be an array");
 
   const blockIds = [...new Set([
@@ -517,7 +521,7 @@ export function createVideoAuthoringContract({ contract, manifest, designSystemI
     designSystem: {
       id: systemId,
       name: systemName,
-      version,
+      ...(version === null ? {} : { version }),
       commit,
       ...(provenance?.indexUrl ? { indexUrl: text(provenance.indexUrl, "video authoring index URL") } : {}),
     },

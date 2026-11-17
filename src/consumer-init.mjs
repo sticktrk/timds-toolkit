@@ -968,6 +968,8 @@ async function resolvePublishedPin({ system, version, url, fetchImpl }) {
     } catch (error) {
       throw new Error(`Could not read the current published version of ${systemId} at ${base}: ${error.message}\nPass --version to pin one explicitly.`);
     }
+    // An unversioned publication names no label; the host that published it does.
+    if (!pinned) throw new Error(`The current publication of ${systemId} at ${base} carries no version label. Pass --version with the label its host published it under, or --version current to follow every release.`);
   }
   return { systemId, version: pinned, url: url ? base : null };
 }

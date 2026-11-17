@@ -174,8 +174,11 @@ writes its own copy on every page it renders, with the page's Markdown
 mirror. `bundle.mjs` builds
 the consumer bundle: the files `timds.json` `bundle.include` globs name,
 copied into `<entry>/bundle/` under their source paths with a `bundle.json`
-of digests, published under the current prefix and an immutable
-`v/<version>/` prefix a website pins. On the product side,
+of digests, published under the current prefix and, when `timds.json`
+declares a version, an immutable `v/<version>/` prefix a website pins. The
+version is optional: an unversioned system's documents and stamp omit it, it
+publishes no `v/` copy, and a consumer pin is an opaque host label that sync
+fetches without requiring the bundle manifest to repeat it. On the product side,
 `consumer-sync.mjs` is `timds consumer sync|update`: a published pin
 (`designSystem.version` in `timds.consumer.json`) fetches that version's
 bundle into the gitignored `design-system/` directory from `postinstall`,

@@ -386,8 +386,11 @@ export function validateManifest(input) {
   }
   const name = String(manifest.name || "").trim();
   if (!name) throw new Error("timds.json name is required");
-  const version = String(manifest.version || "").trim();
-  if (!version) throw new Error("timds.json version is required");
+  // The version is optional: a system without one is labelled by its host
+  // after publication, and nothing it builds carries a version. A declared
+  // version must still be a non-empty label.
+  const version = manifest.version === undefined || manifest.version === null ? undefined : String(manifest.version).trim();
+  if (version === "") throw new Error("timds.json version must be a non-empty label when declared; remove it to leave the system unversioned");
   const artifactEntry = safeArtifactPath(manifest.artifact?.entry || "index.html", "timds.json artifact.entry");
   const artifactPublishRef = String(manifest.artifact?.publishRef || "").trim();
   if (
@@ -1905,7 +1908,7 @@ export async function submitWorkspace(repoRootInput, message, options = {}) {
     commands.push([
       "gh", "pr", "create", "--draft", "--base", baseBranch, "--head", plannedBranch,
       "--title", message,
-      "--body", `## TimDS design-system change\n\n${message}\n\n- Version: ${checked.manifest.version}\n- Artifact files: ${checked.artifact.fileCount}\n- Artifact bytes: ${checked.artifact.totalBytes}\n- Local TimDS validation: passed`,
+      "--body", `## TimDS design-system change\n\n${message}\n\n${checked.manifest.version ? `- Version: ${checked.manifest.version}\n` : ""}- Artifact files: ${checked.artifact.fileCount}\n- Artifact bytes: ${checked.artifact.totalBytes}\n- Local TimDS validation: passed`,
     ]);
   }
   if (options.dryRun) return { baseBranch, branch: plannedBranch, commands, dryRun: true, media };
@@ -1924,7 +1927,7 @@ export function brandReport(workspace, derived) {
   const lines = [];
   const { brand: kit, tokens, index } = derived;
   if (!kit) return ["Brand kit: not derived yet. Run `npm run timds -- check` to build the pages and derive it."];
-  lines.push(`${kit.system.name} — brand kit derived for ${kit.system.version}${derived.stale ? ` (timds.json is now ${workspace.manifest.version}; run timds check)` : ""}`);
+  lines.push(`${kit.system.name} — brand kit derived for ${kit.system.version ?? "an unversioned build"}${derived.stale ? ` (timds.json is now ${workspace.manifest.version ?? "unversioned"}; run timds check)` : ""}`);
   lines.push("", "Roles");
   for (const [role, entry] of Object.entries(kit.roles)) lines.push(`  ${role.padEnd(18)} ${entry.value}  ← ${entry.token}${entry.source === "manifest" ? " (timds.json)" : ""}`);
   const baseTokens = (tokens?.tokens ?? []).filter((token) => token.base);
@@ -2276,7 +2279,7 @@ async function runDoctorCommand(root, options) {
     output(`Repository: ${workspace.repoRoot}`);
     output(`Design system: ${workspace.designSystemRoot}`);
     output(`System: ${workspace.manifest.name} (${workspace.manifest.systemId})`);
-    output(`Version: ${workspace.manifest.version}`);
+    output(`Version: ${workspace.manifest.version ?? "none (timds.json declares no version; a host labels publications)"}`);
     output(`Toolkit selected: ${toolkitSelected}`);
     output(`Toolkit running: ${runtimeIdentity.version} (${isBinaryRuntime() ? "binary" : "npm"})`);
     output(`Media assets: ${workspace.mediaCatalog.assets.length}`);
@@ -2758,10 +2761,10 @@ export async function runCli(argv) {
     const result = await publishRelease(workspace, { portalUrl: options.portalUrl, stamp, token: options.token });
     if (options.json) output(JSON.stringify(result, null, 2));
     else if (result.status === "awaiting-operator") {
-      output(`Candidate ${result.candidate.version} (${result.candidate.contentDigest}) is awaiting operator publication; automatic updates is off.`);
+      output(`Candidate ${result.candidate.version ?? "(unlabelled)"} (${result.candidate.contentDigest}) is awaiting operator publication; automatic updates is off.`);
       output(`Open ${result.operatorUrl} and publish the candidate in Design Systems.`);
     } else {
-      output(`${result.unchanged ? "Already published" : "Published"} ${result.systemId} ${result.version}: ${result.publicRoot}`);
+      output(`${result.unchanged ? "Already published" : "Published"} ${result.systemId}${result.version === undefined ? "" : ` ${result.version}`}: ${result.publicRoot}`);
       output(`Pinned release: ${result.versionedUrls.root}`);
       output(`Agent docs: ${result.versionedUrls.llmsTxt}`);
       output(`Consumer bundle (when supplied): ${result.versionedUrls.bundleJson}`);

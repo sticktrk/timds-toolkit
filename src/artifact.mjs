@@ -17,7 +17,7 @@
 //
 //   POST {portal}/api/operator/design-system-artifacts/uploads
 //   Authorization: Bearer <token>
-//   { systemId, version, sourceCommit,
+//   { systemId, version, sourceCommit,                       // no version when timds.json has none
 //     files: [{ path, contentType, bytes, sha256 }] }        // artifact-relative
 //   → { publicBase,                                          // stable HTTPS prefix
 //       uploads: [{ path, method: "single" | "multipart", url, headers?,
@@ -204,7 +204,8 @@ export async function collectDesignReferenceFiles(designs, artifactRoot, files =
  * prefix where `check` copied them, and under the immutable `v/<version>/`
  * prefix a website pins. The same local file serves both keys; the portal
  * skips a key whose digest is already current, so a republish of an
- * unchanged version uploads nothing.
+ * unchanged version uploads nothing. An unversioned system has only the
+ * current key: its host files publications under labels it assigns.
  */
 export async function collectBundleFiles(bundle, artifactRoot, { entryDirectory, version }, files = new Map()) {
   for (const entry of bundle.files ?? []) {
@@ -218,7 +219,7 @@ export async function collectBundleFiles(bundle, artifactRoot, { entryDirectory,
     }
     const record = { bytes: body.length, contentType: artifactContentType(current), localPath, sha256: sha256Of(body) };
     if (record.sha256 !== entry.sha256) throw new Error(`${current} does not match the digest bundle.json records; run timds check`);
-    for (const key of [current, versioned]) if (!files.has(key)) files.set(key, record);
+    for (const key of [current, versioned]) if (key && !files.has(key)) files.set(key, record);
   }
   return files;
 }
@@ -302,8 +303,9 @@ async function performUpload(fetchImpl, portalUrl, upload, filePath, contentType
   }
 }
 
-/** Refuse changing the content of a version that consumers can already pin. */
+/** Refuse changing the content of a version that consumers can already pin. An unversioned system has no such copy to guard. */
 async function checkPublishedBundle(fetchImpl, publicBase, bundle, options) {
+  if (!options.version) return;
   const relative = bundleManifestPublishPaths(options).versioned;
   const response = await fetchImpl(`${publicBase}/${relative}`, { cache: "no-store" });
   if (response.status === 404) return;
@@ -332,9 +334,10 @@ export async function publishExtractedIndex(workspace, options = {}) {
   }
   const index = JSON.parse(indexRaw);
   const lineage = parentLineage(workspace.parentRecord === undefined ? await readParentRecord(workspace.designSystemRoot) : workspace.parentRecord);
-  if (index.system?.version !== workspace.manifest.version) {
+  // Both unversioned is a match; a version on only one side is a mismatch.
+  if ((index.system?.version ?? null) !== (workspace.manifest.version ?? null)) {
     throw new Error(
-      `Artifact index is stamped ${index.system?.version} but timds.json declares ${workspace.manifest.version}; rebuild before publishing`
+      `Artifact index is stamped ${index.system?.version ?? "without a version"} but timds.json declares ${workspace.manifest.version ?? "no version"}; rebuild before publishing`
     );
   }
 
@@ -387,8 +390,8 @@ export async function publishExtractedIndex(workspace, options = {}) {
     designs: (designs?.designs ?? []).map((design) => ({ id: design.id, routes: (design.pages ?? []).map((page) => page.route) })),
   };
   const version = workspace.manifest.version;
-  if (bundle && (bundle.system?.id !== workspace.manifest.systemId || bundle.system?.version !== version)) {
-    throw new Error(`Artifact bundle is stamped ${bundle.system?.id ?? "unknown"} ${bundle.system?.version ?? "unknown"} but timds.json declares ${workspace.manifest.systemId} ${version}; rebuild before publishing`);
+  if (bundle && (bundle.system?.id !== workspace.manifest.systemId || (bundle.system?.version ?? null) !== (version ?? null))) {
+    throw new Error(`Artifact bundle is stamped ${bundle.system?.id ?? "unknown"} ${bundle.system?.version ?? (version ? "unknown" : "unversioned")} but timds.json declares ${workspace.manifest.systemId} ${version ?? "unversioned"}; rebuild before publishing`);
   }
   if (bundle) await collectBundleFiles(bundle, artifactRoot, { entryDirectory, version }, files);
   const docs = await collectMachineDocFiles(artifactRoot, entryDirectory);
@@ -462,14 +465,16 @@ export async function publishExtractedIndex(workspace, options = {}) {
         ? []
         : [{ body: Buffer.from(`${JSON.stringify({ ...changelog, base: publicBase }, null, 2)}\n`), contentType: "application/json", path: changelogRelative }]),
       // bundle.json at the current prefix names the versioned copy; the copy's own manifest points at itself.
+      // An unversioned system publishes the current copy only.
       ...(bundle === null
         ? []
         : [
           { body: Buffer.from(`${JSON.stringify(rewriteBundleForPublish(bundle, { publicBase, entryDirectory, version }), null, 2)}\n`), contentType: "application/json", path: bundleRelative },
-          { body: Buffer.from(`${JSON.stringify(rewriteBundleForPublish(bundle, { publicBase, entryDirectory, version, versioned: true }), null, 2)}\n`), contentType: "application/json", path: bundleManifestPublishPaths({ entryDirectory, version }).versioned },
+          ...(version ? [{ body: Buffer.from(`${JSON.stringify(rewriteBundleForPublish(bundle, { publicBase, entryDirectory, version, versioned: true }), null, 2)}\n`), contentType: "application/json", path: bundleManifestPublishPaths({ entryDirectory, version }).versioned }] : []),
         ]),
       // The stamp is the one file a remote consumer must know: it names the
       // version, the commit, and where every derived file sits under this base.
+      // An unversioned system's stamp has no version field.
       {
         body: Buffer.from(`${JSON.stringify({
           schemaVersion: 1,
@@ -502,7 +507,7 @@ export async function publishExtractedIndex(workspace, options = {}) {
     await fs.rm(staging, { force: true, recursive: true });
   }
 
-  const total = files.size + 2 + [llmsSource, llmsFullSource, tokensSource, brandKit, formats, designs, changelog, bundle, bundle].filter((document) => document !== null).length;
+  const total = files.size + 2 + [llmsSource, llmsFullSource, tokensSource, brandKit, formats, designs, changelog, bundle, version ? bundle : null].filter((document) => document !== null).length;
   const publishedBundle = bundle === null ? null : rewriteBundleForPublish(bundle, { publicBase, entryDirectory, version });
   return {
     brandUrl: brandKit === null ? null : `${publicBase}/${brandRelative}`,

@@ -23,6 +23,14 @@
 // follows every release at the next install instead; `sync` records which
 // version that resolved to.
 //
+// A pin is an opaque label: whatever the host files a publication under at
+// `v/<label>/`. A Design System whose timds.json declares no version builds a
+// bundle manifest and stamp without one; its host assigns the label after
+// publication. Sync then fetches by the label without requiring the manifest
+// to repeat it (a manifest that names a different version is still refused),
+// `current` reads the current bundle at the base, and every file is verified
+// by its sha256.
+//
 // A site inside its Design System's workspace (`designSystem.workspace`) has
 // no pin: it reads the workspace's source directly. `sync` there does nothing
 // and says so (a script that runs it everywhere still passes); `update`, with
@@ -36,7 +44,7 @@ import process from "node:process";
 import { BUNDLE_MANIFEST_FILE, BUNDLE_OUTPUT_DIRECTORY, BUNDLE_VERSION_PREFIX, bundleOutputDirectory } from "./bundle.mjs";
 import { CONSUMER_BUNDLE_RECORD_FILE, CONSUMER_MANIFEST_FILE, loadConsumer, publishedBaseUrl } from "./consumer.mjs";
 import { WORKSPACE_PIN_MODE } from "./workspace-site.mjs";
-import { PROVENANCE_FILE } from "./derived.mjs";
+import { PROVENANCE_FILE, derivedLayerPaths } from "./derived.mjs";
 
 export const BUNDLE_RECORD_SCHEMA_VERSION = 1;
 
@@ -82,7 +90,10 @@ async function fetchJson(fetchImpl, url, what) {
 /**
  * The bundle a pin resolves to. A named version reads the immutable copy
  * directly; `current` reads the provenance stamp at the base, then resolves
- * the immutable bundle for that version. Returns the manifest with
+ * the immutable bundle for that version, or, when the stamp names no version
+ * (an unversioned system), the current bundle beside the derived layer; the
+ * result's `version` is then null and `sourceCommit` and `contentDigest`
+ * carry the stamp's identity when it has them. Returns the manifest with
  * absolute file URLs, the version it is for, and the designs summary when
  * the caller asked for it. A rewritten manifest (`base` filled in by
  * publish) names its files by absolute URL and is read as written. The
@@ -95,14 +106,27 @@ async function fetchJson(fetchImpl, url, what) {
 export async function resolvePublishedBundle({ url, version, fetchImpl = fetch, withDesigns = false }) {
   const base = String(url).replace(/\/+$/, "");
   let resolvedVersion = version;
+  let identity = {};
+  let manifestUrl;
   if (version === "current") {
     const provenance = await fetchJson(fetchImpl, `${base}/${PROVENANCE_FILE}`, "Design System provenance");
     resolvedVersion = provenance.version ?? null;
-    if (!resolvedVersion) throw new Error(`${base} publishes no version in its provenance stamp`);
+    if (!resolvedVersion) {
+      // An unversioned publication: the stamp names the commit and digest,
+      // and the current bundle sits where the stamp's files map says.
+      if (typeof provenance.sourceCommit !== "string" || !provenance.sourceCommit) throw new Error(`${base} publishes neither a version nor a source commit in its provenance stamp`);
+      identity = { sourceCommit: provenance.sourceCommit, ...(typeof provenance.contentDigest === "string" ? { contentDigest: provenance.contentDigest } : {}) };
+      const relative = provenance.files?.bundle ?? derivedLayerPaths(provenance.entry).bundle;
+      manifestUrl = `${base}/${relative.split("/").map(encodeURIComponent).join("/")}`;
+    }
   }
-  const manifestUrl = `${base}/${BUNDLE_VERSION_PREFIX}/${encodeURIComponent(resolvedVersion)}/${BUNDLE_MANIFEST_FILE}`;
-  const document = await fetchJson(fetchImpl, manifestUrl, `Design System version ${resolvedVersion}'s bundle`);
-  if (document.system?.version !== resolvedVersion) throw new Error(`Design System version ${resolvedVersion}'s bundle is stamped ${document.system?.version ?? "unknown"}; republish the correct version`);
+  manifestUrl ??= `${base}/${BUNDLE_VERSION_PREFIX}/${encodeURIComponent(resolvedVersion)}/${BUNDLE_MANIFEST_FILE}`;
+  const label = resolvedVersion ? `Design System version ${resolvedVersion}'s bundle` : "The current Design System bundle";
+  const document = await fetchJson(fetchImpl, manifestUrl, label);
+  // The label is the host's: an unversioned manifest need not repeat it, but
+  // a manifest naming another version (or one where none was expected) is refused.
+  const stamped = document.system?.version ?? null;
+  if (stamped !== null && stamped !== resolvedVersion) throw new Error(`${label} is stamped ${stamped}; republish the correct version`);
   const absolute = (candidate) => {
     if (typeof candidate !== "string" || !candidate.trim()) return null;
     try {
@@ -126,6 +150,7 @@ export async function resolvePublishedBundle({ url, version, fetchImpl = fetch, 
   });
   return {
     version: resolvedVersion,
+    ...identity,
     systemId: document.system?.id ?? null,
     url: absolute(document.url),
     directory,
@@ -244,6 +269,9 @@ export async function syncConsumerBundle(rootInput = process.cwd(), { fetchImpl 
     systemId: designSystem.systemId,
     pin: designSystem.version,
     version: resolved.version,
+    // An unversioned current publication is identified by its stamp instead.
+    ...(resolved.sourceCommit ? { sourceCommit: resolved.sourceCommit } : {}),
+    ...(resolved.contentDigest ? { contentDigest: resolved.contentDigest } : {}),
     url: resolved.url,
     directory: resolved.directory,
     versioned: resolved.versioned,
@@ -253,6 +281,7 @@ export async function syncConsumerBundle(rootInput = process.cwd(), { fetchImpl 
   };
   const same = previous && previous.systemId === record.systemId && previous.pin === record.pin
     && previous.version === record.version && previous.url === record.url && previous.directory === record.directory
+    && previous.sourceCommit === record.sourceCommit && previous.contentDigest === record.contentDigest
     && downloaded === 0 && removed === 0
     && JSON.stringify(previous.files) === JSON.stringify(record.files) && JSON.stringify(previous.designs ?? null) === JSON.stringify(record.designs ?? null);
   await fs.mkdir(location, { recursive: true });
@@ -262,9 +291,10 @@ export async function syncConsumerBundle(rootInput = process.cwd(), { fetchImpl 
     output(`Warning: .gitignore does not list ${designSystem.path}/; the fetched bundle must never be committed.`);
   }
   const status = same ? "unchanged" : "synced";
+  const named = record.version ?? `current (${record.sourceCommit ? `commit ${record.sourceCommit.slice(0, 12)}` : "unversioned"})`;
   output(status === "unchanged"
-    ? `Design System ${designSystem.systemId} ${record.version} is up to date at ${designSystem.path}/ (${record.files.length} files).`
-    : `Synced Design System ${designSystem.systemId} ${record.version} into ${designSystem.path}/: ${downloaded} downloaded, ${unchanged} unchanged, ${removed} removed.`);
+    ? `Design System ${designSystem.systemId} ${named} is up to date at ${designSystem.path}/ (${record.files.length} files).`
+    : `Synced Design System ${designSystem.systemId} ${named} into ${designSystem.path}/: ${downloaded} downloaded, ${unchanged} unchanged, ${removed} removed.`);
   return { status, version: record.version, pin: designSystem.version, location, downloaded, unchanged, removed, files: record.files.length };
 }
 
@@ -283,6 +313,8 @@ export async function updateConsumerPin(rootInput = process.cwd(), { version = n
   let target = version ? String(version).trim() : null;
   if (!target && designSystem.version !== "current") {
     const resolved = await resolvePublishedBundle({ url: publishedBaseUrl(manifest.designSystem), version: "current", fetchImpl });
+    // An unversioned publication carries no label to pin; its host names one.
+    if (!resolved.version) throw new Error(`The current publication at ${publishedBaseUrl(manifest.designSystem)} carries no version label to pin. Name the label its host published it under: timds consumer update LABEL (or pin "current" to follow every release).`);
     target = resolved.version;
   }
   const previous = designSystem.version;

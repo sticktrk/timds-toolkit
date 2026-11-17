@@ -265,7 +265,8 @@ async function transformDecodedOffshoot(source, {mode = 'full', systemId, name} 
   const baseline = {site: mode === 'structure' ? structureSite(site) : site, formats};
   const {systemId: parentId, sourceId, version, commit} = source.parent || {};
   const parent = validateParentRecord({schemaVersion: 1, systemId: parentId, sourceId, version, commit, mode, baseline});
-  if (manifest.systemId !== parent.systemId || manifest.version !== parent.version) throw new Error('The parent source identity or version disagrees with its release');
+  // An unversioned parent's release label is its host's; only a declared version must agree.
+  if (manifest.systemId !== parent.systemId || manifest.version != null && manifest.version !== parent.version) throw new Error('The parent source identity or version disagrees with its release');
   const stock = await declaredStock(original);
   let result = new Map(original);
   // A workspace site (site/ with a workspace-form consumer manifest) is the
@@ -301,7 +302,7 @@ async function transformDecodedOffshoot(source, {mode = 'full', systemId, name} 
     if (!result.has('src/styles/system.css')) set('src/styles/system.css', '/* Replace placeholder tokens and author the system styles. */\n');
     if (!result.has('src/pages/index.html')) set('src/pages/index.html', '<h1>{{name}}</h1><p>Design System structure. Author the planned pages and replace placeholder tokens.</p>\n{{sitemap}}\n');
     set('media.json', '{"schemaVersion":2,"assets":[]}\n'); set('media/assets.json', '{}\n');
-    set('CHANGELOG.md', `# Changelog\n\n## Unreleased\n\n## ${manifest.version}\n\n- Initial structure.\n`);
+    set('CHANGELOG.md', manifest.version == null ? '# Changelog\n\n## Unreleased\n\n- Initial structure.\n' : `# Changelog\n\n## Unreleased\n\n## ${manifest.version}\n\n- Initial structure.\n`);
     // The toolkit and parent feed have independent three-way merge baselines.
     // Retain the toolkit baseline so severing cannot adopt parent edits as stock.
     set('.timds/starter.json', original.get('.timds/starter.json'));

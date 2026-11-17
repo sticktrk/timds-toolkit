@@ -91,8 +91,10 @@ export async function createPublicationStamp(workspace) {
   if (parentFiles.length > 1) throw new Error(`Duplicate publication lineage paths: ${parentFiles.map(file => file.path).join(', ')}`);
   const lineage = parentFiles.length ? parentLineage(validateParentRecord(JSON.parse(parentFiles[0].content))) : null;
   const contentDigest = publicationDigest({ manifest, tokens, media, sourceFiles, artifactFiles: await artifactFiles(workspace) });
-  const stamp = { schemaVersion: 1, systemId: workspace.manifest.systemId, version: workspace.manifest.version, sourceCommit, contentDigest, lineage };
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9._/-]{1,159}$/.test(stamp.systemId) || !/^[a-zA-Z0-9][a-zA-Z0-9._+-]{0,99}$/.test(stamp.version)) throw new Error("Publication requires a safe system identity and version label");
+  // An unversioned system's stamp has no version: its host labels the release.
+  const version = workspace.manifest.version;
+  const stamp = { schemaVersion: 1, systemId: workspace.manifest.systemId, ...(version === undefined ? {} : { version }), sourceCommit, contentDigest, lineage };
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._/-]{1,159}$/.test(stamp.systemId) || (version !== undefined && !/^[a-zA-Z0-9][a-zA-Z0-9._+-]{0,99}$/.test(version))) throw new Error("Publication requires a safe system identity and version label");
   return stamp;
 }
 
@@ -153,7 +155,7 @@ export async function publishArtifactRef(workspace, { repository = process.env.G
     run("git", ["config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"], stage);
     run("git", ["config", "core.autocrlf", "false"], stage);
     run("git", ["add", "--all", "--force"], stage);
-    run("git", ["commit", "-q", "-m", `Publish TimDS ${stamp.version} from ${stamp.sourceCommit.slice(0, 12)}`], stage);
+    run("git", ["commit", "-q", "-m", `Publish TimDS ${stamp.version === undefined ? "" : `${stamp.version} `}from ${stamp.sourceCommit.slice(0, 12)}`], stage);
     run("git", ["remote", "add", "origin", remote], stage);
     run("git", ["push", "-q", "--force", "origin", `HEAD:refs/heads/${publishRef}`], stage);
     await writePublicationStamp(workspace, stamp);
@@ -163,8 +165,10 @@ export async function publishArtifactRef(workspace, { repository = process.env.G
   }
 }
 
+// An unversioned stamp leaves the label to the host: whatever label the host
+// reports beside it is not compared.
 function matchesStamp(actual, expected) {
-  return stampFields.every((field) => actual?.[field] === expected[field]) &&
+  return stampFields.every((field) => (field === "version" && expected.version === undefined) || actual?.[field] === expected[field]) &&
     JSON.stringify(parentLineage(actual?.lineage ?? null)) === JSON.stringify(parentLineage(expected.lineage ?? null));
 }
 
@@ -218,7 +222,9 @@ export async function publishReleaseFromFiles({ stamp, sourceFiles, artifactFile
 
 async function verifyPublicationResult(result, stamp, fetchImpl) {
   const urlsValid = versionedUrlFields.every((field) => typeof result?.versionedUrls?.[field] === "string" && result.versionedUrls[field]);
-  if (!["published", "awaiting-operator"].includes(result?.status) || result.systemId !== stamp.systemId || result.version !== stamp.version || typeof result.publicRoot !== "string" || !urlsValid) throw new Error("Invalid TimDS publication response");
+  // The host labels an unversioned release; any label it reports is accepted.
+  const versionMatches = stamp.version === undefined ? result?.version === undefined || typeof result?.version === "string" : result?.version === stamp.version;
+  if (!["published", "awaiting-operator"].includes(result?.status) || result.systemId !== stamp.systemId || !versionMatches || typeof result.publicRoot !== "string" || !urlsValid) throw new Error("Invalid TimDS publication response");
   if (result.status === "awaiting-operator") {
     if (!matchesStamp({ ...result.candidate, systemId: result.systemId }, stamp) || !result.operatorUrl) throw new Error("Invalid waiting-candidate response");
     return result;

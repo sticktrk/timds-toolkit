@@ -18,5 +18,5 @@ export function resolveGuidance(pages: IndexPage[], mapping?: Record<string, str
 export function mediaFormat(url: string | null | undefined): string | null;
 /** Where each font role's family comes from, and the roles with no source at all. */
 export function resolveFontSources(roles: Record<string, BrandRole>, fonts?: FontSources): { resolved: Record<string, Omit<BrandFontRole, keyof BrandRole>>; unsourced: Array<{ role: string; family: string }> };
-export function buildBrandKit(input: { manifest: { systemId: string; name: string; version: string; brand?: { guidance?: Record<string, string[]> } }; tokens: Pick<TokensDocument, "roles" | "missingRoles"> | Record<string, never>; pages: IndexPage[]; renderBlock?: (block: IndexBlock) => string | undefined; fonts?: FontSources }): { kit: BrandKit; warnings: string[] };
+export function buildBrandKit(input: { manifest: { systemId: string; name: string; version?: string; brand?: { guidance?: Record<string, string[]> } }; tokens: Pick<TokensDocument, "roles" | "missingRoles"> | Record<string, never>; pages: IndexPage[]; renderBlock?: (block: IndexBlock) => string | undefined; fonts?: FontSources }): { kit: BrandKit; warnings: string[] };
 export function eachBrandKitMedia(kit: BrandKit, visit: (media: MediaRecord) => void): void;

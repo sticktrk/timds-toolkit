@@ -108,7 +108,7 @@ export type ProducerAuthoringContract = {
   schemaVersion: 2;
   producerContractVersion: number;
   runtime: RuntimeIdentity;
-  designSystem: {id: string; name: string; version: string; commit: string; indexUrl?: string};
+  designSystem: {id: string; name: string; version?: string; commit: string; indexUrl?: string};
   outputFormat: ProducerOutputFormat;
   prompt: {instructions: string[]; blockIds: string[]; brief: string};
   /** Present when the contract was built with the asset and media catalogs: the clips a beat may name. */

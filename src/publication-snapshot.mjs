@@ -162,14 +162,16 @@ export function createPublicationStampFromFiles({ sourceCommit, sourceFiles, art
   const manifest = JSON.parse(byPath.get('timds.json').content);
   const tokens = JSON.parse(byPath.get('tokens.json').content);
   const media = byPath.has('media.json') ? JSON.parse(byPath.get('media.json').content) : null;
-  const manifestSystem = String(manifest.systemId || '').trim(), manifestVersion = String(manifest.version || '').trim();
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9._/-]{1,159}$/.test(manifestSystem) || !/^[a-zA-Z0-9][a-zA-Z0-9._+-]{0,99}$/.test(manifestVersion)) throw new Error('Publication requires a safe system identity and version label');
-  if (systemId !== undefined && systemId !== manifestSystem || version !== undefined && version !== manifestVersion) throw new Error('Publication identity differs from the committed manifest');
+  // A manifest without a version yields a stamp without one; the host labels
+  // that release. A declared version must be a safe label, as before.
+  const manifestSystem = String(manifest.systemId || '').trim(), unversioned = manifest.version === undefined || manifest.version === null, manifestVersion = unversioned ? undefined : String(manifest.version).trim();
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._/-]{1,159}$/.test(manifestSystem) || !unversioned && !/^[a-zA-Z0-9][a-zA-Z0-9._+-]{0,99}$/.test(manifestVersion)) throw new Error('Publication requires a safe system identity and version label');
+  if (systemId !== undefined && systemId !== manifestSystem || (version ?? undefined) !== undefined && version !== manifestVersion) throw new Error('Publication identity differs from the committed manifest');
   const artifacts = artifactFiles.map(file => {
     if (file.mode && !['100644', '100755'].includes(file.mode)) throw new Error('Publication artifacts must be regular files');
     return { path: checkedPath(file.path), content: bytesFor(file) };
   });
   if (artifacts.some(file => file.path === '.timds-artifact.json')) throw new Error('The root .timds-artifact.json is reserved for publication metadata');
-  return { schemaVersion: 1, systemId: manifestSystem, version: manifestVersion, sourceCommit, lineage,
+  return { schemaVersion: 1, systemId: manifestSystem, ...(unversioned ? {} : { version: manifestVersion }), sourceCommit, lineage,
     contentDigest: publicationDigest({ manifest, tokens, media, sourceFiles: records, artifactFiles: artifacts }) };
 }

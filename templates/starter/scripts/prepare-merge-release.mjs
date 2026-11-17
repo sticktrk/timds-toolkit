@@ -77,6 +77,9 @@ const replaceDeclaredVersion = (text, previousVersion, version, file) => {
 
 export function prepareMergeRelease(input) {
   const currentVersion = JSON.parse(input.timdsJson).version;
+  // A system whose timds.json declares no version is labelled by its host:
+  // nothing is bumped and the notes stay under ## Unreleased.
+  if (currentVersion === undefined || currentVersion === null) return { changed: false, version: null };
   const comparison = compareVersions(currentVersion, input.previousVersion);
   if (comparison < 0) throw new Error(`Design System version regressed from ${input.previousVersion} to ${currentVersion}`);
   if (comparison > 0) {
@@ -133,8 +136,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     });
     for (const [file, contents] of Object.entries(result.files ?? {})) writeFileSync(filePath(file), contents);
     const output = argument("--github-output");
-    if (output) writeFileSync(output, `changed=${result.changed}\nversion=${result.version}\n`, { flag: "a" });
-    console.log(result.changed ? `Prepared automatic Design System ${result.version}` : `Using explicitly prepared Design System ${result.version}`);
+    if (output) writeFileSync(output, `changed=${result.changed}\nversion=${result.version ?? ""}\n`, { flag: "a" });
+    console.log(result.changed ? `Prepared automatic Design System ${result.version}` : result.version === null ? "timds.json declares no version; nothing to prepare (the host labels releases)" : `Using explicitly prepared Design System ${result.version}`);
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
     process.exit(1);
