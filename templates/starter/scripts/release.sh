@@ -13,6 +13,6 @@ for argument in "$@"; do
     *) echo "Usage: ./scripts/release.sh [YYYY.MM.DD-N] [--no-push]" >&2; exit 1 ;;
   esac
 done
-current="$(node --print 'require("./timds.json").version')"
+current="$(node --print 'require("./timds.json").version ?? "unversioned"')"
 echo "Releasing from $current${version:+ -> $version}"
 npm run release -- ${version:+"$version"} ${push:+"$push"}

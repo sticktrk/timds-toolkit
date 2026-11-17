@@ -674,7 +674,9 @@ The handoff, in order:
 
 1. The designer ships a change (`design-ship`) and an operator merges it.
    In a standalone repository the merge releases a dated version and
-   publishes it. An embedded system has no release automation: the merge
+   publishes it. If an operator has removed the manifest's version, it publishes
+   the commit and keeps the notes under Unreleased without a version bump.
+   An embedded system has no release automation: the merge
    lands the rebuilt `design-system/dist/` in the product's own repository,
    and the product reads the system from there.
 2. The designer, or anyone, runs `design-handoff`. It compares the version
@@ -705,6 +707,10 @@ request here, and the product waits for the next release.
 - `__TIMDS_CLI__ submit` may create a branch, commit, push, and draft pull request only when the user asks.
 - In a standalone repository with managed automatic releases, every accepted
   `main` change becomes a dated release and a source-linked artifact candidate.
+  When an operator has removed `version` from `timds.json`, CI publishes the
+  commit without changing package versions or rolling up the Unreleased notes.
+  Restoring dated releases requires an operator to declare the first version,
+  synchronize package and lockfile versions, and write its changelog section.
 - Only a DT Concepts operator may approve that merge or roll back a TimDS
   version.
 - When `timds.json.consumer` is present, the standalone workflow publishes the
@@ -713,6 +719,8 @@ request here, and the product waits for the next release.
   (`designSystem.version` in its `timds.consumer.json`, moved through the
   consumer's own toolkit, which fetches and verifies the bundle) or, for a
   consumer that still carries this system as a git submodule, its gitlink.
+  A published pin update needs a release label; the workflow skips it when
+  the publication supplies none. A submodule can still advance by commit.
   The automation never merges or deploys the consumer.
 
 ## Protected tooling

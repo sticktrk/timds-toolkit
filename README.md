@@ -398,8 +398,11 @@ refuse an artifact stamped with a different version than `timds.json`
 declares, including a version on one side only. A merge release
 (`scripts/prepare-merge-release.mjs`) bumps nothing for an unversioned system
 and leaves the notes under `## Unreleased`, so the built changelog lists only
-the releases the file already names. A declared `version` behaves as it
-always has.
+the releases the file already names. Standalone validation accepts this shape;
+the package and lockfile keep their own version rather than tracking a missing
+system version. To restore dated releases, an operator explicitly declares the
+first version, synchronizes the package and lockfile, and adds its changelog
+section before merging. A declared `version` otherwise behaves as it always has.
 
 ### Website designs
 
@@ -814,11 +817,13 @@ release at the next install instead. A pin is an opaque label: sync fetches
 `v/<label>/bundle.json` from the prefix, and accepts a manifest that carries
 no version (an unversioned system whose host filed it under that label) as
 long as every file matches its sha256; a manifest naming a different version
-is refused. For an unversioned system `"current"` reads the current
-`bundle.json` the stamp locates and records the stamp's `sourceCommit` (and
+is refused. For an unversioned system `"current"` first checks that the current
+index declares a bundle, then reads the `bundle.json` the stamp locates and
+records the stamp's `sourceCommit` (and
 `contentDigest` when present) in `.timds-bundle.json`; `consumer update` and
 `consumer init --system` without a label refuse, since such a publication
-carries no label to pin. `url` overrides the public prefix
+carries no label to pin. Sync refuses a publication that retired its bundle,
+even when the CDN retains the previous bundle's files. `url` overrides the public prefix
 (default `https://design-systems.timds.com/<systemId>/artifact`). A developer
 working on both repositories symlinks `design-system/` to a Design System
 checkout; `sync` leaves a symbolic link alone, and the checkout serves the

@@ -728,18 +728,26 @@ database as they are. Toolkit upgrades leave the site's files in place.
 
 A division can use the verified design metadata and styles of a sibling
 Design System's exact published release. Keep `systems.main` as the
-workspace entry and add an alias with a system id and release version.
+workspace entry and add an alias with a system id and exact release label.
 
 ```json
 "systems": {
   "main": { "workspace": true },
-  "commercial": { "systemId": "timds-example/commercial", "version": "2026.11.1" }
+  "commercial": { "systemId": "timds-example/commercial", "version": "release-2026.11.17-1" }
 }
 ```
 
 `systemId` is the sibling's full system id as its `timds.json` declares it,
 with or without slash-separated segments: `timds-example-commercial` is as
 valid as `timds-example/commercial`.
+`version` is the exact immutable label the publisher assigned, including
+for an unversioned sibling. Labels use 1–100 letters, digits, dots,
+underscores or hyphens and start with a letter or digit; `current` and
+`latest` are refused. Existing SemVer pins with build metadata, such as
+`1.2.3+build`, remain supported. The receipt must repeat that label. Unversioned
+`bundle.json` and `designs.json` may omit `system.version`; a document that
+declares one must match the label, and system identity and file digests
+are always verified.
 
 Set the division's `system` to `commercial` and `design` to a design id
 from that release. The site can reference up to four sibling pins, and
@@ -751,6 +759,12 @@ directory at `site/.timds-site-inputs/` or point `TIMDS_SITE_INPUTS` at it.
 The build, development server and consumer check verify the declared pins
 and file digests from its receipt, and need no network access. The staged
 directory is generated input and stays outside commits.
+
+Template 8 adds support for unversioned siblings and opaque labels. An
+existing site's integration files are authored source: ordinary toolkit
+upgrades do not replace them. Apply the template's `src/integrations/composition.mjs`
+change explicitly to such a site before using these pins, review it with
+the consumer check, and retain the site's other customizations.
 
 The sibling design's default home page in `designs.json` determines its
 stylesheet links. The site's layout and page fragments remain

@@ -19,6 +19,10 @@ const push = args.includes("--push");
 const requested = args.find((argument) => !argument.startsWith("--"));
 
 const current = JSON.parse(readText("timds.json")).version;
+if (current === undefined || current === null) {
+  console.log("timds.json declares no version; nothing to prepare. Merge changes to publish their source commit. Declare and synchronize a version explicitly to start versioned releases.");
+  process.exit(0);
+}
 // A hand release takes a dated version only: the legacy scheme ends with the
 // version the system has, and a release carries the day it is prepared, never
 // a later one, so the automatic releases that follow it keep counting up.

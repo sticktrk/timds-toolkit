@@ -116,8 +116,13 @@ export async function resolvePublishedBundle({ url, version, fetchImpl = fetch, 
       // and the current bundle sits where the stamp's files map says.
       if (typeof provenance.sourceCommit !== "string" || !provenance.sourceCommit) throw new Error(`${base} publishes neither a version nor a source commit in its provenance stamp`);
       identity = { sourceCommit: provenance.sourceCommit, ...(typeof provenance.contentDigest === "string" ? { contentDigest: provenance.contentDigest } : {}) };
-      const relative = provenance.files?.bundle ?? derivedLayerPaths(provenance.entry).bundle;
-      manifestUrl = `${base}/${relative.split("/").map(encodeURIComponent).join("/")}`;
+      const paths = { ...derivedLayerPaths(provenance.entry), ...(provenance.files ?? {}) };
+      const currentUrl = (relative) => `${base}/${relative.split("/").map(encodeURIComponent).join("/")}`;
+      // The CDN may retain a previous bundle after publishing is disabled.
+      // As in the derived reader, the current index owns its presence.
+      const index = await fetchJson(fetchImpl, currentUrl(paths.index), "The current Design System index");
+      if (!index.bundle) throw new Error(`The current publication at ${base} declares no consumer bundle`);
+      manifestUrl = currentUrl(paths.bundle);
     }
   }
   manifestUrl ??= `${base}/${BUNDLE_VERSION_PREFIX}/${encodeURIComponent(resolvedVersion)}/${BUNDLE_MANIFEST_FILE}`;

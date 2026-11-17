@@ -7,10 +7,14 @@ import { isVersion, todayVersion } from "./prepare-merge-release.mjs";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const readJson = (file) => JSON.parse(readFileSync(join(root, file), "utf8"));
 const timds = readJson("timds.json");
+const expected = timds.version;
+if (expected === undefined || expected === null) {
+  console.log("timds.json declares no version; package versions and named changelog releases are independent.");
+  process.exit(0);
+}
 const pkg = readJson("package.json");
 const lock = readJson("package-lock.json");
 const changelog = readFileSync(join(root, "CHANGELOG.md"), "utf8");
-const expected = timds.version;
 const problems = [];
 
 if (!isVersion(expected)) problems.push(`timds.json version is invalid: ${JSON.stringify(expected)} (expected YYYY.MM.DD-N such as ${todayVersion()}-1)`);

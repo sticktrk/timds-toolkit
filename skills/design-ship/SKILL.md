@@ -80,9 +80,9 @@ then the page, so the note reads `Brand · Color: ...`, `Print DS: ...`, or
 and so on; toolkit work is `Maintenance: ...`); the published system shows
 every release at `/changelog/` with that area as its label. Write a note for
 every change even when others are already listed: `submit` refuses to run
-while `## Unreleased` is empty, because merging rolls the notes into the
-release and an empty one would publish a release that says nothing, and the
-gate checks only that the section is not empty.
+while `## Unreleased` is empty. Versioned standalone merges roll the notes
+into the release; systems without a declared version retain them under
+Unreleased. The gate checks only that the section is not empty.
 
 ## Submit
 
@@ -108,7 +108,10 @@ production once, in order:
 1. An operator reviews and merges the pull request. In a standalone system
    with managed releases, merging is the release decision: every accepted
    change becomes a dated version (`2026.10.12-1`, the day and the release
-   number that day) with its notes on the changelog page. An embedded
+   number that day) with its notes on the changelog page. If an operator has
+   removed `version` from `timds.json`, merging publishes the commit without
+   a version bump and keeps the notes under Unreleased; a product pin needs
+   the label assigned to that publication. An embedded
    system's workflow only validates; its release is whatever the product's
    own process does.
 2. A separate product site keeps using the version it pins until a developer
