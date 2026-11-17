@@ -390,7 +390,11 @@ validator.
 unversioned: its host names each publication after the fact, and nothing it
 builds carries a version. Its documents (`bundle.json`, `index.json`,
 `brand.json` and the rest) have a `system` of `{ id, name }` with no `version`
-field, the app bar's `{{version}}` renders empty, and `extract --publish`
+field, the stock pages build each sentence holding `{{version}}` (the app
+bar's chip, the Use card, the Install note) as a hidden slot that the page
+fills from its own response's `X-TimDS-Version` header, so a hosted system
+shows the dated label its host assigned and a host or preview that sends no
+valid label shows nothing there, and `extract --publish`
 uploads the bundle at its current prefix only, with no `v/<version>/` copy
 and `versioned: null` in the published `bundle.json`; the immutability guard
 applies only to a versioned system. `check` and `extract --publish` still

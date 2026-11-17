@@ -365,6 +365,10 @@ one (`{ schemaVersion, systemId, sourceCommit, contentDigest, lineage }`) and
 sends no version: the host labels the release, and `publish` accepts whatever
 label it reports while still matching the system, commit, digest and lineage.
 The snapshot hashes such a manifest's version as `working`, as before.
+Its stock pages show that label without a rebuild: the viewer builds the
+sentences holding `{{version}}` as hidden slots, and each page reads the
+`X-TimDS-Version` header of its own response once (a same-origin `HEAD`,
+then `GET` if `HEAD` is refused) and fills them with a valid label.
 Stale local stamps, mismatched remote candidates and unavailable public bytes
 fail the command. After a successful ref push, retry promotion without changing
 the build using `npm run timds -- publish --skip-build --skip-push`.

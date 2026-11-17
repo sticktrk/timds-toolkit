@@ -661,6 +661,95 @@ const enhancements = `<script>
 })();
 </script>`;
 
+// An unversioned system's release label is assigned by its host at
+// publication, after the build, so no built page can carry it. Each
+// {{version}} in text is built as an empty, hidden version slot instead: the
+// sentence that holds it (bounded by the surrounding tags and by ., ! or ?
+// before whitespace) moves into the slot's data-timds-version (the text
+// before the label) and data-timds-version-after (the text after it), on the
+// element itself when that sentence is all the element holds (the app bar's
+// "v{{version}}") and on a new <span> otherwise. The page then reads the
+// X-TimDS-Version header of its own response, once, and shows every slot
+// when it is a valid label; anywhere else (dev, a static host, a failed
+// request) the slots stay hidden, so no bare "v" or empty sentence shows.
+// {{version}} in a tag, a comment, <title>, <script>, <style> or <textarea>
+// renders empty, as before. A versioned system's pages are untouched.
+const VERSION_SLOT = "\u0000timds-version\u0000";
+const versionMarkup = /<!--[\s\S]*?-->|<(script|style|title|textarea)\b[^>]*>[\s\S]*?<\/\1\s*>|<\/?[a-zA-Z!][^>]*>/gi;
+const releaseLabelScript = String.raw`<script>
+(() => {
+  const slots = [...document.querySelectorAll("[data-timds-version]")];
+  if (!slots.length || !/^https?:$/.test(location.protocol)) return;
+  // A dated label (YYYY.MM.DD-N, changelog.mjs DATED_VERSION) or MAJOR.MINOR.PATCH; anything else is ignored.
+  const read = (response) => {
+    const value = (response.headers.get("X-TimDS-Version") || "").trim();
+    return /^(?:\d{4}\.\d{2}\.\d{2}-[1-9]\d*|\d+\.\d+\.\d+)$/.test(value) ? value : null;
+  };
+  const page = location.href.split("#")[0];
+  fetch(page, { method: "HEAD", credentials: "same-origin" })
+    .then((response) => response.ok ? read(response) : fetch(page, { credentials: "same-origin" }).then((full) => {
+      const label = full.ok ? read(full) : null;
+      if (full.body) full.body.cancel().catch(() => {});
+      return label;
+    }))
+    .then((label) => {
+      if (!label) return;
+      for (const slot of slots) {
+        slot.textContent = (slot.getAttribute("data-timds-version") || "") + label + (slot.getAttribute("data-timds-version-after") || "");
+        slot.hidden = false;
+      }
+    })
+    .catch(() => {});
+})();
+</script>`;
+
+const slotAttribute = (value) => value.replaceAll('"', "&quot;");
+
+/** A text run's version slots: each sentence holding {{version}} becomes an empty hidden span. */
+function versionSlotText(text) {
+  let html = "";
+  for (let at = text.indexOf(VERSION_SLOT); at !== -1; at = text.indexOf(VERSION_SLOT)) {
+    const head = text.slice(0, at);
+    const rest = text.slice(at + VERSION_SLOT.length);
+    const boundary = [...head.matchAll(/[.!?]\s+/g)].at(-1);
+    let start = boundary ? boundary.index + boundary[0].length : 0;
+    while (start < at && /\s/.test(head[start])) start += 1;
+    const close = /[.!?](?=\s|$)/.exec(rest);
+    const end = close ? close.index + 1 : rest.trimEnd().length;
+    const after = rest.slice(0, end).replaceAll(VERSION_SLOT, "");
+    html += `${head.slice(0, start)}<span data-timds-version="${slotAttribute(head.slice(start))}"${after ? ` data-timds-version-after="${slotAttribute(after)}"` : ""} hidden></span>`;
+    text = rest.slice(end);
+  }
+  return html + text;
+}
+
+/** Turn an unversioned page's {{version}} markers into version slots; `slots` says whether it has any. */
+function versionSlots(html) {
+  if (!html.includes(VERSION_SLOT)) return { html, slots: false };
+  const parts = [];
+  let last = 0;
+  for (const match of html.matchAll(versionMarkup)) {
+    parts.push({ text: html.slice(last, match.index) }, { markup: match[0].replaceAll(VERSION_SLOT, ""), raw: Boolean(match[1]) || match[0].startsWith("<!") });
+    last = match.index + match[0].length;
+  }
+  parts.push({ text: html.slice(last) });
+  let slots = false;
+  for (const [index, part] of parts.entries()) {
+    if (!part.text?.includes(VERSION_SLOT)) continue;
+    slots = true;
+    const opening = parts[index - 1], closing = parts[index + 1];
+    const name = opening && !opening.raw ? /^<([a-zA-Z][\w-]*)\b[^>]*?(?<!\/)>$/.exec(opening.markup)?.[1] : null;
+    const slotted = versionSlotText(part.text);
+    // One sentence that is the element's whole text: the element is the slot.
+    const whole = /^\s*<span (data-timds-version="[^"]*"(?: data-timds-version-after="[^"]*")?) hidden><\/span>\s*$/.exec(slotted);
+    if (name && whole && closing?.markup && new RegExp(`^</${name}\\s*>$`, "i").test(closing.markup) && !/\shidden\b/i.test(opening.markup)) {
+      opening.markup = opening.markup.replace(/\s*>$/, ` ${whole[1]} hidden>`);
+      part.text = "";
+    } else part.text = slotted;
+  }
+  return { html: parts.map((part) => part.markup ?? part.text).join(""), slots };
+}
+
 function renderPagenav(authored, current) {
   const index = authored.indexOf(current);
   const previous = authored[index - 1];
@@ -764,9 +853,11 @@ export async function renderSite(designSystemRoot) {
   const shared = {
     name: escapeHtml(manifest.name || "Design System"),
     description: escapeHtml(manifest.description || "Repository-owned visual and interface standards."),
-    // An unversioned system renders no version: the built pages never carry one.
-    version: escapeHtml(manifest.version || ""),
+    // An unversioned system's pages never carry a version: {{version}} becomes
+    // a hidden slot its host's release label fills at view time (versionSlots).
+    version: manifest.version ? escapeHtml(manifest.version) : VERSION_SLOT,
   };
+  const releaseScriptMark = "\u0000timds-release-script\u0000";
   const authored = model.pages.filter((page) => !page.planned);
   const rendered = new Map();
 
@@ -796,14 +887,15 @@ export async function renderSite(designSystemRoot) {
     const landing = page.layout === "landing";
     // On the front view's pages the brand link stands in for the view's tab, so it carries the current state.
     const chrome = page.view && page.view === frontView(model) ? markBrandCurrent(layout) : layout;
-    rendered.set(page.output, withAgentPointers(fill(chrome, "src/layout.html", {
+    const slotted = versionSlots(fill(chrome, "src/layout.html", {
       ...shared,
       title: escapeHtml(page.title),
       views: renderViews(model, page, designs, hasDesigns),
       sidenav: landing ? "" : renderSidenav(model, page),
-      pagenav: `${landing ? "" : renderPagenav(authored, page)}\n        ${enhancements}`,
+      pagenav: `${landing ? "" : renderPagenav(authored, page)}\n        ${enhancements}${releaseScriptMark}`,
       content: landing ? `<div class="landing">\n${content.trim()}\n</div>` : content.trim(),
-    })));
+    }));
+    rendered.set(page.output, withAgentPointers(slotted.html.replace(releaseScriptMark, () => slotted.slots ? `\n        ${releaseLabelScript}` : "")));
   }
 
   return {

@@ -129,7 +129,11 @@ address; it refuses a planned page), `{{nearest:ID}}` (the same, falling
 back to the nearest authored page while the page is planned), `{{sitemap}}`,
 `{{name}}`, `{{description}}`, `{{version}}`, `{{copy:KEY}}` (a string from
 `src/copy.json`), `{{media:KEY}}` (a catalog asset's `src/assets/` path) and
-`{{slots:GROUP_OR_KEY}}` (brand-kit slot guidance).
+`{{slots:GROUP_OR_KEY}}` (brand-kit slot guidance). In a system whose
+`timds.json` declares no `version`, the sentence holding `{{version}}` is
+built hidden and filled when the page is viewed: a hosted system shows the
+dated release label its host assigned (`YYYY.MM.DD-N`), and the local preview
+shows nothing there. Do not write a label into the pages by hand.
 
 The scaffolded `AGENTS.md` carries the same starter map. Once the system moves
 to another framework, follow `timds.json` `workspace` and that framework's
