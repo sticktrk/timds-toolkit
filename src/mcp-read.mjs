@@ -61,7 +61,10 @@ use it to be on-brand.
    checked artifact, and a draft reader serves its selected draft and
    \`system.revision\`. A local or fixed-URL reader cannot fetch another version:
    \`version\` only asserts the served version there. On a host that supports
-   historical releases, pass \`version\` when the user requests one. Select
+   historical releases, pass \`version\` when the user requests one. A
+   system built without a version reports \`system.version\` null; a
+   published one then names its release by \`system.sourceCommit\` and, when
+   the stamp has it, \`system.contentDigest\`. Select
    \`draft\` only for explicitly requested draft work, never together with
    \`version\`; reading a draft does not move the product's pin. When
    \`pinned\` trails \`published\`, report the difference before porting a
@@ -189,6 +192,9 @@ function systemStamp(resolved) {
     id: layer.system?.id ?? null,
     name: layer.system?.name ?? null,
     version: layer.system?.version ?? null,
+    // An unversioned publication is identified by its stamp, not a label.
+    ...(!layer.system?.version && layer.provenance?.sourceCommit ? { sourceCommit: layer.provenance.sourceCommit } : {}),
+    ...(!layer.system?.version && typeof layer.provenance?.contentDigest === "string" ? { contentDigest: layer.provenance.contentDigest } : {}),
     published: resolved.published ?? null,
     pinned: resolved.pinned ?? null,
     ...(layer.stale ? { stale: true } : {}),
@@ -814,6 +820,8 @@ async function packageVersion() {
   }
 }
 
+// An unversioned layer cannot confirm a requested label (its host owns
+// labels), so only a layer that names a different version refuses one.
 function checkVersion(layer, version) {
   if (version && layer.system?.version && version !== layer.system.version) {
     throw new Error(`Only version ${layer.system.version} is available here; ${version} was requested`);

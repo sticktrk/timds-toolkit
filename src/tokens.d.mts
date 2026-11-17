@@ -32,6 +32,6 @@ export function classifyToken(value: string): TokenKind;
 export function normalizeBrandRoles(input: unknown): Record<string, string>;
 export function roleKind(role: string): "color" | "font-family" | undefined;
 export function resolveBrandRoles(tokens: TokenRecord[], mapping?: Record<string, string>): { roles: Record<string, BrandRole>; errors: string[]; missing: string[] };
-export function buildTokensDocument(input: { manifest: { systemId: string; name: string; version: string; brand?: { roles?: Record<string, string> } }; stylesheets: TokensDocument["stylesheets"]; records: ParsedToken[]; roles?: Record<string, string> }): TokensDocument;
+export function buildTokensDocument(input: { manifest: { systemId: string; name: string; version?: string; brand?: { roles?: Record<string, string> } }; stylesheets: TokensDocument["stylesheets"]; records: ParsedToken[]; roles?: Record<string, string> }): TokensDocument;
 export function derivedTokensPath(designSystemRoot: string, manifest: { artifact?: { entry?: string } }): string;
 export function readDerivedTokens(designSystemRoot: string, manifest: { artifact?: { entry?: string } }): Promise<TokensDocument | null>;

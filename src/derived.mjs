@@ -17,14 +17,17 @@
 //   designs.json  the website designs: every page state as HTML with JavaScript on the
 //                 system's stylesheets, the reference a product port matches
 //   bundle.json   the consumer bundle: the stylesheets, scripts, and assets a
-//                 website loads, each with its digest, and the immutable
-//                 per-version copy a website pins
+//                 website loads, each with its digest, and (for a
+//                 versioned system) the immutable per-version copy a website pins
 //
 // This is the surface a consumer — an MCP server, a render host, a pipeline —
 // reads. It never needs the toolkit's internals or a checkout of authored
 // source: a local reader takes a Design System root, a remote reader takes
 // the published base URL, and both return the same shape. Every document
-// carries `system.version`, so a consumer can pin exactly what it read.
+// of a versioned system carries `system.version`, so a consumer can pin
+// exactly what it read. A system whose timds.json declares no version builds
+// documents without the field: its host names each publication after the
+// fact, and a reader identifies it by that label or the stamp's digest.
 
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -90,12 +93,15 @@ export async function readDerivedLayer(designSystemRoot, manifest, {parentRecord
     readOptional(derivedFilePath(designSystemRoot, manifest, "bundle"), JSON.parse),
   ]);
   const version = index?.system?.version ?? tokens?.system?.version ?? brand?.system?.version ?? null;
+  const derived = index !== null || tokens !== null || brand !== null;
   const lineage = parentLineage(parentRecord === undefined ? await readParentRecord(designSystemRoot) : parentRecord);
   return {
     source: { kind: "local", root: designSystemRoot, artifactRoot: path.join(designSystemRoot, "dist") },
     system: { id: manifest?.systemId ?? null, name: manifest?.name ?? null, version: manifest?.version ?? null },
-    derived: index !== null || tokens !== null || brand !== null,
-    stale: Boolean(version && manifest?.version && version !== manifest.version),
+    derived,
+    // Stale when the layer and the manifest name different versions, or one
+    // names a version and the other none (the version was added or removed).
+    stale: derived && version !== (manifest?.version ?? null),
     provenance: null,
     lineage,
     index,

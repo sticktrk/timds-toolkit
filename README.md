@@ -386,6 +386,21 @@ a new Design System version, and a stale local bundle must be rebuilt.
 bundle rather than the mutable current copy. `@dtconcepts/timds/bundle` exports the builder and the
 validator.
 
+`version` in `timds.json` is optional. A system that leaves it out is
+unversioned: its host names each publication after the fact, and nothing it
+builds carries a version. Its documents (`bundle.json`, `index.json`,
+`brand.json` and the rest) have a `system` of `{ id, name }` with no `version`
+field, the app bar's `{{version}}` renders empty, and `extract --publish`
+uploads the bundle at its current prefix only, with no `v/<version>/` copy
+and `versioned: null` in the published `bundle.json`; the immutability guard
+applies only to a versioned system. `check` and `extract --publish` still
+refuse an artifact stamped with a different version than `timds.json`
+declares, including a version on one side only. A merge release
+(`scripts/prepare-merge-release.mjs`) bumps nothing for an unversioned system
+and leaves the notes under `## Unreleased`, so the built changelog lists only
+the releases the file already names. A declared `version` behaves as it
+always has.
+
 ### Website designs
 
 A Design System is designer-owned down to the pages. Under
@@ -550,7 +565,8 @@ Together `index.json`, `tokens.json`, `brand.json`, `llms.txt`,
 **derived layer**: generated on every `check`, published on every
 `extract --publish`, and the only thing a consumer — an MCP server, a render
 host, a pipeline, another agent — needs. Nothing in it is authored by hand,
-every document is stamped with the system version, and each file declares its
+every document is stamped with the system version (an unversioned system's
+documents omit the field), and each file declares its
 `schemaVersion`; additions are compatible, and a breaking change bumps the
 version. `@dtconcepts/timds/derived` reads the layer the same way from a
 checkout or from the published prefix, and ships type declarations for every
@@ -568,7 +584,25 @@ published.brand.guidance.compliance.blocks;    // blocks with Markdown
 
 The published prefix carries `.timds-artifact.json`, which names the version,
 source commit, and location of each derived file, so a remote reader needs
-only the base URL. `timds doctor` reports the kit's readiness in one line and
+only the base URL. An unversioned system's stamp has no `version` field:
+
+```json
+{
+  "schemaVersion": 1,
+  "sourceCommit": "<40-hex commit>",
+  "systemId": "acme/core",
+  "lineage": null,
+  "entry": "index.html",
+  "files": {
+    "index": "index.json", "tokens": "tokens.json", "brand": "brand.json",
+    "llms": "llms.txt", "llmsFull": "llms-full.txt", "formats": "formats.json",
+    "designs": "designs.json", "changelog": "changelog.json", "bundle": "bundle.json"
+  }
+}
+```
+
+(`timds publish` writes the same stamp shape with `contentDigest` and no
+`entry`/`files`.) The reader then reports `system.version` as null. `timds doctor` reports the kit's readiness in one line and
 `timds brand` prints it in full, with the fix for every gap; `--json` returns
 the kit itself. `timds doctor --json` prints the whole report as one JSON
 object: the repository and design system roots, the system id, name and
@@ -776,7 +810,15 @@ ignores, on a published pin whose package or lockfile is missing, and warns
 on ones not committed yet.
 `timds consumer update [VERSION]` moves the pin to a version, or to the
 current published release, and syncs; a pin of `"current"` follows every
-release at the next install instead. `url` overrides the public prefix
+release at the next install instead. A pin is an opaque label: sync fetches
+`v/<label>/bundle.json` from the prefix, and accepts a manifest that carries
+no version (an unversioned system whose host filed it under that label) as
+long as every file matches its sha256; a manifest naming a different version
+is refused. For an unversioned system `"current"` reads the current
+`bundle.json` the stamp locates and records the stamp's `sourceCommit` (and
+`contentDigest` when present) in `.timds-bundle.json`; `consumer update` and
+`consumer init --system` without a label refuse, since such a publication
+carries no label to pin. `url` overrides the public prefix
 (default `https://design-systems.timds.com/<systemId>/artifact`). A developer
 working on both repositories symlinks `design-system/` to a Design System
 checkout; `sync` leaves a symbolic link alone, and the checkout serves the

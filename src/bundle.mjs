@@ -16,7 +16,9 @@
 // checkout serves the same paths live, and a website's build pins the
 // published copy by version. `extract --publish` uploads the bundle under
 // the current prefix and under an immutable `v/<version>/` prefix, so a pin
-// resolves to the same bytes forever.
+// resolves to the same bytes forever. A system whose timds.json declares no
+// version builds a manifest without `system.version` and publishes only the
+// current copy: its host files each publication under a label it assigns.
 //
 // The bundle is optional: a manifest without `bundle` builds none, and a stale
 // bundle from an earlier manifest is removed so the artifact matches it.
@@ -212,13 +214,15 @@ export async function buildBundle(designSystemRoot, { manifest }) {
 /**
  * The bundle as published: `base` is the CDN prefix, `directory` where the
  * files sit under it, and `versioned` the immutable copy for this version.
- * The versioned document points its files at the versioned copy.
+ * The versioned document points its files at the versioned copy. Without a
+ * version there is no versioned copy: `versioned` stays null.
  */
 export function rewriteBundleForPublish(document, { publicBase, entryDirectory, version, versioned = false }) {
   const base = String(publicBase).replace(/\/+$/, "");
   const prefix = entryDirectory === "." ? "" : `${entryDirectory}/`;
   const currentDirectory = `${base}/${prefix}${BUNDLE_OUTPUT_DIRECTORY}`;
-  const versionedDirectory = `${base}/${BUNDLE_VERSION_PREFIX}/${version}/${BUNDLE_OUTPUT_DIRECTORY}`;
+  if (!version && versioned) throw new Error("An unversioned bundle has no versioned copy");
+  const versionedDirectory = version ? `${base}/${BUNDLE_VERSION_PREFIX}/${version}/${BUNDLE_OUTPUT_DIRECTORY}` : null;
   const directory = versioned ? versionedDirectory : currentDirectory;
   return {
     ...document,
@@ -230,21 +234,21 @@ export function rewriteBundleForPublish(document, { publicBase, entryDirectory, 
   };
 }
 
-/** The artifact-relative paths a bundle's files publish under: the current copy and the immutable versioned copy. */
+/** The artifact-relative paths a bundle's files publish under: the current copy and the immutable versioned copy (null without a version). */
 export function bundlePublishPaths(filePath, { entryDirectory, version }) {
   const prefix = entryDirectory === "." ? "" : `${entryDirectory}/`;
   return {
     current: `${prefix}${BUNDLE_OUTPUT_DIRECTORY}/${filePath}`,
-    versioned: `${BUNDLE_VERSION_PREFIX}/${version}/${BUNDLE_OUTPUT_DIRECTORY}/${filePath}`,
+    versioned: version ? `${BUNDLE_VERSION_PREFIX}/${version}/${BUNDLE_OUTPUT_DIRECTORY}/${filePath}` : null,
   };
 }
 
-/** The artifact-relative paths bundle.json publishes under, beside each copy of the files. */
+/** The artifact-relative paths bundle.json publishes under, beside each copy of the files (no versioned copy without a version). */
 export function bundleManifestPublishPaths({ entryDirectory, version }) {
   const prefix = entryDirectory === "." ? "" : `${entryDirectory}/`;
   return {
     current: `${prefix}${BUNDLE_MANIFEST_FILE}`,
-    versioned: `${BUNDLE_VERSION_PREFIX}/${version}/${BUNDLE_MANIFEST_FILE}`,
+    versioned: version ? `${BUNDLE_VERSION_PREFIX}/${version}/${BUNDLE_MANIFEST_FILE}` : null,
   };
 }
 

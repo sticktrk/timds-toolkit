@@ -5,7 +5,8 @@ import type {SystemLineage, ParentRecord} from "./offshoot-contract.mjs";
 
 export type {SystemLineage, ParentRecord} from "./offshoot-contract.mjs";
 
-export type SystemStamp = { id: string; name: string; version: string };
+/** `version` is absent for a system whose timds.json declares none; its host labels each publication. */
+export type SystemStamp = { id: string; name: string; version?: string };
 
 /* ── tokens.json ─────────────────────────────────────────────────────────── */
 
@@ -332,7 +333,7 @@ export type BundleDocument = {
   directory: string;
   /** The published prefix; null locally. */
   base: string | null;
-  /** The immutable copy of this version's bundle; null locally. A website pins this. */
+  /** The immutable copy of this version's bundle; null locally and for an unversioned system. A website pins this. */
   versioned: string | null;
   fileCount: number;
   bytes: number;
@@ -346,7 +347,10 @@ export type BundleDocument = {
 export type Provenance = {
   schemaVersion: 1;
   sourceCommit: string;
-  version: string;
+  /** Absent for an unversioned system. */
+  version?: string;
+  /** The publication digest; present in stamps `timds publish` writes. */
+  contentDigest?: string;
   systemId?: string;
   entry?: string;
   files?: Partial<Record<DerivedFileName, string>>;

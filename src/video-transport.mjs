@@ -41,7 +41,8 @@ export const VideoAuthoringContractSchema = z.object({
   // Older authoring responses and saved compilations predate runtime identity.
   runtime: VideoRuntimeIdentitySchema.optional(),
   designSystem: z.object({
-    id: z.string().min(1), name: z.string().min(1), version: z.string().min(1),
+    // Absent for a Design System whose timds.json declares no version.
+    id: z.string().min(1), name: z.string().min(1), version: z.string().min(1).optional(),
     commit: z.string().regex(/^[0-9a-f]{40}$/u), indexUrl: z.string().url().optional(),
   }).passthrough(),
   outputFormat: z.enum(["horizontal", "short"]),

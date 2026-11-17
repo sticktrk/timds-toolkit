@@ -764,7 +764,8 @@ export async function renderSite(designSystemRoot) {
   const shared = {
     name: escapeHtml(manifest.name || "Design System"),
     description: escapeHtml(manifest.description || "Repository-owned visual and interface standards."),
-    version: escapeHtml(manifest.version || "0.1.0"),
+    // An unversioned system renders no version: the built pages never carry one.
+    version: escapeHtml(manifest.version || ""),
   };
   const authored = model.pages.filter((page) => !page.planned);
   const rendered = new Map();

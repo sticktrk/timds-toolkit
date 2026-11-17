@@ -360,6 +360,11 @@ and repository IDs do not participate. Source contract files must be committed;
 their bytes are hashed from the commit's blobs, so checkout line-ending or LFS
 filters cannot change the digest, and every file in `dist/` is pushed even when a
 Git ignore rule matches it.
+A system whose `timds.json` declares no `version` publishes a stamp without
+one (`{ schemaVersion, systemId, sourceCommit, contentDigest, lineage }`) and
+sends no version: the host labels the release, and `publish` accepts whatever
+label it reports while still matching the system, commit, digest and lineage.
+The snapshot hashes such a manifest's version as `working`, as before.
 Stale local stamps, mismatched remote candidates and unavailable public bytes
 fail the command. After a successful ref push, retry promotion without changing
 the build using `npm run timds -- publish --skip-build --skip-push`.

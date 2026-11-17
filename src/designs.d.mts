@@ -50,7 +50,7 @@ export function checkDesigns(options: { designSystemRoot: string; manifest?: Man
 export function journeyWarnings(designs: RenderedDesign[]): string[];
 export function rewriteDesignRoutes(html: string, routes: string[], basePrefix: string, designId: string): string;
 export function declaredClasses(css: string): Set<string>;
-export function designsDocument(rendered: RenderedDesigns, manifest: { systemId: string; name: string; version: string }): DesignsDocument;
+export function designsDocument(rendered: RenderedDesigns, manifest: { systemId: string; name: string; version?: string }): DesignsDocument;
 export type DesignListingScreen = { route: string; state: string; label: string; note?: string; url: string };
 export type DesignListingJourney = {
   id: string;

@@ -954,7 +954,7 @@ export async function readPinnedDesigns({ repoRoot, manifest, fetchImpl = fetch 
     const { resolvePublishedBundle } = await import("./consumer-sync.mjs");
     const { version } = manifest.designSystem;
     const bundle = await resolvePublishedBundle({ url: publishedBaseUrl(manifest.designSystem), version, fetchImpl, withDesigns: true });
-    if (!bundle.designs) throw new Error(`the bundle of the pinned version ${bundle.version} records no website designs`);
+    if (!bundle.designs) throw new Error(`the bundle of the pinned version ${bundle.version ?? version} records no website designs`);
     return bundle.designs.map((design) => ({ id: design.id, routes: Array.isArray(design.routes) ? design.routes : [] }));
   }
   const checkout = path.join(repoRoot, manifest.designSystem.path);
