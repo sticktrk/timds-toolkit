@@ -494,6 +494,43 @@ editing `read_file` tool for authored local files. A conflict leaves local files
 unchanged and can be resolved with `timds_update`. The version-1 host HTTP
 snapshot API continues to transfer full file contents.
 
+## Hosted site previews and deployments
+
+In a session with a workspace site, `timds status` prints the live
+`/site/` preview address and includes `sitePreviewUrl` in JSON. Use that
+address to review site changes after `timds update`. The submission Preview
+excludes the site. If the live site returns 503, run `timds diagnostics`
+from the workspace to read its site state, dev output, dependency cache
+outcome and last wake timings. Add `--json` for the host's diagnostic report.
+
+`timds site show` reads the site URL, requested and deployed commits,
+stage, error and recent deployments, including output for a failed build.
+The command finds the source from a hosted workspace. From elsewhere, pass
+`--source-id UUID`; `timds systems --json` lists source UUIDs under `id`.
+Host selection uses `--portal-url`, `TIMDS_PORTAL_URL`, the workspace's
+host, then the selected saved login.
+
+```sh
+timds site show --source-id UUID --json
+timds site show --wait
+timds site show --source-id UUID --wait --commit SHA --timeout-seconds 600
+timds publish --yes --wait-site
+timds site retry --source-id UUID
+```
+
+`--wait` follows the requested commit it first sees, or the full commit SHA
+you supply. It polls every five seconds for up to 30 minutes by default
+and exits nonzero on failure, supersession, or timeout. The JSON report adds
+`siteDeployment` with the outcome for that commit.
+
+After a hosted publication, `timds publish` reports the deployment
+separately and prints a follow command pinned to the published commit.
+Use `--wait-site` to wait inline; a nonzero site wait result still includes
+the successful Design System publication. The wait has the same default and
+supports `--timeout-seconds`. A host administrator can request
+`timds site retry` to resume the recorded operation. Check its actual
+outcome with `timds site show --wait`.
+
 ## Workspace site credentials
 
 A host administrator can inspect or change integration bindings on a published
@@ -533,8 +570,8 @@ independent group changes do not create aggregate-file conflicts.
 
 The public provider interface is exported from `@dtconcepts/timds/hosted`:
 `createHostProvider` supplies sessions (`start`, `pull`, `submit`, `update`,
-`status`, `history`, `close`, `claim`, `join`), identity/system discovery,
-drafts, publication, rollback, release-source reads and consumer registration
+`status`, `history`, `diagnostics`, `close`, `claim`, `join`), identity/system discovery,
+drafts, publication, rollback, hosted sites, release-source reads and consumer registration
 and receipts. API
 version 1 uses the following relative endpoints with a TimDS Bearer token
 and `X-TimDS-API-Version: 1`:
@@ -547,12 +584,14 @@ and `X-TimDS-API-Version: 1`:
 | POST | `/api/timds/sessions/:id/update` | Change set, optional `resolvedPaths` and `mainRevision` |
 | GET | `/api/timds/sessions/:id/status` | Session and latest submission |
 | GET | `/api/timds/sessions/:id/history` | Commits and publication events |
+| GET | `/api/timds/sessions/:id/diagnostics` | Runtime diagnostics with API version in the response header |
 | POST | `/api/timds/sessions/:id/join` | `{principalId?}`; invite or attach |
 | POST | `/api/timds/sessions/:id/claims` | `{patterns,note?}` |
 | GET | `/api/timds/design-systems/:id/active-work` | Members, claims, submissions and live URLs |
 | GET | `/api/timds/design-systems/:id/principals` | People and agents who can be invited |
 | GET | `/api/timds/me` | The signed-in principal `{id,type,name,admin}` |
 | GET | `/api/timds/design-systems` | Systems visible to the signed-in principal |
+| GET | `/api/timds/design-systems/:id` | Source and published release history |
 | GET | `/api/timds/design-systems/:id/releases/:label/source` | Immutable source export for `shoot` / `feed` |
 | GET/POST | `/api/timds/design-systems/:id/drafts` | List, or create `{name,from,idempotencyKey?}` |
 | GET | `/api/timds/design-systems/:id/drafts/:name/snapshot` | Authenticated draft source |
@@ -561,6 +600,8 @@ and `X-TimDS-API-Version: 1`:
 | POST | `/api/timds/sessions/:id/close` | `{apiVersion:1}` |
 | POST | `/api/timds/submissions/:id/publish` | `{apiVersion:1, preflight?, dryRun?}` |
 | GET | `/api/timds/publications/:id` | Publication progress and result |
+| GET | `/api/timds/sources/:sourceId/site` | Site state and deployment history |
+| POST | `/api/timds/sources/:sourceId/site/retry` | `{operationId}` for the recorded site operation |
 
 A change set is `{apiVersion:1, baseRevision, lastUpdateHash, changedFiles, deletedPaths,
 note?}`. Files are `{path, encoding:"base64", content, mode?}`; modes are

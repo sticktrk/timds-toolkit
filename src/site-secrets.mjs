@@ -4,10 +4,12 @@ import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
 import { cleanPortalUrl, resolveAccessToken, savedPortalUrl } from "./auth.mjs";
 import { createHostProvider } from "./hosted.mjs";
+import { SITE_USAGE } from "./hosted-site.mjs";
 
 const names = ["RESEND_API_KEY", "META_CAPI_ACCESS_TOKEN", "TURNSTILE_SECRET_KEY"];
 const uuid = /^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i;
 const help = `Usage:
+${SITE_USAGE}
   timds site secrets status --source-id UUID [--portal-url URL] [--json]
   timds site secrets set NAME --source-id UUID [--stdin] [--operation-id UUID --site-id UUID] [--portal-url URL] [--json]
   timds site secrets unset NAME --source-id UUID [--operation-id UUID --site-id UUID] [--portal-url URL] [--json]

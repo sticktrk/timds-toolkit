@@ -31,6 +31,7 @@ import { describeFeed, feedOffshoot } from "./feed.mjs";
 import { requireCleanPaths } from "./clean-tree.mjs";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { spawn } from "node:child_process";
+import { parseArgs } from "node:util";
 import { CLAUDE_SKILLS_LINK, linkClaudeSkills } from "./agent-skills.mjs";
 import { SKILLS_HELP, installSkills, staleSkillsNotice } from "./skills-install.mjs";
 import { standaloneReleaseAutomationFiles, dependencyAutomationFiles, starterTemplateFiles } from "./release-resources.mjs";
@@ -67,6 +68,7 @@ import { MAX_ARTIFACT_FILE_BYTES, collectArtifactFiles } from "./artifact-files.
 import { isWorkspaceSitePath, workspaceSitePath, workspaceSiteSkillFolders } from "./workspace-site.mjs";
 import { publicStampUrl, publishArtifactRef, publishRelease } from "./publish.mjs";
 import { normalizeProvider, runHostedCommand, sessionReference, workspaceProvider } from "./hosted.mjs";
+import { describeSessionDiagnostics, describeSite, SITE_USAGE, siteCommit, siteTimeoutMs, terminalText } from "./hosted-site.mjs";
 import { buildBundle, describeBundle, normalizeBundleConfig } from "./bundle.mjs";
 import { DESIGNS_SOURCE_DIRECTORY, buildDesigns, checkDesigns, declaredClasses, readDesignCatalog, renderDesigns } from "./designs.mjs";
 import { CHANGELOG_FILE, CHANGELOG_OUTPUT_DIRECTORY, buildChangelog, readUnreleasedNotes, renderChangelog, versionDate } from "./changelog.mjs";
@@ -1758,7 +1760,7 @@ function parseArguments(argv) {
     const rawName = separator < 0 ? argument : argument.slice(0, separator);
     const inlineValue = separator < 0 ? undefined : argument.slice(separator + 1);
     const name = ({ h: "help", m: "message", p: "port" })[rawName] || rawName.replace(/-([a-z])/g, (_match, letter) => letter.toUpperCase());
-    if (["json", "apply", "binary", "autoRelease", "dryRun", "force", "global", "help", "install", "list", "ownRuntime", "dependencyPrs", "noBuild", "noOpen", "noBrowser", "oauth", "device", "noPr", "noPush", "plan", "prepare", "publish", "render", "requireCleanDist", "serve", "silent", "skipBuild", "skipPush", "standalone", "yes"].includes(name)) {
+    if (["json", "apply", "binary", "autoRelease", "dryRun", "force", "global", "help", "install", "list", "ownRuntime", "dependencyPrs", "noBuild", "noOpen", "noBrowser", "oauth", "device", "noPr", "noPush", "plan", "prepare", "publish", "render", "requireCleanDist", "serve", "silent", "skipBuild", "skipPush", "standalone", "waitSite", "yes"].includes(name)) {
       options[name] = true;
       continue;
     }
@@ -2107,6 +2109,7 @@ TimDS Cloud:
   timds auth login [--portal-url URL] [--token TOKEN] [--oauth|--device] [--force] [--no-browser] [--client-id ID] [--scope SCOPES] [--timeout-seconds N]
   timds auth status [--portal-url URL]
   timds auth logout [--portal-url URL]
+${SITE_USAGE}
   timds site secrets status --source-id UUID [--portal-url URL] [--json]
   timds site secrets set NAME --source-id UUID [--stdin] [--operation-id UUID --site-id UUID] [--portal-url URL] [--json]
   timds site secrets unset NAME --source-id UUID [--operation-id UUID --site-id UUID] [--portal-url URL] [--json]
@@ -2117,7 +2120,7 @@ TimDS Cloud:
   timds principals [--system-id ID] [--portal-url URL] [--json]
   timds start SYSTEM [--root PATH] [--portal-url URL] [--on GLOB,...] [--draft NAME] [--note INTENT] [--json]
   timds join SESSION|STUDIO-LINK [--root PATH] [--portal-url URL] [--principal-id ID] [--no-browser] [--json]
-  timds pull|status|history [--root PATH] [--portal-url URL] [--json]
+  timds pull|status|history|diagnostics [--root PATH] [--portal-url URL] [--json]
   timds update [--root PATH] [--portal-url URL] [--resolve PATH[#KEY=mine|theirs]]... [--note INTENT] [--json]
   timds claim --on GLOB,... [--note INTENT] [--root PATH] [--portal-url URL] [--json]
   timds active-work [--system-id ID] [--root PATH] [--portal-url URL] [--json]
@@ -2126,7 +2129,7 @@ TimDS Cloud:
   timds draft list [--system-id ID] [--root PATH] [--portal-url URL] [--json]
   timds draft close NAME [--system-id ID] [--root PATH] [--portal-url URL] [--json]
   timds submit --note INTENT [--root PATH] [--portal-url URL] [--dry-run] [--json]
-  timds publish [--submission ID] [--dry-run] [--yes] [--root PATH] [--skip-build] [--skip-push] [--portal-url URL] [--json]
+  timds publish [--submission ID] [--dry-run] [--yes] [--wait-site [--timeout-seconds N]] [--root PATH] [--skip-build] [--skip-push] [--portal-url URL] [--json]
   timds rollback VERSION [--system-id ID] [--root PATH] [--portal-url URL] [--dry-run] [--yes] [--json]
   timds extract --publish [--root PATH] [--skip-build] [--portal-url URL] [--source-commit SHA]
   timds assets add FILE --publish [--root PATH] [--key LOGICAL_KEY] [--title TEXT] [--tags a,b] [--content-type TYPE] [--ffprobe-path PATH] [--portal-url URL] [--source-id UUID]
@@ -2145,6 +2148,10 @@ TimDS Cloud:
   conflicts use --resolve 'PATH#KEY=mine' or 'PATH#KEY=theirs', repeated per
   conflict. publish and rollback require --yes outside an interactive terminal;
   review their --dry-run first. --skip-build/--skip-push apply to Git publication.
+  site show --wait follows a commit, polling every five seconds for up to 30
+  minutes by default. Hosted publish reports the site separately; use
+  --wait-site to wait for its deployment. status gives the live site preview
+  address, and diagnostics reads the session's dev output and last wake.
   Hosted init writes a source workspace; it does not create a hosted system.
   extract --publish uploads the derived layer, provenance and referenced assets;
   consumer bundles also get an immutable v/<version>/ prefix.
@@ -2312,8 +2319,30 @@ export async function runCli(argv) {
   }
   if (command === 'login') return runCli(['auth', 'login', ...rest]);
   if (command === "site") {
+    if (["show", "retry"].includes(rest[0])) {
+      const args = rest.slice(1);
+      const { values } = parseArgs({ args, options: {
+        "source-id": { type: "string" }, "portal-url": { type: "string" }, root: { type: "string" },
+        "credentials-path": { type: "string" }, json: { type: "boolean" }, help: { type: "boolean", short: "h" },
+        ...(rest[0] === "show" ? { wait: { type: "boolean" }, commit: { type: "string" }, "timeout-seconds": { type: "string" } } : {}),
+      } });
+      if (values.help) return output(`Usage:\n${SITE_USAGE}`);
+      if ((values.commit !== undefined || values["timeout-seconds"] !== undefined) && !values.wait) {
+        throw new Error("--commit and --timeout-seconds require --wait.");
+      }
+      if (values.commit !== undefined && !siteCommit.test(values.commit)) throw new Error("--commit requires a full Git commit SHA.");
+      const result = await runHostedCommand(`site-${rest[0]}`, {
+        root: values.root, sourceId: values["source-id"], portalUrl: values["portal-url"],
+        credentialsPath: values["credentials-path"], waitSite: values.wait, siteCommit: values.commit,
+        siteTimeoutMs: siteTimeoutMs(values["timeout-seconds"]),
+      });
+      if (values.json) output(JSON.stringify(result, null, 2));
+      else for (const line of describeSite(result)) output(line);
+      if (values.wait && result.siteDeployment.status !== "ready") throw new Error(terminalText(result.siteDeployment.error));
+      return result;
+    }
     const { runSiteSecrets } = await import("./site-secrets.mjs");
-    return runSiteSecrets(rest, { output });
+    return runSiteSecrets(rest[0] === "help" ? [] : rest, { output });
   }
   if (command === "consumer") {
     // Consumer subcommands own their flags (see consumer.mjs).
@@ -2411,12 +2440,13 @@ export async function runCli(argv) {
   }
   if (command === "installation") return runInstallationCommand(root, positional, options);
   if (command === "artifact" && positional[0] === "publish") return publishArtifactRef(await loadWorkspace(root));
-  if (["start", "pull", "update", "status", "history", "sessions", "join", "claim", "active-work", "whoami", "systems", "principals", "draft", "rollback"].includes(command)) {
+  if (["start", "pull", "update", "status", "history", "diagnostics", "sessions", "join", "claim", "active-work", "whoami", "systems", "principals", "draft", "rollback"].includes(command)) {
     if (!["start", "join", "whoami", "systems", "principals"].includes(command)) {
       const candidate = resolveDesignSystemRoot(await findRepositoryRoot(root)).designSystemRoot;
       if (existsSync(path.join(candidate, "timds.json"))) await assertBinaryInstallation(candidate);
     }
     if (command === "sessions" && (positional[0] !== "close" || positional.length !== 1)) throw new Error("Usage: timds sessions close [--root PATH]");
+    if (command === "diagnostics" && positional.length) throw new Error("Usage: timds diagnostics [--root PATH] [--portal-url URL] [--json]");
     const operation = command === "sessions" ? "close" : command === "draft" ? `draft-${positional[0]}` : command;
     if (command === "draft" && !["create", "list", "close"].includes(positional[0])) throw new Error("Usage: timds draft create NAME --from main|VERSION | draft list | draft close NAME");
     // A pasted Studio link is a whole invitation: sign in to its host if this
@@ -2432,7 +2462,9 @@ export async function runCli(argv) {
     else if (operation === "whoami") output(`${result.portal}: signed in as ${result.principal.name || result.principal.id} (${result.principal.type}) ${result.principal.id}`);
     else if (operation === "systems") { for (const system of result.systems || []) output(`${system.systemId}  ${system.name}`); if (!result.systems?.length) output(`No design systems are shared with you on ${result.portal}. Ask the host administrator for access.`); }
     else if (operation === "principals") { for (const principal of result.principals || []) output(`${principal.id}  ${principal.type}  ${principal.name}`); if (!result.principals?.length) output("No principals can be invited into this design system."); }
+    else if (operation === "diagnostics") { for (const line of describeSessionDiagnostics(result)) output(line); }
     else { output(`TimDS ${operation}: ${result.session?.status || "complete"}${result.session?.id ? ` (${result.session.id})` : ""}`); if (["history", "status", "active-work", "claim", "draft-list", "rollback"].includes(operation)) output(JSON.stringify(result, null, 2)); if (result.session?.liveUrl) output(`Live: ${result.session.liveUrl}`); }
+    if (!options.json && result.sitePreviewUrl) output(`Site preview: ${result.sitePreviewUrl}`);
     if (!options.json && command === "start") {
       output(`Workspace: ${path.resolve(options.root || String(positional[0]).split("/").at(-1))}`);
       output(isBinaryRuntime() ? "Next: cd into the workspace, run timds-cli installation adopt --binary (then --apply), and timds-cli dev." : "Next: cd into the workspace, run npm ci (or npm install if there is no lockfile), then timds dev.");
@@ -2734,8 +2766,11 @@ export async function runCli(argv) {
     return result;
   }
   if (command === "publish") {
+    if (options.timeoutSeconds !== undefined && !options.waitSite) throw new Error("--timeout-seconds requires --wait-site for publication.");
+    if (options.waitSite && options.dryRun) throw new Error("--wait-site requires a publication; drop --dry-run.");
     if (options.submission || (await workspaceProvider(root))?.kind === 'hosted') {
-      const result = await runHostedCommand('publish', { ...options, root,
+      const result = await runHostedCommand('publish', { ...options, root, reportSite: true, siteTimeoutMs: siteTimeoutMs(options.timeoutSeconds),
+        onPublished: options.json ? undefined : publication => output(`Published: ${publication.result?.publicRoot || publication.id}`),
         onSummary: summary => {
           const line = `Submission ${summary.submissionId}: ${summary.systemId} ${summary.version}\nPreview: ${summary.previewUrl || 'not available'}\nChanges: ${typeof summary.diffSummary === 'string' ? summary.diffSummary : JSON.stringify(summary.diffSummary || [])}\n`;
           if (options.json) process.stderr.write(line); else output(line);
@@ -2749,9 +2784,14 @@ export async function runCli(argv) {
         },
       });
       if (options.json) output(JSON.stringify(result, null, 2));
-      else output(options.dryRun ? `Dry run passed for ${result.systemId} ${result.version}.` : `Published: ${result.result?.publicRoot || result.id}`);
+      else if (options.dryRun) output(`Dry run passed for ${result.systemId} ${result.version}.`);
+      else if (result.siteDeployment) { for (const line of describeSite(result, { history: false })) output(line); }
+      if (options.waitSite && result.siteDeployment && result.siteDeployment.status !== "ready") {
+        throw new Error(`Design System publication succeeded. ${terminalText(result.siteDeployment.error)}`);
+      }
       return result;
     }
+    if (options.waitSite) throw new Error("--wait-site applies to hosted publications.");
     const workspace = options.skipBuild ? await loadWorkspace(root) : await checkWorkspace(root);
     // The ref push already stamped this exact build; promotion reuses that stamp.
     const stamp = options.skipPush ? undefined : await publishArtifactRef(workspace);

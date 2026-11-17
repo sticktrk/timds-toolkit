@@ -6,7 +6,10 @@ import ignore from "ignore";
 import { cleanPortalUrl, resolveAccessToken, savedPortalUrl } from "./auth.mjs";
 import { readUnreleasedNotes } from "./changelog.mjs";
 import { assertBinaryInstallation } from "./binary-installation.mjs";
+import { isBinaryRuntime } from "./executable.mjs";
 import { isLineagePath } from "./offshoot-contract.mjs";
+import { findWorkspaceSite } from "./workspace-site.mjs";
+import { followSite, readSite, reportPublishedSite, retrySite, siteFollowCommand, siteUuid } from "./hosted-site.mjs";
 
 export const HOST_API_VERSION = 1;
 export const SESSION_FILE = ".timds/session.json";
@@ -78,7 +81,7 @@ export async function workspaceProvider(root) {
 export function createHostProvider({ url, token, resolveToken, fetchImpl = fetch, retryClock: clock = retryClock }) {
   const origin = cleanPortalUrl(url);
   if (!token && !resolveToken) throw new Error("A TimDS token is required; run timds login or set TIMDS_ACCESS_TOKEN.");
-  async function request(method, suffix, body, resource = 'sessions') {
+  async function request(method, suffix, body, resource = 'sessions', { signal, versionInHeader = false } = {}) {
     // These two version-1 operations recover a completed request by its original
     // change set. Serialize once: a retry must never reread or append local edits.
     const recoverable = method === "POST" && resource === "sessions" && /\/(?:update|submit)$/.test(suffix);
@@ -90,19 +93,20 @@ export function createHostProvider({ url, token, resolveToken, fetchImpl = fetch
       ...(body ? { body: JSON.stringify({ ...body, apiVersion: HOST_API_VERSION }) } : {}),
     };
     for (let attempt = 1; ; attempt++) {
-      const accessToken = resolveToken ? await resolveToken() : token;
+      const accessToken = resolveToken ? await (signal ? resolveToken({ signal }) : resolveToken()) : token;
+      signal?.throwIfAborted();
       if (!accessToken) throw new Error("A TimDS token is required; run timds login or set TIMDS_ACCESS_TOKEN.");
       const response = await fetchImpl(`${origin}/api/timds/${resource}${suffix}`, {
         ...requestOptions,
         headers: { ...requestOptions.headers, Authorization: `Bearer ${accessToken}` },
-        ...(recoverable ? { signal: AbortSignal.timeout(Math.max(1, deadline - clock.now())) } : {}),
+        ...(recoverable ? { signal: AbortSignal.timeout(Math.max(1, deadline - clock.now())) } : signal ? { signal } : {}),
       });
       const payload = await response.json().catch(() => ({}));
       if (response.status === 401 && resolveToken && !authRetried) {
         authRetried = true;
         // Auth rejected this request. Reuse its exact serialized payload only
         // after the locked credential resolver supplies a different bearer.
-        const refreshed = await resolveToken({ rejectedToken: accessToken });
+        const refreshed = await resolveToken({ rejectedToken: accessToken, ...(signal ? { signal } : {}) });
         if (refreshed && refreshed !== accessToken) continue;
       }
       const siteSecrets = suffix.endsWith("/site/secrets");
@@ -118,16 +122,24 @@ export function createHostProvider({ url, token, resolveToken, fetchImpl = fetch
         if (!siteSecrets) error.details = payload;
         throw error;
       }
+      // Session diagnostics v1 identifies its response only in the header.
+      if (versionInHeader && payload.apiVersion === undefined && typeof payload.state === "string" && response.headers.get("X-TimDS-API-Version") === String(HOST_API_VERSION)) {
+        return { ...payload, apiVersion: HOST_API_VERSION };
+      }
       if (payload.apiVersion !== HOST_API_VERSION) throw new Error("Unsupported TimDS host API version; update the CLI and host together.");
       return payload;
     }
   }
   const siteSecretsPath = (id) => `/${encodeURIComponent(id)}/site/secrets`;
+  const sitePath = (id) => `/${encodeURIComponent(id)}/site`;
   const siteContactPath = (id, operation) => `/${encodeURIComponent(id)}/site/contact/${operation}`;
   const sessionPath = (id) => `/${encodeURIComponent(id)}`;
   return {
     me: () => request("GET", "", undefined, 'me'),
     systems: () => request("GET", "", undefined, 'design-systems'),
+    source: (id, options) => request("GET", sessionPath(id), undefined, "design-systems", options),
+    site: (id, options) => request("GET", sitePath(id), undefined, "sources", options),
+    retrySite: (id, input) => request("POST", `${sitePath(id)}/retry`, input, "sources"),
     siteSecrets: (id) => request("GET", siteSecretsPath(id), undefined, "sources"),
     changeSiteSecret: (id, input) => request("POST", siteSecretsPath(id), input, "sources"),
     siteWebhook: (id) => request("GET", siteContactPath(id, "webhook"), undefined, "sources"),
@@ -155,6 +167,7 @@ export function createHostProvider({ url, token, resolveToken, fetchImpl = fetch
     submit: (id, input) => request("POST", `${sessionPath(id)}/submit`, input),
     update: (id, input) => request("POST", `${sessionPath(id)}/update`, input),
     status: (id) => request("GET", `${sessionPath(id)}/status`),
+    diagnostics: (id) => request("GET", `${sessionPath(id)}/diagnostics`, undefined, "sessions", { versionInHeader: true }),
     history: (id) => request("GET", `${sessionPath(id)}/history`),
     close: (id) => request("POST", `${sessionPath(id)}/close`, {}),
     publish: (id, input) => request("POST", `${sessionPath(id)}/publish`, input, 'submissions'),
@@ -381,7 +394,7 @@ async function applySnapshot(root, snapshot, previous, provider, replace = false
 }
 
 /** The same implementation is called by the CLI and the editing MCP server. */
-export async function runHostedCommand(command, { root = process.cwd(), fixedRoot = false, systemId, note, on, patterns, draft, name, from = "main", version, sessionId, principalId, portalUrl, token, fetchImpl, credentialsPath, dryRun = false, resolve = [], idempotencyKey, submission, yes = false, confirm, onSummary, wait = ms => new Promise(resolve => setTimeout(resolve, ms)), pollIntervalMs = 2000, timeoutMs = 30 * 60_000, staleRetries = 1 } = {}) {
+export async function runHostedCommand(command, { root = process.cwd(), fixedRoot = false, systemId, sourceId, note, on, patterns, draft, name, from = "main", version, sessionId, principalId, portalUrl, token, fetchImpl, credentialsPath, dryRun = false, resolve = [], idempotencyKey, submission, yes = false, confirm, onSummary, onPublished, wait = ms => new Promise(resolve => setTimeout(resolve, ms)), pollIntervalMs = 2000, timeoutMs = 30 * 60_000, staleRetries = 1, reportSite = false, waitSite = false, siteTimeoutMs, siteCommit } = {}) {
   if (command === "join") {
     // A link's origin selects the host only when nothing explicit does.
     const reference = sessionReference(sessionId);
@@ -407,13 +420,26 @@ export async function runHostedCommand(command, { root = process.cwd(), fixedRoo
   // skill does before a workspace exists, so it falls back to the saved
   // login the way start, join, whoami and systems do.
   const systemScoped = ["active-work", "principals", "draft-create", "draft-list", "draft-close", "rollback"].includes(command);
-  const url = portalUrl || process.env.TIMDS_PORTAL_URL || configured?.url || pending?.provider?.url || (destination || identityOnly || systemScoped ? await savedPortalUrl({ credentialsPath }) : null);
-  if (!url || !identityOnly && configured && configured.kind !== "hosted") throw new Error(NO_HOST);
+  const siteCommand = command === "site-show" || command === "site-retry";
+  const explicitTarget = (siteCommand && sourceId !== undefined) || (command === "publish" && Boolean(submission));
+  if (siteCommand && sourceId === undefined && !state && configured?.kind !== "hosted") {
+    throw new Error("Provide --source-id UUID or run inside a hosted workspace.");
+  }
+  const url = portalUrl || process.env.TIMDS_PORTAL_URL || configured?.url || pending?.provider?.url || (destination || identityOnly || systemScoped || explicitTarget ? await savedPortalUrl({ credentialsPath }) : null);
+  if (!url || !identityOnly && !explicitTarget && configured && configured.kind !== "hosted") throw new Error(NO_HOST);
   const provider = normalizeProvider({ kind: "hosted", url });
   if (!identityOnly && state && state.provider.url !== provider.url) throw new Error("Session belongs to a different TimDS host");
   const host = createHostProvider({ url: provider.url, token,
     resolveToken: options => resolveAccessToken(provider.url, { token, credentialsPath, fetchImpl, ...options }), fetchImpl });
   const selectedSystem = systemId || state?.session?.systemId || state?.session?.sourceId || manifest?.systemId;
+  if (siteCommand) {
+    let selectedSource = sourceId ?? state?.session?.sourceId;
+    if (!selectedSource && selectedSystem) selectedSource = (await host.source(selectedSystem)).source?.id;
+    if (!siteUuid.test(selectedSource ?? "")) throw new Error("Provide a valid --source-id UUID for this hosted source.");
+    selectedSource = selectedSource.toLowerCase();
+    if (command === "site-retry") return retrySite(host, selectedSource);
+    return waitSite ? followSite(host, selectedSource, { commit: siteCommit, timeoutMs: siteTimeoutMs }) : readSite(host, selectedSource);
+  }
   if (command === "rollback") {
     if (!selectedSystem || !version) throw new Error("rollback requires VERSION and a design system (--system-id)");
     const summary = await host.rollback(selectedSystem, { version, dryRun: true });
@@ -477,7 +503,12 @@ export async function runHostedCommand(command, { root = process.cwd(), fixedRoo
     }
     if (publication.status !== 'published') throw new Error(publication.error || 'TimDS publication failed; update the session or retry the submission.');
     if (state && summary.sessionId === state.session.id) await writeState(selected, { ...state, session: { ...state.session, status: 'closed' } });
-    return { ...publication, apiVersion: HOST_API_VERSION };
+    const result = { ...publication, apiVersion: HOST_API_VERSION };
+    onPublished?.(result);
+    if (!reportSite && !waitSite) return result;
+    const report = await reportPublishedSite(host, publication, { waitSite, timeoutMs: siteTimeoutMs });
+    const follow = report.siteDeployment && siteFollowCommand(isBinaryRuntime() ? "timds-cli" : "timds", publication.sourceId ?? publication.result?.sourceId, provider.url, report.siteDeployment.sourceCommit);
+    return { ...result, ...report, ...(follow ? { siteFollowCommand: follow } : {}) };
   }
   if (command === "start") {
     if (!systemId) throw new Error("start requires a design-system identifier");
@@ -499,7 +530,12 @@ export async function runHostedCommand(command, { root = process.cwd(), fixedRoo
   }
   if (!state || state.apiVersion !== HOST_API_VERSION) throw new Error("No compatible TimDS session here; run timds start first.");
   if (command === "claim") return host.claim(state.session.id, { patterns: patterns || (Array.isArray(on) ? on : String(on || "").split(",").filter(Boolean)), note });
-  if (command === "status" || command === "history") return host[command](state.session.id);
+  if (command === "history" || command === "diagnostics") return host[command](state.session.id);
+  if (command === "status") {
+    const result = await host.status(state.session.id);
+    if (!result.session?.liveUrl || !findWorkspaceSite(selected)) return result;
+    return { ...result, sitePreviewUrl: new URL("/site/", result.session.liveUrl).href };
+  }
   if (command === "close") {
     const result = await host.close(state.session.id);
     await writeState(selected, { ...state, session: { ...state.session, status: "closed" } });
