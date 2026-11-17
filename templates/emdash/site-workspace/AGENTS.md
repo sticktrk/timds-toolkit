@@ -43,7 +43,7 @@ source paths, so a change to how the site looks is a change to the system.
   in the repository root's `.agents/skills/` walk through a design change
   and the article routes the system does not style yet.
 - The site is its own package: run npm in this folder, not at the workspace
-  root. Deploying is in `docs/emdash-handover.md`.
+  root. For a standalone deployment, read `docs/emdash-handover.md`.
 
 
 Optional `divisions.json` mounts owner-authored HTML fragments in
@@ -59,3 +59,20 @@ dependency graph without executing it. Shared article components must work
 with every collection context and the main topic views; their literals are
 never automatically rewritten against a single context. Scoped Astro styles
 can provide self-contained family navigation without importing system CSS.
+
+## If you use TimDS Cloud
+
+Keep shared design and styling changes in the Design System, site behavior
+and routes in `site/`, and article content in EmDash. Run the following
+TimDS commands from the Design System workspace.
+
+- Open the local `/site/` route during `timds dev`. After `timds update`,
+  open the hosted Site preview from `timds status`. If it returns 503,
+  `timds diagnostics` shows the site state and dev output.
+- Review the site in the live session before submitting. The submission
+  Preview contains the Design System and excludes the site.
+- After publication, follow the published commit with the command printed
+  by `timds publish`, or use `timds publish --wait-site` to wait inline.
+  `timds site show --wait` follows the requested commit to `ready` or
+  reports a failure, including build output when available.
+  Report deployment complete when the expected commit is `ready`.

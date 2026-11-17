@@ -1341,6 +1341,14 @@ builds and checks, pushes `artifact.publishRef`, and asks the portal to
 promote that exact build with an operator token. `extract --publish` uploads
 the derived layer and consumer bundle to the host's CDN.
 
+**Hosted sites.** `timds status` gives the live site preview address and
+`timds diagnostics` reads its dev output when the preview fails. Use
+`timds site show --wait` to follow a requested commit, or
+`timds publish --wait-site` to track the published commit inline.
+The submission Preview excludes the site. See the hosted site command
+reference for deployment history and administrator retries.
+[Hosted site commands](docs/timds-cloud.md#hosted-site-previews-and-deployments)
+
 **Media.** `timds assets publish` uploads staged `media-local/` files to the
 host's public storage (Git `submit` does this first); `assets pull KEY`
 restores one and `assets backfill-metadata` measures older catalog entries

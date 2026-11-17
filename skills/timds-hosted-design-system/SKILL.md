@@ -149,6 +149,32 @@ Everything from here runs inside the workspace folder.
 commands when inspecting their results programmatically; use the process exit
 status to detect failure and preserve any conflict details before retrying.
 
+## If the workspace has a hosted site
+
+Edit appearance, designed page copy, styles and tokens in the Design System.
+Edit site behavior, section declarations, form handlers and site-owned routes
+in `site/`. Manage articles, topics and their media through EmDash. Read
+`site/AGENTS.md` for the site's checks and source boundaries.
+
+`timds dev` serves the local site at `/site/`. Run `timds update` to share
+your changes, then open the Site preview address from `timds status` to check
+the hosted version. If the hosted preview returns 503, run
+`timds diagnostics` and inspect the site state, dev output, dependency cache
+and last wake. The submission Preview covers the Design System. Review the
+site in the live session before submitting because the submission Preview
+excludes it.
+
+After an authorized publication, use the follow command printed by
+`timds publish` to track that exact commit. `timds publish --wait-site`
+can wait inline. For a publication made in Studio, run `timds site show`
+to check the requested commit, then `timds site show --wait --commit SHA`
+for that commit. From outside the workspace, add `--source-id UUID` and
+`--portal-url __HOST_ORIGIN__`; `timds systems --json` lists source UUIDs
+under `id`. Report the site as deployed only after the expected commit
+reaches `ready`. On failure, report the stage, error and relevant build output.
+Run `timds site retry` only when the person asks and the signed-in principal
+is an active host administrator.
+
 ## Submit and stop
 
 Every submission carries its release note: `timds submit` refuses to run

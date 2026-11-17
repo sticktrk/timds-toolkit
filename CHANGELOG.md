@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add hosted site deployment reads, commit-specific waits and administrator
+  retries (#180). Hosted publish reports site deployment separately, and
+  session status and diagnostics help find and troubleshoot the live site preview.
+
 - Add fresh EmDash template 7: an explicit nine-field HTML content profile,
   validated exact-source rendering with Portable Text fallback, site-owned
   article regions with duplicate answer/guide suppression, guide/video metadata,
