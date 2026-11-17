@@ -5,6 +5,8 @@ name: TimDS design system
 # release number that day) exactly once unless the pull request
 # explicitly advanced the version. Publish ships that exact commit and respects
 # automatic updates; the final reusable job advances the linked consumer pin.
+# Without a declared version, preparation keeps source unchanged and publication
+# supplies any host label; submodule consumers can follow the exact source SHA.
 # Portal publication needs an unbound operator TIMDS_ACCESS_TOKEN secret; a
 # release without it stops before any version advance. Tags are not required.
 on:
@@ -82,14 +84,14 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
           if [[ "$EVENT_NAME" == "push" && -n "${BEFORE_SHA:-}" && ! "$BEFORE_SHA" =~ ^0+$ ]] && git cat-file -e "${BEFORE_SHA}:timds.json" 2>/dev/null; then
-            previous_version="$(git show "${BEFORE_SHA}:timds.json" | node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).version")"
+            previous_version="$(git show "${BEFORE_SHA}:timds.json" | node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).version ?? ''")"
             node scripts/prepare-merge-release.mjs \
               --previous "$previous_version" \
               --fallback-note "$RELEASE_NOTE" \
               --github-output "$GITHUB_OUTPUT"
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "version=$(node -p "require('./timds.json').version")" >> "$GITHUB_OUTPUT"
+            echo "version=$(node -p "require('./timds.json').version ?? ''")" >> "$GITHUB_OUTPUT"
             echo "Initial contract push or manual dispatch publishes the selected main commit without changing its version."
           fi
       - name: Verify and commit the synchronized version
@@ -118,6 +120,9 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: write
+    outputs:
+      published: ${{ steps.publication.outputs.published }}
+      version: ${{ steps.publication.outputs.version }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -145,18 +150,31 @@ jobs:
           gh auth setup-git
           npm exec -- timds-publish-artifact
       - name: Publish or stage the portal release and verify the public root
+        id: publication
         env:
           TIMDS_ACCESS_TOKEN: ${{ secrets.TIMDS_ACCESS_TOKEN }}
-        run: npm run timds -- publish --skip-build --skip-push
+        run: |
+          set -euo pipefail
+          result="$RUNNER_TEMP/timds-publication.json"
+          npm run --silent timds -- publish --skip-build --skip-push --json > "$result"
+          node -e '
+            const fs = require("fs");
+            const result = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+            const published = result.status === "published";
+            const version = published && typeof result.version === "string" ? result.version : "";
+            if (/[\r\n]/.test(version)) throw new Error("Invalid publication label");
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, `published=${published}\nversion=${version}\n`);
+            console.log(published ? `Published ${version || "source commit (no release label)"}` : "Publication awaits an operator; consumer updates are deferred.");
+          ' "$result"
 
   pin-consumer:
     needs: [prepare-release, publish]
-    if: needs.prepare-release.outputs.consumer_repository != ''
+    if: needs.prepare-release.outputs.consumer_repository != '' && needs.publish.outputs.published == 'true'
     uses: ./.github/workflows/update-consumer-submodule.yml
     with:
       branch: ${{ needs.prepare-release.outputs.consumer_branch }}
       path: ${{ needs.prepare-release.outputs.consumer_path }}
       repository: ${{ needs.prepare-release.outputs.consumer_repository }}
       sha: ${{ needs.prepare-release.outputs.sha }}
-      version: ${{ needs.prepare-release.outputs.version }}
+      version: ${{ needs.publish.outputs.version }}
     secrets: inherit

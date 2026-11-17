@@ -595,6 +595,14 @@ product repository replaces with a published pin when separately authorized.
 Tags are not required. `scripts/release.sh [YYYY.MM.DD-N]` remains available
 for an intentional explicit release.
 
+If an operator has removed `version` from `timds.json`, CI publishes the
+commit without advancing package versions or rolling up Unreleased notes.
+The consumer's submodule can advance by commit; a published pin update needs
+a release label and is skipped when none is supplied. Do not invent a label
+or restore the manifest version during design work. An operator restoring
+dated releases explicitly synchronizes the first declared version across
+the manifest, package, lockfile and changelog before merging.
+
 The consumer owns its manifest pin (and, in the legacy case, its
 `.gitmodules` record and reviewed gitlink); never merge the consumer pull
 request or deploy the consumer without separate authorization. If
@@ -605,9 +613,9 @@ copying a workstation credential into GitHub Actions.
 ## Submit only when requested
 
 Every change carries its release note: `submit` refuses to run while
-`CHANGELOG.md` has nothing under `## Unreleased`, because the merge rolls
-those notes into the dated version and an empty one would publish a release
-that says nothing. Before submitting, append one or two sentences there in
+`CHANGELOG.md` has nothing under `## Unreleased`. A versioned standalone merge
+rolls those notes into the dated version; an unversioned system retains them
+under Unreleased. Before submitting, append one or two sentences there in
 the designer's words, leading with the area (`Brand · Color: ...`,
 `Maintenance: ...`), as the `design-ship` skill describes; the published
 system shows them at `/changelog/` and in `changelog.json`. Then, when asked

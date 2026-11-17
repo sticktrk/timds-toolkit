@@ -155,18 +155,27 @@ test("an unversioned Design System builds, checks, publishes without a version, 
   // Moving the pin needs a label: the current publication carries none.
   await assert.rejects(updateConsumerPin(product, { fetchImpl: cdnFetch }), /carries no version label to pin/);
 
-  // A current pin reads the stamp, then the current bundle, and records the stamp's commit.
+  // A current pin reads the stamp and index, then the current bundle, and records the stamp's commit.
   const current = JSON.parse(await fs.readFile(path.join(product, CONSUMER_MANIFEST_FILE), "utf8"));
   current.designSystem.version = "current";
   await writeJson(path.join(product, CONSUMER_MANIFEST_FILE), current);
   requests.length = 0;
   const followed = await syncConsumerBundle(product, { fetchImpl: cdnFetch });
   assert.deepEqual([followed.status, followed.pin, followed.version], ["synced", "current", null]);
-  assert.deepEqual(requests.slice(0, 2), [`${PUBLIC_BASE}/${PROVENANCE_FILE}`, `${PUBLIC_BASE}/bundle.json`]);
+  assert.deepEqual(requests.slice(0, 3), [`${PUBLIC_BASE}/${PROVENANCE_FILE}`, `${PUBLIC_BASE}/index.json`, `${PUBLIC_BASE}/bundle.json`]);
   const record = await readBundleRecord(path.join(product, "design-system"));
   assert.deepEqual([record.version, record.sourceCommit, record.versioned], [null, "c".repeat(40), null]);
   const currentCheck = await checkConsumer(product);
   assert.equal(currentCheck.status, "passed", currentCheck.errors.join("\n"));
+
+  // A host can locate the index and bundle separately from the HTML entry.
+  // Presence checks and the download both follow that stamp's file map.
+  cdn.set("release docs/index.json", cdn.get("index.json"));
+  cdn.set("release docs/bundle.json", cdn.get("bundle.json"));
+  cdn.set(PROVENANCE_FILE, Buffer.from(JSON.stringify({ ...stamp, entry: "nested/index.html", files: { ...stamp.files, index: "release docs/index.json", bundle: "release docs/bundle.json" } })));
+  requests.length = 0;
+  assert.equal((await syncConsumerBundle(product, { fetchImpl: cdnFetch })).status, "unchanged");
+  assert.deepEqual(requests.slice(0, 3), [`${PUBLIC_BASE}/${PROVENANCE_FILE}`, `${PUBLIC_BASE}/release%20docs/index.json`, `${PUBLIC_BASE}/release%20docs/bundle.json`]);
 
   // A merge release bumps nothing and leaves the notes under Unreleased.
   const changelog = await fs.readFile(path.join(root, "CHANGELOG.md"), "utf8");
@@ -179,6 +188,25 @@ test("an unversioned Design System builds, checks, publishes without a version, 
   const provenance = createPublicationStampFromFiles({ sourceCommit: "c".repeat(40), sourceFiles, artifactFiles });
   assert.deepEqual(Object.keys(provenance), ["schemaVersion", "systemId", "sourceCommit", "lineage", "contentDigest"]);
   assert.throws(() => createPublicationStampFromFiles({ sourceCommit: "c".repeat(40), sourceFiles, artifactFiles, version: HOST_LABEL }), /differs from the committed manifest/);
+
+  // A later publication retires the bundle. The upload-only CDN retains the
+  // old objects, but sync must refuse without relabelling or editing the
+  // consumer's last successful download.
+  const { bundle: retiredBundle, ...withoutBundle } = manifest;
+  assert.ok(retiredBundle);
+  await writeJson(manifestPath, withoutBundle);
+  timds("check", "--root", root);
+  await publishExtractedIndex(await loadWorkspace(root), { fetchImpl: portalFetch, portalUrl: "https://portal.example.com", sourceCommit: "d".repeat(40), token: "timds_test_token" });
+  assert.ok(cdn.has("bundle.json"), "the CDN still has the retired bundle");
+  assert.equal(JSON.parse(cdn.get("index.json")).bundle, undefined);
+  const previousRecord = await fs.readFile(path.join(product, "design-system/.timds-bundle.json"), "utf8");
+  requests.length = 0;
+  await assert.rejects(syncConsumerBundle(product, { fetchImpl: cdnFetch }), /current publication .* declares no consumer bundle/);
+  assert.deepEqual(requests, [`${PUBLIC_BASE}/${PROVENANCE_FILE}`, `${PUBLIC_BASE}/index.json`]);
+  assert.equal(await fs.readFile(path.join(product, "design-system/.timds-bundle.json"), "utf8"), previousRecord);
+  for (const file of bundle.files) {
+    assert.deepEqual(await fs.readFile(path.join(product, "design-system", file.path)), await fs.readFile(path.join(root, file.path)));
+  }
 
   // Declaring a version again without rebuilding is a mismatch publish refuses.
   await writeJson(manifestPath, { ...manifest, version: removedVersion });

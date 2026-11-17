@@ -182,7 +182,9 @@ fetches without requiring the bundle manifest to repeat it. On the product side,
 `consumer-sync.mjs` is `timds consumer sync|update`: a published pin
 (`designSystem.version` in `timds.consumer.json`) fetches that version's
 bundle into the gitignored `design-system/` directory from `postinstall`,
-verifying digests and leaving a symlink alone, and `consumer update --draft
+verifying digests and leaving a symlink alone. An unversioned `current` pin
+checks the published index before reading the mutable bundle, so a retained
+CDN object cannot revive a bundle a later publication removed. `consumer update --draft
 NAME` (`updateConsumerDraft`) replaces only that ignored bundle with a hosted
 draft's, never the tracked pin; `consumer-migrate.mjs` is
 `timds consumer migrate`, which removes the submodule and pins the version

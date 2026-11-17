@@ -101,23 +101,42 @@ const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "
 const toolkitPackageName = "@dtconcepts/timds";
 const standaloneReleaseAutomation = "merge-patch-v1";
 const dependencyPrAutomation = "upgrade-pr-v1";
-// Stock release files shipped before installation.json recorded managed-file
-// hashes. Every hash a template has had must stay here so an unmodified adopter
-// is never mistaken for a customized one.
+// Stock release files recognized when adoption has no recorded managed-file
+// hash. Keep earlier template bytes, including binary variants, so an
+// unmodified adopter is never mistaken for a customized one.
 const legacyStandaloneAutomationHashes = new Map([
   [".github/workflows/timds-design-system.yml", [
     "44c91cf8fd9ae5c9712ff1bc69605d182470b54d76f14292af2c7a714eb8a95a",
     "203ba2218b7e9d9216166707d89707a8740c8e1835f0a1e3bd31e19768c34992",
     "3d27e370cc596307a73a71617f95e1314c24de0229716af4cb9d2384dee5ae32",
     "4a65fa9b0b70ec8becf911f5691cee492e08a7f376c5dd577925d44799ea7abc",
+    "d09fe05a7d1d20cc4200ae1b6c9c7b8a4b001fce20d0a5c74241131ba023b667",
+    "44c96e496c18ec0216484fd46d9b9eae07bc3180b924ba3e6fc9b093b04fedbf",
   ]],
-  [".github/workflows/update-consumer-submodule.yml", ["a93c345503d5c344b2ab7b3aa37ee901e71d48608ca94df5b145235f21a5ef6f"]],
-  ["scripts/release.mjs", ["ba1b6ec7e4022a7104d7d0c7e2497fb61a839c37394395ea3bdaa979def1260a"]],
+  [".github/workflows/update-consumer-submodule.yml", [
+    "a93c345503d5c344b2ab7b3aa37ee901e71d48608ca94df5b145235f21a5ef6f",
+    "ab9300a0744098879f73ad89199cd234ec10a7d5a37b35811bef4b6ae2d9edb3",
+  ]],
+  ["scripts/release.mjs", [
+    "ba1b6ec7e4022a7104d7d0c7e2497fb61a839c37394395ea3bdaa979def1260a",
+    "a015e6f4d07ace2602f7e6f1f125f8759573d3136cffbacb6e2e153a5c841ccb",
+    "f0f5c48dd5cb6339b64617faf2cfdc5d765cfb1acd181809698f7f80c74d65c7",
+  ]],
   // release.sh and check-versions.mjs were copied by init before the
-  // automation boundary recorded them; their one stock version is recognized
-  // so the dated-version migration replaces it without --force.
-  ["scripts/release.sh", ["4c182b0c21e6b2cb86b3cd8f66a2dfdaddb138f1c80510f32bb4f1087fab636b"]],
-  ["scripts/check-versions.mjs", ["d391be478debe43f4b67bd636e1d1c9bbc8d9d8b2d6a06854d8617311f4b9d51"]],
+  // automation boundary recorded them; recognize their earlier stock bytes
+  // so adoption replaces them without --force.
+  ["scripts/release.sh", [
+    "4c182b0c21e6b2cb86b3cd8f66a2dfdaddb138f1c80510f32bb4f1087fab636b",
+    "c92d79316ecbc285fee641be7b256e8aa8f5af9239dce47d1d337c069290a13f",
+  ]],
+  ["scripts/check-versions.mjs", [
+    "d391be478debe43f4b67bd636e1d1c9bbc8d9d8b2d6a06854d8617311f4b9d51",
+    "4d9d48553e9822f50f5fda96681b90689ac34a6f12905a0d0211aaa3a52f04e4",
+  ]],
+  ["scripts/prepare-merge-release.mjs", [
+    "f08e5db284295350a7c31fbb5de2f5eaa51d9f28045194b51b6f8f938b937a0a",
+    "fa484710518ea5fd6422fd327c9061c49d9f4f7338b84d7012ac418be553017b",
+  ]],
 ]);
 
 const contentTypes = {

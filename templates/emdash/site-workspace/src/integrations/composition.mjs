@@ -12,7 +12,8 @@ const MAX_INPUT_BYTES = 12 * 1024 * 1024;
 const METADATA = ["bundle.json", "designs.json"];
 const SHA256 = /^[a-f0-9]{64}$/;
 const SYSTEM_ID = /^[a-z0-9][a-z0-9._-]*(?:\/[a-z0-9][a-z0-9._-]*)*$/;
-const RELEASE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
+const RELEASE_LABEL = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
+const SEMVER_RELEASE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 const INPUT_PATH = /^files\/(?:tokens\.css|styles\/(?:[A-Za-z0-9_-][A-Za-z0-9._-]*\/)*[A-Za-z0-9_-][A-Za-z0-9._-]*\.(?:css|woff2?|ttf|otf|png|jpe?g|webp|gif|avif|ico|svg)|(?:assets|fonts)\/(?:[A-Za-z0-9_-][A-Za-z0-9._-]*\/)*[A-Za-z0-9_-][A-Za-z0-9._-]*\.(?:woff2?|ttf|otf|png|jpe?g|webp|gif|avif|ico|svg))$/i;
 export const DEPENDENCY_DIRECTORY = "timds-dependencies";
 const MAX_BYTES = 96 * 1024;
@@ -69,8 +70,10 @@ function readSystems(systems) {
   }
   const siblings = Object.entries(systems).filter(([alias]) => alias !== "main");
   if (siblings.length > MAX_DEPENDENCIES || siblings.some(([alias, pin]) => !id(alias) || !exactKeys(pin, ["systemId", "version"])
-    || !label(pin.systemId, 160, SYSTEM_ID) || !label(pin.version, 100, RELEASE))) {
-    throw new Error("Site divisions accept up to four sibling Design Systems with exact release versions.");
+    || !label(pin.systemId, 160, SYSTEM_ID)
+    || (!label(pin.version, 100, RELEASE_LABEL) && !label(pin.version, 100, SEMVER_RELEASE))
+    || ["current", "latest"].includes(pin.version.toLowerCase()))) {
+    throw new Error("Site divisions accept up to four sibling Design Systems with exact release labels, never current or latest.");
   }
   return systems;
 }
@@ -131,7 +134,10 @@ function siblingInputs(siteRoot, systems, divisions) {
       designs = JSON.parse(files.get("designs.json").toString("utf8"));
       bundle = JSON.parse(files.get("bundle.json").toString("utf8"));
     } catch { inputError(); }
-    if ([designs, bundle].some((doc) => doc?.schemaVersion !== 1 || doc.system?.id !== pin.systemId || doc.system?.version !== pin.version)
+    // A host-assigned label lives in the verified receipt; an unversioned
+    // system's documents omit it. A declared document version must agree.
+    if ([designs, bundle].some((doc) => doc?.schemaVersion !== 1 || doc.system?.id !== pin.systemId
+      || (doc.system?.version !== undefined && doc.system.version !== pin.version))
       || !Array.isArray(designs.designs)) inputError();
     const assetPrefix = `/${DEPENDENCY_DIRECTORY}/${alias}/${dependency.contentDigest}`;
     inputs.set(alias, { designs: designs.designs, files, assetPrefix, root: path.join(root, alias, "files") });

@@ -34,6 +34,8 @@ toolkit: the skills under `.agents/skills/` (and, for Claude Code, the
 
 In a standalone repository, merging a pull request releases a dated version
 (`2026.10.12-1`: the day and the release number that day) and publishes it.
+If an operator has removed `version` from `timds.json`, merging publishes the
+commit without advancing a system version or rolling up the Unreleased notes.
 An embedded system (`design-system/` inside a product repository) has no
 release automation: its CI only validates, and the merge lands the rebuilt
 `design-system/dist/` in the product itself. The production product
@@ -341,7 +343,7 @@ remains a separate operator decision.
 ## Linked consumer repository (standalone repositories)
 
 In a standalone repository every accepted change on `main` becomes a
-release: CI synchronizes the version and publishes that exact commit. When
+release: CI synchronizes a declared version and publishes that exact commit. When
 `timds.json` also declares a `consumer`, the same run then opens or
 refreshes a pull request in that product that moves its pin to the release.
 Configure a `TIMDS_CONSUMER_TOKEN` repository secret with contents and
@@ -369,6 +371,14 @@ linked from the version in the app bar, and publishes it as
 only when intentionally releasing at a chosen moment or under a chosen
 later version. Publication and the consumer update remain separate,
 ordered CI work.
+
+An operator may leave `timds.json` without a `version`. In that mode validation
+accepts the package and lockfile's independent version, merge preparation writes
+nothing, and notes stay under `## Unreleased`. The hand-release script does not
+invent a version. A consumer submodule can still advance by commit; a published
+pin needs the publication's label and is skipped when none is available. To
+restore dated releases, the operator declares the first version, synchronizes
+the package and lockfile, and writes its changelog section before merging.
 
 ## Toolkit upgrades
 

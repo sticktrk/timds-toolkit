@@ -5,7 +5,7 @@
   "type": "module",
   "hostContract": 2,
   "emdashTemplate": {
-    "version": 7,
+    "version": 8,
     "history": [
       {
         "version": 1,
@@ -56,6 +56,12 @@
         "changes": [
           "Adds an explicit HTML content profile, exact-source rendering, site-owned article regions, related guides, video fields and structured article metadata for fresh sites.",
           "Raises declared collection field capacity to 144 and adds per-site webhook delivery with contact attribution under tracking contract 2."
+        ]
+      },
+      {
+        "version": 8,
+        "changes": [
+          "Accepts exact opaque release labels for sibling Design Systems and unversioned bundle and design metadata while retaining receipt pin and digest verification."
         ]
       }
     ]

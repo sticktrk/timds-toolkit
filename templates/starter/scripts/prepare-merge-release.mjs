@@ -80,7 +80,11 @@ export function prepareMergeRelease(input) {
   // A system whose timds.json declares no version is labelled by its host:
   // nothing is bumped and the notes stay under ## Unreleased.
   if (currentVersion === undefined || currentVersion === null) return { changed: false, version: null };
-  const comparison = compareVersions(currentVersion, input.previousVersion);
+  // Restoring a declared version after an unversioned commit is an explicit
+  // release, just like advancing one: keep the synchronized files and notes.
+  const previousUnversioned = input.previousVersion === undefined || input.previousVersion === null || input.previousVersion === "";
+  if (previousUnversioned) parseVersion(currentVersion);
+  const comparison = previousUnversioned ? 1 : compareVersions(currentVersion, input.previousVersion);
   if (comparison < 0) throw new Error(`Design System version regressed from ${input.previousVersion} to ${currentVersion}`);
   if (comparison > 0) {
     if (!input.changelog.includes(`\n## ${currentVersion}\n`)) {
@@ -125,7 +129,7 @@ const argument = (name) => {
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   try {
     const previousVersion = argument("--previous");
-    if (!previousVersion) throw new Error("Usage: prepare-merge-release.mjs --previous VERSION [--fallback-note TEXT] [--github-output FILE]");
+    if (previousVersion === undefined) throw new Error('Usage: prepare-merge-release.mjs --previous VERSION [--fallback-note TEXT] [--github-output FILE] (use --previous "" for an unversioned commit)');
     const result = prepareMergeRelease({
       previousVersion,
       fallbackNote: argument("--fallback-note"),
