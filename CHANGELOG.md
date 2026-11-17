@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- Show a hosted system's release label on its stock pages when `timds.json`
+  declares no version. The viewer builds each sentence holding `{{version}}`
+  (the app bar's `v{{version}}` chip, the Use card's glyph, the Install
+  page's "This copy is ..." and the Compose note) as an empty, hidden version
+  slot, on the element itself when the sentence is all it holds and on a
+  `<span>` otherwise, and adds one inline script to the pages that have
+  slots. The script makes one same-origin `HEAD` of the page (a `GET` when
+  `HEAD` is refused), accepts an `X-TimDS-Version` header only when it is a
+  dated label (`YYYY.MM.DD-N`) or `MAJOR.MINOR.PATCH`, and fills every slot
+  as text; with no valid label (`dev`, a static host, a failed request) the
+  slots stay hidden, so no bare "v" or "This copy is ." shows. Nothing built
+  carries a label or date, so an unversioned build is byte-identical from
+  one build to the next, and a versioned system's pages are unchanged. The
+  change is in the package renderer only: existing starter and brand-kit
+  systems, including customized layouts and seed-only kit pages, get it on
+  `upgrade` with no starter step and no change to any stock file.
+  `{{version}}` in a tag, a comment, `<title>`, `<script>`, `<style>` or
+  `<textarea>` still renders empty.
+
 - Add hosted site deployment reads, commit-specific waits and administrator
   retries (#180). Hosted publish reports site deployment separately, and
   session status and diagnostics help find and troubleshoot the live site preview.

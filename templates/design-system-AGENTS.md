@@ -164,7 +164,12 @@ built from the same few blocks.
   and `{{name}}`, `{{description}}`, and `{{version}}` from `timds.json`.
   `src/layout.html` takes those three plus `{{title}}`, `{{views}}`,
   `{{sidenav}}`, `{{pagenav}}`, and `{{content}}`. An unknown placeholder
-  fails the build.
+  fails the build. When `timds.json` declares no `version`, nothing built
+  carries one: the sentence holding `{{version}}` (the app bar's
+  `v{{version}}`, the Install page's "This copy is ...") is built hidden, and
+  a hosted system's pages show it with the dated release label the host
+  assigned (`YYYY.MM.DD-N`) once the page has read it from the host.
+  Previews and hosts that send no label leave it hidden.
 - `src/styles/system.css` is the system itself, the base styles and
   components a product adopts. `src/styles/viewer.css` is documentation
   chrome. Keep them apart. `src/styles/` and `src/assets/` are copied into the
