@@ -2,12 +2,12 @@ import { parseFragment, type DefaultTreeAdapterTypes } from "parse5";
 
 type Node = DefaultTreeAdapterTypes.ChildNode;
 
-export const HTML_POLICY_VERSION = 1;
+export const HTML_POLICY_VERSION = 2;
 export const VIDEO_ID = /^[A-Za-z0-9_-]{11}$/;
 const VIDEO_ORIGIN = "https://www.youtube-nocookie.com";
 const HTML_NAMESPACE = "http://www.w3.org/1999/xhtml";
 const ALLOWED_ELEMENTS = new Set([
-	"a", "abbr", "b", "blockquote", "br", "caption", "cite", "code", "dd", "div", "dl", "dt",
+	"a", "abbr", "aside", "b", "blockquote", "br", "caption", "cite", "code", "dd", "div", "dl", "dt",
 	"em", "figcaption", "figure", "h2", "h3", "h4", "h5", "h6", "hr", "i", "iframe", "img",
 	"kbd", "li", "mark", "ol", "p", "pre", "q", "s", "section", "small", "span", "strong", "sub",
 	"sup", "table", "tbody", "td", "th", "thead", "tfoot", "time", "tr", "ul",

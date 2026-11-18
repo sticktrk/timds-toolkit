@@ -5,7 +5,7 @@
   "type": "module",
   "hostContract": 2,
   "emdashTemplate": {
-    "version": 8,
+    "version": 9,
     "history": [
       {
         "version": 1,
@@ -62,6 +62,13 @@
         "version": 8,
         "changes": [
           "Accepts exact opaque release labels for sibling Design Systems and unversioned bundle and design metadata while retaining receipt pin and digest verification."
+        ]
+      },
+      {
+        "version": 9,
+        "changes": [
+          "Shows the Short answer card in place of the summary line under an article's title, keeping the summary as the meta description and on cards.",
+          "Raises the article HTML policy to version 2, which accepts the aside element, and documents the named question-and-answer body blocks (answer-box, detailed-answer, clock-to-watch, cta, disclaimer) the stock Design System styles by id."
         ]
       }
     ]

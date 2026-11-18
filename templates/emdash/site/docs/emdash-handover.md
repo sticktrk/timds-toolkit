@@ -35,7 +35,11 @@ imported from the path the scaffold recorded. The layout must:
 - [ ] link the Design System stylesheets that define `hero`, `section`,
       `article-list`, `article-card`, `article-meta`, `topic-list`, `prose`,
       `table-scroll`, `button` and `button--secondary`. The routes write no
-      CSS of their own.
+      CSS of their own;
+- [ ] style, inside `prose`, the blocks a question-and-answer body names by
+      `id`: `answer-box`, `detailed-answer`, `clock-to-watch`, `cta` and
+      `disclaimer` (`docs/article-presentation.md`, "Named body blocks"). The
+      starter and brand-kit stylesheets already do.
 
 The layout should not emit its own canonical link or `og:image` on these
 pages, or the head carries two.

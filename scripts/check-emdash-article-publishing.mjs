@@ -140,9 +140,9 @@ try {
 	assert.equal(publicImage.status, 200);
 	assert.deepEqual(Buffer.from(await publicImage.arrayBuffer()), image);
 	const firstNode = "\n <H2 id='evidence'>HTML source &amp; anchor</H2>";
-	const rest = `\r\n <p class="article-lede">The original lead. <a href="https://example.com/guides/shared/">External guide</a></p>\n <figure><img src="${upload.item.url}" alt="Body image"><figcaption>Image note</figcaption></figure>\n <iframe title="Example embed" src="https://www.youtube-nocookie.com/embed/abcdefghijk" allowfullscreen></iframe>\n`;
+	const rest = `\r\n <p class="article-lede">The original lead. <a href="https://example.com/guides/shared/">External guide</a></p>\n <figure><img src="${upload.item.url}" alt="Body image"><figcaption>Image note</figcaption></figure>\n <iframe title="Example embed" src="https://www.youtube-nocookie.com/embed/abcdefghijk" allowfullscreen></iframe>\n <aside id="clock-to-watch"><p>Deadline note</p></aside>\n`;
 	const source = firstNode + rest;
-	const created = await create(api, "articles", "shared", { body_html: source, short_answer: "<b>Plain answer</b>", video_id: "ABCDEFGHIJK", related_guide: { url: "/guides/shared/", title: "Guide title" } });
+	const created = await create(api, "articles", "shared", { summary: "Summary beside the answer", body_html: source, short_answer: "<b>Plain answer</b>", video_id: "ABCDEFGHIJK", related_guide: { url: "/guides/shared/", title: "Guide title" } });
 	const guide = await create(api, "manuals", "shared", { body_html: '<p class="article-lede">Guide source</p>' });
 	const entryPath = `/content/articles/${created.item.id}`;
 	assert.equal((await request("/articles/shared/")).status, 404);
@@ -165,6 +165,7 @@ try {
 	assert.ok(beforeCta >= 0 && cta > beforeCta && afterCta > cta, "the CTA sits between intact source fragments");
 	assert.ok(!page.includes("Portable body"));
 	assert.ok(page.includes("&lt;b&gt;Plain answer&lt;/b&gt;"));
+	assert.ok(page.includes('content="Summary beside the answer"') && !page.includes(">Summary beside the answer<"), "the answer card takes the summary's place under the title");
 	assert.ok(page.includes('/embed/ABCDEFGHIJK'));
 	assert.ok(page.includes('href="/guides/shared/">Guide title'));
 	assert.ok(page.includes(`rel="canonical" href="${PUBLIC_ORIGIN}/articles/shared/"`));
@@ -190,7 +191,7 @@ try {
 	const answerBox = "<section id='answer-box'><h2>Short answer</h2><p>Answer from the original body</p></section>";
 	const bodyGuideLink = `<p><a href="${PUBLIC_ORIGIN}/guides/shared?ref=article#details">Guide in the body</a></p>`;
 	const duplicates = await create(api, "articles", "body-regions", {
-		body_html: answerBox + bodyGuideLink, short_answer: "Answer from the field", related_guide: relatedGuide,
+		summary: "Summary under the title", body_html: answerBox + bodyGuideLink, short_answer: "Answer from the field", related_guide: relatedGuide,
 	});
 	await publish(api, `/content/articles/${duplicates.item.id}`, duplicates._rev);
 	const deduplicated = await request("/articles/body-regions/");
@@ -198,6 +199,7 @@ try {
 	const deduplicatedPage = await deduplicated.text();
 	assert.ok(deduplicatedPage.includes(answerBox) && deduplicatedPage.includes(bodyGuideLink));
 	assert.ok(!deduplicatedPage.includes("Answer from the field") && !deduplicatedPage.includes("Guide card title"));
+	assert.ok(deduplicatedPage.includes(">Summary under the title<"), "the summary shows when the body holds the answer");
 
 	const rejectedHtml = answerBox + bodyGuideLink + "<iframe srcdoc='<script>0</script>'></iframe>";
 	const unsafe = await create(api, "articles", "unsafe", {
