@@ -69,6 +69,9 @@ if (Astro.cache?.enabled) Astro.cache.set(cacheHint);
 Astro.response.headers.set("Cache-Control", cacheControl(Astro.locals, Astro.url, isPreview));
 
 const coverSrc = imageFieldUrl(data.cover, Astro.locals);
+// The header's Short answer card takes the summary's place under the title.
+// This repeats the stock Header region's rule; change the two together.
+const showsShortAnswer = typeof data.short_answer === "string" && data.short_answer.trim() !== "" && !html?.hasAnswerBox;
 const path = articlePath(entry.id, section);
 const seo = getSeoMeta(entry, {
 	siteUrl: origin,
@@ -148,7 +151,7 @@ const breadcrumbData = JSON.stringify({
 		<header class="hero">
 			<TopicList topics={topicsOf(data)} />
 			<h1 {...entry.edit.title}>{data.title}</h1>
-			{data.summary && <p {...entry.edit.summary}>{data.summary}</p>}
+			{data.summary && !showsShortAnswer && <p {...entry.edit.summary}>{data.summary}</p>}
 			<ArticleMeta data={data} />
 			<ArticleHeader {...region} />
 			{

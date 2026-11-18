@@ -303,7 +303,10 @@ workspace instead renders the design source directly, with one copy; see
   the article designs (the list with its empty state, an article, a topic).
   The article page sets its body in one `prose` wrapper of plain elements,
   the way a site renders rich text; a table sits in a `table-scroll` wrapper
-  so a wide one scrolls without widening the page. `/articles/example-article` and
+  so a wide one scrolls without widening the page. The blocks a
+  question-and-answer article names by `id` (`answer-box`, `detailed-answer`,
+  `clock-to-watch`, `cta`, `disclaimer`) are styled inside `prose` by those
+  ids, with no class. `/articles/example-article` and
   `/topics/example-topic` are fixed sample routes: a design has one file per
   route, so it designs the template with one sample entry, and a site that
   seeds an entry at each slug pairs the route with the design in its

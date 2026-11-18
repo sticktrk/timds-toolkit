@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Lay out question-and-answer articles on EmDash sites (template 9). The
+  article route shows the Short answer card in place of the summary line
+  under the title; the summary stays the meta description and the line on
+  cards. Article HTML policy version 2 accepts `aside`. The starter and
+  brand-kit stylesheets style the body blocks an article names by id inside
+  `.prose`: `#answer-box` (a bordered note, for a collection without
+  `short_answer`), `#detailed-answer`, `#clock-to-watch` (a highlighted
+  deadline note), `#cta` and `#disclaimer`, and both article designs show
+  them. `system.css`, the designs and an installed site's files are authored
+  source: no upgrade or starter sync writes them, so an existing system adds
+  the styles and an existing site takes the route, policy and docs changes
+  by hand.
+
 - Show a hosted system's release label on its stock pages when `timds.json`
   declares no version. The viewer builds each sentence holding `{{version}}`
   (the app bar's `v{{version}}` chip, the Use card's glyph, the Install

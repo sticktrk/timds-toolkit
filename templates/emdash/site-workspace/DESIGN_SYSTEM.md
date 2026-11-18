@@ -148,6 +148,11 @@ ported into an Astro route by hand instead (see the rules below).
   `button--secondary`. A route whose classes the system's stylesheets do not
   declare has no port to this system yet; port it with the
   `timds-update-design-system` skill.
+- An article body may name its blocks by `id`: `answer-box`,
+  `detailed-answer`, `clock-to-watch`, `cta` and `disclaimer`
+  (`docs/article-presentation.md`). The system styles them inside `prose` by
+  those ids; a system whose stylesheet lacks those rules shows them as plain
+  text until the rules are added to the system.
 - The collection, field and taxonomy slugs in `seed/seed.json` are the
   contract writers target (`docs/content-api.md`). Renaming one breaks them.
 - `.timds/emdash.json` records the TimDS template version and a hash of

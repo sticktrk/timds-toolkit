@@ -4,10 +4,9 @@
       <li><a href="/topics/example-topic">Example topic</a></li>
     </ul>
     <h1>What an article can hold</h1>
-    <p>The summary field, one or two sentences. It sits under the title here and on every card that lists the article.</p>
     <div class="article-meta"><time datetime="2026-11-02">2 November 2026</time> · <span>By Author Name</span></div>
     <div class="article-meta">Updated <time datetime="2026-11-03">3 November 2026</time></div>
-    <div class="article-note"><strong>Short answer</strong><p>The header can display a separate plain-text answer.</p></div>
+    <div class="article-note"><strong>Short answer</strong><p>The short answer field, in plain text. When an article has one, it takes the summary's place under the title, and the summary still describes the article on every card that lists it.</p></div>
     <img src="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2016%209'%20width='1600'%20height='900'%3E%3C/svg%3E" alt="Placeholder for the article's cover image" width="1600" height="900">
   </header>
 
@@ -50,6 +49,12 @@
           <ol class="article-steps"><li>Describe the first step.</li><li>Explain what comes next.</li></ol>
           <ul class="article-risks"><li>Point out a risk that may change the reader’s decision.</li></ul>
         </section>
+        <h2>Named blocks</h2>
+        <p>A question-and-answer article names a few of its blocks by <code>id</code>, and the system styles each one without a class. A deadline note sits where the text reaches it:</p>
+        <aside id="clock-to-watch">
+          <p><strong>Clock to watch:</strong> A deadline or a time limit the reader must not miss, in a sentence or two.</p>
+        </aside>
+        <p>The call to action and the disclaimer close the body, after the table below.</p>
         <h2>Tables</h2>
         <p>A table has a header row, and sits in a wrapper that scrolls when the table is wider than the screen. This one lists every element above:</p>
         <div class="table-scroll">
@@ -72,6 +77,13 @@
           </tbody>
         </table>
         </div>
+        <section id="cta">
+          <h2>Talk to the team</h2>
+          <p>The closing call to action: one short paragraph that says what to do next, with <a href="/contact">a link to the contact page</a>.</p>
+        </section>
+        <section id="disclaimer">
+          <p><strong>Disclaimer:</strong> Small print that applies to the whole article, such as its limits as general information.</p>
+        </section>
       </div>
       <aside class="article-note" aria-label="Related guide">
         <strong>Related guide</strong>

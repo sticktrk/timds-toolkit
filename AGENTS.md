@@ -238,6 +238,11 @@ four-field Portable Text model. Shared schema capacity is 144 physical fields
 across sixteen sections. Hosted fresh creation selects the HTML profile; no
 existing-site schema migration or compatibility adapter is supplied.
 Hosted discovery must acknowledge the installed template and capabilities.
+Template 9 shows the Short answer card in place of the summary line, raises
+the article HTML policy to version 2 (`aside`), and names the
+question-and-answer body blocks (`answer-box`, `detailed-answer`,
+`clock-to-watch`, `cta`, `disclaimer`); both stock `system.css` files style
+them by id inside `.prose` and both article designs show them.
 Keep package `emdashWorkspaceContract: 3`, `emdashSectionsContract: 2` and
 `emdashCompositionContract: 1` in step with these exports. See
 `docs/emdash.md` for the existing-database boundary.

@@ -502,6 +502,13 @@ Portable Text `body`. Nonempty `body_html` renders with its original bytes
 when it passes the site's policy. Missing, blank or rejected HTML uses the
 Portable Text body. The stock regions hide duplicate answer and related-guide
 cards when the rendered HTML already contains the answer box or guide link.
+From template 9 the Short answer card takes the summary's place under the
+title, HTML policy version 2 accepts `aside`, and the stock Design System
+styles the blocks a question-and-answer body names by id (`answer-box`,
+`detailed-answer`, `clock-to-watch`, `cta`, `disclaimer`) inside `.prose`. A
+site installed from an earlier template takes these changes by hand: the
+route, `src/lib/articles/html.ts`, the two docs, and the block styles in its
+Design System's `src/styles/system.css`.
 Article regions and structured metadata are site-owned source. Read the
 site's `docs/article-presentation.md` and `docs/content-api.md` before authoring
 these components. A guide uses its pipeline's selected section and prefix;

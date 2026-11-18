@@ -17,11 +17,19 @@ follow them and verify their classes in each division where they render.
 | Region | Placement and use |
 | --- | --- |
 | `Head.astro` | Additional head metadata. The route emits the canonical link and the Article and breadcrumb objects. |
-| `Header.astro` | Below the summary and byline. The stock component shows the plain-text answer unless the rendered HTML already contains `<section id="answer-box">`. It shows the updated date when it differs from the publication date. |
+| `Header.astro` | Below the title and byline. The stock component shows the plain-text answer in a Short answer card unless the rendered HTML already contains `<section id="answer-box">`. It shows the updated date when it differs from the publication date. |
 | `BeforeBody.astro` | Above the prose. The stock component displays the approved video player when the entry has a valid `video_id`. |
 | `WithinBody.astro` | Between complete top-level HTML nodes or Portable Text block groups. Use an authored link or call to action. |
 | `AfterBody.astro` | Below the prose. The stock component shows the related guide when its title and path are valid and the rendered HTML has no link to that path. This is also a place for an author card or footer disclaimer. |
 | `Sidebar.astro` | Beside the body on a wide screen when the component renders an `aside`. Put an authored contact prompt or form here. |
+
+The route shows the summary under the title only when the Short answer
+card does not show: the entry has no `short_answer`, or the rendered HTML
+contains `<section id="answer-box">`. The summary stays the meta description
+and the line on every card in both cases. The route repeats the stock
+`Header.astro` rule to decide this. A site that changes when its header shows
+the answer changes `showsShortAnswer` in `src/routes/articles/entry.astro`
+with it.
 
 Enable an in-body region by setting `withinBody: 0.25` in
 `articlePresentation`. The route finds the closest interior boundary to a
@@ -57,14 +65,35 @@ bylines by default. To credit the configured organization as author, set
 `author: "organization"`. Breadcrumbs use the home page, the section label
 and the current entry. All addresses use the public site origin.
 
-## HTML policy version 1
+## Named body blocks
+
+A question-and-answer article names its blocks by `id`. The Design System
+styles these IDs inside the prose wrapper, so the body needs no class for
+them. Each ID is optional and appears once in a body.
+
+| ID | Element | Presentation |
+| --- | --- | --- |
+| `answer-box` | `section` | The answer, as a bordered note at the top of the body. A body has one only when the collection does not declare `short_answer`; otherwise send the answer in that field and leave the section out. |
+| `detailed-answer` | `section` | The main text. Its headings, paragraphs, lists and tables keep the prose spacing. |
+| `clock-to-watch` | `aside` or `div` | A highlighted note for a deadline or time limit. It can sit inside `detailed-answer`. |
+| `cta` | `section` | The closing call to action, as a bordered block with its own heading. |
+| `disclaimer` | `section` | Small, muted text under a rule at the end of the body. |
+
+The styles are in the site layout block of the Design System's
+`src/styles/system.css`, selected as `.prose #cta` and so on. A site-owned
+region such as `AfterBody.astro` still renders outside the body and can add
+an author card or the site's own disclaimer.
+
+## HTML policy version 2
+
+Version 2 adds the `aside` element to version 1 and changes nothing else.
 
 Keep HTML as a fragment. Use explicit closing tags for non-void elements,
 including list items. The policy accepts up to 1 MiB of UTF-8 source with up
 to 64 levels of nesting. Escape literal angle brackets in text. Use the
 entry's title field for its `h1`.
 
-- Structure and text elements: `div`, `section`, `h2`–`h6`, `p`, `br`, `hr`,
+- Structure and text elements: `div`, `section`, `aside`, `h2`–`h6`, `p`, `br`, `hr`,
   `span`, `strong`, `b`, `em`, `i`, `small`, `mark`, `s`, `sub`, `sup`,
   `abbr`, `code`, `pre`, `kbd`, `time`, `cite`, `blockquote`, `q` and `a`.
 - Lists and tables: `ol`, `ul`, `li`, `dl`, `dt`, `dd`, `table`, `caption`,
