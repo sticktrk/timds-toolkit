@@ -295,7 +295,7 @@ test("remote mode takes systemId and version, serves the host's media and pins, 
       if (version && version !== layer.system.version) throw new Error(`version ${version} not found`);
       return {
         layer,
-        media: { assets: [
+        media: { truncated: true, assets: [
           { key: "hero-wide", title: "Hero", kind: "video", tags: ["b-roll", "hero"], publicUrl: "https://cdn.example/hero.mp4" },
           { key: "office", title: "Office", kind: "image", tags: ["photo"], publicUrl: "https://cdn.example/office.jpg" },
         ] },
@@ -346,6 +346,9 @@ test("remote mode takes systemId and version, serves the host's media and pins, 
   assert.equal(media.catalog, true);
   assert.equal(media.total, 1);
   assert.equal(media.assets[0].key, "hero-wide");
+  const noMatch = await ok(client, "list_media", { systemId, tag: "unseen" });
+  assert.equal(noMatch.returned, 0);
+  assert.equal(noMatch.truncated, true);
   assert.equal((await ok(client, "list_media", { systemId, kind: "image" })).assets[0].key, "office");
   assert.equal((await ok(client, "list_media", { systemId })).total, 2);
 
