@@ -1406,7 +1406,10 @@ it.
 `TIMDS_PORTAL_URL` set serves the hosted editing tools, and `timds mcp read
 --draft NAME --system-id ID --portal-url URL` serves a draft's derived layer.
 `consumer init` registers the host's `timds-design-system-read` HTTP MCP
-server in `.mcp.json`. Its client authorizes at the selected host.
+server in `.mcp.json`. Its client authorizes at the selected host. For an
+existing portal connector, run `consumer init --portal-url HOST` and authorize
+your own client again. An ordinary toolkit upgrade keeps the legacy endpoint
+until the owner selects the replacement host.
 
 Running and administering a host is documented in the host repository, not
 here; see [docs/hosted-operations-moved.md](docs/hosted-operations-moved.md).

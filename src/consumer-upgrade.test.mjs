@@ -223,8 +223,21 @@ test("upgrade applies the entry rules to launch and MCP entries and keeps foreig
   assert.equal(forcedLaunch.configurations[1].port, 4321);
   const forcedMcp = await readJson(mcpPath);
   assert.deepEqual(forcedMcp.mcpServers.other, foreignServer);
-  assert.deepEqual(forcedMcp.mcpServers["timds-design-system-read"].headers, { Authorization: "Bearer ${TIMDS_ACCESS_TOKEN}" });
+  assert.equal(forcedMcp.mcpServers["timds-design-system-read"].headers, undefined);
   assert.equal(forcedMcp.mcpServers["timds-design-system-read"].url, "https://portal.example.test/api/timds/mcp");
+
+  const serverName = "timds-design-system-read";
+  const legacy = { type: "http", url: "https://portal.example.test/api/timds/mcp/read", headers: { Authorization: "Bearer ${TIMDS_ACCESS_TOKEN}" } };
+  forcedMcp.mcpServers[serverName] = legacy;
+  await writeJson(mcpPath, forcedMcp);
+  const previous = await readJson(installationPath);
+  previous.consumer.mcpServers[serverName] = sha256(JSON.stringify(legacy));
+  await writeJson(installationPath, previous);
+  await upgradeConsumer(product, { output: quiet });
+  assert.deepEqual((await readJson(mcpPath)).mcpServers[serverName], legacy);
+  await initializeConsumer(product, { skipInstall: true, portalUrl: "https://host.example.test", output: quiet });
+  assert.deepEqual((await readJson(mcpPath)).mcpServers[serverName], { type: "http", url: "https://host.example.test/api/timds/mcp" });
+
 });
 
 test("upgrade refuses a consumer that was never initialized", async (t) => {
