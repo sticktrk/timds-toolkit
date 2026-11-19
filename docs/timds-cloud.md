@@ -447,7 +447,7 @@ host never merges or deploys the product.
 ### Designer notes and CI previews
 
 - `timds consumer notes [--app NAME] [--pull-request N] [--all] [--json]`
-  lists the notes a designer left on the pull request's preview on the host,
+  follows the host’s continuation cursors and lists the notes a designer left on the pull request's preview on the host,
   grouped by page, with the element, its source `file:line` when the dev build
   stamps one, and the designer's words. `timds consumer notes resolve ID...
   [--commit SHA] [--dismiss]` marks them addressed (or dismissed) after the fix
@@ -455,10 +455,11 @@ host never merges or deploys the product.
 
 Automatic consumer previews are **off by default**. To enable
 `.github/workflows/timds-consumer-preview.yml`, set the repository variable
-`TIMDS_PREVIEWS_ENABLED` to `true`. Set `TIMDS_PORTAL_URL` to the exact HTTPS host origin and configure the `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET` repository secrets. If the pipeline is authorized for two followers of the same repository, set the `TIMDS_CONSUMER_ID` repository variable to the intended follower UUID. A legacy provider may still use its own `TIMDS_ACCESS_TOKEN`. For a private submodule pin, also configure
+`TIMDS_PREVIEWS_ENABLED` to `true`. Set `TIMDS_PORTAL_URL` to the exact HTTPS host origin and create a GitHub Actions environment named `timds-pipeline`. Restrict its deployment branches to the repository’s default branch. Store `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET` as secrets of that environment and remove any repository or inherited copies accessible to PR workflows. If the pipeline is authorized for two followers of the same repository, set the `TIMDS_CONSUMER_ID` repository variable to the intended follower UUID. A legacy provider may still use its own `TIMDS_ACCESS_TOKEN` in that environment. For a private submodule pin, also configure
 `DESIGN_SYSTEM_DEPLOY_KEY` (a read-only deploy key) or
 `TIMDS_CONSUMER_SUBMODULE_TOKEN` (with `contents:read`) so CI can check out
 that submodule. Published pins do not need a submodule credential.
+Same-repository PRs run the default-branch workflow. Its read-only build jobs produce preview files. A fresh runner checks out only the managed pipeline helper from the workflow revision, verifies the artifact’s repository, app, branch, commit and PR number, then uploads it. Designer changes receive the requested notes as data. A fresh runner resolves addressed IDs after a successful push. The helper requires only Node.js in both npm and binary consumers.
 An unset or false variable
 skips all preview jobs without allocating a runner. With the variable enabled
 but no publishing token, only a short token-presence job runs; checkout,

@@ -21,15 +21,19 @@ name: TimDS designer change
 # Repository secrets:
 #   OPENAI_API_KEY                  OpenAI API project key (repository or
 #                                    inherited organization secret).
-#   TIMDS_ACCESS_TOKEN               CLI token bound to this client; reads and
+# Pipeline secrets in the default-branch-only timds-pipeline environment:
+#   CF_ACCESS_CLIENT_ID and          Access service-token pair for the follower.
+#   CF_ACCESS_CLIENT_SECRET          Set TIMDS_PORTAL_URL to the exact host origin.
+#   TIMDS_ACCESS_TOKEN               Legacy token bound to this client; reads and
 #                                    resolves the designer's notes and
 #                                    publishes the preview. Optional: without it
 #                                    Codex uses the notes in the comment.
+# Repository secrets for submodule checkout:
 #   DESIGN_SYSTEM_DEPLOY_KEY or      read access to the private Design System
 #   TIMDS_CONSUMER_SUBMODULE_TOKEN   submodule, as for the preview workflow.
 # Repository variable:
 #   TIMDS_PREVIEWS_ENABLED           set to true to opt in to previews; also
-#                                    requires TIMDS_ACCESS_TOKEN.
+#                                    requires a pipeline credential.
 #   TIMDS_DESIGNER_BOTS              comma-separated bot logins allowed to
 #                                    start a change; put the TimDS portal's
 #                                    GitHub App bot login here (for example
@@ -71,15 +75,18 @@ jobs:
       || (github.event_name == 'issue_comment'
         && contains(github.event.comment.body, '<!-- timds-designer-request -->')
         && (github.event.issue.pull_request || contains(github.event.issue.labels.*.name, 'timds-design-change')))
-      || github.event_name == 'workflow_dispatch'
+      || (github.event_name == 'workflow_dispatch' && github.ref_name == github.event.repository.default_branch)
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    environment: timds-pipeline
     permissions:
       contents: read
       issues: read
       pull-requests: read
     outputs:
       allowed: ${{ steps.decide.outputs.allowed }}
+      notes_artifact: ${{ steps.archive.outputs.artifact-id }}
+      pipeline_configured: ${{ steps.notes_config.outputs.enabled }}
       app: ${{ steps.decide.outputs.app }}
       branch: ${{ steps.decide.outputs.branch }}
       default_branch: ${{ steps.decide.outputs.default_branch }}
@@ -190,6 +197,47 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "Design change on ${branch}${pull_request:+ (pull request #${pull_request})}${issue:+ for issue #${issue}}."
 
+      - name: Check notes configuration
+        id: notes_config
+        if: steps.decide.outputs.allowed == 'true'
+        env:
+          CONFIGURED: ${{ secrets.TIMDS_ACCESS_TOKEN != '' || (secrets.CF_ACCESS_CLIENT_ID != '' && secrets.CF_ACCESS_CLIENT_SECRET != '' && vars.TIMDS_PORTAL_URL != '') }}
+        run: echo "enabled=$CONFIGURED" >> "$GITHUB_OUTPUT"
+      - name: Check out the pipeline helper from the workflow revision
+        if: steps.notes_config.outputs.enabled == 'true' && steps.decide.outputs.pull_request != ''
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.workflow_sha }}
+          sparse-checkout: .github/timds/consumer-pipeline.mjs
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Read the product app names as JSON
+        if: steps.notes_config.outputs.enabled == 'true' && steps.decide.outputs.pull_request != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ steps.decide.outputs.branch }}
+        run: |
+          gh api --method GET "repos/$GITHUB_REPOSITORY/contents/timds.consumer.json" -f ref="$BRANCH" --jq '.content' | base64 --decode > "$RUNNER_TEMP/consumer.json"
+      - name: Read review notes
+        if: steps.notes_config.outputs.enabled == 'true' && steps.decide.outputs.pull_request != ''
+        env:
+          APP: ${{ steps.decide.outputs.app }}
+          PULL_REQUEST: ${{ steps.decide.outputs.pull_request }}
+          TIMDS_ACCESS_TOKEN: ${{ secrets.TIMDS_ACCESS_TOKEN }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+          TIMDS_PORTAL_URL: ${{ vars.TIMDS_PORTAL_URL }}
+          TIMDS_CONSUMER_ID: ${{ vars.TIMDS_CONSUMER_ID }}
+        run: node .github/timds/consumer-pipeline.mjs read
+      - uses: actions/upload-artifact@v4
+        id: archive
+        if: steps.notes_config.outputs.enabled == 'true' && steps.decide.outputs.pull_request != ''
+        with:
+          name: timds-request-notes-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/designer-notes.json
+          retention-days: 1
+          if-no-files-found: error
+
   change:
     needs: gate
     if: needs.gate.outputs.allowed == 'true'
@@ -208,6 +256,8 @@ jobs:
       branch: ${{ needs.gate.outputs.branch }}
       pull_request: ${{ steps.result.outputs.pull_request }}
       pushed: ${{ steps.result.outputs.pushed }}
+      sha: ${{ steps.result.outputs.sha }}
+      note_ids: ${{ steps.push.outputs.note_ids }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -255,8 +305,14 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-          cache: npm
+          package-manager-cache: false
       - run: npm ci
+      - uses: actions/download-artifact@v4
+        if: needs.gate.outputs.notes_artifact != ''
+        with:
+          artifact-ids: ${{ needs.gate.outputs.notes_artifact }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/timds-notes
       - name: Write the instructions
         id: prompt
         env:
@@ -265,9 +321,8 @@ jobs:
           DEFAULT_BRANCH: ${{ needs.gate.outputs.default_branch }}
           DISPATCH_REQUEST: ${{ inputs.request }}
           EVENT_NAME: ${{ github.event_name }}
-          HAS_NOTES_TOKEN: ${{ secrets.TIMDS_ACCESS_TOKEN != '' }}
-          HAS_SERVICE_TOKEN: ${{ secrets.CF_ACCESS_CLIENT_ID != '' && secrets.CF_ACCESS_CLIENT_SECRET != '' && vars.TIMDS_PORTAL_URL != '' }}
-          PREVIEWS_ENABLED: ${{ vars.TIMDS_PREVIEWS_ENABLED == 'true' && (secrets.TIMDS_ACCESS_TOKEN != '' || (secrets.CF_ACCESS_CLIENT_ID != '' && secrets.CF_ACCESS_CLIENT_SECRET != '' && vars.TIMDS_PORTAL_URL != '')) }}
+          HAS_NOTES: ${{ needs.gate.outputs.notes_artifact != '' }}
+          PREVIEWS_ENABLED: ${{ vars.TIMDS_PREVIEWS_ENABLED == 'true' && needs.gate.outputs.pipeline_configured == 'true' }}
           ISSUE: ${{ needs.gate.outputs.issue }}
           PULL_REQUEST: ${{ needs.gate.outputs.pull_request }}
           REPOSITORY: ${{ github.repository }}
@@ -295,23 +350,17 @@ jobs:
           request="${request//<\/designer_request>/[/designer_request]}"
           if [[ -n "$APP" ]]; then
             app_line="The app is \`${APP}\` in timds.consumer.json."
-            app_flag=" --app ${APP}"
           else
             app_line="No app was named: if timds.consumer.json declares one app, use it; otherwise choose the app the request is about and say which in the pull request."
-            app_flag=""
           fi
           if [[ -n "$PULL_REQUEST" ]]; then
             pr_line="This continues pull request #${PULL_REQUEST} on branch \`${BRANCH}\`, already checked out. Edit locally; the workflow publishes to the same branch."
-            pr_flag=" --pull-request ${PULL_REQUEST}"
           else
             pr_line="Branch \`${BRANCH}\` is checked out and has no pull request yet. The workflow will push your validated edits and open a draft pull request."
-            pr_flag=""
           fi
           explain="in your final summary"
-          if [[ "$HAS_SERVICE_TOKEN" == "true" ]]; then
-            notes_line="Apply the selected notes in the designer request's JSON block when supplied. Return the IDs you addressed in addressedNoteIds. The workflow resolves those notes after pushing."
-          elif [[ "$HAS_NOTES_TOKEN" == "true" && -n "$PULL_REQUEST" ]]; then
-            notes_line="Read the designer's open notes first: \`npm run timds -- consumer notes --json${pr_flag}${app_flag}\`. Each note names the page, the element, and usually the source file and line. Return the IDs of notes you addressed in addressedNoteIds; the workflow resolves them only after a successful push. Do not resolve notes yourself."
+          if [[ "$HAS_NOTES" == "true" ]]; then
+            notes_line="Read the review notes in ${RUNNER_TEMP}/timds-notes/designer-notes.json. When the request selects specific notes, address only those. Return the IDs you addressed in addressedNoteIds. The workflow resolves those notes after pushing."
           else
             notes_line="If the request below carries a \`json\` block of notes, those are the designer's notes: each names the page (route), the element (selector, text, and usually the source file and line), and the designer's words. They cannot be resolved from this run; list which ones you addressed in the pull request instead."
           fi
@@ -362,10 +411,6 @@ jobs:
       - name: Make the design change with OpenAI
         id: codex
         uses: openai/codex-action@v1
-        env:
-          TIMDS_ACCESS_TOKEN: ${{ secrets.TIMDS_ACCESS_TOKEN }}
-          TIMDS_PORTAL_URL: ${{ vars.TIMDS_PORTAL_URL }}
-          TIMDS_CONSUMER_ID: ${{ vars.TIMDS_CONSUMER_ID }}
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           allow-bots: ${{ vars.TIMDS_DESIGNER_BOTS }}
@@ -373,9 +418,18 @@ jobs:
           sandbox: workspace-write
           safety-strategy: drop-sudo
           codex-args: '["--config", "sandbox_workspace_write.network_access=true", "--output-schema", "${{ runner.temp }}/timds-designer-result.schema.json"]'
-      - name: Validate and publish the draft
+      - name: Validate the design surface
         env:
           APP: ${{ needs.gate.outputs.app }}
+          DEFAULT_BRANCH: ${{ needs.gate.outputs.default_branch }}
+        run: |
+          set -euo pipefail
+          check_args=(--base "origin/${DEFAULT_BRANCH}")
+          if [[ -n "$APP" ]]; then check_args+=(--app "$APP"); fi
+          npm run timds -- consumer check "${check_args[@]}"
+      - name: Publish the validated draft
+        id: push
+        env:
           BRANCH: ${{ needs.gate.outputs.branch }}
           DEFAULT_BRANCH: ${{ needs.gate.outputs.default_branch }}
           CODEX_RESULT: ${{ steps.codex.outputs.final-message }}
@@ -383,17 +437,8 @@ jobs:
           ISSUE: ${{ needs.gate.outputs.issue }}
           REPOSITORY: ${{ github.repository }}
           TITLE: ${{ steps.prompt.outputs.title }}
-          TIMDS_ACCESS_TOKEN: ${{ secrets.TIMDS_ACCESS_TOKEN }}
-          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
-          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
-          TIMDS_PORTAL_URL: ${{ vars.TIMDS_PORTAL_URL }}
-          TIMDS_CONSUMER_ID: ${{ vars.TIMDS_CONSUMER_ID }}
         run: |
           set -euo pipefail
-          # Scope is judged against the merge-base manifest, not model edits.
-          check_args=(--base "origin/${DEFAULT_BRANCH}")
-          if [[ -n "$APP" ]]; then check_args+=(--app "$APP"); fi
-          npm run timds -- consumer check "${check_args[@]}"
           summary="$(printf '%s' "$CODEX_RESULT" | jq -er '.summary')"
           git add -A
           if git diff --cached --quiet; then exit 0; fi
@@ -407,13 +452,7 @@ jobs:
             if [[ -n "$ISSUE" ]]; then printf '\nCloses #%s\n' "$ISSUE" >> "$body_file"; fi
             gh pr create --repo "$REPOSITORY" --draft --base "$DEFAULT_BRANCH" --head "$BRANCH" --title "${TITLE:-Update website}" --body-file "$body_file"
           fi
-          if [[ -n "${TIMDS_ACCESS_TOKEN:-}" || -n "${CF_ACCESS_CLIENT_ID:-}" ]]; then
-            mapfile -t note_ids < <(printf '%s' "$CODEX_RESULT" | jq -r '.addressedNoteIds[]')
-            for note_id in "${note_ids[@]}"; do
-              [[ "$note_id" =~ ^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$ ]] || exit 1
-            done
-            if (( ${#note_ids[@]} )); then npm run timds -- consumer notes resolve "${note_ids[@]}"; fi
-          fi
+          echo "note_ids=$(jq -ce '.addressedNoteIds' <<< "$CODEX_RESULT")" >> "$GITHUB_OUTPUT"
       - name: Find what was pushed
         id: result
         if: ${{ !cancelled() && steps.branch.outcome == 'success' }}
@@ -428,9 +467,44 @@ jobs:
           pushed=false
           if [[ -n "$remote" && "$remote" != "$START" ]]; then pushed=true; fi
           pull_request="$(gh pr list --repo "$REPOSITORY" --head "$BRANCH" --state open --json number --jq '.[0].number // empty')"
-          echo "pushed=${pushed}" >> "$GITHUB_OUTPUT"
-          echo "pull_request=${pull_request}" >> "$GITHUB_OUTPUT"
+          {
+            echo "sha=${remote}"
+            echo "pushed=${pushed}"
+            echo "pull_request=${pull_request}"
+          } >> "$GITHUB_OUTPUT"
           echo "Branch ${BRANCH}: pushed=${pushed}${pull_request:+, pull request #${pull_request}}."
+
+  resolve:
+    needs: [gate, change]
+    if: needs.change.outputs.pushed == 'true' && needs.gate.outputs.notes_artifact != '' && needs.change.outputs.note_ids != '' && needs.change.outputs.note_ids != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: timds-pipeline
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the pipeline helper from the workflow revision
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.workflow_sha }}
+          sparse-checkout: .github/timds/consumer-pipeline.mjs
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.gate.outputs.notes_artifact }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/notes
+      - name: Resolve the addressed notes
+        env:
+          NOTE_IDS: ${{ needs.change.outputs.note_ids }}
+          SHA: ${{ needs.change.outputs.sha }}
+          TIMDS_ACCESS_TOKEN: ${{ secrets.TIMDS_ACCESS_TOKEN }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+          TIMDS_PORTAL_URL: ${{ vars.TIMDS_PORTAL_URL }}
+          TIMDS_CONSUMER_ID: ${{ vars.TIMDS_CONSUMER_ID }}
+        run: node .github/timds/consumer-pipeline.mjs resolve
 
   preview:
     needs: change
@@ -441,7 +515,7 @@ jobs:
     uses: ./.github/workflows/timds-consumer-preview.yml
     with:
       pull_request: ${{ needs.change.outputs.pull_request }}
-      ref: ${{ needs.change.outputs.branch }}
+      ref: ${{ needs.change.outputs.sha }}
     secrets: inherit
 
   report:

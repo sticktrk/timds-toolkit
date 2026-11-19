@@ -69,7 +69,8 @@ import { WORKSPACE_PIN_MODE } from "./workspace-site.mjs";
 import { createPreviewServer, execute, loadWorkspace, workspaceCommandEnvironment } from "./core.mjs";
 import { buildDesigns } from "./designs.mjs";
 import { escapeHtml } from "./html.mjs";
-import { portalEndpoint } from "./media.mjs";
+import { pipelineHeaders, uploadPreview, PREVIEW_LIMITS, scanPreviewTree } from "./consumer-pipeline.mjs";
+export { CONSUMER_PREVIEWS_PATH, PREVIEW_METADATA_HEADER, PREVIEW_LIMITS, previewMetadataHeader, scanPreviewTree } from "./consumer-pipeline.mjs";
 
 export const PREVIEW_SCHEMA_VERSION = 1;
 export const PREVIEW_VIEWPORTS = Object.freeze({
@@ -77,20 +78,8 @@ export const PREVIEW_VIEWPORTS = Object.freeze({
   tablet: Object.freeze({ width: 1024, height: 768 }),
   phone: Object.freeze({ width: 390, height: 844 }),
 });
-export const CONSUMER_PREVIEWS_PATH = "/api/timds/consumer-previews";
-export const PREVIEW_METADATA_HEADER = "x-timds-build-metadata";
 const DEFAULT_PORTAL_URL = "https://timds.com";
 const DEFAULT_READY_TIMEOUT_MS = 120_000;
-
-// The same limits `validateArtifact` applies to a Design System build, so the
-// portal's draft-build intake accepts what this writes.
-export const PREVIEW_LIMITS = Object.freeze({
-  maxDepth: 20,
-  maxFileBytes: 12_000_000,
-  maxFiles: 2_000,
-  maxScannedEntries: 5_000,
-  maxTotalBytes: 80_000_000,
-});
 
 const PREVIEW_HELP = `Usage:
   timds consumer preview [--app NAME] [--root PATH] [--output DIR] [--no-install] [--base REF]
@@ -158,7 +147,7 @@ async function gitValue(args, cwd) {
 async function repositoryProvenance(repoRoot, env) {
   const repository = normalizeRepository(await gitValue(["remote", "get-url", "origin"], repoRoot))
     || normalizeRepository(env.GITHUB_REPOSITORY ? `https://github.com/${env.GITHUB_REPOSITORY}` : "");
-  const headRef = String(env.GITHUB_HEAD_REF || "").trim();
+  const headRef = String(env.TIMDS_PREVIEW_BRANCH || env.GITHUB_HEAD_REF || "").trim();
   const branch = headRef
     || await gitValue(["symbolic-ref", "--quiet", "--short", "HEAD"], repoRoot)
     || (/^\d+\/merge$/.test(String(env.GITHUB_REF_NAME || "")) ? null : String(env.GITHUB_REF_NAME || "").trim() || null);
@@ -172,45 +161,6 @@ function timestamp(date) {
 
 // ---------------------------------------------------------------------------
 // Files
-
-/**
- * Walk `root` with the artifact limits (depth, entry count, per-file and total
- * bytes, file count) and refuse symbolic links. Returns relative file paths.
- */
-export async function scanPreviewTree(root, label = root, limits = PREVIEW_LIMITS) {
-  const rootInfo = await fs.lstat(root).catch((error) => {
-    if (error?.code === "ENOENT") throw new Error(`${label} does not exist`);
-    throw error;
-  });
-  if (rootInfo.isSymbolicLink() || !rootInfo.isDirectory()) throw new Error(`${label} must be a real directory`);
-  const files = [];
-  let scanned = 0;
-  let totalBytes = 0;
-  const walk = async (directory, depth) => {
-    if (depth > limits.maxDepth) throw new Error(`${label} exceeds the directory depth limit of ${limits.maxDepth}`);
-    const entries = (await fs.readdir(directory, { withFileTypes: true })).sort((left, right) => left.name.localeCompare(right.name));
-    for (const entry of entries) {
-      scanned += 1;
-      if (scanned > limits.maxScannedEntries) throw new Error(`${label} contains more than ${limits.maxScannedEntries} entries`);
-      const absolutePath = path.join(directory, entry.name);
-      const relativePath = path.relative(root, absolutePath).split(path.sep).join("/");
-      const info = await fs.lstat(absolutePath);
-      if (info.isSymbolicLink()) throw new Error(`${label} cannot contain symbolic links (${relativePath})`);
-      if (info.isDirectory()) {
-        await walk(absolutePath, depth + 1);
-        continue;
-      }
-      if (!info.isFile()) continue;
-      if (info.size > limits.maxFileBytes) throw new Error(`${label}/${relativePath} exceeds the ${limits.maxFileBytes}-byte file limit`);
-      totalBytes += info.size;
-      if (totalBytes > limits.maxTotalBytes) throw new Error(`${label} exceeds the ${limits.maxTotalBytes}-byte total limit`);
-      if (files.length >= limits.maxFiles) throw new Error(`${label} contains more than ${limits.maxFiles} files`);
-      files.push({ bytes: info.size, path: relativePath });
-    }
-  };
-  await walk(root, 0);
-  return { files, totalBytes };
-}
 
 async function copyPreviewTree(source, destination, label) {
   const { files } = await scanPreviewTree(source, label);
@@ -1577,86 +1527,16 @@ export async function buildConsumerPreview(consumer, app, options = {}) {
 // ---------------------------------------------------------------------------
 // Publish
 
-/**
- * The metadata header: `preview.json` without the per-route detail, the
- * changed-file list, or the dropped-file list (which travel in the archive
- * and could exceed HTTP header limits), plus counts, base64-encoded JSON like
- * the draft-build upload header.
- */
-export function previewMetadataHeader(preview) {
-  const { routes = [], compare = null, dropped: _dropped, ...rest } = preview;
-  const metadata = {
-    ...rest,
-    compare: compare ? { base: compare.base, baseCommit: compare.baseCommit, status: compare.status } : null,
-    changedRouteCount: preview.changedRouteCount ?? 0,
-    routeCount: routes.length,
-    captureCount: routes.reduce((sum, route) => sum + (route.captures?.length || 0), 0),
-    designRouteCount: routes.filter((route) => route.design?.captures?.length).length,
-  };
-  return Buffer.from(JSON.stringify(metadata), "utf8").toString("base64");
-}
-
-/** Use the pipeline's service-token pair only on its configured HTTPS host. */
 export async function previewAuthHeaders(portalUrl, options = {}) {
   const env = options.env || process.env;
-  const id = env.CF_ACCESS_CLIENT_ID, secret = env.CF_ACCESS_CLIENT_SECRET;
-  const follower = env.TIMDS_CONSUMER_ID ? { "X-TimDS-Consumer-ID": env.TIMDS_CONSUMER_ID } : {};
-  const version = { "X-TimDS-API-Version": "1", ...follower };
-  if (id || secret) {
-    const url = new URL(portalUrl);
-    if (!id || !secret || url.protocol !== "https:" || url.origin !== env.TIMDS_PORTAL_URL || url.username || url.password) {
-      throw new Error("Set both Access service-token variables and TIMDS_PORTAL_URL to the exact HTTPS host origin");
-    }
-    return { ...version, "CF-Access-Client-Id": id, "CF-Access-Client-Secret": secret };
-  }
-  const token = await resolveAccessToken(portalUrl, options);
-  if (!token) throw new Error("Set the Access service-token pair for this follower, or use its provider’s TIMDS_ACCESS_TOKEN");
-  return { ...version, Authorization: `Bearer ${token}` };
+  const token = env.CF_ACCESS_CLIENT_ID || env.CF_ACCESS_CLIENT_SECRET ? null : await resolveAccessToken(portalUrl, options);
+  return pipelineHeaders(portalUrl, env, token);
 }
 
-/** Tar and gzip `outputDir` and post it to the portal; returns `{ previewUrl }`. */
 export async function publishConsumerPreview(outputDir, options = {}) {
-  const root = path.resolve(outputDir);
-  let preview;
-  try {
-    preview = JSON.parse(await fs.readFile(path.join(root, "preview.json"), "utf8"));
-  } catch {
-    throw new Error(`${root}/preview.json is missing or invalid; run \`timds consumer preview\` first`);
-  }
-  await scanPreviewTree(root, "The preview");
   const portalUrl = options.portalUrl || process.env.TIMDS_PORTAL_URL || DEFAULT_PORTAL_URL;
   const headers = await previewAuthHeaders(portalUrl, options);
-  const fetchImpl = options.fetchImpl || fetch;
-  const workDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "timds-consumer-preview-"));
-  try {
-    const archivePath = path.join(workDirectory, "preview.tar.gz");
-    await execute(["tar", "-czf", archivePath, "-C", root, "."], {
-      capture: true,
-      env: { ...process.env, COPYFILE_DISABLE: "1" },
-    });
-    const body = await fs.readFile(archivePath);
-    const url = portalEndpoint(portalUrl, CONSUMER_PREVIEWS_PATH);
-    const response = await fetchImpl(url, {
-      body,
-      headers: {
-        Accept: "application/json",
-        ...headers,
-        "Content-Type": "application/gzip",
-        [PREVIEW_METADATA_HEADER]: previewMetadataHeader(preview),
-      },
-      method: "POST",
-      redirect: "error",
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      throw new Error(`Publishing the preview failed (${response.status}): ${String(payload.error || payload.message || response.statusText || "no detail")}`);
-    }
-    const previewUrl = String(payload.previewUrl || "").trim();
-    if (!previewUrl) throw new Error("The portal accepted the preview but returned no previewUrl");
-    return { previewUrl };
-  } finally {
-    await fs.rm(workDirectory, { force: true, recursive: true });
-  }
+  return uploadPreview(outputDir, { portalUrl, headers, fetchImpl: options.fetchImpl });
 }
 
 // ---------------------------------------------------------------------------

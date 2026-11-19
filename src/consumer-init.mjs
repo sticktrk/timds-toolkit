@@ -22,6 +22,7 @@
 //                                                 change workflow (OpenAI
 //                                                 makes a requested change on
 //                                                 a design/ branch)
+//   .github/timds/consumer-pipeline.mjs           credentialed CI client
 //   .claude/launch.json                           one entry per crawl-mode app,
 //                                                 merged beside existing ones
 //   .mcp.json                                     the Design System read MCP
@@ -106,7 +107,7 @@ directory down, and the root package.json when it has a dev, start, preview,
 or build script), selects @dtconcepts/timds in the root package.json, and
 installs both consumer skills, the preview and designer-change workflows,
 .claude/launch.json entries, and the Design System read MCP server in
-.mcp.json (at the host selected by --portal-url, default ${DEFAULT_PORTAL_URL}). An existing
+.mcp.json (at the host selected by --portal-url, or TIMDS_PORTAL_URL when first installed). An existing
 manifest is kept; --force regenerates it and replaces customized managed
 files.
 
@@ -668,6 +669,8 @@ export async function consumerManagedFiles(manifest, options = {}) {
   const files = await consumerSkillFiles(manifest, options);
   files.push({ path: CONSUMER_WORKFLOW_PATH, content: await consumerWorkflow("timds-consumer-preview.yml", options) });
   files.push({ path: CONSUMER_DESIGNER_WORKFLOW_PATH, content: await consumerWorkflow("timds-designer-change.yml", options) });
+  const pipeline = await fs.readFile(path.join(packageRoot, "src/consumer-pipeline.mjs"), "utf8");
+  files.push({ path: ".github/timds/consumer-pipeline.mjs", content: `${pipeline}\nawait runConsumerPipeline(process.argv[2], process.env);\n` });
   return files;
 }
 
@@ -683,7 +686,6 @@ export async function consumerWorkflow(name, { mode = "npm" } = {}) {
     .replaceAll(`$(node -p "require('./timds.consumer.json').designSystem?.path || 'design-system'")`, `$(jq -r '.designSystem.path // "design-system"' timds.consumer.json)`)
     .replaceAll(`$(node -e "process.stdout.write(JSON.stringify(Object.keys(require('./timds.consumer.json').apps)))")`, "$(jq -c '.apps | keys' timds.consumer.json)")
     .replaceAll("          cache: npm\n", "")
-    .replaceAll("          node-version: 22\n", "          node-version: 22\n          package-manager-cache: false\n")
     .replaceAll("      - run: npm ci\n", install);
 }
 
@@ -691,7 +693,8 @@ export async function consumerWorkflow(name, { mode = "npm" } = {}) {
  * `.mcp.json` servers TimDS manages, keyed by name: the Design System read
  * tools over HTTP at the host. An interactive client authorizes its own OAuth session.
  */
-export function consumerMcpServers({ portalUrl = DEFAULT_PORTAL_URL } = {}) {
+export function consumerMcpServers({ portalUrl } = {}) {
+  if (!portalUrl) return {};
   let base;
   try {
     base = new URL(String(portalUrl));
@@ -815,6 +818,9 @@ async function planMcp(repoRoot, desired, recorded, force, preserveLegacyConnect
   if (config.mcpServers === undefined) config.mcpServers = {};
   if (!config.mcpServers || typeof config.mcpServers !== "object" || Array.isArray(config.mcpServers)) {
     throw new Error(`${CONSUMER_MCP_PATH} has an mcpServers value that is not an object; fix it, then rerun timds consumer init`);
+  }
+  if (!Object.keys(desired).length) {
+    return { mcpPath, changed: false, kept: [], managed: recorded, statuses: [] };
   }
   const kept = [];
   const managed = {};
@@ -988,8 +994,8 @@ async function resolvePublishedPin({ system, version, url, fetchImpl }) {
  * write, or on customized managed files unless `force`.
  */
 export async function initializeConsumer(rootInput = process.cwd(), { force = false, skipInstall = false, portalUrl: selectedHost = null, system = null, version = null, url = null, draftPreview = false, mode = null, fetchImpl = fetch, runNpm = runConsumerNpm, output = () => {} } = {}) {
-  const portalUrl = selectedHost ?? DEFAULT_PORTAL_URL;
   const repoRoot = await findGitRoot(rootInput);
+  const portalUrl = selectedHost ?? await installedPortalUrl(repoRoot);
   await refuseWorkspaceSite(rootInput, "timds consumer init", (siteRoot) => `${siteRoot} is a site inside a Design System workspace (designSystem.workspace in its ${CONSUMER_MANIFEST_FILE}); it needs no consumer init: it uses the workspace's toolkit and has no pin to install. Check it with timds consumer check --root ${siteRoot}, and keep the toolkit current with timds upgrade at the workspace root.`);
   if (existsSync(path.join(repoRoot, "timds.json"))) {
     throw new Error(`${repoRoot} is a Design System workspace (it holds timds.json); consumer init adopts a product repository that pins a Design System. To give this system its own site, run timds consumer scaffold emdash --workspace here.`);
@@ -1021,7 +1027,7 @@ export async function initializeConsumer(rootInput = process.cwd(), { force = fa
     if (!published) throw new Error("--draft-preview requires a published consumer");
     const modulePath = ".timds/draft-preview.mjs";
     const runtime = await fs.readFile(path.join(packageRoot, "src/consumer-draft-preview.mjs"), "utf8");
-    const moduleContent = `${runtime}\ninstallDraftPreview(${JSON.stringify({ source: published.systemId, portalUrl })});\n`;
+    const moduleContent = `${runtime}\ninstallDraftPreview(${JSON.stringify({ source: published.systemId, portalUrl: portalUrl || DEFAULT_PORTAL_URL })});\n`;
     const indexPath = path.join(repoRoot, "index.html");
     const html = await fs.readFile(indexPath, "utf8").catch(error => { if (error.code === "ENOENT") return null; throw error; });
     if (html !== null && !html.includes('data-timds-draft-preview') && !html.includes('</head>')) throw new Error("index.html has no </head> for the optional draft preview module");
@@ -1088,13 +1094,13 @@ export async function initializeConsumer(rootInput = process.cwd(), { force = fa
         ...(skipInstall ? [`Run ${binary ? "timds-cli consumer sync" : "npm install (or npm run timds -- consumer sync)"} to fetch the bundle into ${designSystemPath}/`] : []),
       ]
       : []),
-    "Automatic previews are off by default; to enable them, set the TIMDS_PREVIEWS_ENABLED repository variable to true and add the TIMDS_ACCESS_TOKEN repository secret",
+    "Automatic previews are off by default; to enable them, set the TIMDS_PREVIEWS_ENABLED repository variable to true and configure the default-branch timds-pipeline environment with the host Access service-token pair, or the legacy provider’s TIMDS_ACCESS_TOKEN",
     ...(published
       ? []
       : ["For previews or designer changes: add DESIGN_SYSTEM_DEPLOY_KEY (read-only deploy key on the Design System repository) or TIMDS_CONSUMER_SUBMODULE_TOKEN (contents:read on it) so CI can check out the private submodule"]),
     "For designer changes: add the OPENAI_API_KEY repository or organization secret so the designer-change workflow can run Codex through the OpenAI API",
     `For designer changes: create the ${CONSUMER_DESIGN_CHANGE_LABEL} label, set the TIMDS_DESIGNER_BOTS repository variable to the TimDS portal's GitHub App bot login (comma-separated if more than one), and allow GitHub Actions to create pull requests (Settings > Actions > General)`,
-    `${CONSUMER_MCP_PATH} reads the Design System through the portal with TIMDS_ACCESS_TOKEN from the environment; export it locally to use the ${CONSUMER_MCP_SERVER_NAME} tools`,
+    portalUrl ? `Authorize the ${CONSUMER_MCP_SERVER_NAME} connector in your MCP client at its configured origin.` : `To install the optional ${CONSUMER_MCP_SERVER_NAME} connector, rerun ${invocation} consumer init --portal-url HOST with your TimDS host origin.`,
     `After editing ${CONSUMER_MANIFEST_FILE}, rerun timds consumer init so the skill's product section and the launch entries match it`,
     `Commit ${CONSUMER_MANIFEST_FILE}, ${binary ? "the exact executable pin" : "package.json, the lockfile"}, and the managed files; then run ${invocation} consumer check`,
   ];
@@ -1121,7 +1127,7 @@ export async function initializeConsumer(rootInput = process.cwd(), { force = fa
 // ---------------------------------------------------------------------------
 // Upgrade
 
-/** The portal origin the managed read MCP server points at today (default when absent or unreadable). */
+/** Preserve the installed origin on reruns. A new connector needs a configured host. */
 async function installedPortalUrl(repoRoot) {
   const config = await readJsonFile(path.join(repoRoot, CONSUMER_MCP_PATH), CONSUMER_MCP_PATH);
   const url = config?.mcpServers?.[CONSUMER_MCP_SERVER_NAME]?.url;
@@ -1129,9 +1135,9 @@ async function installedPortalUrl(repoRoot) {
     const parsed = new URL(String(url));
     if (["http:", "https:"].includes(parsed.protocol)) return parsed.origin;
   } catch {
-    // Fall through to the default portal.
+    // No installed origin. Use the configured host if one was supplied.
   }
-  return DEFAULT_PORTAL_URL;
+  return process.env.TIMDS_PORTAL_URL || null;
 }
 
 /**

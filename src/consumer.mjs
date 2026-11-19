@@ -77,6 +77,7 @@ export const CONSUMER_ALWAYS_ALLOWED = Object.freeze([
   ".gitignore",
   CONSUMER_INSTALLATION_PATH,
   ...CONSUMER_SKILL_NAMES.map((name) => `.agents/skills/${name}/**`),
+  ".github/timds/consumer-pipeline.mjs",
   ".github/workflows/timds-consumer-preview.yml",
   ".github/workflows/timds-designer-change.yml",
   ".claude/launch.json",

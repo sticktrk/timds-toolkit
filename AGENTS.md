@@ -97,7 +97,8 @@ the design surface), `.agents/skills/timds-update-design-system/` (a
 developer moving the pin to a release and porting the designs that
 changed; both are rendered from the manifest by `renderConsumerSkillFile`),
 the
-`timds-consumer-preview.yml` and `timds-designer-change.yml` workflows, the
+`timds-consumer-preview.yml` and `timds-designer-change.yml` workflows, their
+standalone `.github/timds/consumer-pipeline.mjs` helper, the
 tracked `.claude/launch.json` and `.mcp.json` entries, and `consumer` in
 `.timds/installation.json`; `upgrade` there refreshes only that boundary (and,
 with `--version`, the root package and lockfile) and never touches

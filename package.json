@@ -151,6 +151,7 @@
     "src/consumer-sync.mjs",
     "src/consumer-migrate.mjs",
     "src/consumer-preview.mjs",
+    "src/consumer-pipeline.mjs",
     "src/consumer-browser.mjs",
     "src/consumer-png.mjs",
     "src/defaults.mjs",

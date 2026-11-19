@@ -498,7 +498,7 @@ test("publish tars and gzips the preview and posts it with metadata and bearer a
   } finally {
     if (saved !== undefined) process.env.TIMDS_ACCESS_TOKEN = saved;
   }
-  await assert.rejects(publishConsumerPreview(path.join(outputDir, "nope"), { fetchImpl, token: "t" }), /preview\.json is missing/);
+  await assert.rejects(publishConsumerPreview(path.join(outputDir, "nope"), { fetchImpl, token: "t" }), /The preview does not exist/);
 });
 
 // ---------------------------------------------------------------------------

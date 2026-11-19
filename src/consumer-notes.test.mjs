@@ -198,7 +198,7 @@ test("parseNotesComment reads the portal's designer request comment", () => {
 
 test("consumer notes resolves repository, app, and pull request from the checkout", async (t) => {
   const root = await createConsumerRepo(t);
-  const { calls, fetchImpl } = stubFetch(() => ({ body: { notes: NOTES } }));
+  const { calls, fetchImpl } = stubFetch(url => ({ body: url.searchParams.has("after") ? { notes: NOTES.slice(1) } : { notes: NOTES.slice(0, 1), nextCursor: "page/2" } }));
   const lines = [];
   const result = await runConsumerNotes(["--root", root, "--portal-url", "https://portal.example.test"], {
     output: (line) => lines.push(line),
@@ -210,6 +210,7 @@ test("consumer notes resolves repository, app, and pull request from the checkou
   assert.equal(result.app, "web");
   assert.equal(result.pullRequest, 12);
   assert.deepEqual(Object.fromEntries(calls[0].url.searchParams), { repository: "acme/product", app: "web", pullRequest: "12", status: "open" });
+  assert.deepEqual(Object.fromEntries(calls[1].url.searchParams), { repository: "acme/product", app: "web", pullRequest: "12", status: "open", after: "page/2" });
   assert.match(lines.join("\n"), /3 open designer notes for acme\/product, app web, pull request #12\./);
 
   // --json prints the list unchanged; --pull-request wins over GITHUB_REF; --all drops the status filter.
@@ -221,8 +222,8 @@ test("consumer notes resolves repository, app, and pull request from the checkou
     token: "test-token",
   });
   assert.deepEqual(JSON.parse(lines.join("\n")), { notes: NOTES });
-  assert.equal(calls[1].url.searchParams.get("pullRequest"), "7");
-  assert.equal(calls[1].url.searchParams.has("status"), false);
+  assert.equal(calls[2].url.searchParams.get("pullRequest"), "7");
+  assert.equal(calls[2].url.searchParams.has("status"), false);
 
   await assert.rejects(runConsumerNotes(["--root", root, "--app", "docs", "--pull-request", "7"], { fetchImpl, token: "t" }), /Unknown app "docs"/);
   await assert.rejects(runConsumerNotes(["--root", root, "--bogus"], { fetchImpl, token: "t" }), /Unknown option --bogus/);

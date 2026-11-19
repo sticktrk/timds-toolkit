@@ -15,6 +15,7 @@
 // module only calls its agent API with the CLI token. It never edits the
 // product, and it never decides a note is addressed on its own.
 
+import { readNotesPages } from "./consumer-pipeline.mjs";
 import { spawn } from "node:child_process";
 import process from "node:process";
 
@@ -22,7 +23,7 @@ import { loadConsumer, resolveConsumerApp } from "./consumer.mjs";
 import { normalizeRepository, resolvePullRequest, previewAuthHeaders } from "./consumer-preview.mjs";
 
 export const CONSUMER_NOTES_PATH = "/api/timds/consumer-previews/notes";
-export const DESIGNER_REQUEST_MARKER = "<!-- timds-designer-request -->";
+export { DESIGNER_REQUEST_MARKER, parseNotesComment } from "./consumer-pipeline.mjs";
 const DEFAULT_PORTAL_URL = "https://timds.com";
 
 const NOTES_HELP = `Usage:
@@ -108,10 +109,11 @@ export async function fetchConsumerNotes({ repository, app, pullRequest, all = f
   url.searchParams.set("app", app);
   url.searchParams.set("pullRequest", String(pullRequest));
   if (!all) url.searchParams.set("status", "open");
-  const { payload, response } = await portalJson(fetchImpl, url, headers, { method: "GET" });
-  if (!response.ok) throw portalError("Reading designer notes", response, payload);
-  if (!Array.isArray(payload?.notes)) throw new Error("The portal returned no notes list");
-  return { notes: payload.notes };
+  return readNotesPages(url, async pageUrl => {
+    const { payload, response } = await portalJson(fetchImpl, pageUrl, headers, { method: "GET" });
+    if (!response.ok) throw portalError("Reading designer notes", response, payload);
+    return payload;
+  });
 }
 
 /** PATCH one note to `addressed` (or `dismissed`) at `commit`. Returns the portal's note when it sends one. */
@@ -125,30 +127,6 @@ export async function resolveConsumerNote(id, { commit, dismiss = false, portalU
   const { payload, response } = await portalJson(fetchImpl, url, headers, { method: "PATCH", body: JSON.stringify(body) });
   if (!response.ok) throw portalError(`Resolving note ${noteId}`, response, payload);
   return payload?.note ?? { id: noteId, ...body };
-}
-
-/**
- * The notes array carried by a portal PR comment: the comment holds the
- * marker `<!-- timds-designer-request -->` and a fenced ```json block whose
- * content is either an array of notes or `{ "notes": [...] }`. Returns null
- * when the comment is not a designer request; throws when it is one whose
- * json block is missing or unreadable.
- */
-export function parseNotesComment(body) {
-  const text = String(body ?? "").replace(/\r\n/g, "\n");
-  const markerAt = text.indexOf(DESIGNER_REQUEST_MARKER);
-  if (markerAt === -1) return null;
-  const match = text.slice(markerAt).match(/```json[^\n]*\n([\s\S]*?)\n```/);
-  if (!match) throw new Error("The designer request comment has no ```json block with its notes");
-  let value;
-  try {
-    value = JSON.parse(match[1]);
-  } catch (error) {
-    throw new Error(`The designer request comment's json block is not valid JSON: ${error.message}`);
-  }
-  const notes = Array.isArray(value) ? value : value?.notes;
-  if (!Array.isArray(notes)) throw new Error("The designer request comment's json block must be an array of notes or { \"notes\": [...] }");
-  return notes;
 }
 
 // ---------------------------------------------------------------------------
