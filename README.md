@@ -1018,9 +1018,11 @@ comment carrying `<!-- timds-designer-request -->` on a `design/` pull request
 or on such an issue (the portal posts review notes this way, with a fenced
 `json` block of notes), or a manual dispatch runs Codex through the OpenAI API
 with the consumer skill on a `design/<issue>-<title>` branch. Codex edits in a
-workspace sandbox without a GitHub write token. A subsequent workflow step
-runs `consumer check` against the merge-base design surface, pushes validated
-edits and opens a draft pull request that closes the issue. When
+read-only GitHub job. The job runs `consumer check --designer --base REF`,
+which restricts edits to the requested app’s design surface and rejects
+developer-managed paths. A fresh runner applies the patch to a Git index,
+checks its paths and file modes using the workflow revision’s scope rules,
+and pushes the commit to a draft pull request that closes the issue. When
 `TIMDS_PREVIEWS_ENABLED=true`, the workflow then calls the preview workflow,
 which checks for the publishing token, because pushes made with the job token
 start no other workflows. Without previews, the draft describes the routes
@@ -1031,7 +1033,7 @@ merged. Only owners, members, collaborators, and the bots listed in the
 can trigger it, and fork branches are skipped. It needs the
 `OPENAI_API_KEY` repository or inherited organization secret, the
 `timds-design-change` label, and permission for Actions to create pull
-requests. A credentialed gate reads notes before the model runs. A separate
+requests. A credentialed gate reads notes before the model runs. A request carrying only selected note IDs waits for their feedback. Ordinary requests and comments containing the full feedback can continue with manual note resolution. A separate
 runner resolves the addressed IDs after a successful push. It uses the official
 `openai/codex-action@v1` with `workspace-write` and `drop-sudo`.
 

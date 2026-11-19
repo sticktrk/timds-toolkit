@@ -42,50 +42,17 @@ import { parseCssTokens, resolveTokens } from "./tokens.mjs";
 import { assertBinaryInstallation, readBinaryInstallation } from "./binary-installation.mjs";
 import { WORKSPACE_PIN_MODE, findDesignSystemAbove, isWorkspaceDesignSystem } from "./workspace-site.mjs";
 
-export const CONSUMER_MANIFEST_FILE = "timds.consumer.json";
+import { normalizeRelativePath, classifyConsumerPath, designerPathAllowed, CONSUMER_MANIFEST_FILE, CONSUMER_INSTALLATION_PATH } from "./consumer-paths.mjs";
+export { CONSUMER_MANIFEST_FILE, CONSUMER_INSTALLATION_PATH, CONSUMER_ALWAYS_ALLOWED, CONSUMER_SKILL_NAME, CONSUMER_UPDATE_SKILL_NAME, CONSUMER_SKILL_NAMES, classifyConsumerPath, matchesGlob, globToRegExp } from "./consumer-paths.mjs";
 /** The record `consumer sync` leaves in the bundle directory: which version is there and which files. */
 export const CONSUMER_BUNDLE_RECORD_FILE = ".timds-bundle.json";
-/** Where `consumer init` records the managed files it installed (also read by upgrade). */
-export const CONSUMER_INSTALLATION_PATH = ".timds/installation.json";
 /** Where a published system sits unless `designSystem.url` says otherwise: `<base>/<systemId>/artifact`. */
 export const DEFAULT_PUBLISHED_BASE_URL = "https://design-systems.timds.com";
 export const CONSUMER_VIEWPORTS = Object.freeze(["desktop", "tablet", "phone"]);
 export const CONSUMER_SCHEMES = Object.freeze(["light", "dark"]);
 
-/** The designer's skill: a change inside the design surface of the product. */
-export const CONSUMER_SKILL_NAME = "timds-consume-design-system";
-/** The developer's counterpart: move the pin to a new release and port the designs that changed. */
-export const CONSUMER_UPDATE_SKILL_NAME = "timds-update-design-system";
-/** Every consumer skill `consumer init` renders and `upgrade` refreshes; the always-allowed paths derive from it. */
-export const CONSUMER_SKILL_NAMES = Object.freeze([CONSUMER_SKILL_NAME, CONSUMER_UPDATE_SKILL_NAME]);
-
-/**
- * Paths a consumer PR may always change: the manifest, the TimDS-managed
- * files, and the root files `consumer init` and upgrades write (the root
- * package manifest, lockfiles, .gitignore, installation record). Root only:
- * an app's own package.json stays subject to its design surface.
- */
-export const CONSUMER_ALWAYS_ALLOWED = Object.freeze([
-  CONSUMER_MANIFEST_FILE,
-  "package.json",
-  "package-lock.json",
-  "npm-shrinkwrap.json",
-  "bun.lock",
-  "bun.lockb",
-  "pnpm-lock.yaml",
-  "yarn.lock",
-  ".gitignore",
-  CONSUMER_INSTALLATION_PATH,
-  ...CONSUMER_SKILL_NAMES.map((name) => `.agents/skills/${name}/**`),
-  ".github/timds/consumer-pipeline.mjs",
-  ".github/workflows/timds-consumer-preview.yml",
-  ".github/workflows/timds-designer-change.yml",
-  ".claude/launch.json",
-  ".mcp.json",
-]);
-
 const CONSUMER_HELP = `Usage:
-  timds consumer check [--root PATH] [--app NAME] [--base REF] [--allow-pin-update LABEL] [--require-token=--NAME]... [--no-fix] [--json]
+  timds consumer check [--root PATH] [--app NAME] [--base REF] [--designer] [--allow-pin-update LABEL] [--require-token=--NAME]... [--no-fix] [--json]
   timds consumer register [--portal-url URL] [--repository OWNER/REPO] [--base-branch REF] [--delivery auto|approve] [--notify] [--surface PATH]... [--root PATH] [--json]
   timds consumer updates [LABEL] [--portal-url URL] [--consumer-id UUID] [--root PATH] [--json]
   timds consumer sync [--root PATH]
@@ -130,10 +97,6 @@ function isSafeRelativePath(value) {
   return normalized.split("/").every((segment) => segment !== "..");
 }
 
-function normalizeRelativePath(value) {
-  const normalized = path.posix.normalize(String(value).replace(/\\/g, "/")).replace(/\/+$/, "");
-  return normalized === "" ? "." : normalized;
-}
 
 const relativePath = (label) => z.string().refine(isSafeRelativePath, {
   message: `${label} must be a relative path inside the repository (no leading "/" and no "..")`,
@@ -654,79 +617,6 @@ export function resolveConsumerApp(consumer, name) {
 }
 
 // ---------------------------------------------------------------------------
-// Glob matching (`**`, `*`, `?`), no dependency
-
-const globCache = new Map();
-
-export function globToRegExp(glob) {
-  if (globCache.has(glob)) return globCache.get(glob);
-  const source = normalizeRelativePath(glob);
-  let pattern = "";
-  for (let index = 0; index < source.length; index += 1) {
-    const char = source[index];
-    if (char === "*") {
-      if (source[index + 1] === "*") {
-        const atStart = index === 0 || source[index - 1] === "/";
-        const atEnd = index + 2 === source.length || source[index + 2] === "/";
-        if (atStart && atEnd) {
-          if (index + 2 === source.length) {
-            pattern += ".*"; // trailing "**": everything below
-          } else {
-            pattern += "(?:[^/]+/)*"; // "**/": zero or more directories
-            index += 1; // skip the slash after "**"
-          }
-          index += 1;
-          continue;
-        }
-        pattern += "[^/]*";
-        index += 1;
-        continue;
-      }
-      pattern += "[^/]*";
-    } else if (char === "?") {
-      pattern += "[^/]";
-    } else {
-      pattern += char.replace(/[.+^${}()|[\]\\]/g, "\\$&");
-    }
-  }
-  // "dir/**" also matches "dir" itself; a literal path (no wildcard) matches
-  // that file or everything under that directory.
-  const literal = !/[*?]/.test(source);
-  const expression = new RegExp(source.endsWith("/**")
-    ? `^(?:${pattern.slice(0, -3)}|${pattern})$`
-    : literal ? `^${pattern}(?:/.*)?$` : `^${pattern}$`);
-  globCache.set(glob, expression);
-  return expression;
-}
-
-export function matchesGlob(filePath, glob) {
-  return globToRegExp(glob).test(filePath);
-}
-
-function relativeToApp(filePath, cwd) {
-  if (cwd === ".") return filePath;
-  if (filePath === cwd) return "";
-  return filePath.startsWith(`${cwd}/`) ? filePath.slice(cwd.length + 1) : null;
-}
-
-/** Classify one repo-relative path against the manifest: "allowed", "protected" (with app), or "outside". */
-export function classifyConsumerPath(filePath, manifest, apps = Object.keys(manifest.apps)) {
-  if (CONSUMER_ALWAYS_ALLOWED.some((glob) => matchesGlob(filePath, glob))) return { status: "allowed", app: null };
-  let protectedBy = null;
-  for (const name of apps) {
-    const app = manifest.apps[name];
-    const inner = relativeToApp(filePath, app.cwd);
-    if (inner === null || inner === "") continue;
-    if (app.protected.some((glob) => matchesGlob(inner, glob))) {
-      protectedBy ||= name;
-      continue;
-    }
-    if (app.designSurface.some((glob) => matchesGlob(inner, glob))) return { status: "allowed", app: name };
-  }
-  return protectedBy ? { status: "protected", app: protectedBy } : { status: "outside", app: null };
-}
-
-// ---------------------------------------------------------------------------
 // Check
 
 // Both listings use NUL-separated output so odd file names are never quoted,
@@ -885,6 +775,7 @@ export async function checkConsumer(repoRootInput = process.cwd(), options = {})
   if (options.allowPinUpdate !== undefined && (!options.base || typeof options.allowPinUpdate !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(options.allowPinUpdate) || ["current", "latest"].includes(options.allowPinUpdate))) {
     throw new Error("--allow-pin-update requires --base and one immutable published release label");
   }
+  if (options.designer && (!options.base || options.allowPinUpdate !== undefined)) throw new Error("--designer requires --base and a fixed Design System pin");
   let consumer;
   try {
     consumer = await loadConsumer(repoRootInput);
@@ -1059,6 +950,13 @@ export async function checkConsumer(repoRootInput = process.cwd(), options = {})
     const paths = await changedPaths(repoRoot, options.base, workspace ? null : designSystem.path);
     const atBase = await manifestAtBase(repoRoot, options.base, prefix);
     const scopeManifest = atBase.manifest || manifest;
+    if (options.designer) {
+      if (workspace || !atBase.manifest) errors.push("A designer change requires an existing consumer manifest at the merge base.");
+      else {
+        const refused = paths.filter(file => !designerPathAllowed(file, scopeManifest, options.app));
+        if (refused.length) errors.push(`Designer changes must stay inside the authorized design surface:\n${refused.join("\n")}`);
+      }
+    }
     const withoutVersion = value => ({ ...value, designSystem: Object.fromEntries(Object.entries(value.designSystem).filter(([key]) => key !== "version")) });
     const pinUpdateAllowed = !workspace && options.allowPinUpdate !== undefined && Boolean(atBase.manifest?.designSystem.version) && designSystem.mode === "published"
       && manifest.designSystem.version === options.allowPinUpdate
@@ -1168,7 +1066,7 @@ export async function checkConsumer(repoRootInput = process.cwd(), options = {})
 // ---------------------------------------------------------------------------
 // CLI
 
-const CHECK_BOOLEAN_FLAGS = new Set(["help", "json", "noFix"]);
+const CHECK_BOOLEAN_FLAGS = new Set(["help", "json", "noFix", "designer"]);
 const CHECK_VALUE_FLAGS = new Set(["app", "base", "root", "requireToken", "allowPinUpdate"]);
 
 // Strict on purpose: a mistyped or empty --base would otherwise skip the scope check and pass.
@@ -1288,7 +1186,7 @@ export async function runConsumerCli(args = [], { env = process.env, output = de
     output(CONSUMER_HELP);
     return;
   }
-  const result = await checkConsumer(options.root || process.cwd(), { app: options.app, base: options.base, requireTokens: options.requireTokens, allowPinUpdate: options.allowPinUpdate, fix: !options.noFix });
+  const result = await checkConsumer(options.root || process.cwd(), { app: options.app, base: options.base, designer: options.designer, requireTokens: options.requireTokens, allowPinUpdate: options.allowPinUpdate, fix: !options.noFix });
   if (options.json) output(JSON.stringify(result, null, 2));
   else output(checkReport(result));
   // The stock workflow previews only these apps; written before a scope failure throws.

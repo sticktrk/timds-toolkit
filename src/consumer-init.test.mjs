@@ -223,9 +223,9 @@ test("discovers apps and writes the manifest with guessed defaults", async (t) =
   const output = lines.join("\n");
   assert.match(output, /For the developer to confirm:/);
   assert.match(output, /web: preview\.port is 4321 \(the astro default\)/);
-  assert.match(output, /spa: install is bun install --frozen-lockfile \(bun is not set up/);
+  assert.match(output, /spa: install is bun install --frozen-lockfile \(bun is not installed/);
   assert.match(output, /TIMDS_ACCESS_TOKEN/);
-  assert.match(output, /Automatic previews are off by default; to enable them, set the TIMDS_PREVIEWS_ENABLED repository variable to true and configure the default-branch timds-pipeline environment/);
+  assert.match(output, /Automatic previews are off by default; to enable them, set TIMDS_PREVIEWS_ENABLED to true.*TIMDS_PORTAL_URL.*default-branch timds-pipeline environment/);
   assert.match(output, /DESIGN_SYSTEM_DEPLOY_KEY/);
   assert.match(output, /web: preview\.routes lists only "\/" and preview\.discover follows links/);
   assert.match(output, /OPENAI_API_KEY/);
@@ -294,13 +294,11 @@ test("renders the skill from the manifest and records managed-file hashes", asyn
   assert.match(workflow, /pull_request_target:\n\s+types: \[opened, synchronize, reopened\]/);
   // The scope check reports instead of failing the job (developer pull requests leave the surface),
   // the base ref reaches the shell through env, and the preview builds the pull request's head commit.
-  assert.match(workflow, /BASE_REF: \$\{\{ github\.base_ref \|\| github\.event\.repository\.default_branch \}\}/);
-  assert.match(workflow, /if npm run timds -- consumer check --base "origin\/\$\{BASE_REF\}"; then/);
-  assert.doesNotMatch(workflow, /run:[^\n]*\$\{\{ github\.base_ref/);
-  // Only the apps the check names are previewed; a pull request that cannot change a look skips the job.
-  assert.match(workflow, /CHANGED: \$\{\{ steps\.scope\.outputs\.preview-apps \}\}/);
-  assert.match(workflow, /preview:\n\s+needs: check\n\s+if: needs\.check\.result == 'success' && needs\.check\.outputs\.apps != '\[\]'/);
-  assert.match(workflow, /ref: \$\{\{ needs\.check\.outputs\.sha \}\}/);
+  assert.match(workflow, /BASE_REF: \$\{\{ needs\.gate\.outputs\.base_branch \}\}/);
+  assert.match(workflow, /node \.github\/timds\/consumer-paths\.mjs preview/);
+  assert.match(workflow, /needs\.gate\.outputs\.scope == 'outside'/);
+  assert.match(workflow, /needs: \[gate, check\]/);
+  assert.match(workflow, /ref: \$\{\{ needs\.gate\.outputs\.sha \}\}/);
   assert.match(workflow, /consumer preview --app "\$APP" --base "origin\/\$\{BASE_REF\}" --pull-request/);
   assert.match(workflow, /<!-- timds-consumer-preview:\$\{APP\} -->/);
   assert.match(workflow, /DESIGN_SYSTEM_DEPLOY_KEY/);
@@ -309,8 +307,11 @@ test("renders the skill from the manifest and records managed-file hashes", asyn
   assert.match(workflow, /workflow_call:\n\s+inputs:\n\s+pull_request:[\s\S]*ref:/);
   assert.match(workflow, /PULL_REQUEST: \$\{\{ inputs\.pull_request \|\| github\.event\.number \}\}/);
 
-  const designer = await fs.readFile(path.join(product, ".github", "workflows", "timds-designer-change.yml"), "utf8");
-  assert.equal(designer, await fs.readFile(new URL("../templates/timds-designer-change.yml", import.meta.url), "utf8"));
+  const entry = await fs.readFile(path.join(product, ".github", "workflows", "timds-designer-change.yml"), "utf8");
+  const worker = await fs.readFile(path.join(product, ".github", "workflows", "timds-designer-run.yml"), "utf8");
+  assert.equal(entry, await fs.readFile(new URL("../templates/timds-designer-change.yml", import.meta.url), "utf8"));
+  assert.equal(worker, await fs.readFile(new URL("../templates/timds-designer-run.yml", import.meta.url), "utf8"));
+  const designer = entry + worker;
   assert.doesNotMatch(designer, /__[A-Z_]+__/);
   assert.match(designer, /issues:\n\s+types: \[labeled\]/);
   assert.match(designer, /github\.event\.label\.name == 'timds-design-change'/);
@@ -329,7 +330,7 @@ test("renders the skill from the manifest and records managed-file hashes", asyn
   assert.match(designer, /gh pr create.*--draft/);
   assert.match(designer, /node \.github\/timds\/consumer-pipeline\.mjs resolve/);
   assert.match(designer, /uses: \.\/\.github\/workflows\/timds-consumer-preview\.yml/);
-  assert.match(designer, /cancel-in-progress: false/);
+  assert.match(designer, /queue: max/);
   // Event text reaches shell steps only through env, never ${{ }} inside run.
   const runBlocks = designer.split("\n").reduce((blocks, line) => {
     const indent = line.match(/^ */)[0].length;

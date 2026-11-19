@@ -135,6 +135,11 @@ export async function pipelineHeaders(portalUrl, env, token, fetchImpl = fetch) 
   return { ...version, Authorization: `Bearer ${token}` };
 }
 
+// Keep provider response bodies out of logs. A 409 can require an explicit follower.
+export function followerHint(status, headers) {
+  return status === 409 && !headers["X-TimDS-Consumer-ID"] ? ". If the credential serves multiple followers, select one with TIMDS_CONSUMER_ID (X-TimDS-Consumer-ID)." : "";
+}
+
 /** Tar and gzip `outputDir` and post it to the portal; returns `{ previewUrl }`. */
 export async function uploadPreview(outputDir, { portalUrl, headers, expected, fetchImpl = fetch }) {
   const root = path.resolve(outputDir);
@@ -168,7 +173,7 @@ export async function uploadPreview(outputDir, { portalUrl, headers, expected, f
     });
     if (!response.ok && !headers.Authorization) {
       await response.body?.cancel().catch(() => {});
-      throw new Error(`Publishing the preview failed (${response.status})`);
+      throw new Error(`Publishing the preview failed (${response.status})${followerHint(response.status, headers)}`);
     }
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
@@ -213,23 +218,57 @@ export function parseNotesComment(body) {
   let value;
   try {
     value = JSON.parse(match[1]);
-  } catch (error) {
-    throw new Error(`The designer request comment's json block is not valid JSON: ${error.message}`);
+  } catch {
+    throw new Error("The designer request comment's json block is not valid JSON");
   }
   const notes = Array.isArray(value) ? value : value?.notes;
   if (!Array.isArray(notes)) throw new Error("The designer request comment's json block must be an array of notes or { \"notes\": [...] }");
   return notes;
 }
 
+const hasFeedback = note => typeof note?.body === "string" && note.body.trim().length > 0;
+
+async function commentSelection(env, { classify = false } = {}) {
+  const event = JSON.parse(await fs.readFile(env.GITHUB_EVENT_PATH, "utf8"));
+  const comment = event.comment?.body || "";
+  const hostApply = comment.includes("<!-- timds-review:") && comment.includes(DESIGNER_REQUEST_MARKER);
+  let notes = null;
+  if (hostApply || comment.includes(DESIGNER_REQUEST_MARKER) && comment.includes("```json")) {
+    try {
+      notes = parseNotesComment(comment);
+    } catch (error) {
+      // A regular request can still use its own text when optional note JSON is malformed.
+      if (!classify) throw error;
+    }
+  }
+  const requiresHost = notes?.length
+    ? notes.some(note => (hostApply || typeof note?.id === "string") && !hasFeedback(note))
+    : hostApply;
+  return { notes, requiresHost };
+}
+
 // CI inputs come from the trusted event and gate. Artifacts and note IDs are data.
-export async function runConsumerPipeline(action, env) {
-  const portal = env.TIMDS_PORTAL_URL || "https://timds.com";
+export async function runConsumerPipeline(action, env, installedOrigin) {
+  if (action === "selection") {
+    const { requiresHost } = await commentSelection(env, { classify: true });
+    await fs.appendFile(env.GITHUB_OUTPUT, `requires_host=${requiresHost}\n`);
+    return;
+  }
+  const service = Boolean(env.CF_ACCESS_CLIENT_ID || env.CF_ACCESS_CLIENT_SECRET);
+  if (service && !installedOrigin) throw new Error("Configure the follower origin with consumer init --portal-url HOST before using Access credentials");
+  const portal = installedOrigin || "https://timds.com";
+  if ((service || env.TIMDS_PORTAL_URL) && env.TIMDS_PORTAL_URL !== portal) {
+    throw new Error("TIMDS_PORTAL_URL must match the origin installed by consumer init --portal-url HOST");
+  }
   const headers = await pipelineHeaders(portal, env, env.TIMDS_ACCESS_TOKEN);
   if (new URL(portal).protocol !== "https:") throw new Error("The pipeline endpoint must use HTTPS");
   const request = async (url, init = {}) => {
     const response = await fetch(url, { ...init, headers: { ...headers, "Content-Type": "application/json" }, redirect: "error", signal: AbortSignal.timeout(30_000) });
-    if (!response.ok) throw new Error(`Designer notes request failed (${response.status})`);
-    return response.json();
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => {});
+      throw new Error(`Designer notes request failed (${response.status})${followerHint(response.status, headers)}`);
+    }
+    return response.json().catch(() => { throw new Error("The host returned an invalid designer notes response"); });
   };
   if (action === "upload") {
     const expected = { repository: env.GITHUB_REPOSITORY, app: env.APP, pullRequest: Number(env.PULL_REQUEST), commit: env.SHA, branch: env.BRANCH };
@@ -241,9 +280,7 @@ export async function runConsumerPipeline(action, env) {
   const notesUrl = new URL("/api/timds/consumer-previews/notes", portal);
   if (action === "read") {
     const manifest = JSON.parse(await fs.readFile(path.join(env.RUNNER_TEMP, "consumer.json"), "utf8"));
-    const event = JSON.parse(await fs.readFile(env.GITHUB_EVENT_PATH, "utf8"));
-    const comment = event.comment?.body || "";
-    const selection = comment.includes(DESIGNER_REQUEST_MARKER) && comment.includes("```json") ? parseNotesComment(comment) : null;
+    const { notes: selection, requiresHost } = await commentSelection(env);
     const selectedIds = selection && new Set(selection.map(note => note.id));
     const apps = env.APP ? [env.APP] : Object.keys(manifest.apps);
     const notes = [];
@@ -255,12 +292,14 @@ export async function runConsumerPipeline(action, env) {
         const page = await readNotesPages(notesUrl, request);
         const candidates = page.notes.filter(note => !selectedIds || selectedIds.has(note.id));
         // The comment event can arrive before the host records successful delivery.
-        if (env.CF_ACCESS_CLIENT_ID && selectedIds && attempt < 3 && candidates.some(note => note.status === "open")) {
+        const awaitingDelivery = candidates.some(note => note.status === "open")
+          || (env.APP && requiresHost && candidates.length < selectedIds?.size);
+        if (env.CF_ACCESS_CLIENT_ID && selectedIds && attempt < 3 && awaitingDelivery) {
           await new Promise(resolve => setTimeout(resolve, 1000 * 2 ** attempt));
           continue;
         }
         for (const note of candidates) {
-          if (!env.CF_ACCESS_CLIENT_ID || note.status === "sent") notes.push({ ...note, app });
+          if (hasFeedback(note) && (!env.CF_ACCESS_CLIENT_ID || note.status === "sent")) notes.push({ ...note, app });
         }
         break;
       }
@@ -268,7 +307,13 @@ export async function runConsumerPipeline(action, env) {
     if (env.CF_ACCESS_CLIENT_ID && !selectedIds && !notes.length) {
       console.log("No outstanding notes have been applied to this pull request. A publisher can send notes from Studio.");
     }
+    const delivered = new Set(notes.map(note => note.id));
+    const resolvable = notes.length > 0 && (!selectedIds || [...selectedIds].every(id => delivered.has(id)));
+    if (selectedIds?.size && !resolvable) console.log(requiresHost
+      ? "Selected note feedback is unavailable. Retry after the publisher's notes have been delivered."
+      : "Use the feedback in the comment for this change and leave its notes for manual resolution.");
     await fs.writeFile(path.join(env.RUNNER_TEMP, "designer-notes.json"), JSON.stringify({ notes }));
+    await fs.appendFile(env.GITHUB_OUTPUT, `resolvable=${resolvable}\n`);
     return;
   }
   if (action !== "resolve") throw new Error("Unknown pipeline action");

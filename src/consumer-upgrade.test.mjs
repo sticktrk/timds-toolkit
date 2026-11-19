@@ -124,7 +124,7 @@ test("upgrade refreshes unmodified managed files from the installed templates an
   assert.equal(await fs.readFile(path.join(product, PREVIEW_WORKFLOW), "utf8"), await readTemplate("timds-consumer-preview.yml"));
   assert.equal(await fs.readFile(path.join(product, DESIGNER_WORKFLOW), "utf8"), await readTemplate("timds-designer-change.yml"));
   assert.match(await fs.readFile(path.join(product, PREVIEW_WORKFLOW), "utf8"), /vars\.TIMDS_PREVIEWS_ENABLED == 'true'/);
-  assert.match(await fs.readFile(path.join(product, DESIGNER_WORKFLOW), "utf8"), /vars\.TIMDS_PREVIEWS_ENABLED == 'true'/);
+  assert.match(await fs.readFile(path.join(product, ".github/workflows/timds-designer-run.yml"), "utf8"), /vars\.TIMDS_PREVIEWS_ENABLED == 'true'/);
   assert.match(await fs.readFile(path.join(product, SKILL), "utf8"), /### `web`/);
   await assert.rejects(fs.access(path.join(product, ".agents/skills/timds-consume-design-system/retired.md")));
   assert.deepEqual(await fs.readFile(path.join(product, "timds.consumer.json")), manifestBefore);
@@ -235,6 +235,8 @@ test("upgrade applies the entry rules to launch and MCP entries and keeps foreig
   await writeJson(installationPath, previous);
   await upgradeConsumer(product, { output: quiet });
   assert.deepEqual((await readJson(mcpPath)).mcpServers[serverName], legacy);
+  const retained = await initializeConsumer(product, { skipInstall: true, output: quiet });
+  assert.ok(retained.todos.some(todo => todo.includes("legacy connector") && todo.includes("--portal-url HOST")));
   await initializeConsumer(product, { skipInstall: true, portalUrl: "https://host.example.test", output: quiet });
   assert.deepEqual((await readJson(mcpPath)).mcpServers[serverName], { type: "http", url: "https://host.example.test/api/timds/mcp" });
 

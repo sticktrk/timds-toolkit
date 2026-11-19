@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- Consumer setup now selects its host with `consumer init --portal-url HOST` or
+  `TIMDS_PORTAL_URL` on first installation. The managed `.mcp.json` HTTP
+  connector uses `/api/timds/mcp`. Run init with the explicit host to migrate
+  a legacy `/api/timds/mcp/read` connector.
+- Consumer previews now use `pull_request_target` for same-repository pull
+  requests. Set `TIMDS_PREVIEWS_ENABLED=true`, match the `TIMDS_PORTAL_URL`
+  repository variable to the installed HTTPS origin and restrict the
+  `timds-pipeline` environment to the default branch. Move
+  `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET` (or the legacy
+  `TIMDS_ACCESS_TOKEN`) into that environment. `TIMDS_CONSUMER_ID` selects
+  a follower and `TIMDS_ACCESS_MODE=protected-api` selects direct Access
+  authentication for installations that protect the API routes.
+- Designer changes use `consumer check --designer --base REF`. A fresh runner
+  verifies a proposed patch against the default branch's design surface before
+  pushing. Preview builds run in Docker. Designer requests can continue from
+  full comment feedback when host reads fail. Requests containing only note IDs require verified feedback.
+
 - Export `@dtconcepts/timds/read-tools` for Worker and other HTTP hosts. `designSystemReadTools({ z, resolveSystem, listSystems, hooks })` returns tool and resource definitions with handlers. Pass the server’s Zod instance and `hooks.drafts: false` for a published-only reader. The Node and stdio servers register the same definitions.
 
 - Add the blog posting template. A Design System keeps the layout of its

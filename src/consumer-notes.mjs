@@ -15,7 +15,7 @@
 // module only calls its agent API with the CLI token. It never edits the
 // product, and it never decides a note is addressed on its own.
 
-import { readNotesPages } from "./consumer-pipeline.mjs";
+import { followerHint, readNotesPages } from "./consumer-pipeline.mjs";
 import { spawn } from "node:child_process";
 import process from "node:process";
 
@@ -83,7 +83,7 @@ async function portalJson(fetchImpl, url, headers, init = {}) {
   });
   if (!response.ok && !headers.Authorization) {
     await response.body?.cancel().catch(() => {});
-    return { response, payload: { error: "The host refused the request" } };
+    return { response, payload: { error: "The host refused the request" + followerHint(response.status, headers) } };
   }
   const payload = await response.json().catch(() => ({}));
   return { payload, response };

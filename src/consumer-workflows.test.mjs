@@ -9,7 +9,8 @@ import { parse } from "yaml";
 import { consumerManagedFiles } from "./consumer-init.mjs";
 
 const preview = parse(await fs.readFile(new URL("../templates/timds-consumer-preview.yml", import.meta.url), "utf8"));
-const designer = parse(await fs.readFile(new URL("../templates/timds-designer-change.yml", import.meta.url), "utf8"));
+const designerEntry = parse(await fs.readFile(new URL("../templates/timds-designer-change.yml", import.meta.url), "utf8"));
+const designer = parse(await fs.readFile(new URL("../templates/timds-designer-run.yml", import.meta.url), "utf8"));
 
 function expressionData(value) {
   if (value === null || value === undefined) return new data.Null();
@@ -43,14 +44,14 @@ async function scratchDirectory(t) {
 
 test("consumer previews allocate no runner without opt-in and no expensive jobs without a token", async (t) => {
   const { gate, check } = preview.jobs;
-  assert.equal(gate["timeout-minutes"], 1);
+  assert.equal(gate["timeout-minutes"], 5);
   assert.deepEqual(Object.keys(preview.on), ["pull_request_target", "workflow_call"]);
   const token = gate.steps[0];
   assert.equal(token.uses, undefined);
   assert.deepEqual(Object.keys(token.env), ["HAS_ACCESS_TOKEN"], "the gate must receive presence, not credentials");
   assert.equal(evaluate(gate.outputs.enabled, { steps: { [token.id]: { outputs: { enabled: "true" } } } }), "true");
   assert.equal(check.needs, "gate");
-  assert.equal(preview.jobs.preview.needs, "check");
+  assert.deepEqual(preview.jobs.preview.needs, ["gate", "check"]);
   const scenarios = [
     { name: "unset flag", flag: undefined, token: "test-token", gate: false, enabled: false },
     { name: "false flag", flag: "false", token: "test-token", gate: false, enabled: false },
@@ -111,7 +112,7 @@ test("the preview matrix requires a successful check and apps whose look can cha
     // A successful check emits an apps array; failed/skipped checks may not
     // emit anything and must never reach fromJSON or allocate a runner.
     for (const apps of result === "success" ? ["[]", '["web"]'] : ["[]", '["web"]', ""]) {
-      const runs = condition(preview.jobs.preview.if, { needs: { check: { result, outputs: { apps } } } });
+      const runs = condition(preview.jobs.preview.if, { needs: { check: { result }, gate: { outputs: { apps } } } });
       assert.equal(runs, result === "success" && apps !== "[]", `${result}: ${apps}`);
     }
   }
@@ -124,7 +125,7 @@ test("CI preview builds an artifact without credentials and uses a trusted runne
   await fs.writeFile(path.join(bin, "npm"), '#!/bin/sh\nprintf "%s\\n" "$@" >> "$TEST_NPM_LOG"\n');
   await fs.chmod(path.join(bin, "npm"), 0o755);
   const build = preview.jobs.preview.steps.find((step) => step.id === "preview");
-  for (const job of [preview.jobs.preview, preview.jobs.check, designer.jobs.change]) {
+  for (const job of [preview.jobs.preview, preview.jobs.check, designer.jobs.edit, designer.jobs.change]) {
     assert.doesNotMatch(JSON.stringify(job), /"CF_ACCESS_CLIENT_(ID|SECRET)"|"TIMDS_ACCESS_TOKEN"/);
   }
   for (const job of [preview.jobs.publish, designer.jobs.resolve, designer.jobs.gate]) {
@@ -149,6 +150,9 @@ test("CI preview builds an artifact without credentials and uses a trusted runne
 });
 
 test("designer changes call previews only after opt-in and a pushed pull request", () => {
+  assert.equal(designerEntry.jobs.deliver.concurrency.group, "timds-designer-change-${{ needs.gate.outputs.branch }}");
+  assert.equal(designerEntry.jobs.deliver.concurrency.queue, "max");
+  assert.equal(designerEntry.jobs.deliver.uses, "./.github/workflows/timds-designer-run.yml");
   assert.equal(designer.jobs.preview.needs, "change");
   assert.equal(designer.jobs.preview.uses, "./.github/workflows/timds-consumer-preview.yml");
   assert.equal(designer.jobs.preview.secrets, "inherit");
@@ -166,11 +170,11 @@ test("designer changes call previews only after opt-in and a pushed pull request
     }
   }
   // The flag must not disable the requested change or access to existing notes.
-  assert.equal(condition(designer.jobs.change.if, { needs: { gate: { outputs: { allowed: "true" } } } }), true);
+  assert.equal(condition(designer.jobs.edit.if, { needs: { gate: { outputs: { allowed: "true" } } } }), true);
 });
 
 test("designer instructions promise a published preview only with opt-in and a token", async (t) => {
-  const step = designer.jobs.change.steps.find((step) => step.id === "prompt");
+  const step = designer.jobs.edit.steps.find((step) => step.id === "prompt");
   for (const flag of [undefined, "false", "true"]) {
     for (const token of ["", "legacy", "service"]) await t.test(`${flag ?? "unset"} flag, ${token || "missing"} token`, async (t) => {
       const directory = await scratchDirectory(t);
@@ -212,7 +216,7 @@ test("the workflow helper publishes built files and resolves only notes delivere
   const installed = await consumerManagedFiles({
     schemaVersion: 1, designSystem: { path: "design-system", systemId: "example/core" },
     apps: { web: { cwd: ".", designSurface: ["src/**"], preview: { build: ["npm", "run", "build"], output: "dist" } } },
-  });
+  }, { portalUrl: "https://host.example.com" });
   await fs.writeFile(helper, installed.find(file => file.path === ".github/timds/consumer-pipeline.mjs").content);
   const selected = "00000000-0000-4000-8000-000000000001";
   const other = "00000000-0000-4000-8000-000000000002";
@@ -223,7 +227,8 @@ test("the workflow helper publishes built files and resolves only notes delivere
   await fs.writeFile(path.join(directory, "review", "preview.json"), JSON.stringify(preview));
   await fs.writeFile(path.join(directory, "review", "index.html"), "<main>Example</main>");
   await fs.writeFile(path.join(directory, "consumer.json"), JSON.stringify({ apps: { web: {} } }));
-  await fs.writeFile(path.join(directory, "event.json"), JSON.stringify({ comment: { body: "<!-- timds-designer-request -->\n```json\n" + JSON.stringify({ notes: [{ id: selected }] }) + "\n```" } }));
+  const applyComment = notes => "<!-- timds-review:example -->\n<!-- timds-designer-request -->\n\nApp: web\n\nApply the selected preview notes.\n\n```json\n" + JSON.stringify({ notes }) + "\n```";
+  await fs.writeFile(path.join(directory, "event.json"), JSON.stringify({ comment: { body: applyComment([{ id: selected }]) } }));
   const provider = path.join(directory, "provider.mjs");
   await fs.writeFile(provider, `
     import assert from "node:assert/strict";
@@ -266,7 +271,8 @@ test("the workflow helper publishes built files and resolves only notes delivere
         return Response.json({ note: {} });
       }
       return Response.json(url.searchParams.has("after")
-        ? { notes: [{ id: "${selected}", status: "sent" }] } : { notes: [{ id: "${other}", status: "open" }], nextCursor: "next" });
+        ? { notes: [{ id: "${selected}", status: "sent", body: process.env.EMPTY_FEEDBACK ? " " : "Increase the heading size" }] }
+        : { notes: [{ id: "${other}", status: "open", body: "Align the sidebar" }], nextCursor: "next" });
     };
   `);
   for (const mode of ["legacy", "service", "protected-api"]) {
@@ -279,8 +285,14 @@ test("the workflow helper publishes built files and resolves only notes delivere
       ...(mode === "legacy" ? { TIMDS_ACCESS_TOKEN: "legacy-token" } : { CF_ACCESS_CLIENT_ID: "service-id", CF_ACCESS_CLIENT_SECRET: "service-secret" }),
     };
     const run = (action, overrides) => execFileSync(process.execPath, ["--import", provider, helper, action], { env: { ...env, ...overrides }, stdio: "pipe" });
+    const readiness = () => fs.readFile(env.GITHUB_OUTPUT, "utf8").then(output => output.trim().split("\n").at(-1));
+    run("selection", { CF_ACCESS_CLIENT_ID: "", CF_ACCESS_CLIENT_SECRET: "", TIMDS_ACCESS_TOKEN: "" });
+    assert.equal(await readiness(), "requires_host=true");
+    assert.throws(() => run("upload", { TIMDS_PORTAL_URL: "https://other.example.com" }), /must match the origin installed/);
+    await assert.rejects(fs.access(env.RECEIPT), { code: "ENOENT" });
     run("upload");
     run("read");
+    assert.equal(await readiness(), "resolvable=true");
     await fs.mkdir(path.join(directory, "notes"), { recursive: true });
     await fs.rename(path.join(directory, "designer-notes.json"), path.join(directory, "notes", "designer-notes.json"));
     run("resolve");
@@ -295,6 +307,8 @@ test("the workflow helper publishes built files and resolves only notes delivere
     assert.throws(() => run("upload", { SHA: "b".repeat(40) }), /identity does not match/);
     const dispatch = path.join(directory, "manual.json");
     await fs.writeFile(dispatch, JSON.stringify({ inputs: { request: "Address open notes" } }));
+    run("selection", { GITHUB_EVENT_PATH: dispatch });
+    assert.equal(await readiness(), "requires_host=false");
     run("read", { GITHUB_EVENT_PATH: dispatch });
     const thread = JSON.parse(await fs.readFile(path.join(directory, "designer-notes.json"), "utf8"));
     assert.deepEqual(thread.notes.map(note => note.id), mode === "legacy" ? [other, selected] : [selected]);
@@ -308,9 +322,73 @@ test("the workflow helper publishes built files and resolves only notes delivere
         assert.equal(await fs.readFile(receiptFile, "utf8"), "GET /service-auth\n");
       }
       const unsent = path.join(directory, "unsent.json");
-      await fs.writeFile(unsent, JSON.stringify({ comment: { body: "<!-- timds-designer-request -->\n```json\n" + JSON.stringify({ notes: [{ id: other }] }) + "\n```" } }));
+      await fs.writeFile(unsent, JSON.stringify({ comment: { body: applyComment([{ id: selected }, { id: other }]) } }));
       run("read", { GITHUB_EVENT_PATH: unsent });
-      assert.deepEqual(JSON.parse(await fs.readFile(path.join(directory, "designer-notes.json"), "utf8")).notes, []);
+      assert.equal(await readiness(), "resolvable=false", "the entire selection must arrive, even when one note is ready");
+      run("read", { EMPTY_FEEDBACK: "true" });
+      assert.equal(await readiness(), "resolvable=false", "delivery of a note ID alone supplies no design request");
+      const embedded = path.join(directory, "embedded.json");
+      await fs.writeFile(embedded, JSON.stringify({ comment: { body: "<!-- timds-designer-request -->\n```json\n" + JSON.stringify([{ id: selected, body: "Increase the heading size" }]) + "\n```" } }));
+      for (const [event, required] of [[env.GITHUB_EVENT_PATH, true], [embedded, false], [dispatch, false]]) {
+        run("selection", { GITHUB_EVENT_PATH: event, EXCHANGE_FAILURE: "denied" });
+        assert.equal(await readiness(), "requires_host=" + required);
+        assert.throws(() => run("read", { GITHUB_EVENT_PATH: event, EXCHANGE_FAILURE: "denied" }), /service identity exchange failed/);
+      }
     }
   }
+});
+
+test("the installed workflows select preview apps and verify the proposed patch on a fresh checkout", async t => {
+  const root = await scratchDirectory(t);
+  const product = path.join(root, "product"), writer = path.join(root, "writer");
+  const manifest = {
+    schemaVersion: 1, designSystem: { systemId: "example/core" },
+    apps: { web: { cwd: ".", designSurface: ["src/**"], protected: ["src/server/**"], preview: { build: ["npm", "run", "build"], output: "dist" } } },
+  };
+  const git = (cwd, ...args) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  await fs.mkdir(product);
+  git(product, "init", "-b", "main");
+  git(product, "config", "user.name", "Example");
+  git(product, "config", "user.email", "design@example.com");
+  for (const { path: relative, content } of await consumerManagedFiles(manifest)) {
+    const dest = path.join(product, relative);
+    await fs.mkdir(path.dirname(dest), { recursive: true });
+    await fs.writeFile(dest, content);
+  }
+  await fs.writeFile(path.join(product, "timds.consumer.json"), JSON.stringify(manifest));
+  await fs.writeFile(path.join(product, "package.json"), "{}");
+  git(product, "add", ".");
+  git(product, "commit", "-m", "Adopt consumer");
+  const base = git(product, "rev-parse", "HEAD");
+  git(root, "clone", product, writer);
+  const proposal = path.join(root, "proposal");
+  await fs.mkdir(proposal);
+  const env = { PATH: process.env.PATH, RUNNER_TEMP: root, BASE_SHA: base, HEAD_SHA: base, APP: "web" };
+  const verify = designer.jobs.change.steps.find(step => step.name?.startsWith("Verify proposed")).run;
+  const save = designer.jobs.edit.steps.find(step => step.name === "Save the proposed edits").run;
+  const check = () => execFileSync("bash", ["-c", verify], { cwd: writer, env, stdio: "pipe" });
+  const propose = async () => {
+    execFileSync("bash", ["-c", save], { cwd: product, env: { ...env, START_SHA: base } });
+    await fs.copyFile(path.join(root, "design.patch"), path.join(proposal, "design.patch"));
+  };
+  await fs.mkdir(path.join(product, "src"));
+  await fs.writeFile(path.join(product, "src/theme.css"), "main { margin: auto; }");
+  await propose();
+  check();
+  assert.equal(git(writer, "diff", "--cached", "--name-only"), "src/theme.css");
+  await assert.rejects(fs.access(path.join(writer, "src/theme.css")), { code: "ENOENT" });
+  git(product, "commit", "-m", "Style the page");
+  git(writer, "fetch", "origin");
+  const head = git(product, "rev-parse", "HEAD");
+  execFileSync("bash", ["-c", preview.jobs.gate.steps.find(step => step.id === "scope").run], {
+    cwd: writer, env: { ...env, HEAD_SHA: head, GITHUB_OUTPUT: path.join(root, "preview-scope") },
+  });
+  assert.equal(await fs.readFile(path.join(root, "preview-scope"), "utf8"), 'apps=["web"]\nscope=inside\n');
+  await fs.writeFile(path.join(product, "package.json"), '{"private":true}');
+  await propose();
+  assert.throws(check, /protected path or file mode: "package.json"/);
+  assert.deepEqual(designer.jobs.edit.permissions, { contents: "read" });
+  assert.doesNotMatch(JSON.stringify(designer.jobs.change.steps), /npm ci|npm run|codex-action/);
+  assert.equal(designer.jobs.gate.steps.find(step => step.id === "read_notes")["continue-on-error"], true);
+  assert.match(designer.jobs.gate.steps.find(step => step.id === "archive").if, /read_notes.outputs.resolvable/);
 });
