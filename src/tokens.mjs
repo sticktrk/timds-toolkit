@@ -14,26 +14,12 @@
 
 import { derivedFilePath, readDerivedLayer } from "./derived.mjs";
 import { attr, byTag, findAll, parseHtml } from "./html.mjs";
+import { BRAND_ROLES } from "./read-documents.mjs";
+export { BRAND_ROLES } from "./read-documents.mjs";
 
 export const TOKENS_SCHEMA_VERSION = 1;
 
-/**
- * The brand roles every consumer can ask for by name, with the token names
- * that fill each one by convention when `timds.json brand.roles` does not say
- * otherwise. Candidates are tried in order against the document scope and
- * must have the role's kind. The vocabulary mirrors the video contract's
- * brand block so one name means one thing everywhere.
- */
-export const BRAND_ROLES = Object.freeze({
-  "color.background": ["--color-background", "--color-canvas", "--background", "--canvas", "--color-bg", "--bg"],
-  "color.panel": ["--color-panel", "--color-surface", "--panel", "--surface"],
-  "color.accent": ["--color-accent", "--accent", "--color-primary", "--primary", "--brand"],
-  "color.text": ["--color-text", "--color-ink", "--text", "--ink", "--color-fg", "--fg"],
-  "color.muted": ["--color-muted", "--color-text-muted", "--muted", "--text-muted"],
-  "font.display": ["--font-display", "--font-heading", "--font-headline", "--font-serif", "--display"],
-  "font.body": ["--font-body", "--font-text", "--font-sans", "--body"],
-  "font.ui": ["--font-ui", "--font-sans", "--font-body", "--ui"],
-});
+
 const ROLE_KINDS = Object.freeze({ color: "color", font: "font-family" });
 const ROLE_PATTERN = /^(color|font)\.[a-z][a-z0-9-]*$/;
 const TOKEN_NAME_PATTERN = /^--[a-zA-Z0-9_-]+$/;

@@ -70,6 +70,7 @@ jobs:
           package-manager-cache: false
       - run: npm ci
       - run: npm test
+      - run: npm run check:read-tools
       - run: npm run pack:check
       - run: node scripts/check-starter-history.mjs
       - run: node scripts/check-posting-template.mjs
