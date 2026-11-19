@@ -474,6 +474,7 @@ jobs:
     environment: timds-pipeline
     permissions:
       contents: read
+      pull-requests: read
     steps:
       - name: Check out the pipeline helper from the workflow revision
         uses: actions/checkout@v5
@@ -487,6 +488,17 @@ jobs:
           artifact-ids: ${{ needs.gate.outputs.notes_artifact }}
           merge-multiple: true
           path: ${{ runner.temp }}/notes
+      - name: Verify the pushed revision on the selected pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ needs.gate.outputs.branch }}
+          PULL_REQUEST: ${{ needs.gate.outputs.pull_request }}
+          SHA: ${{ needs.change.outputs.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$PULL_REQUEST" =~ ^[1-9][0-9]*$ && "$SHA" =~ ^[0-9a-f]{40}$ ]]
+          gh api "repos/${GITHUB_REPOSITORY}/pulls/${PULL_REQUEST}" | jq -e --arg sha "$SHA" --arg branch "$BRANCH" --arg repo "$GITHUB_REPOSITORY" \
+            '.state == "open" and .head.sha == $sha and .head.ref == $branch and .head.repo.full_name == $repo' >/dev/null
       - name: Resolve the addressed notes
         env:
           NOTE_IDS: ${{ needs.change.outputs.note_ids }}
