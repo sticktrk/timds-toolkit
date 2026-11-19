@@ -23,6 +23,11 @@
 // The bundle is optional: a manifest without `bundle` builds none, and a stale
 // bundle from an earlier manifest is removed so the artifact matches it.
 //
+// The blog posting template (`src/posting/blog.json`, see posting.mjs) is part
+// of every bundle whose system keeps one, without a pattern naming it: a
+// publishing engine and a website read it from here, beside the stylesheets
+// that style its blocks. An `exclude` pattern still leaves it out.
+//
 // A workspace site (`site/`, see workspace-site.mjs) is its own package with
 // its own dependencies and build output, so the walk never enters it: a
 // system's bundle holds the system's files only, and a check stays as fast
@@ -32,6 +37,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 
+import { POSTING_SOURCE_FILE } from "./posting.mjs";
 import { WORKSPACE_SITE_DIRECTORY, findWorkspaceSite } from "./workspace-site.mjs";
 
 export const BUNDLE_SCHEMA_VERSION = 1;
@@ -129,7 +135,7 @@ export async function collectBundleFiles(designSystemRoot, config, { outputDirec
       }
       if (!entry.isFile()) continue;
       if (ownOutput && (relative.startsWith(`${ownOutput}/`) || relative === `${path.posix.dirname(ownOutput)}/${BUNDLE_MANIFEST_FILE}`.replace(/^\.\//, ""))) continue;
-      if (!config.include.some((pattern) => matchesPattern(relative, pattern))) continue;
+      if (relative !== POSTING_SOURCE_FILE && !config.include.some((pattern) => matchesPattern(relative, pattern))) continue;
       if (config.exclude.some((pattern) => matchesPattern(relative, pattern))) continue;
       found.push({ path: relative, absolutePath: path.join(directory, entry.name) });
     }

@@ -77,6 +77,7 @@ tokens; the rest are declared as planned and built once someone writes them.
 | `tokens/<group>.json`, `media/<group>.json` | Authored token and media key maps; the build emits each token as a `--group-name` CSS custom property in `tokens.css`. `tokens.json` and `media.json` are generated views of the groups, never edited |
 | `src/site.json` | The views and their pages, authored or planned; drives the navigation and the overview |
 | `src/formats.json` | Every print sheet and screen canvas the system produces, each tied to its page; `{{formats:GROUP}}` tables and `{{canvas:ID}}` previews read it |
+| `src/posting/blog.json` | The blog posting template: an article's named blocks in page order and what a writer puts in each; `{{posting:preview}}` and `{{posting:blocks}}` show it, the stylesheet styles each block by id, and the consumer bundle publishes it |
 | `src/pages/` | One content fragment per authored page, such as `src/pages/brand/color.html` |
 | `src/designs/` | Website designs: whole pages in HTML with JavaScript on the system's stylesheets, one directory per design, built to `/designs/` |
 | `src/layout.html` | The shell every page shares |

@@ -28,6 +28,13 @@
 // nearest authored page, for a toolkit-written fragment that links the
 // client's own pages.
 //
+// src/posting/blog.json is the blog posting template (posting.mjs): the named
+// blocks of an article a publishing engine writes for a site on this system.
+// {{posting:preview}} renders those blocks as a sample article body, styled by
+// the system's own stylesheet, and {{posting:blocks}} their spec table, so a
+// page shows the template that is published and never a copy of it. Both
+// say so when the system keeps no template.
+//
 // Website designs under src/designs/ are whole pages on the system's own
 // stylesheets. build() invokes the package's design and changelog renderers;
 // the app bar links /designs/ and the overview's sitemap names each design.
@@ -37,6 +44,7 @@ import { access, cp, lstat, mkdir, readFile, readdir, rm, stat, writeFile } from
 import { createServer } from "node:http";
 import path from "node:path";
 import { brandKitCopySamples, brandKitMediaSamples, brandKitSlots, brandKitLabels } from "./brand-kit.mjs";
+import { readPostingTemplate, renderPostingPreview, renderPostingTable } from "./posting.mjs";
 import { WORKSPACE_SITE_MOUNT, findWorkspaceSite } from "./workspace-site.mjs";
 
 /** The design system's own folders, from the root a stub passes. */
@@ -826,6 +834,7 @@ export async function renderSite(designSystemRoot) {
   const model = readSiteModel(await readJson("src/site.json"));
   const formats = readFormats(existsSync(path.join(source, "formats.json")) ? await readJson("src/formats.json") : null, model);
   const designs = await designList({ root, source });
+  const posting = (await readPostingTemplate(root))?.template ?? null;
   const data = await readSlotData({ root, source });
   const fallbacks = new Set();
   const slotValues = slotRenderers(data, tokens, fallbacks);
@@ -878,6 +887,11 @@ export async function renderSite(designSystemRoot) {
       // system moved it to the front.
       page: (id) => pageHref(model, id, page.file),
       nearest: (id) => nearestHref(model, id, page.file),
+      posting: (part) => {
+        if (part === "preview") return renderPostingPreview(posting);
+        if (part === "blocks") return renderPostingTable(posting);
+        throw new Error(`${file} uses {{posting:${part ?? ""}}}; the parts are {{posting:preview}} and {{posting:blocks}}`);
+      },
       sitemap: () => renderSitemap(model, designs),
       tokens: (group) => renderTokenTable(tokens, group, page.file),
     }));
@@ -905,6 +919,7 @@ export async function renderSite(designSystemRoot) {
     files: rendered,
     formatCount: formats.byId.size,
     formatGroups: formats.groups.size,
+    postingBlocks: posting ? posting.blocks.length : null,
     pages: authored.length,
     planned: model.pages.filter((page) => page.planned).map((page) => page.id),
     tokens,
@@ -1030,6 +1045,7 @@ export async function check(designSystemRoot) {
   }
 
   console.log(`Validated ${site.tokenGroups} token groups, ${site.formatCount} formats, and ${site.pages} authored pages`);
+  if (site.postingBlocks !== null) console.log(`Validated the blog posting template: ${site.postingBlocks} blocks`);
   if (site.fallbacks.length) console.log(`Stock samples used for unfilled slots: ${site.fallbacks.join(", ")}`);
   for (const warning of site.warnings) console.warn(`Warning: ${warning}`);
   if (site.planned.length) console.log(`Planned pages not yet authored: ${site.planned.join(", ")}`);

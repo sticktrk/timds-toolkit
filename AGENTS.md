@@ -385,6 +385,15 @@ names, domains and repository names never enter this public repository.
 - Single-owner catalogs are JSON the viewer validates: asset sizes in
   `src/formats.json`, with every entry naming its page. A page never
   restates a size or a token.
+- The blog posting template is `src/posting/blog.json` (`src/posting.mjs`,
+  `docs/posting-template.md`): an article's named blocks, read by publishing
+  engines from the consumer bundle, which carries it without a pattern.
+  Its structure only grows: `schemaVersion` stays `1`, a new ability is a new
+  optional key whose absence means the old behaviour, unknown keys are
+  ignored (and named by `check`), and nothing is renamed. The stock template
+  in `templates/starter/src/posting/blog.json` (both starters seed it), the
+  block styles in both stock `system.css` files and the EmDash site
+  template's named blocks describe the same ids; change them together.
 - Preview engines and shared atoms are script-free CSS under `src/styles/`,
   written against the starter tokens with no color literals.
 - Platform facts (standard ad sizes, upload limits, print trims) may be

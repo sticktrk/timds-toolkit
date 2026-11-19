@@ -33,7 +33,8 @@ retain their declared prerequisites. The agent runs these steps for the designer
 A logo or font file the product's website must load itself reaches it only
 through the consumer bundle, which carries the files `timds.json`
 `bundle.include` names (a fresh system ships only `dist/tokens.css` and
-`dist/styles/system.css`). That manifest is protected: report which pattern
+`dist/styles/system.css`, plus its blog posting template, which every bundle
+carries unnamed). That manifest is protected: report which pattern
 an operator should add rather than editing it.
 
 Never commit a full-resolution original, a video master, or source audio.
