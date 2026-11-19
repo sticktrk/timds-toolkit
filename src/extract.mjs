@@ -54,6 +54,8 @@ import { designsDocument } from "./designs.mjs";
 import { CHANGELOG_OUTPUT_DIRECTORY } from "./changelog.mjs";
 import { describeFormatSize, formatsDocument } from "./formats.mjs";
 import { buildTokensDocument, importReferences, parseCssTokens, parseFontFaces, stylesheetReferences } from "./tokens.mjs";
+import { blockToMarkdown, pageToMarkdown } from "./read-documents.mjs";
+export { blockToMarkdown, pageToMarkdown } from "./read-documents.mjs";
 
 export const EXTRACT_SCHEMA_VERSION = 1;
 
@@ -320,46 +322,6 @@ export function extractPage(html, { pageId, url, config = normalizeMachineConfig
 
 /* ── emitters ───────────────────────────────────────────────────────────── */
 
-/** One block as Markdown, heading included — the unit a guidance group or a citation hands to an agent. */
-export function blockToMarkdown(block) {
-  const lines = [];
-  const anchor = block.id.includes("#") ? block.id.slice(block.id.indexOf("#") + 1) : block.id;
-  lines.push(`## ${block.title || anchor}   \`#${anchor}\``, "");
-  if (block.intro) lines.push(block.intro, "");
-  for (const table of block.specs ?? []) {
-    const columns = table.columns.length ? table.columns : Object.keys(table.rows[0].fields);
-    lines.push(`| ${columns.join(" | ")} |`, `| ${columns.map(() => "---").join(" | ")} |`);
-    for (const row of table.rows) {
-      const source = row.markdown ?? row.fields;
-      lines.push(`| ${columns.map((column) => String(source[column] ?? "").replace(/\|/g, "\\|")).join(" | ")} |`);
-    }
-    lines.push("");
-  }
-  for (const note of block.notes ?? []) lines.push(`> **Note.** ${note.text}`, "");
-  for (const entry of block.code ?? []) lines.push("```", entry.text, "```", "");
-  if (block.assets?.length) {
-    lines.push("| Asset | Media key | Notes |", "| --- | --- | --- |");
-    for (const asset of block.assets) {
-      const brand = asset.brand
-        ? [asset.brand.role, asset.brand.primary ? "primary" : null, asset.brand.variant, asset.brand.lockup, asset.brand.on ? `on ${asset.brand.on}` : null].filter(Boolean).join(" ")
-        : null;
-      const detail = [brand ? `**${brand}**` : null, ...(asset.lines ?? [])].filter(Boolean).join(" · ").replace(/\|/g, "\\|");
-      lines.push(`| ${asset.name} | \`${asset.media.key ?? "—"}\` | ${detail} |`);
-    }
-    lines.push("");
-  }
-  for (const entry of block.prose ?? []) lines.push(entry.text, "");
-  return `${lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd()}\n`;
-}
-
-export function pageToMarkdown(page) {
-  const lines = [`# ${page.title || page.id}`, ""];
-  if (page.eyebrow) lines.push(`*${page.eyebrow}*`, "");
-  if (page.lede) lines.push(page.lede, "");
-  lines.push(`<!-- source: ${page.url} · id: ${page.id} -->`, "");
-  for (const block of page.blocks) lines.push(blockToMarkdown(block));
-  return `${lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd()}\n`;
-}
 
 const ROLE_LABELS = Object.freeze({
   "color.background": "Background",

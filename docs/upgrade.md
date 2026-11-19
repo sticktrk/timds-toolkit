@@ -35,7 +35,7 @@ the generated artifact in `dist/`; that does not grant upgrade permission to
 rewrite authored pages, styles, documentation, components or `timds.json`.
 
 Consumer repositories have their own smaller boundary: the two consumer
-skills, preview/designer-change workflows, TimDS launch and MCP entries, and
+skills, preview/designer-change workflows and their standalone pipeline helper, TimDS launch and MCP entries, and
 the installation record. Upgrade retains the product manifest, Design System
 pin, other launch/MCP entries and product source. `--version` also selects the
 toolkit dependency and exact lockfile; it does not select a Design System

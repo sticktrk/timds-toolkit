@@ -198,7 +198,7 @@ test("parseNotesComment reads the portal's designer request comment", () => {
 
 test("consumer notes resolves repository, app, and pull request from the checkout", async (t) => {
   const root = await createConsumerRepo(t);
-  const { calls, fetchImpl } = stubFetch(() => ({ body: { notes: NOTES } }));
+  const { calls, fetchImpl } = stubFetch(url => ({ body: url.searchParams.has("after") ? { notes: NOTES.slice(1) } : { notes: NOTES.slice(0, 1), nextCursor: "page/2" } }));
   const lines = [];
   const result = await runConsumerNotes(["--root", root, "--portal-url", "https://portal.example.test"], {
     output: (line) => lines.push(line),
@@ -210,6 +210,7 @@ test("consumer notes resolves repository, app, and pull request from the checkou
   assert.equal(result.app, "web");
   assert.equal(result.pullRequest, 12);
   assert.deepEqual(Object.fromEntries(calls[0].url.searchParams), { repository: "acme/product", app: "web", pullRequest: "12", status: "open" });
+  assert.deepEqual(Object.fromEntries(calls[1].url.searchParams), { repository: "acme/product", app: "web", pullRequest: "12", status: "open", after: "page/2" });
   assert.match(lines.join("\n"), /3 open designer notes for acme\/product, app web, pull request #12\./);
 
   // --json prints the list unchanged; --pull-request wins over GITHUB_REF; --all drops the status filter.
@@ -221,8 +222,8 @@ test("consumer notes resolves repository, app, and pull request from the checkou
     token: "test-token",
   });
   assert.deepEqual(JSON.parse(lines.join("\n")), { notes: NOTES });
-  assert.equal(calls[1].url.searchParams.get("pullRequest"), "7");
-  assert.equal(calls[1].url.searchParams.has("status"), false);
+  assert.equal(calls[2].url.searchParams.get("pullRequest"), "7");
+  assert.equal(calls[2].url.searchParams.has("status"), false);
 
   await assert.rejects(runConsumerNotes(["--root", root, "--app", "docs", "--pull-request", "7"], { fetchImpl, token: "t" }), /Unknown app "docs"/);
   await assert.rejects(runConsumerNotes(["--root", root, "--bogus"], { fetchImpl, token: "t" }), /Unknown option --bogus/);
@@ -243,6 +244,45 @@ test("consumer notes resolve marks each id at HEAD by default", async (t) => {
   assert.deepEqual(JSON.parse(calls[2].init.body), { status: "dismissed", commit: "cafe123" });
 
   await assert.rejects(runConsumerNotes(["resolve", "--root", root], { fetchImpl, token: "t" }), /Name the notes to resolve/);
+});
+
+test("consumer notes lists and resolves using the selected host's service assertion", async (t) => {
+  const root = await createConsumerRepo(t);
+  const origin = "https://host.example.test";
+  const principalId = "00000000-0000-4000-8000-000000000001";
+  const assertion = "example.example.example";
+  const env = { TIMDS_PORTAL_URL: origin, CF_ACCESS_CLIENT_ID: "example-id", CF_ACCESS_CLIENT_SECRET: "example-secret" };
+  const lines = [];
+  const { calls, fetchImpl } = stubFetch((url, init) => {
+    assert.equal(url.origin, origin);
+    assert.equal(init.redirect, "error");
+    const headers = new Headers(init.headers);
+    if (url.pathname === "/service-auth") {
+      assert.equal(init.method || "GET", "GET");
+      assert.equal(headers.get("CF-Access-Client-Id"), env.CF_ACCESS_CLIENT_ID);
+      assert.equal(headers.get("CF-Access-Client-Secret"), env.CF_ACCESS_CLIENT_SECRET);
+      assert.equal(headers.has("Authorization"), false);
+      return { body: { assertion, principalId } };
+    }
+    assert.equal(headers.has("CF-Access-Client-Id"), false);
+    assert.equal(headers.has("CF-Access-Client-Secret"), false);
+    assert.equal(headers.has("Authorization"), false);
+    assert.equal(headers.get("Cf-Access-Jwt-Assertion"), assertion);
+    assert.equal(headers.get("X-TimDS-API-Version"), "1");
+    return init.method === "PATCH" ? { body: { note: { id: "note_1", ...JSON.parse(init.body) } } } : { body: { notes: NOTES } };
+  });
+  const options = { env, fetchImpl, output: line => lines.push(line) };
+  const read = await runConsumerNotes(["--root", root, "--pull-request", "12"], options);
+  assert.deepEqual(read.notes, NOTES);
+  const fixed = await runConsumerNotes(["resolve", "note_1", "--root", root], options);
+  assert.equal(fixed.notes[0].status, "addressed");
+  assert.deepEqual(calls.map(call => call.url.pathname), ["/service-auth", CONSUMER_NOTES_PATH, "/service-auth", CONSUMER_NOTES_PATH + "/note_1"]);
+  assert.doesNotMatch(lines.join("\n"), /example-secret|example\.example\.example/);
+
+  for (const selected of ["https://other.example.test", origin + "/elsewhere"]) {
+    await assert.rejects(runConsumerNotes(["--root", root, "--portal-url", selected, "--pull-request", "12"], options));
+  }
+  assert.equal(calls.length, 4, "a conflicting selection must fail before sending credentials");
 });
 
 test("timds consumer notes is dispatched with raw arguments", async (t) => {

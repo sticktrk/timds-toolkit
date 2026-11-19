@@ -155,6 +155,7 @@ export const legacyStarterFileHashes = new Map([
     "358f7f76a72ebc1e01ca439f55497bc42d9ebfa2e209048da7812201d0d495f9", // v0.1.497
   ]],
   ["src/pages/use/install.html", [
+    "348cb57f2160df9db77c9d1ba4626e616fc1114e82c143e12be213b7d0deb035", // Stock through v0.1.509.
     "fa101103b57bd17354f209936b735cd2ad8a2b346c9c802d83058e4bb9d3e6f9", // v0.1.497
   ]],
   ["src/styles/viewer.css", [

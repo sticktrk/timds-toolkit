@@ -45,8 +45,7 @@ beside the route at every width and scheme, so the port is reviewed against its
 reference. Pairing a new route is a developer change to the manifest.
 
 Automatic previews are off by default. A developer can enable them with the
-`TIMDS_PREVIEWS_ENABLED=true` repository variable, the `TIMDS_ACCESS_TOKEN`
-secret, and CI read access to the Design System submodule. Otherwise include
+`TIMDS_PREVIEWS_ENABLED=true` repository variable and CI read access to the Design System submodule. For host previews, set the `TIMDS_PORTAL_URL` variable to the host origin and configure `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET` in the default-branch-restricted `timds-pipeline` environment for the granted follower. A legacy provider uses `TIMDS_ACCESS_TOKEN`. Otherwise include
 local review details and screenshots in the draft pull request.
 
 ## Rules for theme changes

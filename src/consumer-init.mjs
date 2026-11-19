@@ -22,6 +22,7 @@
 //                                                 change workflow (OpenAI
 //                                                 makes a requested change on
 //                                                 a design/ branch)
+//   .github/timds/consumer-pipeline.mjs           credentialed CI client
 //   .claude/launch.json                           one entry per crawl-mode app,
 //                                                 merged beside existing ones
 //   .mcp.json                                     the Design System read MCP
@@ -106,7 +107,7 @@ directory down, and the root package.json when it has a dev, start, preview,
 or build script), selects @dtconcepts/timds in the root package.json, and
 installs both consumer skills, the preview and designer-change workflows,
 .claude/launch.json entries, and the Design System read MCP server in
-.mcp.json (at --portal-url, default ${DEFAULT_PORTAL_URL}). An existing
+.mcp.json (at the host selected by --portal-url, or TIMDS_PORTAL_URL when first installed). An existing
 manifest is kept; --force regenerates it and replaces customized managed
 files.
 
@@ -240,8 +241,8 @@ function packageManagerFor(appRoot) {
   const has = (file) => existsSync(path.join(appRoot, file));
   // package-lock wins over a stray bun lockfile: the stock workflow sets up Node.
   if (has("package-lock.json")) return { name: "npm", install: ["npm", "ci"], run: (script) => ["npm", "run", script], todo: has("bun.lockb") || has("bun.lock") ? "both package-lock.json and a bun lockfile exist; install uses npm ci" : null };
-  if (has("bun.lockb") || has("bun.lock")) return { name: "bun", install: ["bun", "install", "--frozen-lockfile"], run: (script) => ["bun", "run", script], todo: "bun is not set up by the stock preview workflow; add oven-sh/setup-bun or switch install to npm" };
-  if (has("pnpm-lock.yaml")) return { name: "pnpm", install: ["pnpm", "install", "--frozen-lockfile"], run: (script) => ["pnpm", "run", script], todo: "pnpm is not set up by the stock preview workflow; add pnpm/action-setup or switch install to npm" };
+  if (has("bun.lockb") || has("bun.lock")) return { name: "bun", install: ["bun", "install", "--frozen-lockfile"], run: (script) => ["bun", "run", script], todo: "bun is not installed by the stock preview workflow; install it in the preview build image or switch install to npm" };
+  if (has("pnpm-lock.yaml")) return { name: "pnpm", install: ["pnpm", "install", "--frozen-lockfile"], run: (script) => ["pnpm", "run", script], todo: "pnpm is not installed by the stock preview workflow; enable it in the preview build image or switch install to npm" };
   if (has("yarn.lock")) return { name: "yarn", install: ["yarn", "install", "--frozen-lockfile"], run: (script) => ["yarn", "run", script], todo: null };
   return { name: "npm", install: ["npm", "install"], run: (script) => ["npm", "run", script], todo: "no lockfile found; install uses npm install, commit a lockfile and switch to npm ci" };
 }
@@ -668,6 +669,13 @@ export async function consumerManagedFiles(manifest, options = {}) {
   const files = await consumerSkillFiles(manifest, options);
   files.push({ path: CONSUMER_WORKFLOW_PATH, content: await consumerWorkflow("timds-consumer-preview.yml", options) });
   files.push({ path: CONSUMER_DESIGNER_WORKFLOW_PATH, content: await consumerWorkflow("timds-designer-change.yml", options) });
+  files.push({ path: ".github/workflows/timds-designer-run.yml", content: await consumerWorkflow("timds-designer-run.yml", options) });
+  const pipeline = await fs.readFile(path.join(packageRoot, "src/consumer-pipeline.mjs"), "utf8");
+  const origin = options.portalUrl ? new URL(options.portalUrl).origin : null;
+  files.push({ path: ".github/timds/consumer-pipeline.mjs", content: `${pipeline}\nawait runConsumerPipeline(process.argv[2], process.env, ${JSON.stringify(origin)});\n` });
+  files.push({ path: ".github/timds/product-build.sh", content: await template("consumer-product-build.sh") });
+  const paths = await fs.readFile(path.join(packageRoot, "src/consumer-paths.mjs"), "utf8");
+  files.push({ path: ".github/timds/consumer-paths.mjs", content: `${paths}\nawait checkWorkflowPaths(process.argv[2], process.env);\n` });
   return files;
 }
 
@@ -676,23 +684,29 @@ export async function consumerWorkflow(name, { mode = "npm" } = {}) {
   const source = await template(name);
   if (mode !== "binary") return source;
   const install = await template("consumer-binary-install.yml");
+  const designerInstall = `      - name: Prepare the offline editor runtime cache
+        run: echo "TIMDS_BINARY_CACHE=$(mktemp -d /tmp/timds-designer-runtime.XXXXXX)" >> "$GITHUB_ENV"
+${install}      - name: Verify the editor runtime is ready
+        run: timds-cli --version
+`;
   return source
+    .replace(/      - name: Prepare the pinned toolkit for the designer\n[\s\S]*?(?=      - name: Write the instructions)/, () => designerInstall)
     .replaceAll("npm run timds --", "timds-cli")
     .replaceAll("a published pin is fetched by npm ci", "a published pin is fetched by consumer sync")
     .replaceAll("npm ci fetches the pinned version.", "consumer sync fetches the pinned version.")
     .replaceAll(`$(node -p "require('./timds.consumer.json').designSystem?.path || 'design-system'")`, `$(jq -r '.designSystem.path // "design-system"' timds.consumer.json)`)
     .replaceAll(`$(node -e "process.stdout.write(JSON.stringify(Object.keys(require('./timds.consumer.json').apps)))")`, "$(jq -c '.apps | keys' timds.consumer.json)")
     .replaceAll("          cache: npm\n", "")
-    .replaceAll("          node-version: 22\n", "          node-version: 22\n          package-manager-cache: false\n")
+    .replace(/      - name: Install the product\n(        shell: [^\n]+\n)        run: npm ci\n/g, (_step, shell) => install.replaceAll("        shell: bash\n", shell))
     .replaceAll("      - run: npm ci\n", install);
 }
 
 /**
  * `.mcp.json` servers TimDS manages, keyed by name: the Design System read
- * tools over HTTP at the portal, authorized with TIMDS_ACCESS_TOKEN from the
- * environment (never a literal token).
+ * tools over HTTP at the host. An interactive client authorizes its own OAuth session.
  */
-export function consumerMcpServers({ portalUrl = DEFAULT_PORTAL_URL } = {}) {
+export function consumerMcpServers({ portalUrl } = {}) {
+  if (!portalUrl) return {};
   let base;
   try {
     base = new URL(String(portalUrl));
@@ -703,8 +717,7 @@ export function consumerMcpServers({ portalUrl = DEFAULT_PORTAL_URL } = {}) {
   return {
     [CONSUMER_MCP_SERVER_NAME]: {
       type: "http",
-      url: new URL("/api/timds/mcp/read", `${base.origin}/`).toString(),
-      headers: { Authorization: "Bearer ${TIMDS_ACCESS_TOKEN}" },
+      url: new URL("/api/timds/mcp", `${base.origin}/`).toString(),
     },
   };
 }
@@ -810,13 +823,20 @@ async function planLaunch(repoRoot, desired, recorded, force) {
   return { launchPath, content, changed, kept, managed, statuses };
 }
 
-async function planMcp(repoRoot, desired, recorded, force) {
+async function planMcp(repoRoot, desired, recorded, force, preserveLegacyConnector) {
   const mcpPath = path.join(repoRoot, CONSUMER_MCP_PATH);
   const existing = await readJsonFile(mcpPath, CONSUMER_MCP_PATH);
   const config = existing ? structuredClone(existing) : { mcpServers: {} };
   if (config.mcpServers === undefined) config.mcpServers = {};
   if (!config.mcpServers || typeof config.mcpServers !== "object" || Array.isArray(config.mcpServers)) {
     throw new Error(`${CONSUMER_MCP_PATH} has an mcpServers value that is not an object; fix it, then rerun timds consumer init`);
+  }
+  const installed = config.mcpServers[CONSUMER_MCP_SERVER_NAME];
+  const keepLegacy = preserveLegacyConnector && typeof installed?.url === "string" && URL.canParse(installed.url)
+    && new URL(installed.url).pathname === "/api/timds/mcp/read";
+  if (!Object.keys(desired).length) {
+    const statuses = keepLegacy ? [{ name: CONSUMER_MCP_SERVER_NAME, status: "kept-legacy" }] : [];
+    return { mcpPath, changed: false, kept: [], managed: recorded, statuses };
   }
   const kept = [];
   const managed = {};
@@ -829,6 +849,14 @@ async function planMcp(repoRoot, desired, recorded, force) {
       continue;
     }
     const current = config.mcpServers[name];
+    // The former provider's origin cannot identify this installation's new
+    // host. Only consumer init with the owner-selected host can move it.
+    if (name === CONSUMER_MCP_SERVER_NAME && keepLegacy) {
+      if (recorded[name]) managed[name] = recorded[name];
+      else delete managed[name];
+      statuses.push({ name, status: "kept-legacy" });
+      continue;
+    }
     if (sameJson(current, entry)) {
       statuses.push({ name, status: "unchanged" });
       continue;
@@ -863,15 +891,18 @@ async function planGitignoreLines(repoRoot, lines) {
  * record of the previous installation. Shared by init and upgrade so both
  * apply the same rules; nothing is written here.
  */
-async function planConsumerManagedState(repoRoot, manifest, previous, { defaultBranch, force, portalUrl, mode = "npm" }) {
-  const files = await consumerManagedFiles(manifest, { defaultBranch, mode });
+async function planConsumerManagedState(repoRoot, manifest, previous, { defaultBranch, force, portalUrl, preserveLegacyConnector = true, mode = "npm" }) {
+  const servers = consumerMcpServers({ portalUrl });
+  const mcpPlan = await planMcp(repoRoot, servers, previous.mcpServers || {}, force, preserveLegacyConnector);
+  const legacy = mcpPlan.statuses.some(entry => entry.status === "kept-legacy");
+  const pipelineOrigin = !legacy && portalUrl ? new URL(portalUrl).origin : null;
+  const files = await consumerManagedFiles(manifest, { defaultBranch, mode, portalUrl: pipelineOrigin });
   const filePlan = await planManagedFiles(repoRoot, files, previous.managedFiles || {}, force);
   const launchPlan = await planLaunch(repoRoot, await consumerLaunchConfigurations(manifest), previous.launchConfigurations || {}, force);
-  const mcpPlan = await planMcp(repoRoot, consumerMcpServers({ portalUrl }), previous.mcpServers || {}, force);
-  return { files, filePlan, launchPlan, mcpPlan };
+  return { files, filePlan, launchPlan, mcpPlan, pipelineOrigin };
 }
 
-function consumerInstallationRecord(files, launchPlan, mcpPlan) {
+function consumerInstallationRecord(files, launchPlan, mcpPlan, pipelineOrigin) {
   return {
     name: runtimeIdentity.name,
     schemaVersion: 1,
@@ -879,6 +910,7 @@ function consumerInstallationRecord(files, launchPlan, mcpPlan) {
     managedFiles: Object.fromEntries(files.map((file) => [file.path, sha256(file.content)])),
     launchConfigurations: launchPlan.managed,
     mcpServers: mcpPlan.managed,
+    pipelineOrigin,
   };
 }
 
@@ -898,7 +930,7 @@ async function refuseIgnoredPaths(repoRoot, paths, command) {
  * it or requiring its pin to be in the index yet. Migration uses this before
  * removing the submodule; force applies only to the installation's files.
  */
-export async function planConsumerInstallation(repoRoot, manifest, { force = false, portalUrl = null, command = "timds consumer init", mode = null } = {}) {
+export async function planConsumerInstallation(repoRoot, manifest, { force = false, portalUrl = null, preserveLegacyConnector = !portalUrl, command = "timds consumer init", mode = null } = {}) {
   await assertBinaryInstallation(repoRoot, { allowNpm: true });
   const validated = validateConsumerManifest(manifest);
   const installationPath = path.join(repoRoot, CONSUMER_INSTALLATION_PATH);
@@ -909,8 +941,8 @@ export async function planConsumerInstallation(repoRoot, manifest, { force = fal
   }
   const previous = installation.consumer && typeof installation.consumer === "object" ? installation.consumer : {};
   const defaultBranch = await consumerDefaultBranch(repoRoot);
-  const { files, filePlan, launchPlan, mcpPlan } = await planConsumerManagedState(repoRoot, validated, previous, {
-    defaultBranch, force, mode, portalUrl: portalUrl ?? await installedPortalUrl(repoRoot),
+  const { files, filePlan, launchPlan, mcpPlan, pipelineOrigin } = await planConsumerManagedState(repoRoot, validated, previous, {
+    defaultBranch, force, mode, portalUrl: portalUrl ?? await installedPortalUrl(repoRoot), preserveLegacyConnector,
   });
   refuseCustomizedFiles(filePlan.conflicts, command);
   const published = consumerPinMode(validated.designSystem) === "published";
@@ -918,7 +950,7 @@ export async function planConsumerInstallation(repoRoot, manifest, { force = fal
   const toolkitLockPlan = published && mode !== "binary" ? await planConsumerToolkitLock(repoRoot) : null;
   const gitignorePlan = await planGitignoreLines(repoRoot, ["node_modules/", ".timds/preview/", ...(published ? [`${validated.designSystem.path}/`] : [])]);
   if (mode === "binary") installation = binaryInstallationRecord(installation);
-  installation.consumer = consumerInstallationRecord(files, launchPlan, mcpPlan);
+  installation.consumer = consumerInstallationRecord(files, launchPlan, mcpPlan, pipelineOrigin);
   const writes = [
     ...filePlan.writes,
     ...(packagePlan.changed ? [{ path: "package.json", content: packagePlan.content }] : []),
@@ -980,8 +1012,9 @@ async function resolvePublishedPin({ system, version, url, fetchImpl }) {
  * on a conflicting toolkit declaration, when git ignores a file it would
  * write, or on customized managed files unless `force`.
  */
-export async function initializeConsumer(rootInput = process.cwd(), { force = false, skipInstall = false, portalUrl = DEFAULT_PORTAL_URL, system = null, version = null, url = null, draftPreview = false, mode = null, fetchImpl = fetch, runNpm = runConsumerNpm, output = () => {} } = {}) {
+export async function initializeConsumer(rootInput = process.cwd(), { force = false, skipInstall = false, portalUrl: selectedHost = null, system = null, version = null, url = null, draftPreview = false, mode = null, fetchImpl = fetch, runNpm = runConsumerNpm, output = () => {} } = {}) {
   const repoRoot = await findGitRoot(rootInput);
+  const portalUrl = selectedHost ?? await installedPortalUrl(repoRoot);
   await refuseWorkspaceSite(rootInput, "timds consumer init", (siteRoot) => `${siteRoot} is a site inside a Design System workspace (designSystem.workspace in its ${CONSUMER_MANIFEST_FILE}); it needs no consumer init: it uses the workspace's toolkit and has no pin to install. Check it with timds consumer check --root ${siteRoot}, and keep the toolkit current with timds upgrade at the workspace root.`);
   if (existsSync(path.join(repoRoot, "timds.json"))) {
     throw new Error(`${repoRoot} is a Design System workspace (it holds timds.json); consumer init adopts a product repository that pins a Design System. To give this system its own site, run timds consumer scaffold emdash --workspace here.`);
@@ -1013,7 +1046,7 @@ export async function initializeConsumer(rootInput = process.cwd(), { force = fa
     if (!published) throw new Error("--draft-preview requires a published consumer");
     const modulePath = ".timds/draft-preview.mjs";
     const runtime = await fs.readFile(path.join(packageRoot, "src/consumer-draft-preview.mjs"), "utf8");
-    const moduleContent = `${runtime}\ninstallDraftPreview(${JSON.stringify({ source: published.systemId, portalUrl })});\n`;
+    const moduleContent = `${runtime}\ninstallDraftPreview(${JSON.stringify({ source: published.systemId, portalUrl: portalUrl || DEFAULT_PORTAL_URL })});\n`;
     const indexPath = path.join(repoRoot, "index.html");
     const html = await fs.readFile(indexPath, "utf8").catch(error => { if (error.code === "ENOENT") return null; throw error; });
     if (html !== null && !html.includes('data-timds-draft-preview') && !html.includes('</head>')) throw new Error("index.html has no </head> for the optional draft preview module");
@@ -1022,7 +1055,7 @@ export async function initializeConsumer(rootInput = process.cwd(), { force = fa
     if (old && old !== moduleContent && !force) throw new Error(`${modulePath} already exists; use --force to replace this preview module`);
     await refuseIgnoredPaths(repoRoot, [modulePath, ...(previewPlan.html ? ['index.html'] : [])], 'timds consumer init');
   }
-  const plan = await planConsumerInstallation(repoRoot, manifest, { force, portalUrl, mode });
+  const plan = await planConsumerInstallation(repoRoot, manifest, { force, portalUrl, preserveLegacyConnector: !selectedHost, mode });
   const { defaultBranch, launchPlan, mcpPlan, packagePlan } = plan;
   const binary = plan.mode === "binary";
   const invocation = binary ? "timds-cli" : "npm run timds --";
@@ -1080,13 +1113,13 @@ export async function initializeConsumer(rootInput = process.cwd(), { force = fa
         ...(skipInstall ? [`Run ${binary ? "timds-cli consumer sync" : "npm install (or npm run timds -- consumer sync)"} to fetch the bundle into ${designSystemPath}/`] : []),
       ]
       : []),
-    "Automatic previews are off by default; to enable them, set the TIMDS_PREVIEWS_ENABLED repository variable to true and add the TIMDS_ACCESS_TOKEN repository secret",
+    "Automatic previews are off by default; to enable them, set TIMDS_PREVIEWS_ENABLED to true. For host Access authentication, rerun consumer init --portal-url HOST and set the TIMDS_PORTAL_URL repository variable to that exact HTTPS origin. Store the service-token pair or legacy TIMDS_ACCESS_TOKEN in the default-branch timds-pipeline environment",
     ...(published
       ? []
       : ["For previews or designer changes: add DESIGN_SYSTEM_DEPLOY_KEY (read-only deploy key on the Design System repository) or TIMDS_CONSUMER_SUBMODULE_TOKEN (contents:read on it) so CI can check out the private submodule"]),
     "For designer changes: add the OPENAI_API_KEY repository or organization secret so the designer-change workflow can run Codex through the OpenAI API",
     `For designer changes: create the ${CONSUMER_DESIGN_CHANGE_LABEL} label, set the TIMDS_DESIGNER_BOTS repository variable to the TimDS portal's GitHub App bot login (comma-separated if more than one), and allow GitHub Actions to create pull requests (Settings > Actions > General)`,
-    `${CONSUMER_MCP_PATH} reads the Design System through the portal with TIMDS_ACCESS_TOKEN from the environment; export it locally to use the ${CONSUMER_MCP_SERVER_NAME} tools`,
+    mcpPlan.statuses.some(entry => entry.status === "kept-legacy") ? `To move the legacy connector and configure host authentication, rerun ${invocation} consumer init --portal-url HOST.` : portalUrl ? `Authorize the ${CONSUMER_MCP_SERVER_NAME} connector in your MCP client at its configured origin.` : `To install the optional ${CONSUMER_MCP_SERVER_NAME} connector, rerun ${invocation} consumer init --portal-url HOST with your TimDS host origin.`,
     `After editing ${CONSUMER_MANIFEST_FILE}, rerun timds consumer init so the skill's product section and the launch entries match it`,
     `Commit ${CONSUMER_MANIFEST_FILE}, ${binary ? "the exact executable pin" : "package.json, the lockfile"}, and the managed files; then run ${invocation} consumer check`,
   ];
@@ -1113,17 +1146,26 @@ export async function initializeConsumer(rootInput = process.cwd(), { force = fa
 // ---------------------------------------------------------------------------
 // Upgrade
 
-/** The portal origin the managed read MCP server points at today (default when absent or unreadable). */
+/** Preserve the installed origin on reruns. A new connector needs a configured host. */
 async function installedPortalUrl(repoRoot) {
+  const installation = await readJsonFile(path.join(repoRoot, CONSUMER_INSTALLATION_PATH), CONSUMER_INSTALLATION_PATH);
+  const previous = installation?.consumer;
+  if (previous?.pipelineOrigin) return previous.pipelineOrigin;
   const config = await readJsonFile(path.join(repoRoot, CONSUMER_MCP_PATH), CONSUMER_MCP_PATH);
-  const url = config?.mcpServers?.[CONSUMER_MCP_SERVER_NAME]?.url;
+  const connector = config?.mcpServers?.[CONSUMER_MCP_SERVER_NAME];
+  // A previously recorded, unmodified connector can supply its owner's selection.
+  // A customized connector has no authority to redirect the workflow credential.
+  if (!connector || sha256(JSON.stringify(connector)) !== previous?.mcpServers?.[CONSUMER_MCP_SERVER_NAME]) {
+    return process.env.TIMDS_PORTAL_URL || null;
+  }
+  const url = connector.url;
   try {
     const parsed = new URL(String(url));
     if (["http:", "https:"].includes(parsed.protocol)) return parsed.origin;
   } catch {
-    // Fall through to the default portal.
+    // No installed origin. Use the configured host if one was supplied.
   }
-  return DEFAULT_PORTAL_URL;
+  return process.env.TIMDS_PORTAL_URL || null;
 }
 
 /**
@@ -1153,7 +1195,7 @@ export async function upgradeConsumer(rootInput = process.cwd(), { force = false
   }
   const defaultBranch = await consumerDefaultBranch(repoRoot);
   const portalUrl = await installedPortalUrl(repoRoot);
-  const { files, filePlan, launchPlan, mcpPlan } = await planConsumerManagedState(repoRoot, manifest, previous, { defaultBranch, force, portalUrl, mode });
+  const { files, filePlan, launchPlan, mcpPlan, pipelineOrigin } = await planConsumerManagedState(repoRoot, manifest, previous, { defaultBranch, force, portalUrl, mode });
   refuseCustomizedFiles(filePlan.conflicts, "timds upgrade");
   await refuseIgnoredPaths(repoRoot, [
     ...filePlan.writes.map((file) => file.path),
@@ -1179,7 +1221,7 @@ export async function upgradeConsumer(rootInput = process.cwd(), { force = false
   if (launchPlan.changed) await writeFile(launchPlan.launchPath, launchPlan.content);
   if (mcpPlan.changed) await writeFile(mcpPlan.mcpPath, mcpPlan.content);
   if (mode === "binary") installation = binaryInstallationRecord(installation);
-  installation.consumer = consumerInstallationRecord(files, launchPlan, mcpPlan);
+  installation.consumer = consumerInstallationRecord(files, launchPlan, mcpPlan, pipelineOrigin);
   await writeFile(installationPath, toJson(installation));
 
   const previousVersion = typeof previous.version === "string" ? previous.version : "unknown";
@@ -1195,7 +1237,7 @@ export async function upgradeConsumer(rootInput = process.cwd(), { force = false
     output(`  ${status.padEnd(9)} ${CONSUMER_LAUNCH_PATH} entry "${name}"${status === "refused" ? " (customized; rerun timds upgrade --force to replace it)" : ""}`);
   }
   for (const { name, status } of mcpPlan.statuses) {
-    output(`  ${status.padEnd(9)} ${CONSUMER_MCP_PATH} server "${name}"${status === "refused" ? " (customized; rerun timds upgrade --force to replace it)" : ""}`);
+    output(`  ${status.padEnd(9)} ${CONSUMER_MCP_PATH} server "${name}"${status === "kept-legacy" ? " (run timds consumer init --portal-url HOST to move this connector)" : status === "refused" ? " (customized; rerun timds upgrade --force to replace it)" : ""}`);
   }
   output(`Review the diff, then commit the managed files and ${CONSUMER_INSTALLATION_PATH}.`);
 
@@ -1221,12 +1263,12 @@ export async function adoptConsumerBinary(rootInput = process.cwd(), { apply = f
   if (!installation.consumer) throw new Error("This product has no consumer installation record; run consumer init before adopting its managed files.");
   const selected = await readBinaryInstallation(repoRoot);
   if (selected && selected.version !== runtimeIdentity.version) throw new Error(`Workspace already selects ${selected.version}; use timds-cli upgrade --version ${runtimeIdentity.version} to change releases.`);
-  const { files, filePlan, launchPlan, mcpPlan } = await planConsumerManagedState(repoRoot, manifest, installation.consumer, {
+  const { files, filePlan, launchPlan, mcpPlan, pipelineOrigin } = await planConsumerManagedState(repoRoot, manifest, installation.consumer, {
     defaultBranch: await consumerDefaultBranch(repoRoot), force, portalUrl: await installedPortalUrl(repoRoot), mode: "binary",
   });
   refuseCustomizedFiles(filePlan.conflicts, "timds-cli installation adopt --binary --apply");
   const next = binaryInstallationRecord(installation);
-  next.consumer = consumerInstallationRecord(files, launchPlan, mcpPlan);
+  next.consumer = consumerInstallationRecord(files, launchPlan, mcpPlan, pipelineOrigin);
   const writes = [
     ...filePlan.writes,
     ...(launchPlan.changed ? [{ path: CONSUMER_LAUNCH_PATH, content: launchPlan.content }] : []),

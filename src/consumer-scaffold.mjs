@@ -83,7 +83,6 @@ export const EMDASH_TEMPLATES_ROOT = path.join(packageRoot, "templates", "emdash
 export const EMDASH_RECORD_PATH = ".timds/emdash.json";
 
 const DESIGN_SYSTEM_PATH = "design-system";
-const DEFAULT_PORTAL_URL = "https://timds.com";
 // Not Astro's default 4321: the starter Design System's own dev server and
 // other Astro sites already listen there.
 const DEV_PORT = 4380;
@@ -481,7 +480,7 @@ export async function scaffoldEmdashSite(rootInput, {
   platform = "cloudflare",
   stylesheets = [],
   siteUrl = "",
-  portalUrl = DEFAULT_PORTAL_URL,
+  portalUrl = null,
   skipInstall = false,
   createSite = createEmdashSite,
   output = () => {},

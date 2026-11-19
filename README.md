@@ -788,11 +788,19 @@ Resources `timds://brand.json`, `timds://tokens.json`, `timds://index.json`,
 `timds://llms.txt`, `timds://formats.json`, `timds://bundle.json`, and
 `timds://guidance/{group}` serve the same documents.
 
-A host that serves consumers imports the tools from
-`@dtconcepts/timds/mcp/read`. `registerDesignSystemReadTools(server, {
+A Worker imports `designSystemReadTools` from `@dtconcepts/timds/read-tools`
+and passes its own Zod instance as `z` alongside the resolver and hooks below.
+Each tool definition carries its input shape, annotations and asynchronous
+handler. Resource definitions carry their URI or URI template and handler.
+Set `hooks.drafts: false` when only published releases are available.
+
+A Node server can import the adapter from `@dtconcepts/timds/mcp/read`. `registerDesignSystemReadTools(server, {
 resolveSystem, listSystems, hooks })` registers them on an `McpServer`.
-`resolveSystem({ systemId, version, draft })` returns `{ layer, media, published,
-pinned }`; with `hooks.remote` every tool takes an optional `systemId` and
+`resolveSystem({ systemId, version, draft }, documents)` returns `{ layer, media,
+published, pinned }`. The optional second argument lists the documents needed
+for the read. An empty array requests only system metadata. Omitting it requests
+the full layer for `describe_system`. Existing resolvers can ignore this hint.
+With `hooks.remote` every tool takes an optional `systemId` and
 `version` or `draft` (mutually exclusive), and resources live under `timds://systems/{system}/...` with the
 system id percent-encoded. `hooks.fileGap({ system, gap })` receives each
 reported gap.
@@ -988,8 +996,9 @@ Declared `routes` always come first and always stay.
 - `timds consumer init [--skip-install] [--portal-url URL]` writes a manifest
   skeleton and installs both managed consumer skills, the preview and
   designer-change workflows, `.claude/launch.json` entries, and the
-  `timds-design-system-read` HTTP MCP server in `.mcp.json` (authorized with
-  `TIMDS_ACCESS_TOKEN` from the environment). Merged entries beside your own
+  `timds-design-system-read` HTTP MCP server in `.mcp.json`. On first install, select the host with `--portal-url HOST` or `TIMDS_PORTAL_URL`.
+  With neither configured, init completes the local setup and prints the command
+  to add the connector. Later runs preserve the selected origin. Authorize the client through its browser sign-in. Merged entries beside your own
   are tracked one by one; customized ones are kept unless `--force`. Apps are
   discovered from a `package.json` one folder down, and from the root
   `package.json` when it has a `dev`, `start`, `preview`, or `build` script
@@ -1009,9 +1018,11 @@ comment carrying `<!-- timds-designer-request -->` on a `design/` pull request
 or on such an issue (the portal posts review notes this way, with a fenced
 `json` block of notes), or a manual dispatch runs Codex through the OpenAI API
 with the consumer skill on a `design/<issue>-<title>` branch. Codex edits in a
-workspace sandbox without a GitHub write token. A subsequent workflow step
-runs `consumer check` against the merge-base design surface, pushes validated
-edits and opens a draft pull request that closes the issue. When
+read-only GitHub job with the pinned toolkit and Design System prepared before editing. A fresh read-only runner applies the proposed patch in a build container and runs `consumer check --designer --base REF`,
+which restricts edits to the requested app’s design surface and rejects
+developer-managed paths. A fresh runner applies the patch to a Git index,
+checks its paths and file modes using the workflow revision’s scope rules,
+and pushes the commit to a draft pull request that closes the issue. When
 `TIMDS_PREVIEWS_ENABLED=true`, the workflow then calls the preview workflow,
 which checks for the publishing token, because pushes made with the job token
 start no other workflows. Without previews, the draft describes the routes
@@ -1022,12 +1033,12 @@ merged. Only owners, members, collaborators, and the bots listed in the
 can trigger it, and fork branches are skipped. It needs the
 `OPENAI_API_KEY` repository or inherited organization secret, the
 `timds-design-change` label, and permission for Actions to create pull
-requests; with `TIMDS_ACCESS_TOKEN` it also reads and resolves notes through
-the portal after successfully pushing the change. It uses the official
-`openai/codex-action@v1` with `workspace-write` and `drop-sudo`.
+requests. A credentialed gate reads notes before the model runs. A request carrying only selected note IDs waits for their feedback. Ordinary requests and comments containing the full feedback can continue with manual note resolution. A separate
+runner resolves the addressed IDs after a successful push. It uses the official
+v1 release of `openai/codex-action`, pinned by commit, with `workspace-write` and `drop-sudo`.
 
 To upgrade a consumer, run `npm run timds -- upgrade` at the product root:
-it refreshes both consumer skills, the two consumer workflows, and the tracked
+it refreshes both consumer skills, the two consumer workflows, their standalone pipeline helper, and the tracked
 launch and MCP entries from the installed toolkit, replacing only what nobody
 edited since TimDS wrote it (customized files are refused, customized entries
 kept, until `--force`), and records the new version in
@@ -1401,7 +1412,10 @@ it.
 `TIMDS_PORTAL_URL` set serves the hosted editing tools, and `timds mcp read
 --draft NAME --system-id ID --portal-url URL` serves a draft's derived layer.
 `consumer init` registers the host's `timds-design-system-read` HTTP MCP
-server in `.mcp.json`, authorized with `TIMDS_ACCESS_TOKEN`.
+server in `.mcp.json` when a host has been selected. Its client authorizes at that host. For an
+existing portal connector, run `consumer init --portal-url HOST` and authorize
+your own client again. An ordinary toolkit upgrade keeps the legacy endpoint
+until the owner selects the replacement host.
 
 Running and administering a host is documented in the host repository, not
 here; see [docs/hosted-operations-moved.md](docs/hosted-operations-moved.md).

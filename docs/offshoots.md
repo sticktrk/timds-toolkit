@@ -274,7 +274,7 @@ the running release, naming the upgrade to run first. Check validates
 the file without rewriting it. Sessions may receive/read this record but
 cannot create, edit or delete it; `.timds/stock.json` is designer-authored.
 
-The derived index, MCP `describe_system` / `read_derived_layer`, and provenance
+The derived index, MCP `describe_system`, and provenance
 carry `lineage:{systemId,sourceId,version,commit,mode}` or `null`. Older
 published layers without lineage read as `null`. Public readers do not
 receive the source merge baseline or the stock hashes. Publication binds lineage to the committed

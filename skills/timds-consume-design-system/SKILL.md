@@ -175,9 +175,7 @@ __DERIVED_LAYER__
 ## If you use TimDS Cloud
 
 - **Designer notes.** When a preview is published, the designer can review it
-  in the TimDS portal and leave notes. Run `npm run timds -- consumer notes`
-  at the start and again after each push (it needs `TIMDS_ACCESS_TOKEN` or
-  `npm run timds -- auth login`). Each note names the page, the element, and
+  in Studio and leave notes. A host publisher can send selected notes to a design PR through Apply. The generated workflow passes those notes to the designer and resolves addressed IDs after a verified push. For a direct pipeline run, `npm run timds -- consumer notes` requires the host address and an Access service token granted to that follower. A legacy portal accepts `TIMDS_ACCESS_TOKEN` or a portal login. Each note names the page, the element, and
   usually the source file and line; the designer's words are the request and
   the element is where it applies. After pushing the fix, run
   `npm run timds -- consumer notes resolve <id>` for each note you addressed
@@ -186,7 +184,7 @@ __DERIVED_LAYER__
   `consumer notes resolve <id> --dismiss` when the designer agreed to drop
   it. Without portal access, use the request and pull-request comments.
 - **Pull-request previews.** Automatic previews require the repository
-  variable `TIMDS_PREVIEWS_ENABLED=true` and the `TIMDS_ACCESS_TOKEN` secret.
+  variable `TIMDS_PREVIEWS_ENABLED=true` and a pipeline credential (the host Access service token or a legacy provider’s `TIMDS_ACCESS_TOKEN`).
   They are off by default; without a token the workflow skips all preview
   work. When enabled, `timds-consumer-preview` comments a preview link for
   each app whose design surface the pull request changes (every app when it
@@ -196,8 +194,7 @@ __DERIVED_LAYER__
 - **Shared imagery.** The Design System publishes registered media with
   `assets publish`.
 - **Hosted read tools.** The `.mcp.json` entry for `timds-design-system-read`
-  reaches the portal over HTTP and needs `TIMDS_ACCESS_TOKEN` in the
-  environment.
+  reaches the selected host. Authorize your MCP client through its browser sign-in.
 - **A designer's draft.** `npm run timds -- consumer update --draft NAME`
   replaces the ignored bundle under `__DESIGN_SYSTEM_PATH__/` with the
   draft's build and leaves the tracked pin alone (`consumer check` then warns
@@ -280,9 +277,7 @@ commit, push, open a pull request or use GitHub credentials. Run
 (what changed, which pages to review, and the assumptions made) and
 `addressedNoteIds`; the workflow commits, pushes, opens or refreshes the
 draft pull request, and resolves those notes only after a successful push.
-Do not run `consumer notes resolve` yourself. Without `TIMDS_ACCESS_TOKEN`
-the designer's notes arrive as a `json` block in the request; list the ones
-you addressed in the summary instead. The rest of **Open the pull request
+Use the notes file named by the workflow or the designer request’s JSON block. The model receives no pipeline credential. Return the IDs of addressed notes for the workflow to resolve. Without configured note access, list what you addressed in the summary. The rest of **Open the pull request
 only when asked** (never merge, never move the pin, never edit managed
 files) still holds.
 

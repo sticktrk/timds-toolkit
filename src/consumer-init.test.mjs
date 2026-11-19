@@ -223,9 +223,9 @@ test("discovers apps and writes the manifest with guessed defaults", async (t) =
   const output = lines.join("\n");
   assert.match(output, /For the developer to confirm:/);
   assert.match(output, /web: preview\.port is 4321 \(the astro default\)/);
-  assert.match(output, /spa: install is bun install --frozen-lockfile \(bun is not set up/);
+  assert.match(output, /spa: install is bun install --frozen-lockfile \(bun is not installed/);
   assert.match(output, /TIMDS_ACCESS_TOKEN/);
-  assert.match(output, /Automatic previews are off by default; to enable them, set the TIMDS_PREVIEWS_ENABLED repository variable to true and add the TIMDS_ACCESS_TOKEN repository secret/);
+  assert.match(output, /Automatic previews are off by default; to enable them, set TIMDS_PREVIEWS_ENABLED to true.*TIMDS_PORTAL_URL.*default-branch timds-pipeline environment/);
   assert.match(output, /DESIGN_SYSTEM_DEPLOY_KEY/);
   assert.match(output, /web: preview\.routes lists only "\/" and preview\.discover follows links/);
   assert.match(output, /OPENAI_API_KEY/);
@@ -291,17 +291,15 @@ test("renders the skill from the manifest and records managed-file hashes", asyn
   assert.equal(await fs.readlink(path.join(product, ".claude", "skills")), path.join("..", ".agents", "skills"));
 
   const workflow = await fs.readFile(path.join(product, ".github", "workflows", "timds-consumer-preview.yml"), "utf8");
-  assert.match(workflow, /pull_request:\n\s+types: \[opened, synchronize, reopened\]/);
+  assert.match(workflow, /pull_request_target:\n\s+types: \[opened, synchronize, reopened\]/);
   // The scope check reports instead of failing the job (developer pull requests leave the surface),
   // the base ref reaches the shell through env, and the preview builds the pull request's head commit.
-  assert.match(workflow, /BASE_REF: \$\{\{ github\.base_ref \|\| github\.event\.repository\.default_branch \}\}/);
-  assert.match(workflow, /if npm run timds -- consumer check --base "origin\/\$\{BASE_REF\}"; then/);
-  assert.doesNotMatch(workflow, /run:[^\n]*\$\{\{ github\.base_ref/);
-  // Only the apps the check names are previewed; a pull request that cannot change a look skips the job.
-  assert.match(workflow, /CHANGED: \$\{\{ steps\.scope\.outputs\.preview-apps \}\}/);
-  assert.match(workflow, /preview:\n\s+needs: check\n\s+if: needs\.check\.result == 'success' && needs\.check\.outputs\.apps != '\[\]'/);
-  assert.match(workflow, /ref: \$\{\{ inputs\.ref \|\| github\.event\.pull_request\.head\.sha \}\}/);
-  assert.match(workflow, /consumer preview --app "\$APP" --base "origin\/\$\{BASE_REF\}" --publish --pull-request/);
+  assert.match(workflow, /BASE_REF: \$\{\{ needs\.gate\.outputs\.base_branch \}\}/);
+  assert.match(workflow, /node \.github\/timds\/consumer-paths\.mjs preview/);
+  assert.match(workflow, /needs\.gate\.outputs\.scope == 'outside'/);
+  assert.match(workflow, /needs: \[gate, check\]/);
+  assert.match(workflow, /ref: \$\{\{ needs\.gate\.outputs\.sha \}\}/);
+  assert.match(workflow, /consumer preview --app "\$APP" --base "origin\/\$\{BASE_REF\}" --pull-request/);
   assert.match(workflow, /<!-- timds-consumer-preview:\$\{APP\} -->/);
   assert.match(workflow, /DESIGN_SYSTEM_DEPLOY_KEY/);
   assert.doesNotMatch(workflow, /__[A-Z_]+__/);
@@ -309,27 +307,30 @@ test("renders the skill from the manifest and records managed-file hashes", asyn
   assert.match(workflow, /workflow_call:\n\s+inputs:\n\s+pull_request:[\s\S]*ref:/);
   assert.match(workflow, /PULL_REQUEST: \$\{\{ inputs\.pull_request \|\| github\.event\.number \}\}/);
 
-  const designer = await fs.readFile(path.join(product, ".github", "workflows", "timds-designer-change.yml"), "utf8");
-  assert.equal(designer, await fs.readFile(new URL("../templates/timds-designer-change.yml", import.meta.url), "utf8"));
+  const entry = await fs.readFile(path.join(product, ".github", "workflows", "timds-designer-change.yml"), "utf8");
+  const worker = await fs.readFile(path.join(product, ".github", "workflows", "timds-designer-run.yml"), "utf8");
+  assert.equal(entry, await fs.readFile(new URL("../templates/timds-designer-change.yml", import.meta.url), "utf8"));
+  assert.equal(worker, await fs.readFile(new URL("../templates/timds-designer-run.yml", import.meta.url), "utf8"));
+  const designer = entry + worker;
   assert.doesNotMatch(designer, /__[A-Z_]+__/);
   assert.match(designer, /issues:\n\s+types: \[labeled\]/);
   assert.match(designer, /github\.event\.label\.name == 'timds-design-change'/);
   assert.match(designer, /contains\(github\.event\.comment\.body, '<!-- timds-designer-request -->'\)/);
   assert.match(designer, /case "\$2" in OWNER\|MEMBER\|COLLABORATOR\) return 0/);
   assert.match(designer, /DESIGNER_BOTS: \$\{\{ vars\.TIMDS_DESIGNER_BOTS \}\}/);
-  assert.match(designer, /uses: openai\/codex-action@v1/);
+  assert.match(designer, /uses: openai\/codex-action@[a-f0-9]{40} # v1/);
   assert.match(designer, /openai-api-key: \$\{\{ secrets\.OPENAI_API_KEY \}\}/);
   assert.doesNotMatch(designer, /ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN|claude-code-action/);
   assert.match(designer, /sandbox: workspace-write/);
   assert.match(designer, /safety-strategy: drop-sudo/);
-  const codexStep = designer.slice(designer.indexOf("      - name: Make the design change with OpenAI"), designer.indexOf("      - name: Validate and publish the draft"));
+  const codexStep = designer.slice(designer.indexOf("      - name: Make the design change with OpenAI"), designer.indexOf("      - name: Validate the design surface"));
   assert.doesNotMatch(codexStep, /GH_TOKEN|github\.token|persist-credentials: true/);
   assert.match(designer, /consumer check "\$\{check_args\[@\]\}"/);
   assert.match(designer, /git diff --cached --quiet/);
   assert.match(designer, /gh pr create.*--draft/);
-  assert.match(designer, /consumer notes resolve "\$\{note_ids\[@\]\}"/);
+  assert.match(designer, /node \.github\/timds\/consumer-pipeline\.mjs resolve/);
   assert.match(designer, /uses: \.\/\.github\/workflows\/timds-consumer-preview\.yml/);
-  assert.match(designer, /cancel-in-progress: false/);
+  assert.match(designer, /queue: max/);
   // Event text reaches shell steps only through env, never ${{ }} inside run.
   const runBlocks = designer.split("\n").reduce((blocks, line) => {
     const indent = line.match(/^ */)[0].length;
@@ -342,13 +343,8 @@ test("renders the skill from the manifest and records managed-file hashes", asyn
   assert.ok(runBlocks.length >= 5);
   for (const block of runBlocks) assert.doesNotMatch(block.lines.join("\n"), /\$\{\{/);
 
-  const mcp = JSON.parse(await fs.readFile(path.join(product, ".mcp.json"), "utf8"));
-  assert.deepEqual(mcp, { mcpServers: consumerMcpServers() });
-  assert.deepEqual(mcp.mcpServers["timds-design-system-read"], {
-    type: "http",
-    url: "https://timds.com/api/timds/mcp/read",
-    headers: { Authorization: "Bearer ${TIMDS_ACCESS_TOKEN}" },
-  });
+  await assert.rejects(fs.access(path.join(product, ".mcp.json")), { code: "ENOENT" });
+  assert.ok(result.todos.some(item => item.includes("consumer init --portal-url HOST")));
 
   const installation = JSON.parse(await fs.readFile(path.join(product, ".timds", "installation.json"), "utf8"));
   assert.equal(installation.consumer.name, toolkitPackage.name);
@@ -361,27 +357,36 @@ test("renders the skill from the manifest and records managed-file hashes", asyn
   const launch = JSON.parse(await fs.readFile(path.join(product, ".claude", "launch.json"), "utf8"));
   assert.deepEqual(Object.keys(installation.consumer.launchConfigurations), ["web"]);
   assert.equal(installation.consumer.launchConfigurations.web, sha256(JSON.stringify(launch.configurations[0])));
-  assert.deepEqual(installation.consumer.mcpServers, { "timds-design-system-read": sha256(JSON.stringify(mcp.mcpServers["timds-design-system-read"])) });
+  assert.deepEqual(installation.consumer.mcpServers, {});
 });
 
 test("merges the read MCP server into an existing .mcp.json", async (t) => {
   const product = await createConsumerRepo(t);
   const userServer = { command: "npx", args: ["some-mcp"] };
   await writeJson(path.join(product, ".mcp.json"), { mcpServers: { other: userServer }, extra: true });
-  await initializeConsumer(product, { skipInstall: true, output: quiet, portalUrl: "https://portal.example.test/ignored/path" });
+  const previous = process.env.TIMDS_PORTAL_URL;
+  try {
+    process.env.TIMDS_PORTAL_URL = "https://portal.example.test";
+    await initializeConsumer(product, { skipInstall: true, output: quiet });
+    process.env.TIMDS_PORTAL_URL = "https://different.example.test";
+    await initializeConsumer(product, { skipInstall: true, output: quiet });
+  } finally {
+    if (previous === undefined) delete process.env.TIMDS_PORTAL_URL;
+    else process.env.TIMDS_PORTAL_URL = previous;
+  }
   const mcpPath = path.join(product, ".mcp.json");
   const merged = JSON.parse(await fs.readFile(mcpPath, "utf8"));
   assert.deepEqual(merged.mcpServers.other, userServer);
   assert.equal(merged.extra, true);
-  assert.equal(merged.mcpServers["timds-design-system-read"].url, "https://portal.example.test/api/timds/mcp/read");
+  assert.equal(merged.mcpServers["timds-design-system-read"].url, "https://portal.example.test/api/timds/mcp");
 
   // A rerun is idempotent.
   await initializeConsumer(product, { skipInstall: true, output: quiet, portalUrl: "https://portal.example.test" });
   assert.deepEqual(JSON.parse(await fs.readFile(mcpPath, "utf8")), merged);
 
-  // An unmodified managed entry follows a new portal URL.
+  // A rerun without a flag preserves the owner-selected host.
   await initializeConsumer(product, { skipInstall: true, output: quiet });
-  assert.equal(JSON.parse(await fs.readFile(mcpPath, "utf8")).mcpServers["timds-design-system-read"].url, "https://timds.com/api/timds/mcp/read");
+  assert.equal(JSON.parse(await fs.readFile(mcpPath, "utf8")).mcpServers["timds-design-system-read"].url, "https://portal.example.test/api/timds/mcp");
 
   // A customized entry is kept without --force (other servers untouched) and replaced with it.
   const customized = JSON.parse(await fs.readFile(mcpPath, "utf8"));
@@ -569,7 +574,7 @@ test("refuses, before writing anything, when git ignores a file init would write
   git(product, "add", ".gitignore");
   git(product, "commit", "-m", "Ignore npm files at the root");
   const statusBefore = git(product, "status", "--porcelain", "--untracked-files=all");
-  await assert.rejects(initializeConsumer(product, { skipInstall: true, output: quiet }), (error) => {
+  await assert.rejects(initializeConsumer(product, { skipInstall: true, portalUrl: "https://host.example.test", output: quiet }), (error) => {
     assert.match(error.message, /timds consumer init would write files git ignores/);
     assert.match(error.message, /^  package\.json  \(\.gitignore:1 \/package\.json\)$/m);
     assert.match(error.message, /^  \.mcp\.json  \(\.gitignore:3 \.mcp\.json\)$/m);
@@ -582,7 +587,7 @@ test("refuses, before writing anything, when git ignores a file init would write
   // A negation re-includes the package; the remaining pattern still refuses.
   await fs.writeFile(path.join(product, ".gitignore"), "/package.json\n!/package.json\n.mcp.json\n", "utf8");
   git(product, "commit", "-qam", "Re-include package.json");
-  await assert.rejects(initializeConsumer(product, { skipInstall: true, output: quiet }), (error) => {
+  await assert.rejects(initializeConsumer(product, { skipInstall: true, portalUrl: "https://host.example.test", output: quiet }), (error) => {
     assert.doesNotMatch(error.message, /package\.json  \(/);
     assert.match(error.message, /^  \.mcp\.json  \(\.gitignore:3 \.mcp\.json\)$/m);
     return true;
@@ -590,7 +595,7 @@ test("refuses, before writing anything, when git ignores a file init would write
 
   await fs.writeFile(path.join(product, ".gitignore"), "node_modules/\n", "utf8");
   git(product, "commit", "-qam", "Keep the TimDS files");
-  const result = await initializeConsumer(product, { skipInstall: true, output: quiet });
+  const result = await initializeConsumer(product, { skipInstall: true, portalUrl: "https://host.example.test", output: quiet });
   assert.ok(result.written.includes("package.json"));
 
   // A pattern that matches an already tracked file ignores nothing.
@@ -598,7 +603,7 @@ test("refuses, before writing anything, when git ignores a file init would write
   await fs.writeFile(path.join(tracked, ".gitignore"), "/package.json\n", "utf8");
   git(tracked, "add", ".gitignore");
   git(tracked, "commit", "-m", "Pattern on a tracked file");
-  const adopted = await initializeConsumer(tracked, { skipInstall: true, output: quiet });
+  const adopted = await initializeConsumer(tracked, { skipInstall: true, portalUrl: "https://host.example.test", output: quiet });
   assert.ok(adopted.written.includes("package.json"));
 });
 

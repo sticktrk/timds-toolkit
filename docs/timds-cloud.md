@@ -447,19 +447,21 @@ host never merges or deploys the product.
 ### Designer notes and CI previews
 
 - `timds consumer notes [--app NAME] [--pull-request N] [--all] [--json]`
-  lists the notes a designer left on the pull request's preview in the portal,
+  follows the host’s continuation cursors and lists the notes a designer left on the pull request's preview on the host,
   grouped by page, with the element, its source `file:line` when the dev build
   stamps one, and the designer's words. `timds consumer notes resolve ID...
   [--commit SHA] [--dismiss]` marks them addressed (or dismissed) after the fix
-  is pushed. Both need `TIMDS_ACCESS_TOKEN` or `timds login`.
+  is pushed. On a host these commands use a service-token identity granted upload access for the follower.
 
 Automatic consumer previews are **off by default**. To enable
 `.github/workflows/timds-consumer-preview.yml`, set the repository variable
-`TIMDS_PREVIEWS_ENABLED` to `true` and configure the `TIMDS_ACCESS_TOKEN`
-repository secret. For a private submodule pin, also configure
+`TIMDS_PREVIEWS_ENABLED` to `true`. Run `consumer init --portal-url HOST` to install the intended HTTPS origin in the managed pipeline helper. Set the repository variable `TIMDS_PORTAL_URL` to that origin and create a GitHub Actions environment named `timds-pipeline`. Restrict its deployment branches to the repository’s default branch. Store `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET` as secrets of that environment and remove any repository or inherited copies accessible to PR workflows. The CLI and the installed workflows exchange the service-token pair at the host’s `GET /service-auth`. They use the returned Access assertion for preview uploads and note requests on that same host. If your existing Access application protects the preview and notes API routes directly, set `TIMDS_ACCESS_MODE=protected-api` in the CLI environment or as a repository variable to send the pair directly to those routes. A failed exchange stops that authenticated request.
+
+If the pipeline is authorized for two followers of the same repository, set the `TIMDS_CONSUMER_ID` repository variable to the intended follower UUID. A legacy provider may still use its own `TIMDS_ACCESS_TOKEN` in that environment. For a private submodule pin, also configure
 `DESIGN_SYSTEM_DEPLOY_KEY` (a read-only deploy key) or
 `TIMDS_CONSUMER_SUBMODULE_TOKEN` (with `contents:read`) so CI can check out
 that submodule. Published pins do not need a submodule credential.
+Same-repository PRs run the default-branch workflow. The gate computes the app list and design surface from the Git diff. Product installs, checks and rendering run inside disposable Docker containers with the checkout and a dedicated output directory. The submodule checkout uses the default branch’s `.gitmodules` and Design System path. Merge a reviewed change to that configuration before using it with a private checkout credential. A fresh runner checks out only the managed pipeline helper from the workflow revision, verifies the artifact’s repository, app, branch, commit and PR number, then uploads it. Designer changes receive verified notes as data. A request that supplies selected note IDs requires verified feedback for every selected ID. If feedback is unavailable, the workflow reports how to retry. Requests with ordinary instructions or complete embedded feedback can continue with manual resolution. The authorized caller holds one Actions concurrency group per branch from selection of its current head through editing, push and note resolution. Up to 100 requests can wait per branch, in the order they enter the queue. [GitHub Actions concurrency](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idconcurrency). The editor receives the pinned toolkit and Design System before Codex starts. A fresh read-only runner applies the proposed patch in a disposable product container and runs the consumer check. The write job verifies the same patch against the default branch’s design surface before pushing. A fresh runner resolves the verified addressed IDs after a successful push. The helper requires only Node.js in both npm and binary consumers.
 An unset or false variable
 skips all preview jobs without allocating a runner. With the variable enabled
 but no publishing token, only a short token-presence job runs; checkout,
@@ -629,3 +631,7 @@ Snapshots are capped at 4,000 files and 50 MiB of raw content, with at most
 files remain eligible, matching consumer checks. Traversal, credential files,
 `.git`, unsafe symlinks, and session metadata are excluded. Host storage and
 publication remain host responsibilities; no reference host is shipped.
+
+A manual designer continuation on an existing pull request reads outstanding notes a host publisher already sent to that repository, app and pull request. Apply reads the selected notes. Resolution records the commit the run pushed and verified on the pull request.
+
+Direct previews for same-repository PRs use `pull_request_target` and require a repository event policy that permits it. GitHub has announced enforcement of its default block for affected public repositories on 2026-12-02. The trusted designer workflow can also call the preview workflow directly. See [GitHub’s event policy](https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target#default-policy-for-pull_request_target).

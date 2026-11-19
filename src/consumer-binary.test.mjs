@@ -118,7 +118,7 @@ test('binary adoption refuses customized managed files before any mutation and f
 });
 
 test('binary consumer workflows install the exact verified CLI and keep custom product execution separate', async () => {
-  for (const name of ['timds-consumer-preview.yml', 'timds-designer-change.yml']) {
+  for (const name of ['timds-consumer-preview.yml', 'timds-designer-run.yml']) {
     const source = await consumerWorkflow(name, { mode: 'binary' });
     const workflow = parse(source);
     const steps = Object.values(workflow.jobs).flatMap(job => job.steps ?? []);
@@ -131,9 +131,18 @@ test('binary consumer workflows install the exact verified CLI and keep custom p
       assert.match(step.run, /schemaVersion == 2/);
     }
     assert.ok(steps.some(step => step.name === 'Fetch the published Design System pin'));
+    if (name === 'timds-designer-run.yml') {
+      const edit = workflow.jobs.edit.steps;
+      const index = label => edit.findIndex(step => step.name === label);
+      assert.ok(index('Confirm the designer toolkit selection') < index('Install the exact TimDS executable'));
+      assert.ok(index('Prepare the offline editor runtime cache') < index('Install the exact TimDS executable'));
+      assert.match(edit[index('Prepare the offline editor runtime cache')].run, /TIMDS_BINARY_CACHE=.*mktemp -d \/tmp\//);
+      assert.ok(index('Fetch the published Design System pin') < index('Verify the editor runtime is ready'));
+      assert.ok(index('Verify the editor runtime is ready') < index('Make the design change with OpenAI'));
+    }
     assert.doesNotMatch(source, /npm run timds|run: npm ci|cache: npm|\$\(node /);
     const toolchains = steps.filter(step => step.uses === 'actions/setup-node@v5');
-    assert.ok(toolchains.length, 'product toolchains remain supported in CI');
+    if (!toolchains.length) assert.match(source, /product-build\.sh/, 'product toolchain is isolated in CI');
     assert.ok(toolchains.every(step => step.with['package-manager-cache'] === false), 'binary tooling must not implicitly require a root npm lockfile');
   }
 });

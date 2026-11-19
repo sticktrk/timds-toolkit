@@ -263,7 +263,7 @@ test("scaffolds an EmDash site that reads a starter Design System from the pin",
 
   // Adopted exactly as `timds consumer init` adopts a product.
   const mcp = JSON.parse(await fs.readFile(path.join(site, ".mcp.json"), "utf8"));
-  assert.deepEqual(Object.keys(mcp.mcpServers), ["emdash-docs", "timds-design-system-read"]);
+  assert.deepEqual(Object.keys(mcp.mcpServers), ["emdash-docs"]);
   for (const file of [".agents/skills/timds-consume-design-system/SKILL.md", ".github/workflows/timds-consumer-preview.yml", ".github/workflows/timds-designer-change.yml", ".claude/launch.json", ".timds/installation.json"]) {
     assert.ok(existsSync(path.join(site, file)), file);
     assert.ok(result.written.includes(file), file);
@@ -275,7 +275,7 @@ test("scaffolds an EmDash site that reads a starter Design System from the pin",
 
   assert.ok(result.todos.some((item) => item.startsWith("Run npm install and commit package-lock.json")));
   assert.ok(result.todos.some((item) => item.includes("<site origin>/_emdash/api/mcp")));
-  assert.ok(result.todos.some((item) => item.includes("TIMDS_ACCESS_TOKEN repository secret")));
+  assert.ok(result.todos.some((item) => item.includes("timds-pipeline environment")));
   assert.ok(lines.includes(`Created the EmDash site acme-site at ${site}, consuming acme/core.`));
   assert.ok(!lines.join("\n").includes("EMDASH_ENCRYPTION_KEY=fixture"));
 });
@@ -299,7 +299,7 @@ test("adds the EmDash MCP server for --site-url, and refuses a bad one before wr
   const result = await scaffoldEmdashSite(site, { designSystem, siteUrl: "https://acme.example.com/blog", skipInstall: true, createSite: fakeGenerator(), output: quiet });
   const mcp = JSON.parse(await fs.readFile(path.join(site, ".mcp.json"), "utf8"));
   assert.deepEqual(mcp.mcpServers.emdash, { type: "http", url: "https://acme.example.com/_emdash/api/mcp" });
-  assert.deepEqual(Object.keys(mcp.mcpServers), ["emdash-docs", "emdash", "timds-design-system-read"]);
+  assert.deepEqual(Object.keys(mcp.mcpServers), ["emdash-docs", "emdash"]);
   assert.ok(result.todos.some((item) => item.includes('"emdash" MCP server in .mcp.json (https://acme.example.com/_emdash/api/mcp)')));
 });
 
