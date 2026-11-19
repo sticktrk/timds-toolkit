@@ -117,8 +117,11 @@ system is ordinary design work:
    edit its entry there (`id`, `element`, `heading`, `required`, `plain`,
    `write`), add a rule for `.prose #<id>` to the system stylesheet, and look
    at Web → Components, where `{{posting:preview}}` draws the file with the
-   system's styles. Never rename a published block id; `check` warns about a
-   block with no style rule.
+   system's styles. The file is layout only: a publishing engine decides
+   which blocks an article fills and writes the words, so do not put
+   instructions about wording or tone in it beyond what a block is for.
+   Never rename a published block id; `check` warns about a block with no
+   style rule.
 4. Add the logo under `src/assets/` and write the `brand/logo`, `brand/voice`,
    and other guidance pages, shaped as described in the next section. A
    fragment holds only the content of `<main>`; `src/layout.html` supplies the

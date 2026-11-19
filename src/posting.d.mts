@@ -8,11 +8,11 @@ export type PostingBlock = {
   element: "section" | "aside" | "div";
   /** Fixed heading text, or "" when the writer chooses it. */
   heading: string;
-  /** true: in every article. false: written only when its description fits. */
+  /** The designer's note that the layout expects the block in every article. A publishing engine decides which blocks an article has. */
   required: boolean;
   /** true: one paragraph of plain text, so a site can show it in a card of its own. */
   plain: boolean;
-  /** What a writer puts in the block, or "". */
+  /** What the block is for, which an engine gives its writer, or "". */
   write: string;
 };
 
@@ -22,7 +22,7 @@ export type PostingTemplate = {
   name: string;
   /** What the page shows by itself, so a writer leaves it out. */
   supplies: string[];
-  /** Classes the system approves in an article body. */
+  /** Extra classes the stylesheet styles in an article body. A record for people; a publishing engine writes no class. */
   classes: { name: string; use: string }[];
   /** The article's named blocks, in page order. */
   blocks: PostingBlock[];

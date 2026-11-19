@@ -52,6 +52,15 @@ try {
     assert.deepEqual(postingWarnings(checked), [], `${starter}: a styled block is not reported`);
     assert.ok((await fs.readFile(path.join(root, 'dist', 'web', 'components', 'index.html'), 'utf8')).includes('<section id="what-changes-this">\n  <h2>What changes this answer</h2>'));
 
+    // An exclude pattern leaves the file out of the bundle: the warning names the pattern's key.
+    const manifestPath = path.join(root, 'timds.json');
+    const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8'));
+    await fs.writeFile(manifestPath, `${JSON.stringify({...manifest, bundle: {...manifest.bundle, exclude: ['src/posting/**']}}, null, 2)}\n`);
+    checked = await quiet(() => checkWorkspace(root));
+    warnings = postingWarnings(checked);
+    assert.ok(warnings.length === 1 && warnings[0].includes('a bundle.exclude pattern in timds.json leaves it out'), `${starter}: ${JSON.stringify(warnings)}`);
+    await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
     // A file a reader could not use stops the check and says where.
     edited.blocks.push({id: 'cta'});
     await fs.writeFile(templatePath, `${JSON.stringify(edited, null, 2)}\n`);
@@ -63,7 +72,7 @@ try {
     assert.deepEqual(postingWarnings(checked), []);
     assert.ok(!JSON.parse(await fs.readFile(path.join(root, 'dist', 'bundle.json'), 'utf8')).files.some(file => file.path === POSTING_SOURCE_FILE));
     assert.ok((await fs.readFile(path.join(root, 'dist', 'web', 'components', 'index.html'), 'utf8')).includes('This system keeps no blog template yet.'));
-    console.log(`PASS posting template (${starter}): scaffolded, previewed, published, style and spelling reported, invalid file refused`);
+    console.log(`PASS posting template (${starter}): scaffolded, previewed, published, style, spelling and exclusion reported, invalid file refused`);
   }
 } finally {
   await fs.rm(scratch, {recursive: true, force: true});

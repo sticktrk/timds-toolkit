@@ -72,6 +72,7 @@ jobs:
       - run: npm test
       - run: npm run pack:check
       - run: node scripts/check-starter-history.mjs
+      - run: node scripts/check-posting-template.mjs
 
   native-binaries:
     needs: changes

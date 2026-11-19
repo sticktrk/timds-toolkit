@@ -2,10 +2,12 @@
 
 ## Unreleased
 
-- Add the blog posting template. A Design System keeps the shape of its
-  articles in `src/posting/blog.json`: the named blocks in page order, which
-  of them every article has, a fixed heading, what a writer puts in each, and
-  extra classes a body may use. Every system's file has the same structure and
+- Add the blog posting template. A Design System keeps the layout of its
+  articles in `src/posting/blog.json`: the named blocks in page order, each
+  block's element and fixed heading, and what each block is for. The designer
+  owns the layout and a publishing engine owns the content: it asks its
+  writer for content only and builds the HTML from the file, with no class.
+  Every system's file has the same structure and
   the structure only grows (`schemaVersion` stays `1`; only `schemaVersion`,
   `template` and each block's `id` are required; unknown keys are ignored;
   nothing is renamed). `{{posting:preview}}` renders the blocks as a sample
@@ -15,7 +17,8 @@
   keeps one, without a `bundle.include` pattern, so a publishing engine and a
   website read what a release published. `check` refuses a file a reader
   could not use and warns about a block no bundled stylesheet styles, a key it
-  does not know, and a template in a system with no bundle.
+  does not know, and a template nothing publishes (no bundle, or an `exclude`
+  pattern that leaves it out).
   `@dtconcepts/timds/posting` exports the reader. An existing system has no
   template until it adds the file; its Components page is authored source and
   is not changed by an upgrade. See `docs/posting-template.md`.

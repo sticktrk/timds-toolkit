@@ -388,6 +388,9 @@ names, domains and repository names never enter this public repository.
 - The blog posting template is `src/posting/blog.json` (`src/posting.mjs`,
   `docs/posting-template.md`): an article's named blocks, read by publishing
   engines from the consumer bundle, which carries it without a pattern.
+  The designer owns the layout and a publishing engine owns the content:
+  the file never tells a writer to write a wrapper, a fixed heading or a
+  class, and `required` and `html.classes` are notes for people.
   Its structure only grows: `schemaVersion` stays `1`, a new ability is a new
   optional key whose absence means the old behaviour, unknown keys are
   ignored (and named by `check`), and nothing is renamed. The stock template

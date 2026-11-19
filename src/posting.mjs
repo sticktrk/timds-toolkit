@@ -1,9 +1,15 @@
-// The blog posting template: the shape of an article a publishing engine
+// The blog posting template: the layout of an article a publishing engine
 // writes for a site on this Design System.
 //
+// The designer owns the layout and the publishing engine owns the content.
 // A designer keeps the template in `src/posting/blog.json`: the article's
-// named blocks in page order, which of them every article has, what a writer
-// puts in each, and the classes an article body may use. The system's
+// named blocks in page order, each block's element and fixed heading, and
+// what each block is for. An engine decides which blocks an article fills and
+// what each says, asks its writer for that content only, and builds the HTML
+// from this file, so a writer never writes a wrapper, a fixed heading or a
+// class. `required` is the designer's note that the layout expects a block,
+// and `html.classes` a record of the extra classes the stylesheet styles in a
+// body; neither is an instruction to a writer. The system's
 // stylesheet styles each block by its id (`.prose #answer-box`), the viewer
 // shows the template with those styles ({{posting:preview}} and
 // {{posting:blocks}} in a page), and a release publishes the file in the
@@ -188,26 +194,28 @@ export function renderPostingPreview(template) {
   return `<div class="${POSTING_BODY_CLASS}">\n${blocks.join("\n")}\n</div>`;
 }
 
-/** The template's blocks as a spec table: id, element, heading, whether every article has it, and what goes in it. */
+/** The template's blocks as a spec table: id, element, heading, whether the layout expects it in every article, and what goes in it. */
 export function renderPostingTable(template) {
-  const head = "<thead><tr><th>Block</th><th>Element</th><th>Heading</th><th>In every article</th><th>What the writer puts in it</th></tr></thead>";
+  const head = "<thead><tr><th>Block</th><th>Element</th><th>Heading</th><th>The layout expects it</th><th>What goes in it</th></tr></thead>";
   if (!template) return `<table class="spec">\n${head}\n<tbody>\n<tr><td>None</td><td></td><td></td><td></td><td>No <code>${POSTING_SOURCE_FILE}</code> in this system</td></tr>\n</tbody>\n</table>`;
-  const rows = template.blocks.map((block) => `<tr><td><code>#${block.id}</code></td><td><code>${block.element}</code></td><td>${block.heading ? escapeHtml(block.heading) : "The writer chooses"}</td><td>${block.required ? "Yes" : "Only when it applies"}</td><td>${escapeHtml(block.write || "Not stated")}${block.plain ? " One plain paragraph." : ""}</td></tr>`);
+  const rows = template.blocks.map((block) => `<tr><td><code>#${block.id}</code></td><td><code>${block.element}</code></td><td>${block.heading ? escapeHtml(block.heading) : "None fixed"}</td><td>${block.required ? "In every article" : "When it applies"}</td><td>${escapeHtml(block.write || "Not stated")}${block.plain ? " One plain paragraph." : ""}</td></tr>`);
   return `<table class="spec">\n${head}\n<tbody>\n${rows.join("\n")}\n</tbody>\n</table>`;
 }
 
 /**
  * What `check` says about a system's template beyond its validity: keys this
  * toolkit does not know, blocks no stylesheet styles, and a template the
- * manifest does not publish. `stylesheets` are the texts of the sheets a
- * website loads; `bundlePaths` the files the consumer bundle holds, or null
- * when the manifest declares no bundle.
+ * manifest does not publish: either it declares no bundle, or an `exclude`
+ * pattern leaves the file out of the one it declares. `stylesheets` are the
+ * texts of the sheets a website loads; `bundlePaths` the files the consumer
+ * bundle holds, or null when the manifest declares no bundle.
  */
 export function postingTemplateWarnings({ template, unknown }, { stylesheets = [], bundlePaths = null } = {}) {
   const warnings = [];
   if (unknown.length) warnings.push(`${POSTING_SOURCE_FILE} has ${unknown.length === 1 ? "a key" : "keys"} this toolkit does not know (${unknown.join(", ")}); readers ignore ${unknown.length === 1 ? "it" : "them"}, so check the spelling`);
   const unstyled = stylesheets.length ? unstyledPostingBlocks(template, stylesheets) : [];
   if (unstyled.length) warnings.push(`${POSTING_SOURCE_FILE} names ${unstyled.length === 1 ? "a block" : "blocks"} no stylesheet styles (${unstyled.map((id) => `#${id}`).join(", ")}); a site shows ${unstyled.length === 1 ? "it" : "them"} as ordinary text until a rule such as .${POSTING_BODY_CLASS} #${unstyled[0]} exists`);
-  if (!bundlePaths || !bundlePaths.includes(POSTING_SOURCE_FILE)) warnings.push(`${POSTING_SOURCE_FILE} is not published: add "${POSTING_SOURCE_FILE}" to bundle.include in timds.json so a release carries it`);
+  if (!bundlePaths) warnings.push(`${POSTING_SOURCE_FILE} is not published: timds.json declares no bundle; add "${POSTING_SOURCE_FILE}" to bundle.include so a release carries it`);
+  else if (!bundlePaths.includes(POSTING_SOURCE_FILE)) warnings.push(`${POSTING_SOURCE_FILE} is not published: a bundle.exclude pattern in timds.json leaves it out; remove that pattern so a release carries it`);
   return warnings;
 }

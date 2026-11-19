@@ -360,8 +360,10 @@ site root repeats it for a crawler that reads that file first.
 
 A system that publishes articles keeps its blog template at
 `src/posting/blog.json` (the starters do): the named blocks of an article in
-page order, which of them every article has, what a writer puts in each, and
-the classes an article body may use. The system's stylesheet styles each block
+page order, each block's element and fixed heading, and what each block is
+for. The designer owns that layout and a publishing engine owns the content:
+it asks its writer for content only and builds the HTML from the file, with
+no class. The system's stylesheet styles each block
 by its id (`.prose #answer-box`), `{{posting:preview}}` and
 `{{posting:blocks}}` show the template on a page with those styles (the
 starters' Web → Components page does), and the consumer bundle carries the

@@ -1,11 +1,23 @@
 # The blog posting template
 
-A posting template is the shape of a published article: its named blocks, the
-order they come in, which of them every article has, and what a writer puts
-in each. A Design System keeps its own template in one file,
-`src/posting/blog.json`. A publishing engine writes articles from that file,
-and a website styles the same blocks from the same system, so the writer's
-instructions and the page come from one place and ship in one release.
+A posting template is the layout of a published article: its named blocks, the
+order they come in, each block's element and fixed heading, and what each
+block is for. A Design System keeps its own template in one file,
+`src/posting/blog.json`. A publishing engine builds articles from that file,
+and a website styles the same blocks from the same system, so the layout and
+the page come from one place and ship in one release.
+
+Who owns what:
+
+| | The designer, in the Design System | The publishing engine |
+| --- | --- | --- |
+| Owns | Which blocks an article has, their order, each block's element, id and fixed heading, and how they look | Which blocks an article fills and what each one says |
+| Never decides | The words | Wrappers, fixed headings, order, classes |
+
+An engine asks its writer for content only, block by block, and builds the
+HTML from the template: each block in its element with its id and fixed
+heading, in the file's order, with no class. The designer changes the layout
+by editing the file and the stylesheet, without touching the engine.
 
 A template has three parts, all in the Design System:
 
@@ -42,14 +54,14 @@ call block) is the website's page, not the template.
 | `template` | yes | Always `"blog"` | The file is refused |
 | `name` | no | A label for people | No label |
 | `page.supplies` | no | What the page shows by itself, in plain words, so a writer leaves it out | Title, cover image and publication date |
-| `html.classes[]` | no | Extra classes the system approves in an article body, each with a `name` and a `use` | Only the stock classes: `article-lede`, `article-steps`, `article-risks`, `article-scenario` |
+| `html.classes[]` | no | Extra classes the stylesheet styles in an article body, each with a `name` and a `use`. A record for people who write or edit an article by hand: a publishing engine writes no class, and a site approves a class in its own settings | No extra classes |
 | `blocks[]` | yes, at least one | The article's named blocks, in page order | The file is refused |
 | `blocks[].id` | yes | The block's `id` in the HTML: lowercase letters, digits and hyphens, starting with a letter, used once | The file is refused |
-| `blocks[].element` | no | `section`, `aside` or `div` | `section` |
-| `blocks[].heading` | no | Fixed heading text | The writer chooses the heading |
-| `blocks[].required` | no | `true`: every article has the block | Written only when its description fits the article |
+| `blocks[].element` | no | The element the block is wrapped in: `section`, `aside` or `div` | `section` |
+| `blocks[].heading` | no | Fixed heading text, which an engine writes as the block's heading | No fixed heading; any heading is the writer's |
+| `blocks[].required` | no | `true`: the layout expects the block in every article. A note for people; a publishing engine decides which blocks an article has | No note |
 | `blocks[].plain` | no | `true`: one paragraph of plain text, so a site can show it in a card of its own | Ordinary prose |
-| `blocks[].write` | no | What a writer puts in the block | Only the id, element and heading are given |
+| `blocks[].write` | no | What the block is for, in a sentence or two. An engine gives it to its writer | The writer is given only the id |
 
 Limits: 24 blocks, 40 classes, 16 `page.supplies` entries; a `write` of 600
 characters, a `use` of 200, a `heading` or `supplies` entry of 80.
@@ -95,8 +107,9 @@ Every Design System's file has this one structure, and it only grows:
   `.css` files the consumer bundle holds, since those are what a website
   loads; a system that bundles no stylesheet is compared with `src/styles/`.
 - Warns about a key it does not know.
-- Warns when the system keeps a template and declares no bundle, since
-  nothing then publishes it.
+- Warns when the system keeps a template and nothing publishes it: the
+  manifest declares no bundle, or a `bundle.exclude` pattern leaves the file
+  out.
 
 ## How it is published
 

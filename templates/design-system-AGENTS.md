@@ -499,14 +499,17 @@ them, logos, asset formats), so what reaches the kit reaches every tool.
   derived catalog without a page link or warning; an unbuilt page that is
   not planned is reported as a gap.
 - `src/posting/blog.json` is the blog posting template: the named blocks of
-  an article (`answer-box`, `detailed-answer`, …) in page order, which of
-  them every article has (`required`), a fixed `heading`, what a writer puts
-  in each (`write`), and extra classes a body may use (`html.classes`). A
-  publishing engine writes articles from it and a site styles the same ids,
-  so a block is three edits in one change: its entry in the file, a rule for
-  its id in the system stylesheet (`.prose #block-id`, tokens only), and
-  nothing else, because `{{posting:preview}}` and `{{posting:blocks}}` (on
-  Web → Components in the starters) redraw from the file. `check` warns about
+  an article (`answer-box`, `detailed-answer`, …) in page order, each
+  block's `element` and fixed `heading`, and what the block is for (`write`).
+  The system owns that layout and a publishing engine owns the content: it
+  decides which blocks an article fills, asks its writer for content only,
+  and builds the HTML from the file, so `required` is a note that the layout
+  expects a block and `html.classes` a record of extra classes the
+  stylesheet styles, never instructions to a writer. A site styles the same
+  ids, so a block is two edits in one change: its entry in the file and a
+  rule for its id in the system stylesheet (`.prose #block-id`, tokens
+  only). `{{posting:preview}}` and `{{posting:blocks}}` (on Web → Components
+  in the starters) redraw from the file. `check` warns about
   a block without a style rule and about a key it does not know. Never
   rename or reuse a published block id, keep `schemaVersion` at `1`, and add
   abilities as new optional keys only. The consumer bundle carries the file
