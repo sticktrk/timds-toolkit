@@ -204,11 +204,20 @@ export async function runConsumerPipeline(action, env) {
     const notes = [];
     // A manual host continuation can pick up notes already sent to this PR by a publisher.
     for (const app of apps) {
-      notesUrl.search = new URLSearchParams({ repository: env.GITHUB_REPOSITORY, app, pullRequest: env.PULL_REQUEST, status: "open" });
-      const page = await readNotesPages(notesUrl, request);
-      for (const note of page.notes) {
-        const included = selectedIds ? selectedIds.has(note.id) : !env.CF_ACCESS_CLIENT_ID || note.status === "sent";
-        if (included) notes.push({ ...note, app });
+      const query = { repository: env.GITHUB_REPOSITORY, app, pullRequest: env.PULL_REQUEST, status: "open" };
+      for (let attempt = 0; ; attempt++) {
+        notesUrl.search = new URLSearchParams(query);
+        const page = await readNotesPages(notesUrl, request);
+        const candidates = page.notes.filter(note => !selectedIds || selectedIds.has(note.id));
+        // The comment event can arrive before the host records successful delivery.
+        if (env.CF_ACCESS_CLIENT_ID && selectedIds && attempt < 3 && candidates.some(note => note.status === "open")) {
+          await new Promise(resolve => setTimeout(resolve, 1000 * 2 ** attempt));
+          continue;
+        }
+        for (const note of candidates) {
+          if (!env.CF_ACCESS_CLIENT_ID || note.status === "sent") notes.push({ ...note, app });
+        }
+        break;
       }
     }
     if (env.CF_ACCESS_CLIENT_ID && !selectedIds && !notes.length) {

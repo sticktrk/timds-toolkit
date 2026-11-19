@@ -275,5 +275,11 @@ test("the workflow helper publishes built files and resolves only notes delivere
     run("read", { GITHUB_EVENT_PATH: dispatch });
     const thread = JSON.parse(await fs.readFile(path.join(directory, "designer-notes.json"), "utf8"));
     assert.deepEqual(thread.notes.map(note => note.id), mode === "service" ? [selected] : [other, selected]);
+    if (mode === "service") {
+      const unsent = path.join(directory, "unsent.json");
+      await fs.writeFile(unsent, JSON.stringify({ comment: { body: "<!-- timds-designer-request -->\n```json\n" + JSON.stringify({ notes: [{ id: other }] }) + "\n```" } }));
+      run("read", { GITHUB_EVENT_PATH: unsent });
+      assert.deepEqual(JSON.parse(await fs.readFile(path.join(directory, "designer-notes.json"), "utf8")).notes, []);
+    }
   }
 });
