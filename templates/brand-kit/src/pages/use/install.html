@@ -116,7 +116,7 @@ npx -y @dtconcepts/timds@latest mcp read --published <span data-root>https://THI
 <section class="block step" id="product">
   <div class="block__head">
     <h2 class="h2">Pin a release in a website or app</h2>
-    <p>A product never copies the system. One command at the product's root pins the current release in <code>timds.consumer.json</code>, wires a digest-verified fetch of the consumer bundle into <code>npm install</code>, installs <code>timds-consume-design-system</code> for design changes and <code>timds-update-design-system</code> for developer pin updates, and writes launch and review configuration. It also registers the hosted read-MCP entry, which needs host authorization when used. A clone and an install is then all a developer, or an agent working in the product, needs.</p>
+    <p>A product never copies the system. One command at the product's root pins the current release in <code>timds.consumer.json</code>, wires a digest-verified fetch of the consumer bundle into <code>npm install</code>, installs <code>timds-consume-design-system</code> for design changes and <code>timds-update-design-system</code> for developer pin updates, and writes launch and review configuration. To also register the hosted read connector, add <code>--portal-url</code> followed by your authenticated host’s HTTPS origin, then authorize your connector there. A clone and an install is then all a developer, or an agent working in the product, needs.</p>
   </div>
   <pre data-copy>npx --yes @dtconcepts/timds@latest consumer init --system <span data-system-id>SYSTEM-ID</span> --url <span data-root-bare>https://THIS-SYSTEM</span>
 npm ci</pre>
