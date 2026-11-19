@@ -265,7 +265,8 @@ jobs:
           DEFAULT_BRANCH: ${{ needs.gate.outputs.default_branch }}
           DISPATCH_REQUEST: ${{ inputs.request }}
           EVENT_NAME: ${{ github.event_name }}
-          HAS_NOTES_TOKEN: ${{ (secrets.TIMDS_ACCESS_TOKEN != '' || (secrets.CF_ACCESS_CLIENT_ID != '' && secrets.CF_ACCESS_CLIENT_SECRET != '' && vars.TIMDS_PORTAL_URL != '')) }}
+          HAS_NOTES_TOKEN: ${{ secrets.TIMDS_ACCESS_TOKEN != '' }}
+          HAS_SERVICE_TOKEN: ${{ secrets.CF_ACCESS_CLIENT_ID != '' && secrets.CF_ACCESS_CLIENT_SECRET != '' && vars.TIMDS_PORTAL_URL != '' }}
           PREVIEWS_ENABLED: ${{ vars.TIMDS_PREVIEWS_ENABLED == 'true' && (secrets.TIMDS_ACCESS_TOKEN != '' || (secrets.CF_ACCESS_CLIENT_ID != '' && secrets.CF_ACCESS_CLIENT_SECRET != '' && vars.TIMDS_PORTAL_URL != '')) }}
           ISSUE: ${{ needs.gate.outputs.issue }}
           PULL_REQUEST: ${{ needs.gate.outputs.pull_request }}
@@ -307,7 +308,9 @@ jobs:
             pr_flag=""
           fi
           explain="in your final summary"
-          if [[ "$HAS_NOTES_TOKEN" == "true" && -n "$PULL_REQUEST" ]]; then
+          if [[ "$HAS_SERVICE_TOKEN" == "true" ]]; then
+            notes_line="Apply the selected notes in the designer request's JSON block when supplied. Return the IDs you addressed in addressedNoteIds. The workflow resolves those notes after pushing."
+          elif [[ "$HAS_NOTES_TOKEN" == "true" && -n "$PULL_REQUEST" ]]; then
             notes_line="Read the designer's open notes first: \`npm run timds -- consumer notes --json${pr_flag}${app_flag}\`. Each note names the page, the element, and usually the source file and line. Return the IDs of notes you addressed in addressedNoteIds; the workflow resolves them only after a successful push. Do not resolve notes yourself."
           else
             notes_line="If the request below carries a \`json\` block of notes, those are the designer's notes: each names the page (route), the element (selector, text, and usually the source file and line), and the designer's words. They cannot be resolved from this run; list which ones you addressed in the pull request instead."
@@ -361,8 +364,6 @@ jobs:
         uses: openai/codex-action@v1
         env:
           TIMDS_ACCESS_TOKEN: ${{ secrets.TIMDS_ACCESS_TOKEN }}
-          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
-          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
           TIMDS_PORTAL_URL: ${{ vars.TIMDS_PORTAL_URL }}
           TIMDS_CONSUMER_ID: ${{ vars.TIMDS_CONSUMER_ID }}
         with:
