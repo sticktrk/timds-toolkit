@@ -12,7 +12,7 @@
     <thead><tr><th>The job</th><th>Do this</th><th>What it installs</th></tr></thead>
     <tbody>
       <tr><td><strong>One piece of work</strong>: a post, an email, a deck, a one-page site, a quick question about the brand</td><td><a href="#one-url">1 · Paste one address</a></td><td>Nothing</td></tr>
-      <tr><td><strong>Ongoing work in a repository</strong> with an agent: Claude Code, Codex, Cursor, Gemini CLI, VS Code, or any MCP client</td><td><a href="#agent">2 · Connect the agent over MCP</a></td><td>One server entry; the CLI runs at <code>@latest</code></td></tr>
+      <tr><td><strong>Ongoing work in a repository</strong> with an agent: Claude Code, Codex, Cursor, Gemini CLI, VS Code, or any MCP client</td><td><a href="#agent">2 · Connect the agent over MCP</a></td><td>One HTTP or stdio server entry</td></tr>
       <tr><td><strong>A website or app</strong> built on the system</td><td><a href="#product">3 · Pin a release in the product</a></td><td>A manifest, a locked dev dependency, consumer skills, and review configuration</td></tr>
       <tr><td><strong>Changing the system itself</strong>: a designer, or an agent working for one</td><td><a href="#contribute">4 · Give the agent the designer skills</a></td><td>Skills in the folder the agent works from</td></tr>
     </tbody>
@@ -39,21 +39,29 @@
 <section class="block step" id="agent">
   <div class="block__head">
     <h2 class="h2">Connect your agent over MCP</h2>
-    <p>For ongoing work in a repository, add the system's read server to the agent once. Snippets 1 to 6 run the TimDS CLI at <code>@latest</code> against this public copy, with no sign-in or token: the server reads the derived layer and never edits authored source. An installed binary can instead run <code>timds-cli mcp read --published URL</code> with this system's public URL. It is named <code>timds-design-system-read</code>; its first calls are <code>get_consumer_guide</code>, then <code>describe_system</code>, and system reads name the release they read. Pick the tool, copy the snippet, and start a new conversation in the repository.</p>
+    <p>If this system is published on TimDS Cloud, connect an HTTP-capable client to <code><span data-origin>https://THIS-ORIGIN</span>/mcp</code>. Use <code><span data-system-id>SYSTEM-ID</span></code> as the <code>systemId</code> on a shared public host. For a static publication or a stdio client, snippets 1 to 6 run the toolkit against this system’s public URL. The first calls are <code>get_consumer_guide</code> and <code>describe_system</code>.</p>
   </div>
   <table class="spec">
     <thead><tr><th>Tool</th><th>Where the entry goes</th><th>Snippet</th></tr></thead>
     <tbody>
+      <tr><td><strong>No local install</strong></td><td>If you use TimDS Cloud and this public origin exposes <code>/mcp</code>, connect to its HTTP read server</td><td>HTTP</td></tr>
       <tr><td><strong>Claude Code</strong></td><td><code>.mcp.json</code> at the repository root, written by the command</td><td>1</td></tr>
       <tr><td><strong>Codex</strong></td><td><code>~/.codex/config.toml</code></td><td>2</td></tr>
       <tr><td><strong>Cursor</strong></td><td><code>.cursor/mcp.json</code> in the repository</td><td>3</td></tr>
       <tr><td><strong>Gemini CLI</strong></td><td><code>.gemini/settings.json</code> in the repository</td><td>4</td></tr>
       <tr><td><strong>VS Code</strong></td><td><code>.vscode/mcp.json</code> in the repository</td><td>5</td></tr>
       <tr><td><strong>Any other MCP client</strong></td><td>Its stdio server configuration</td><td>6</td></tr>
-      <tr><td><strong>No local install</strong></td><td>If you use TimDS Cloud and this public origin exposes <code>/mcp</code>, connect to its HTTP read server</td><td>7</td></tr>
     </tbody>
   </table>
   <div class="tabs" data-tabs aria-label="Agent">
+    <div class="tabs__panel" data-tab="HTTP">
+      <pre data-copy>{
+  "mcpServers": {
+    "timds-host-read": { "type": "http", "url": "<span data-origin>https://THIS-ORIGIN</span>/mcp" }
+  }
+}</pre>
+    </div>
+
     <div class="tabs__panel" data-tab="Claude Code">
       <pre data-copy># Claude Code: writes the entry into .mcp.json at the repository root
 claude mcp add --scope project timds-design-system-read -- npx -y @dtconcepts/timds@latest mcp read --published <span data-root>https://THIS-SYSTEM/</span></pre>
@@ -99,15 +107,8 @@ args = ["-y", "@dtconcepts/timds@latest", "mcp", "read", "--published", "<span d
       <pre data-copy># A stdio server: the command, then its arguments
 npx -y @dtconcepts/timds@latest mcp read --published <span data-root>https://THIS-SYSTEM/</span></pre>
     </div>
-    <div class="tabs__panel" data-tab="HTTP">
-      <pre data-copy>{
-  "mcpServers": {
-    "timds-host-read": { "type": "http", "url": "<span data-origin>https://THIS-ORIGIN</span>/mcp" }
-  }
-}</pre>
-    </div>
   </div>
-  <p class="note">Snippets 1 to 6 give the agent the whole consumer tool set: brand roles, tokens, guidance search, pages, formats, designs, and media; <a href="{{page:use/compose}}#mcp">Compose</a> lists every tool. If you use TimDS Cloud, snippet 7 needs no local CLI when the host exposes that endpoint. Discover its advertised tools before calling them; the host may offer <code>describe_system</code>, <code>get_tokens</code>, <code>read_page</code> and <code>read_derived_layer</code>, each taking this system's id, <code><span data-system-id>SYSTEM-ID</span></code>, as <code>systemId</code> and an optional <code>version</code>. Historical selection depends on the host; a local or fixed-URL reader uses <code>version</code> only to assert its served release.</p>
+  <p class="note">The read tools cover brand roles, tokens, guidance search, pages, formats, designs and media. Discover the connected server’s advertised tools. <a href="{{page:use/compose}}#mcp">Compose</a> describes the reads. A hosted reader can select a published release by version. A fixed-URL reader uses <code>version</code> to assert the release served by its configured address.</p>
   <p class="note">For the toolkit read server, first reads in order: <code>get_consumer_guide</code> once per conversation, then <code>describe_system</code> and note the version. For a color or a font ask <code>resolve_role</code>, not a token name; for marks and imagery <code>get_brand</code> and <code>list_media</code>; for copy <code>search_guidance</code>; for a size <code>list_formats</code>. Report what was used, and name anything the system could not answer rather than guessing it.</p>
   <p class="note">When the release is an offshoot, <code>describe_system</code> and the derived layer's provenance carry <code>lineage</code>: its parent system, source, release, commit, and creation mode. A <code>null</code> lineage is supported for ordinary systems and older releases. Ancestry describes where the system began; use the served system's guidance and assets.</p>
 </section>

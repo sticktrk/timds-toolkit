@@ -788,8 +788,13 @@ Resources `timds://brand.json`, `timds://tokens.json`, `timds://index.json`,
 `timds://llms.txt`, `timds://formats.json`, `timds://bundle.json`, and
 `timds://guidance/{group}` serve the same documents.
 
-A host that serves consumers imports the tools from
-`@dtconcepts/timds/mcp/read`. `registerDesignSystemReadTools(server, {
+A Worker imports `designSystemReadTools` from `@dtconcepts/timds/read-tools`
+and passes its own Zod instance as `z` alongside the resolver and hooks below.
+Each tool definition carries its input shape, annotations and asynchronous
+handler. Resource definitions carry their URI or URI template and handler.
+Set `hooks.drafts: false` when only published releases are available.
+
+A Node server can import the adapter from `@dtconcepts/timds/mcp/read`. `registerDesignSystemReadTools(server, {
 resolveSystem, listSystems, hooks })` registers them on an `McpServer`.
 `resolveSystem({ systemId, version, draft })` returns `{ layer, media, published,
 pinned }`; with `hooks.remote` every tool takes an optional `systemId` and
