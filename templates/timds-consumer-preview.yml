@@ -28,6 +28,7 @@ name: TimDS consumer preview
 #                                    cannot read another private repository.
 # Repository variable:
 #   TIMDS_PORTAL_URL                 exact HTTPS origin of the selected host.
+#   TIMDS_ACCESS_MODE                protected-api only for directly Access-protected API routes.
 #   TIMDS_CONSUMER_ID                follower UUID when one repository follows multiple systems.
 #   TIMDS_PREVIEWS_ENABLED           set to true to enable previews; unset or
 #                                    false skips the workflow's jobs.
@@ -298,6 +299,7 @@ jobs:
           CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
           CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
           TIMDS_PORTAL_URL: ${{ vars.TIMDS_PORTAL_URL }}
+          TIMDS_ACCESS_MODE: ${{ vars.TIMDS_ACCESS_MODE }}
           TIMDS_CONSUMER_ID: ${{ vars.TIMDS_CONSUMER_ID }}
         run: node .github/timds/consumer-pipeline.mjs upload
       - name: Comment the preview link

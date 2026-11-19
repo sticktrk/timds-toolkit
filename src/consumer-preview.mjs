@@ -1530,11 +1530,11 @@ export async function buildConsumerPreview(consumer, app, options = {}) {
 export async function previewAuthHeaders(portalUrl, options = {}) {
   const env = options.env || process.env;
   const token = env.CF_ACCESS_CLIENT_ID || env.CF_ACCESS_CLIENT_SECRET ? null : await resolveAccessToken(portalUrl, options);
-  return pipelineHeaders(portalUrl, env, token);
+  return pipelineHeaders(portalUrl, env, token, options.fetchImpl);
 }
 
 export async function publishConsumerPreview(outputDir, options = {}) {
-  const portalUrl = options.portalUrl || process.env.TIMDS_PORTAL_URL || DEFAULT_PORTAL_URL;
+  const portalUrl = options.portalUrl || (options.env || process.env).TIMDS_PORTAL_URL || DEFAULT_PORTAL_URL;
   const headers = await previewAuthHeaders(portalUrl, options);
   return uploadPreview(outputDir, { portalUrl, headers, fetchImpl: options.fetchImpl });
 }

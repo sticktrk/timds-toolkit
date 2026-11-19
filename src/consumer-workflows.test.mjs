@@ -232,12 +232,31 @@ test("the workflow helper publishes built files and resolves only notes delivere
       const url = new URL(input);
       assert.equal(url.origin, "https://host.example.com");
       assert.equal(init.redirect, "error");
-      if (process.env.CF_ACCESS_CLIENT_ID) {
-        assert.equal(init.headers["CF-Access-Client-Secret"], "service-secret");
-        assert.equal(init.headers.Authorization, undefined);
-      } else assert.equal(init.headers.Authorization, "Bearer legacy-token");
       const method = init.method || "GET";
       await appendFile(process.env.RECEIPT, method + " " + url.pathname + url.search + "\\n");
+      const headers = new Headers(init.headers);
+      const exchange = url.pathname === "/service-auth";
+      const usesPair = exchange || process.env.TIMDS_ACCESS_MODE === "protected-api";
+      assert.equal(headers.get("CF-Access-Client-Id"), usesPair ? "service-id" : null);
+      assert.equal(headers.get("CF-Access-Client-Secret"), usesPair ? "service-secret" : null);
+      if (exchange) {
+        assert.equal(method, "GET");
+        assert.ok(init.signal instanceof AbortSignal);
+        assert.equal(headers.has("Authorization"), false);
+        assert.equal(headers.has("Cf-Access-Jwt-Assertion"), false);
+        assert.equal(headers.has("X-TimDS-Consumer-ID"), false);
+        if (process.env.EXCHANGE_FAILURE === "redirect") return Response.redirect("https://other.example.com/login");
+        if (process.env.EXCHANGE_FAILURE === "oversized") return Response.json({
+          assertion: "example.example.example", principalId: "${other}", padding: "x".repeat(100000),
+        });
+        if (process.env.EXCHANGE_FAILURE === "denied") return new Response("service-secret", { status: 403 });
+        return Response.json({ assertion: "example.example.example", principalId: "${other}" });
+      }
+      assert.ok(url.pathname.startsWith("/api/timds/consumer-previews"));
+      assert.equal(headers.get("X-TimDS-API-Version"), "1");
+      assert.equal(headers.get("X-TimDS-Consumer-ID"), "${other}");
+      assert.equal(headers.get("Authorization"), process.env.CF_ACCESS_CLIENT_ID ? null : "Bearer legacy-token");
+      assert.equal(headers.get("Cf-Access-Jwt-Assertion"), !usesPair && process.env.CF_ACCESS_CLIENT_ID ? "example.example.example" : null);
       if (method === "POST") {
         assert.equal(JSON.parse(Buffer.from(init.headers["x-timds-build-metadata"], "base64")).commit, process.env.SHA);
         return Response.json({ previewUrl: "https://share.example.com/p/1" });
@@ -250,12 +269,13 @@ test("the workflow helper publishes built files and resolves only notes delivere
         ? { notes: [{ id: "${selected}", status: "sent" }] } : { notes: [{ id: "${other}", status: "open" }], nextCursor: "next" });
     };
   `);
-  for (const mode of ["legacy", "service"]) {
+  for (const mode of ["legacy", "service", "protected-api"]) {
     const env = {
       PATH: process.env.PATH, RUNNER_TEMP: directory, GITHUB_EVENT_PATH: path.join(directory, "event.json"),
       GITHUB_OUTPUT: path.join(directory, "output"), RECEIPT: path.join(directory, mode),
       APP: "web", BRANCH: preview.branch, SHA: sha, GITHUB_REPOSITORY: repo, PULL_REQUEST: "12",
-      TIMDS_PORTAL_URL: "https://host.example.com", NOTE_IDS: JSON.stringify([selected]),
+      TIMDS_PORTAL_URL: "https://host.example.com", TIMDS_CONSUMER_ID: other, NOTE_IDS: JSON.stringify([selected]),
+      ...(mode === "protected-api" ? { TIMDS_ACCESS_MODE: mode } : {}),
       ...(mode === "legacy" ? { TIMDS_ACCESS_TOKEN: "legacy-token" } : { CF_ACCESS_CLIENT_ID: "service-id", CF_ACCESS_CLIENT_SECRET: "service-secret" }),
     };
     const run = (action, overrides) => execFileSync(process.execPath, ["--import", provider, helper, action], { env: { ...env, ...overrides }, stdio: "pipe" });
@@ -264,18 +284,29 @@ test("the workflow helper publishes built files and resolves only notes delivere
     await fs.mkdir(path.join(directory, "notes"), { recursive: true });
     await fs.rename(path.join(directory, "designer-notes.json"), path.join(directory, "notes", "designer-notes.json"));
     run("resolve");
+    const receipt = (await fs.readFile(env.RECEIPT, "utf8")).trim().split("\n");
+    const api = receipt.filter(line => line !== "GET /service-auth");
+    assert.equal(receipt.length - api.length, mode === "service" ? 3 : 0);
+    assert.equal(api.length, 4);
+    assert.equal(api[0], "POST /api/timds/consumer-previews");
+    assert.match(api[2], /after=next/);
+    assert.equal(api[3], "PATCH /api/timds/consumer-previews/notes/" + selected);
     assert.throws(() => run("resolve", { NOTE_IDS: JSON.stringify([other]) }), /Unknown addressed note ID/);
     assert.throws(() => run("upload", { SHA: "b".repeat(40) }), /identity does not match/);
-    const receipt = (await fs.readFile(env.RECEIPT, "utf8")).trim().split("\n");
-    assert.equal(receipt.length, 4);
-    assert.match(receipt[2], /after=next/);
-    assert.equal(receipt[3], "PATCH /api/timds/consumer-previews/notes/" + selected);
     const dispatch = path.join(directory, "manual.json");
     await fs.writeFile(dispatch, JSON.stringify({ inputs: { request: "Address open notes" } }));
     run("read", { GITHUB_EVENT_PATH: dispatch });
     const thread = JSON.parse(await fs.readFile(path.join(directory, "designer-notes.json"), "utf8"));
-    assert.deepEqual(thread.notes.map(note => note.id), mode === "service" ? [selected] : [other, selected]);
+    assert.deepEqual(thread.notes.map(note => note.id), mode === "legacy" ? [other, selected] : [selected]);
     if (mode === "service") {
+      for (const failure of ["redirect", "oversized", "denied"]) {
+        const receiptFile = path.join(directory, failure);
+        assert.throws(() => run("upload", { RECEIPT: receiptFile, EXCHANGE_FAILURE: failure }), error => {
+          assert.doesNotMatch(error.stdout + error.stderr, /service-secret|example\.example\.example/);
+          return true;
+        });
+        assert.equal(await fs.readFile(receiptFile, "utf8"), "GET /service-auth\n");
+      }
       const unsent = path.join(directory, "unsent.json");
       await fs.writeFile(unsent, JSON.stringify({ comment: { body: "<!-- timds-designer-request -->\n```json\n" + JSON.stringify({ notes: [{ id: other }] }) + "\n```" } }));
       run("read", { GITHUB_EVENT_PATH: unsent });

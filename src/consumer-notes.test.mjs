@@ -246,6 +246,45 @@ test("consumer notes resolve marks each id at HEAD by default", async (t) => {
   await assert.rejects(runConsumerNotes(["resolve", "--root", root], { fetchImpl, token: "t" }), /Name the notes to resolve/);
 });
 
+test("consumer notes lists and resolves using the selected host's service assertion", async (t) => {
+  const root = await createConsumerRepo(t);
+  const origin = "https://host.example.test";
+  const principalId = "00000000-0000-4000-8000-000000000001";
+  const assertion = "example.example.example";
+  const env = { TIMDS_PORTAL_URL: origin, CF_ACCESS_CLIENT_ID: "example-id", CF_ACCESS_CLIENT_SECRET: "example-secret" };
+  const lines = [];
+  const { calls, fetchImpl } = stubFetch((url, init) => {
+    assert.equal(url.origin, origin);
+    assert.equal(init.redirect, "error");
+    const headers = new Headers(init.headers);
+    if (url.pathname === "/service-auth") {
+      assert.equal(init.method || "GET", "GET");
+      assert.equal(headers.get("CF-Access-Client-Id"), env.CF_ACCESS_CLIENT_ID);
+      assert.equal(headers.get("CF-Access-Client-Secret"), env.CF_ACCESS_CLIENT_SECRET);
+      assert.equal(headers.has("Authorization"), false);
+      return { body: { assertion, principalId } };
+    }
+    assert.equal(headers.has("CF-Access-Client-Id"), false);
+    assert.equal(headers.has("CF-Access-Client-Secret"), false);
+    assert.equal(headers.has("Authorization"), false);
+    assert.equal(headers.get("Cf-Access-Jwt-Assertion"), assertion);
+    assert.equal(headers.get("X-TimDS-API-Version"), "1");
+    return init.method === "PATCH" ? { body: { note: { id: "note_1", ...JSON.parse(init.body) } } } : { body: { notes: NOTES } };
+  });
+  const options = { env, fetchImpl, output: line => lines.push(line) };
+  const read = await runConsumerNotes(["--root", root, "--pull-request", "12"], options);
+  assert.deepEqual(read.notes, NOTES);
+  const fixed = await runConsumerNotes(["resolve", "note_1", "--root", root], options);
+  assert.equal(fixed.notes[0].status, "addressed");
+  assert.deepEqual(calls.map(call => call.url.pathname), ["/service-auth", CONSUMER_NOTES_PATH, "/service-auth", CONSUMER_NOTES_PATH + "/note_1"]);
+  assert.doesNotMatch(lines.join("\n"), /example-secret|example\.example\.example/);
+
+  for (const selected of ["https://other.example.test", origin + "/elsewhere"]) {
+    await assert.rejects(runConsumerNotes(["--root", root, "--portal-url", selected, "--pull-request", "12"], options));
+  }
+  assert.equal(calls.length, 4, "a conflicting selection must fail before sending credentials");
+});
+
 test("timds consumer notes is dispatched with raw arguments", async (t) => {
   const root = await createConsumerRepo(t);
   const lines = [];

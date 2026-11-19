@@ -31,7 +31,8 @@ name: TimDS designer change
 # Repository secrets for submodule checkout:
 #   DESIGN_SYSTEM_DEPLOY_KEY or      read access to the private Design System
 #   TIMDS_CONSUMER_SUBMODULE_TOKEN   submodule, as for the preview workflow.
-# Repository variable:
+# Repository variables:
+#   TIMDS_ACCESS_MODE                protected-api only for directly Access-protected API routes.
 #   TIMDS_PREVIEWS_ENABLED           set to true to opt in to previews; also
 #                                    requires a pipeline credential.
 #   TIMDS_DESIGNER_BOTS              comma-separated bot logins allowed to
@@ -227,6 +228,7 @@ jobs:
           CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
           CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
           TIMDS_PORTAL_URL: ${{ vars.TIMDS_PORTAL_URL }}
+          TIMDS_ACCESS_MODE: ${{ vars.TIMDS_ACCESS_MODE }}
           TIMDS_CONSUMER_ID: ${{ vars.TIMDS_CONSUMER_ID }}
         run: node .github/timds/consumer-pipeline.mjs read
       - uses: actions/upload-artifact@v4
@@ -507,6 +509,7 @@ jobs:
           CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
           CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
           TIMDS_PORTAL_URL: ${{ vars.TIMDS_PORTAL_URL }}
+          TIMDS_ACCESS_MODE: ${{ vars.TIMDS_ACCESS_MODE }}
           TIMDS_CONSUMER_ID: ${{ vars.TIMDS_CONSUMER_ID }}
         run: node .github/timds/consumer-pipeline.mjs resolve
 

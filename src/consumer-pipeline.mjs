@@ -79,17 +79,57 @@ export function previewMetadataHeader(preview) {
   return Buffer.from(JSON.stringify(metadata), "utf8").toString("base64");
 }
 
-/** Use the pipeline's service-token pair only on its configured HTTPS host. */
-export function pipelineHeaders(portalUrl, env, token) {
+// The host exchanges a service token for a short-lived Access JWT. Keep the
+// response and the token pair in this trusted process, including on failures.
+async function serviceAssertion(origin, serviceHeaders, fetchImpl) {
+  const invalid = "The host returned an invalid service identity response";
+  let response;
+  try {
+    response = await fetchImpl(new URL("/service-auth", origin).href, {
+      method: "GET", headers: { Accept: "application/json", ...serviceHeaders },
+      redirect: "error", signal: AbortSignal.timeout(15_000),
+    });
+  } catch {
+    throw new Error("The host service identity exchange failed");
+  }
+  if (response.status !== 200 || !/^application\/json(?:\s*;|$)/i.test(response.headers.get("content-type") || "")) {
+    await response.body?.cancel().catch(() => {});
+    throw new Error(`The host service identity exchange failed (${response.status})`);
+  }
+  const chunks = [];
+  let bytes = 0;
+  let result;
+  try {
+    for await (const chunk of response.body) {
+      bytes += chunk.length;
+      if (bytes > 32_768) throw new Error(invalid);
+      chunks.push(chunk);
+    }
+    result = JSON.parse(Buffer.concat(chunks, bytes).toString("utf8"));
+  } catch {
+    throw new Error(invalid);
+  }
+  const assertion = result?.assertion;
+  if (typeof result?.principalId !== "string" || !result.principalId.trim() ||
+      typeof assertion !== "string" || assertion.length > 16_384 || !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(assertion)) {
+    throw new Error(invalid);
+  }
+  return assertion;
+}
+
+export async function pipelineHeaders(portalUrl, env, token, fetchImpl = fetch) {
   const id = env.CF_ACCESS_CLIENT_ID, secret = env.CF_ACCESS_CLIENT_SECRET;
   const follower = env.TIMDS_CONSUMER_ID ? { "X-TimDS-Consumer-ID": env.TIMDS_CONSUMER_ID } : {};
   const version = { "X-TimDS-API-Version": "1", ...follower };
   if (id || secret) {
-    const url = new URL(portalUrl);
-    if (!id || !secret || url.protocol !== "https:" || url.origin !== env.TIMDS_PORTAL_URL || url.username || url.password) {
+    const origin = URL.canParse(portalUrl) && new URL(portalUrl).origin;
+    if (!id || !secret || !origin || !origin.startsWith("https://") || origin !== env.TIMDS_PORTAL_URL || (portalUrl !== origin && portalUrl !== origin + "/")) {
       throw new Error("Set both Access service-token variables and TIMDS_PORTAL_URL to the exact HTTPS host origin");
     }
-    return { ...version, "CF-Access-Client-Id": id, "CF-Access-Client-Secret": secret };
+    const serviceHeaders = { "CF-Access-Client-Id": id, "CF-Access-Client-Secret": secret };
+    if (env.TIMDS_ACCESS_MODE === "protected-api") return { ...version, ...serviceHeaders };
+    if (env.TIMDS_ACCESS_MODE && env.TIMDS_ACCESS_MODE !== "exchange") throw new Error("TIMDS_ACCESS_MODE must be exchange or protected-api");
+    return { ...version, "Cf-Access-Jwt-Assertion": await serviceAssertion(origin, serviceHeaders, fetchImpl) };
   }
   if (!token) throw new Error("Set the Access service-token pair for this follower, or use its provider’s TIMDS_ACCESS_TOKEN");
   return { ...version, Authorization: `Bearer ${token}` };
@@ -124,7 +164,12 @@ export async function uploadPreview(outputDir, { portalUrl, headers, expected, f
       },
       method: "POST",
       redirect: "error",
+      signal: AbortSignal.timeout(180_000),
     });
+    if (!response.ok && !headers.Authorization) {
+      await response.body?.cancel().catch(() => {});
+      throw new Error(`Publishing the preview failed (${response.status})`);
+    }
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
       throw new Error(`Publishing the preview failed (${response.status}): ${String(payload.error || payload.message || response.statusText || "no detail")}`);
@@ -179,10 +224,10 @@ export function parseNotesComment(body) {
 // CI inputs come from the trusted event and gate. Artifacts and note IDs are data.
 export async function runConsumerPipeline(action, env) {
   const portal = env.TIMDS_PORTAL_URL || "https://timds.com";
-  const headers = pipelineHeaders(portal, env, env.TIMDS_ACCESS_TOKEN);
+  const headers = await pipelineHeaders(portal, env, env.TIMDS_ACCESS_TOKEN);
   if (new URL(portal).protocol !== "https:") throw new Error("The pipeline endpoint must use HTTPS");
   const request = async (url, init = {}) => {
-    const response = await fetch(url, { ...init, headers: { ...headers, "Content-Type": "application/json" }, redirect: "error" });
+    const response = await fetch(url, { ...init, headers: { ...headers, "Content-Type": "application/json" }, redirect: "error", signal: AbortSignal.timeout(30_000) });
     if (!response.ok) throw new Error(`Designer notes request failed (${response.status})`);
     return response.json();
   };

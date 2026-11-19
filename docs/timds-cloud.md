@@ -455,7 +455,9 @@ host never merges or deploys the product.
 
 Automatic consumer previews are **off by default**. To enable
 `.github/workflows/timds-consumer-preview.yml`, set the repository variable
-`TIMDS_PREVIEWS_ENABLED` to `true`. Set `TIMDS_PORTAL_URL` to the exact HTTPS host origin and create a GitHub Actions environment named `timds-pipeline`. Restrict its deployment branches to the repository’s default branch. Store `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET` as secrets of that environment and remove any repository or inherited copies accessible to PR workflows. If the pipeline is authorized for two followers of the same repository, set the `TIMDS_CONSUMER_ID` repository variable to the intended follower UUID. A legacy provider may still use its own `TIMDS_ACCESS_TOKEN` in that environment. For a private submodule pin, also configure
+`TIMDS_PREVIEWS_ENABLED` to `true`. Set `TIMDS_PORTAL_URL` to the exact HTTPS host origin and create a GitHub Actions environment named `timds-pipeline`. Restrict its deployment branches to the repository’s default branch. Store `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET` as secrets of that environment and remove any repository or inherited copies accessible to PR workflows. The CLI and the installed workflows exchange the service-token pair at the host’s `GET /service-auth`. They use the returned Access assertion for preview uploads and note requests on that same host. If your existing Access application protects the preview and notes API routes directly, set `TIMDS_ACCESS_MODE=protected-api` in the CLI environment or as a repository variable to send the pair directly to those routes. A failed exchange stops the operation.
+
+If the pipeline is authorized for two followers of the same repository, set the `TIMDS_CONSUMER_ID` repository variable to the intended follower UUID. A legacy provider may still use its own `TIMDS_ACCESS_TOKEN` in that environment. For a private submodule pin, also configure
 `DESIGN_SYSTEM_DEPLOY_KEY` (a read-only deploy key) or
 `TIMDS_CONSUMER_SUBMODULE_TOKEN` (with `contents:read`) so CI can check out
 that submodule. Published pins do not need a submodule credential.

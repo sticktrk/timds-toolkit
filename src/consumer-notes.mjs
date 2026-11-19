@@ -33,8 +33,9 @@ const NOTES_HELP = `Usage:
 Lists the designer's notes on this pull request's preview (open ones unless
 --all), grouped by page, with the element and source line each one points at.
 resolve marks notes addressed at a commit (default HEAD) after the fix is
-pushed; --dismiss marks them dismissed instead. Needs TIMDS_ACCESS_TOKEN or
-\`timds auth login\`.`;
+pushed; --dismiss marks them dismissed instead. Host pipelines use their Access
+service-token pair and TIMDS_PORTAL_URL. Other providers can use TIMDS_ACCESS_TOKEN
+or \`timds auth login\`.`;
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -73,12 +74,17 @@ async function portalJson(fetchImpl, url, headers, init = {}) {
   const response = await fetchImpl(url.toString(), {
     ...init,
     redirect: "error",
+    signal: AbortSignal.timeout(30_000),
     headers: {
       Accept: "application/json",
       ...headers,
       ...(init.body ? { "Content-Type": "application/json" } : {}),
     },
   });
+  if (!response.ok && !headers.Authorization) {
+    await response.body?.cancel().catch(() => {});
+    return { response, payload: { error: "The host refused the request" } };
+  }
   const payload = await response.json().catch(() => ({}));
   return { payload, response };
 }
@@ -102,8 +108,8 @@ export async function fetchConsumerNotes({ repository, app, pullRequest, all = f
   if (!repository) throw new Error("fetchConsumerNotes needs repository (OWNER/REPO)");
   if (!app) throw new Error("fetchConsumerNotes needs app");
   if (!pullRequest) throw new Error("fetchConsumerNotes needs pullRequest");
-  const portal = portalUrl || process.env.TIMDS_PORTAL_URL || DEFAULT_PORTAL_URL;
-  const headers = await previewAuthHeaders(portal, options);
+  const portal = portalUrl || (options.env || process.env).TIMDS_PORTAL_URL || DEFAULT_PORTAL_URL;
+  const headers = await previewAuthHeaders(portal, { ...options, fetchImpl });
   const url = portalEndpoint(portal, CONSUMER_NOTES_PATH);
   url.searchParams.set("repository", repository);
   url.searchParams.set("app", app);
@@ -120,8 +126,8 @@ export async function fetchConsumerNotes({ repository, app, pullRequest, all = f
 export async function resolveConsumerNote(id, { commit, dismiss = false, portalUrl, fetchImpl = fetch, ...options } = {}) {
   const noteId = String(id || "").trim();
   if (!noteId) throw new Error("A note id is required");
-  const portal = portalUrl || process.env.TIMDS_PORTAL_URL || DEFAULT_PORTAL_URL;
-  const headers = await previewAuthHeaders(portal, options);
+  const portal = portalUrl || (options.env || process.env).TIMDS_PORTAL_URL || DEFAULT_PORTAL_URL;
+  const headers = await previewAuthHeaders(portal, { ...options, fetchImpl });
   const url = portalEndpoint(portal, `${CONSUMER_NOTES_PATH}/${encodeURIComponent(noteId)}`);
   const body = { status: dismiss ? "dismissed" : "addressed", commit: commit || null };
   const { payload, response } = await portalJson(fetchImpl, url, headers, { method: "PATCH", body: JSON.stringify(body) });
@@ -246,7 +252,7 @@ export async function runConsumerNotes(args = [], { output = (line) => process.s
     if (!commit) throw new Error("Could not read HEAD; pass --commit SHA");
     const resolved = [];
     for (const id of ids) {
-      resolved.push(await resolveConsumerNote(id, { ...overrides, commit, dismiss: Boolean(options.dismiss), portalUrl: options.portalUrl }));
+      resolved.push(await resolveConsumerNote(id, { ...overrides, env, commit, dismiss: Boolean(options.dismiss), portalUrl: options.portalUrl }));
       output(`Note ${id} marked ${options.dismiss ? "dismissed" : "addressed"} at ${commit.slice(0, 12)}.`);
     }
     return { notes: resolved };
@@ -259,7 +265,7 @@ export async function runConsumerNotes(args = [], { output = (line) => process.s
   const repository = await repositoryName(consumer.repoRoot, env);
   if (!repository) throw new Error("Could not tell the repository from `git remote get-url origin`; add the GitHub remote as origin");
   const pullRequest = await pullRequestNumber(options.pullRequest, consumer.repoRoot, env);
-  const result = await fetchConsumerNotes({ ...overrides, repository, app: app.name, pullRequest, all: Boolean(options.all), portalUrl: options.portalUrl });
+  const result = await fetchConsumerNotes({ ...overrides, env, repository, app: app.name, pullRequest, all: Boolean(options.all), portalUrl: options.portalUrl });
   if (options.json) output(JSON.stringify({ notes: result.notes }, null, 2));
   else output(formatConsumerNotes(result.notes, { repository, app: app.name, pullRequest, all: Boolean(options.all) }));
   return { ...result, repository, app: app.name, pullRequest };
