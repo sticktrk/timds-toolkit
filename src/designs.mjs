@@ -48,11 +48,15 @@ import path from "node:path";
 import { agentPointerHead, agentPointerNote } from "./agent-pointers.mjs";
 import { attr, classList, escapeHtml, findAll, findOne, parseHtml, textOf, walk } from "./html.mjs";
 import { importReferences, stylesheetReferences } from "./tokens.mjs";
+import { DEFAULT_STATE } from "./read-documents.mjs";
+export { DEFAULT_STATE } from "./read-documents.mjs";
+export { designsDirectory, findDesignPage } from "./read-documents.mjs";
 
 export const DESIGNS_SOURCE_DIRECTORY = "src/designs";
 export const DESIGNS_OUTPUT_DIRECTORY = "designs";
 export const DESIGNS_SCHEMA_VERSION = 1;
-export const DEFAULT_STATE = "default";
+
+
 /** The directory under a design's output reserved for journey storyboards. */
 export const JOURNEYS_OUTPUT_DIRECTORY = "journeys";
 
@@ -806,57 +810,6 @@ export function designsDocument(rendered, manifest) {
   };
 }
 
-/** A journey as a listing carries it: the steps and screens in visitor order, without the pages' HTML. */
-function journeyListing(journey) {
-  const screen = ({ route, state, label, note, url }) => ({ route, state, label, ...(note ? { note } : {}), url });
-  return {
-    id: journey.id,
-    title: journey.title,
-    ...(journey.summary ? { summary: journey.summary } : {}),
-    url: journey.url,
-    stepCount: journey.stepCount ?? journey.steps?.length ?? 0,
-    screenCount: journey.screenCount ?? 0,
-    steps: (journey.steps ?? []).map((step) => ({
-      title: step.title,
-      ...(step.summary ? { summary: step.summary } : {}),
-      screens: (step.screens ?? []).map(screen),
-      ...(step.branches?.length ? { branches: step.branches.map(screen) } : {}),
-    })),
-  };
-}
-
-/**
- * The directory of a designs document without the HTML, for listings: each
- * design's routes and states, and its journeys with the screens in the order
- * a visitor meets them (a document written before journeys lists none).
- */
-export function designsDirectory(document) {
-  return (document?.designs ?? []).map((design) => ({
-    id: design.id,
-    title: design.title,
-    ...(design.summary ? { summary: design.summary } : {}),
-    url: design.url,
-    pageCount: design.pages?.length ?? 0,
-    pages: (design.pages ?? []).map((page) => ({
-      route: page.route,
-      title: page.title,
-      url: page.url,
-      states: (page.states ?? []).map((state) => state.name),
-    })),
-    journeys: (design.journeys ?? []).map(journeyListing),
-  }));
-}
-
-/** One page state of a designs document, by design id, route, and state name. */
-export function findDesignPage(document, designId, route, state = DEFAULT_STATE) {
-  const design = (document?.designs ?? []).find((candidate) => candidate.id === designId);
-  if (!design) return { design: null, page: null, state: null };
-  const normalized = String(route ?? "/").trim();
-  const wanted = normalized.length > 1 ? `/${normalized.replace(/^\/+|\/+$/g, "")}` : "/";
-  const page = design.pages.find((candidate) => candidate.route === wanted) ?? null;
-  const found = page?.states.find((candidate) => candidate.name === (state || DEFAULT_STATE)) ?? null;
-  return { design, page, state: found };
-}
 
 /** Every site-absolute file the designs load, for the publisher. */
 export function eachDesignReference(document, visit) {

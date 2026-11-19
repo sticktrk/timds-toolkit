@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Export `@dtconcepts/timds/read-tools` for Worker and other HTTP hosts. `designSystemReadTools({ z, resolveSystem, listSystems, hooks })` returns tool and resource definitions with handlers. Pass the server’s Zod instance and `hooks.drafts: false` for a published-only reader. The Node and stdio servers register the same definitions.
+
 - Add the blog posting template. A Design System keeps the layout of its
   articles in `src/posting/blog.json`: the named blocks in page order, each
   block's element and fixed heading, and what each block is for. The designer
