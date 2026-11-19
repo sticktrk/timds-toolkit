@@ -349,7 +349,9 @@ function normalizeResolved(resolved) {
  * Describe the consumer tools and resources using the caller's Zod instance.
  * Tool handlers return the structured result and propagate errors to the transport.
  *
- * `resolveSystem({ systemId, version, draft })` returns `{ layer, media, published,
+ * A resolver can use its optional second argument, a list of required derived documents
+ * (including "media"), to avoid loading unrelated release data. Omitted means the full summary.
+ * `resolveSystem({ systemId, version, draft }, documents)` returns `{ layer, media, published,
  * pinned }`: `layer` is a derived layer (see `readDerivedLayer` and
  * `fetchDerivedLayer`), `media` an optional media catalog (`{ assets }`),
  * `published` the version label currently published, and `pinned` the version
@@ -374,13 +376,13 @@ export function designSystemReadTools({ z, resolveSystem, listSystems, hooks = {
     ...(hooks.drafts !== false ? { draft: z.string().min(1).max(100).optional().describe("A named prerelease draft; never changes the product pin") } : {}),
     version: z.string().min(1).max(100).optional().describe("A specific published version when the host supports selection; local or fixed-URL readers only assert their served version. Omit for the server's default source; cannot combine with draft"),
   };
-  const systemFor = async (args) => {
+  const systemFor = async (args, documents) => {
     if (args.version && args.draft) throw readError(400, "Choose a published version or a draft");
     return normalizeResolved(await resolveSystem({
       systemId: remote ? args.systemId?.trim() || undefined : undefined,
       version: args.version?.trim() || undefined,
       draft: hooks.drafts === false ? undefined : args.draft?.trim() || undefined,
-    }));
+    }, documents));
   };
   const addTool = (name, config, handler) => tools.push({ name, ...config, handler });
   const tool = (name, config, handler) => addTool(name, { ...config, inputSchema: { ...scopeShape, ...config.inputSchema } }, handler);
@@ -402,7 +404,7 @@ export function designSystemReadTools({ z, resolveSystem, listSystems, hooks = {
   }, async () => {
     const systems = typeof listSystems === "function"
         ? await listSystems()
-        : [await systemFor({})].map((resolved) => {
+        : [await systemFor({}, [])].map((resolved) => {
             const stamp = systemStamp(resolved);
             return { systemId: stamp.id, name: stamp.name, publishedVersion: stamp.published ?? stamp.version, pinnedVersion: stamp.pinned, source: stamp.source };
           });
@@ -448,7 +450,7 @@ export function designSystemReadTools({ z, resolveSystem, listSystems, hooks = {
       group: z.string().min(1).max(50).optional().describe("Only one group, e.g. print, digital, or social"),
     },
   }, async (args) => {
-    const resolved = await systemFor(args);
+    const resolved = await systemFor(args, ["formats"]);
     const document = resolved.layer.formats;
     const group = args.group?.trim().toLowerCase() || null;
     const groups = (document?.groups ?? []).filter((entry) => !group || entry.id === group);
@@ -466,7 +468,7 @@ export function designSystemReadTools({ z, resolveSystem, listSystems, hooks = {
     annotations: READ_ONLY,
     description: "The brand kit: every filled role with its token and value, unfilled roles, logos and imagery with their variants, intended backgrounds, and stable URLs, and the guidance groups. Read guidance text with search_guidance or read_page.",
   }, async (args) => {
-    const resolved = await systemFor(args);
+    const resolved = await systemFor(args, ["brand"]);
     const kit = requireDocument(resolved.layer, "brand");
     return {
       system: systemStamp(resolved),
@@ -489,7 +491,7 @@ export function designSystemReadTools({ z, resolveSystem, listSystems, hooks = {
   }, async (args) => {
     const roles = [...new Set([...(args.role ? [args.role.trim()] : []), ...(args.roles ?? []).map((role) => role.trim())].filter(Boolean))];
     if (!roles.length) throw readError(400, "Pass role or roles");
-    const resolved = await systemFor(args);
+    const resolved = await systemFor(args, ["tokens"]);
     const tokens = requireDocument(resolved.layer, "tokens");
     return {
       system: systemStamp(resolved),
@@ -510,7 +512,7 @@ export function designSystemReadTools({ z, resolveSystem, listSystems, hooks = {
       limit: z.number().int().min(1).max(MAX_TOKENS_PER_CALL).optional().describe(`Maximum tokens returned; defaults to 200`),
     },
   }, async (args) => {
-    const resolved = await systemFor(args);
+    const resolved = await systemFor(args, ["tokens"]);
     const document = requireDocument(resolved.layer, "tokens");
     const query = args.query?.trim().toLowerCase();
     const scope = args.scope?.trim();
@@ -546,7 +548,7 @@ export function designSystemReadTools({ z, resolveSystem, listSystems, hooks = {
     annotations: READ_ONLY,
     description: "The page directory: id, title, url, view, eyebrow, lede, and block count for every page in the system.",
   }, async (args) => {
-    const resolved = await systemFor(args);
+    const resolved = await systemFor(args, ["index"]);
     const index = requireDocument(resolved.layer, "index");
     const pages = pageDirectory(index);
     return { system: systemStamp(resolved), total: pages.length, pages };
@@ -562,7 +564,7 @@ export function designSystemReadTools({ z, resolveSystem, listSystems, hooks = {
       format: z.enum(["markdown", "blocks"]).optional().describe("markdown (default) or blocks"),
     },
   }, async (args) => {
-    const resolved = await systemFor(args);
+    const resolved = await systemFor(args, ["index"]);
     const index = requireDocument(resolved.layer, "index");
     const page = findPage(index, args.page);
     if (!page) throw readError(404, `No page ${JSON.stringify(args.page)}; list_pages shows the directory`);
@@ -581,7 +583,7 @@ export function designSystemReadTools({ z, resolveSystem, listSystems, hooks = {
     annotations: READ_ONLY,
     description: "The website designs the designer has authored in the system: each design with its title, summary, routes, the states each route has, and its journeys (the screens, each a route in a state, in the order a visitor meets them, step by step, with the branch screens met instead, and the storyboard url that shows them). A design is the reference a product port must match: port a journey's screens in its order and express every state it shows; read a page with read_design.",
   }, async (args) => {
-    const resolved = await systemFor(args);
+    const resolved = await systemFor(args, ["designs"]);
     const document = resolved.layer.designs;
     const designs = designsDirectory(document);
     return { system: systemStamp(resolved), base: document?.base ?? null, total: designs.length, designs, ...(designs.length ? {} : { note: "This system publishes no website designs" }) };
@@ -597,7 +599,7 @@ export function designSystemReadTools({ z, resolveSystem, listSystems, hooks = {
       state: z.string().min(1).max(100).optional().describe(`State name; defaults to ${DEFAULT_STATE}`),
     },
   }, async (args) => {
-    const resolved = await systemFor(args);
+    const resolved = await systemFor(args, ["designs"]);
     const document = resolved.layer.designs;
     if (!document) throw readError(404, "This system publishes no website designs");
     const { design, page, state } = findDesignPage(document, args.design.trim(), args.route, args.state?.trim() || DEFAULT_STATE);
@@ -627,7 +629,7 @@ export function designSystemReadTools({ z, resolveSystem, listSystems, hooks = {
       limit: z.number().int().min(1).max(MAX_SEARCH_RESULTS).optional().describe("Maximum results; defaults to 8"),
     },
   }, async (args) => {
-    const resolved = await systemFor(args);
+    const resolved = await systemFor(args, ["index", "brand"]);
     const index = requireDocument(resolved.layer, "index");
     const brand = resolved.layer.brand;
     const group = args.group?.trim().toLowerCase() || null;
@@ -648,7 +650,7 @@ export function designSystemReadTools({ z, resolveSystem, listSystems, hooks = {
       limit: z.number().int().min(1).max(MAX_MEDIA_PER_CALL).optional().describe("Maximum assets returned; defaults to 200"),
     },
   }, async (args) => {
-    const resolved = await systemFor(args);
+    const resolved = await systemFor(args, ["media"]);
     const catalog = resolved.media;
     const tag = args.tag?.trim().toLowerCase();
     const kind = args.kind?.trim().toLowerCase();
@@ -680,7 +682,7 @@ export function designSystemReadTools({ z, resolveSystem, listSystems, hooks = {
       reference: z.string().max(500).optional().describe("The page, block, role, token, or media key it concerns"),
     },
   }, async (args) => {
-    const resolved = await systemFor(args);
+    const resolved = await systemFor(args, []);
     const system = systemStamp(resolved);
     const gap = {
       kind: args.kind,
@@ -707,7 +709,7 @@ export function designSystemReadTools({ z, resolveSystem, listSystems, hooks = {
   }, async (uri) => ({ contents: [{ uri: uri.href, mimeType: "text/markdown", text: consumerGuideText() }] }));
 
   const decodeSystem = (variables) => (remote ? decodeURIComponent(String(variables?.system ?? "")) || undefined : undefined);
-  const resolveForResource = async (variables) => normalizeResolved(await resolveSystem({ systemId: decodeSystem(variables) }));
+  const resolveForResource = async (variables, documents) => normalizeResolved(await resolveSystem({ systemId: decodeSystem(variables) }, documents));
   const resourceUri = (suffix) => (remote ? `timds://systems/{system}/${suffix}` : `timds://${suffix}`);
   const documents = [
     ["brand.json", "brand", "application/json", "The brand kit: roles, logos, imagery, and guidance groups."],
@@ -719,7 +721,7 @@ export function designSystemReadTools({ z, resolveSystem, listSystems, hooks = {
   ];
   for (const [suffix, name, mimeType, description] of documents) {
     const read = async (uri, variables) => {
-      const resolved = await resolveForResource(variables);
+      const resolved = await resolveForResource(variables, [name]);
       const document = requireDocument(resolved.layer, name);
       return { contents: [{ uri: uri.href, mimeType, text: typeof document === "string" ? document : `${JSON.stringify(document, null, 2)}\n` }] };
     };
@@ -732,7 +734,7 @@ export function designSystemReadTools({ z, resolveSystem, listSystems, hooks = {
   resource("guidance", template(resourceUri("guidance/{group}"), remote
       ? undefined
       : async () => {
-          const resolved = await resolveForResource({});
+          const resolved = await resolveForResource({}, ["brand"]);
           return {
             resources: Object.keys(resolved.layer.brand?.guidance ?? {}).map((group) => ({
               uri: `timds://guidance/${group}`,
@@ -746,7 +748,7 @@ export function designSystemReadTools({ z, resolveSystem, listSystems, hooks = {
     description: "One guidance group (voice, compliance, ...) as Markdown with a citation per block.",
     mimeType: "text/markdown",
   }, async (uri, variables) => {
-    const resolved = await resolveForResource(variables);
+    const resolved = await resolveForResource(variables, ["brand", "index"]);
     const kit = requireDocument(resolved.layer, "brand");
     const group = String(variables?.group ?? "");
     const entry = kit.guidance?.[group];
