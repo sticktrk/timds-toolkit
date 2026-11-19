@@ -447,16 +447,15 @@ host never merges or deploys the product.
 ### Designer notes and CI previews
 
 - `timds consumer notes [--app NAME] [--pull-request N] [--all] [--json]`
-  lists the notes a designer left on the pull request's preview in the portal,
+  lists the notes a designer left on the pull request's preview on the host,
   grouped by page, with the element, its source `file:line` when the dev build
   stamps one, and the designer's words. `timds consumer notes resolve ID...
   [--commit SHA] [--dismiss]` marks them addressed (or dismissed) after the fix
-  is pushed. Both need `TIMDS_ACCESS_TOKEN` or `timds login`.
+  is pushed. On a host these commands use a service-token identity granted upload access for the follower.
 
 Automatic consumer previews are **off by default**. To enable
 `.github/workflows/timds-consumer-preview.yml`, set the repository variable
-`TIMDS_PREVIEWS_ENABLED` to `true` and configure the `TIMDS_ACCESS_TOKEN`
-repository secret. For a private submodule pin, also configure
+`TIMDS_PREVIEWS_ENABLED` to `true`. Set `TIMDS_PORTAL_URL` to the exact HTTPS host origin and configure the `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET` repository secrets. If the pipeline is authorized for two followers of the same repository, set the `TIMDS_CONSUMER_ID` repository variable to the intended follower UUID. A legacy provider may still use its own `TIMDS_ACCESS_TOKEN`. For a private submodule pin, also configure
 `DESIGN_SYSTEM_DEPLOY_KEY` (a read-only deploy key) or
 `TIMDS_CONSUMER_SUBMODULE_TOKEN` (with `contents:read`) so CI can check out
 that submodule. Published pins do not need a submodule credential.

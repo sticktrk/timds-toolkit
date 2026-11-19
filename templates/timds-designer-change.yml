@@ -265,8 +265,8 @@ jobs:
           DEFAULT_BRANCH: ${{ needs.gate.outputs.default_branch }}
           DISPATCH_REQUEST: ${{ inputs.request }}
           EVENT_NAME: ${{ github.event_name }}
-          HAS_NOTES_TOKEN: ${{ secrets.TIMDS_ACCESS_TOKEN != '' }}
-          PREVIEWS_ENABLED: ${{ vars.TIMDS_PREVIEWS_ENABLED == 'true' && secrets.TIMDS_ACCESS_TOKEN != '' }}
+          HAS_NOTES_TOKEN: ${{ (secrets.TIMDS_ACCESS_TOKEN != '' || (secrets.CF_ACCESS_CLIENT_ID != '' && secrets.CF_ACCESS_CLIENT_SECRET != '' && vars.TIMDS_PORTAL_URL != '')) }}
+          PREVIEWS_ENABLED: ${{ vars.TIMDS_PREVIEWS_ENABLED == 'true' && (secrets.TIMDS_ACCESS_TOKEN != '' || (secrets.CF_ACCESS_CLIENT_ID != '' && secrets.CF_ACCESS_CLIENT_SECRET != '' && vars.TIMDS_PORTAL_URL != '')) }}
           ISSUE: ${{ needs.gate.outputs.issue }}
           PULL_REQUEST: ${{ needs.gate.outputs.pull_request }}
           REPOSITORY: ${{ github.repository }}
@@ -361,6 +361,10 @@ jobs:
         uses: openai/codex-action@v1
         env:
           TIMDS_ACCESS_TOKEN: ${{ secrets.TIMDS_ACCESS_TOKEN }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+          TIMDS_PORTAL_URL: ${{ vars.TIMDS_PORTAL_URL }}
+          TIMDS_CONSUMER_ID: ${{ vars.TIMDS_CONSUMER_ID }}
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           allow-bots: ${{ vars.TIMDS_DESIGNER_BOTS }}
@@ -379,6 +383,10 @@ jobs:
           REPOSITORY: ${{ github.repository }}
           TITLE: ${{ steps.prompt.outputs.title }}
           TIMDS_ACCESS_TOKEN: ${{ secrets.TIMDS_ACCESS_TOKEN }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+          TIMDS_PORTAL_URL: ${{ vars.TIMDS_PORTAL_URL }}
+          TIMDS_CONSUMER_ID: ${{ vars.TIMDS_CONSUMER_ID }}
         run: |
           set -euo pipefail
           # Scope is judged against the merge-base manifest, not model edits.
@@ -398,7 +406,7 @@ jobs:
             if [[ -n "$ISSUE" ]]; then printf '\nCloses #%s\n' "$ISSUE" >> "$body_file"; fi
             gh pr create --repo "$REPOSITORY" --draft --base "$DEFAULT_BRANCH" --head "$BRANCH" --title "${TITLE:-Update website}" --body-file "$body_file"
           fi
-          if [[ -n "${TIMDS_ACCESS_TOKEN:-}" ]]; then
+          if [[ -n "${TIMDS_ACCESS_TOKEN:-}" || -n "${CF_ACCESS_CLIENT_ID:-}" ]]; then
             mapfile -t note_ids < <(printf '%s' "$CODEX_RESULT" | jq -r '.addressedNoteIds[]')
             for note_id in "${note_ids[@]}"; do
               [[ "$note_id" =~ ^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$ ]] || exit 1

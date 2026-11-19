@@ -18,9 +18,8 @@
 import { spawn } from "node:child_process";
 import process from "node:process";
 
-import { resolveAccessToken } from "./auth.mjs";
 import { loadConsumer, resolveConsumerApp } from "./consumer.mjs";
-import { normalizeRepository, resolvePullRequest } from "./consumer-preview.mjs";
+import { normalizeRepository, resolvePullRequest, previewAuthHeaders } from "./consumer-preview.mjs";
 
 export const CONSUMER_NOTES_PATH = "/api/timds/consumer-previews/notes";
 export const DESIGNER_REQUEST_MARKER = "<!-- timds-designer-request -->";
@@ -69,18 +68,13 @@ function portalEndpoint(portalUrl, pathname) {
   return new URL(pathname, `${base.origin}/`);
 }
 
-async function portalToken(portalUrl, options) {
-  const token = await resolveAccessToken(portalUrl, options);
-  if (!token) throw new Error("Set TIMDS_ACCESS_TOKEN or sign in with `timds auth login` to read designer notes");
-  return token;
-}
-
-async function portalJson(fetchImpl, url, token, init = {}) {
+async function portalJson(fetchImpl, url, headers, init = {}) {
   const response = await fetchImpl(url.toString(), {
     ...init,
+    redirect: "error",
     headers: {
       Accept: "application/json",
-      Authorization: `Bearer ${token}`,
+      ...headers,
       ...(init.body ? { "Content-Type": "application/json" } : {}),
     },
   });
@@ -91,7 +85,7 @@ async function portalJson(fetchImpl, url, token, init = {}) {
 function portalError(action, response, payload) {
   const detail = String(payload?.error || payload?.message || response.statusText || "no detail");
   if (response.status === 401 || response.status === 403) {
-    return new Error(`${action} was refused (${response.status}): ${detail}. Check that TIMDS_ACCESS_TOKEN belongs to the client that owns this repository.`);
+    return new Error(`${action} was refused (${response.status}): ${detail}. Check that TIMDS_ACCESS_TOKEN or the Access service token is authorized for this follower.`);
   }
   return new Error(`${action} failed (${response.status}): ${detail}`);
 }
@@ -108,13 +102,13 @@ export async function fetchConsumerNotes({ repository, app, pullRequest, all = f
   if (!app) throw new Error("fetchConsumerNotes needs app");
   if (!pullRequest) throw new Error("fetchConsumerNotes needs pullRequest");
   const portal = portalUrl || process.env.TIMDS_PORTAL_URL || DEFAULT_PORTAL_URL;
-  const token = await portalToken(portal, options);
+  const headers = await previewAuthHeaders(portal, options);
   const url = portalEndpoint(portal, CONSUMER_NOTES_PATH);
   url.searchParams.set("repository", repository);
   url.searchParams.set("app", app);
   url.searchParams.set("pullRequest", String(pullRequest));
   if (!all) url.searchParams.set("status", "open");
-  const { payload, response } = await portalJson(fetchImpl, url, token, { method: "GET" });
+  const { payload, response } = await portalJson(fetchImpl, url, headers, { method: "GET" });
   if (!response.ok) throw portalError("Reading designer notes", response, payload);
   if (!Array.isArray(payload?.notes)) throw new Error("The portal returned no notes list");
   return { notes: payload.notes };
@@ -125,10 +119,10 @@ export async function resolveConsumerNote(id, { commit, dismiss = false, portalU
   const noteId = String(id || "").trim();
   if (!noteId) throw new Error("A note id is required");
   const portal = portalUrl || process.env.TIMDS_PORTAL_URL || DEFAULT_PORTAL_URL;
-  const token = await portalToken(portal, options);
+  const headers = await previewAuthHeaders(portal, options);
   const url = portalEndpoint(portal, `${CONSUMER_NOTES_PATH}/${encodeURIComponent(noteId)}`);
   const body = { status: dismiss ? "dismissed" : "addressed", commit: commit || null };
-  const { payload, response } = await portalJson(fetchImpl, url, token, { method: "PATCH", body: JSON.stringify(body) });
+  const { payload, response } = await portalJson(fetchImpl, url, headers, { method: "PATCH", body: JSON.stringify(body) });
   if (!response.ok) throw portalError(`Resolving note ${noteId}`, response, payload);
   return payload?.note ?? { id: noteId, ...body };
 }

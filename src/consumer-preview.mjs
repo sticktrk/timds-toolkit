@@ -107,7 +107,7 @@ const noop = () => {};
 // The product's install, build, and serve commands run code from the branch
 // under review and its dependencies; they never receive the portal token.
 function productEnvironment(env) {
-  const { TIMDS_ACCESS_TOKEN: _token, ...rest } = env;
+  const { TIMDS_ACCESS_TOKEN: _token, CF_ACCESS_CLIENT_ID: _id, CF_ACCESS_CLIENT_SECRET: _secret, ...rest } = env;
   return rest;
 }
 
@@ -1596,6 +1596,24 @@ export function previewMetadataHeader(preview) {
   return Buffer.from(JSON.stringify(metadata), "utf8").toString("base64");
 }
 
+/** Use the pipeline's service-token pair only on its configured HTTPS host. */
+export async function previewAuthHeaders(portalUrl, options = {}) {
+  const env = options.env || process.env;
+  const id = env.CF_ACCESS_CLIENT_ID, secret = env.CF_ACCESS_CLIENT_SECRET;
+  const follower = env.TIMDS_CONSUMER_ID ? { "X-TimDS-Consumer-ID": env.TIMDS_CONSUMER_ID } : {};
+  const version = { "X-TimDS-API-Version": "1", ...follower };
+  if (id || secret) {
+    const url = new URL(portalUrl);
+    if (!id || !secret || url.protocol !== "https:" || url.origin !== env.TIMDS_PORTAL_URL || url.username || url.password) {
+      throw new Error("Set both Access service-token variables and TIMDS_PORTAL_URL to the exact HTTPS host origin");
+    }
+    return { ...version, "CF-Access-Client-Id": id, "CF-Access-Client-Secret": secret };
+  }
+  const token = await resolveAccessToken(portalUrl, options);
+  if (!token) throw new Error("Set the Access service-token pair for this follower, or use its provider’s TIMDS_ACCESS_TOKEN");
+  return { ...version, Authorization: `Bearer ${token}` };
+}
+
 /** Tar and gzip `outputDir` and post it to the portal; returns `{ previewUrl }`. */
 export async function publishConsumerPreview(outputDir, options = {}) {
   const root = path.resolve(outputDir);
@@ -1607,8 +1625,7 @@ export async function publishConsumerPreview(outputDir, options = {}) {
   }
   await scanPreviewTree(root, "The preview");
   const portalUrl = options.portalUrl || process.env.TIMDS_PORTAL_URL || DEFAULT_PORTAL_URL;
-  const token = await resolveAccessToken(portalUrl, options);
-  if (!token) throw new Error("Set TIMDS_ACCESS_TOKEN or sign in with `timds auth login` before publishing a preview");
+  const headers = await previewAuthHeaders(portalUrl, options);
   const fetchImpl = options.fetchImpl || fetch;
   const workDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "timds-consumer-preview-"));
   try {
@@ -1623,11 +1640,12 @@ export async function publishConsumerPreview(outputDir, options = {}) {
       body,
       headers: {
         Accept: "application/json",
-        Authorization: `Bearer ${token}`,
+        ...headers,
         "Content-Type": "application/gzip",
         [PREVIEW_METADATA_HEADER]: previewMetadataHeader(preview),
       },
       method: "POST",
+      redirect: "error",
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {

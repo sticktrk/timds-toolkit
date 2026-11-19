@@ -2,7 +2,7 @@ name: TimDS consumer preview
 
 # Managed by TimDS (`timds consumer init`); `upgrade` refreshes it while it is
 # unmodified. Previews are off by default: opt in with
-# TIMDS_PREVIEWS_ENABLED=true and a TIMDS_ACCESS_TOKEN. Otherwise this workflow
+# TIMDS_PREVIEWS_ENABLED=true and a follower pipeline credential. Otherwise this workflow
 # skips checkout, installation, validation, rendering, upload, and comments.
 # When enabled, each pull request has its manifest and Design System pin
 # validated (a published pin is fetched by npm ci; a submodule pin is checked
@@ -17,14 +17,17 @@ name: TimDS consumer preview
 # reviewer sees when a design change needs a developer.
 #
 # Repository secrets:
-#   TIMDS_ACCESS_TOKEN               CLI token bound to this client; required
-#                                    for previews. Without it nothing is built.
+#   CF_ACCESS_CLIENT_ID              Access service-token client ID.
+#   CF_ACCESS_CLIENT_SECRET          Access service-token secret.
+#   TIMDS_ACCESS_TOKEN               Bearer token for a legacy provider.
 #   DESIGN_SYSTEM_DEPLOY_KEY         private half of a read-only deploy key on
 #                                    the Design System repository, or
 #   TIMDS_CONSUMER_SUBMODULE_TOKEN   a token with contents:read on it.
 #                                    One of the two is required: the job token
 #                                    cannot read another private repository.
 # Repository variable:
+#   TIMDS_PORTAL_URL                 exact HTTPS origin of the selected host.
+#   TIMDS_CONSUMER_ID                follower UUID when one repository follows multiple systems.
 #   TIMDS_PREVIEWS_ENABLED           set to true to enable previews; unset or
 #                                    false skips the workflow's jobs.
 #
@@ -69,12 +72,12 @@ jobs:
       - name: Check preview token availability
         id: token
         env:
-          HAS_ACCESS_TOKEN: ${{ secrets.TIMDS_ACCESS_TOKEN != '' }}
+          HAS_ACCESS_TOKEN: ${{ secrets.TIMDS_ACCESS_TOKEN != '' || (secrets.CF_ACCESS_CLIENT_ID != '' && secrets.CF_ACCESS_CLIENT_SECRET != '' && vars.TIMDS_PORTAL_URL != '') }}
         run: |
           set -euo pipefail
           echo "enabled=${HAS_ACCESS_TOKEN}" >> "$GITHUB_OUTPUT"
           if [[ "$HAS_ACCESS_TOKEN" != "true" ]]; then
-            echo "TIMDS_ACCESS_TOKEN is not configured; skipping previews."
+            echo "A preview credential is not configured; skipping previews."
           fi
 
   check:
@@ -213,6 +216,10 @@ jobs:
           PULL_REQUEST: ${{ inputs.pull_request || github.event.number }}
           BASE_REF: ${{ github.base_ref || github.event.repository.default_branch }}
           TIMDS_ACCESS_TOKEN: ${{ secrets.TIMDS_ACCESS_TOKEN }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+          TIMDS_PORTAL_URL: ${{ vars.TIMDS_PORTAL_URL }}
+          TIMDS_CONSUMER_ID: ${{ vars.TIMDS_CONSUMER_ID }}
         run: |
           set -euo pipefail
           npm run timds -- consumer preview --app "$APP" --base "origin/${BASE_REF}" --publish --pull-request "$PULL_REQUEST"
