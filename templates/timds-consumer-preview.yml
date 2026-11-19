@@ -200,6 +200,15 @@ jobs:
           # Full history, so the preview can find the merge base to compare with.
           fetch-depth: 0
           persist-credentials: false
+      - name: Attach the verified preview revision
+        env:
+          PREVIEW_BRANCH: ${{ needs.check.outputs.branch }}
+          PREVIEW_SHA: ${{ needs.check.outputs.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$PREVIEW_SHA" ]]
+          git check-ref-format --branch "$PREVIEW_BRANCH" >/dev/null
+          git switch -C "$PREVIEW_BRANCH" "$PREVIEW_SHA"
       - name: Check out the pinned Design System
         env:
           DESIGN_SYSTEM_DEPLOY_KEY: ${{ secrets.DESIGN_SYSTEM_DEPLOY_KEY }}

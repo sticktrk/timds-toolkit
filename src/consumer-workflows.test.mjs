@@ -247,7 +247,7 @@ test("the workflow helper publishes built files and resolves only notes delivere
         return Response.json({ note: {} });
       }
       return Response.json(url.searchParams.has("after")
-        ? { notes: [{ id: "${selected}" }] } : { notes: [{ id: "${other}" }], nextCursor: "next" });
+        ? { notes: [{ id: "${selected}", status: "sent" }] } : { notes: [{ id: "${other}", status: "open" }], nextCursor: "next" });
     };
   `);
   for (const mode of ["legacy", "service"]) {
@@ -270,5 +270,10 @@ test("the workflow helper publishes built files and resolves only notes delivere
     assert.equal(receipt.length, 4);
     assert.match(receipt[2], /after=next/);
     assert.equal(receipt[3], "PATCH /api/timds/consumer-previews/notes/" + selected);
+    const dispatch = path.join(directory, "manual.json");
+    await fs.writeFile(dispatch, JSON.stringify({ inputs: { request: "Address open notes" } }));
+    run("read", { GITHUB_EVENT_PATH: dispatch });
+    const thread = JSON.parse(await fs.readFile(path.join(directory, "designer-notes.json"), "utf8"));
+    assert.deepEqual(thread.notes.map(note => note.id), mode === "service" ? [selected] : [other, selected]);
   }
 });

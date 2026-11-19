@@ -202,11 +202,17 @@ export async function runConsumerPipeline(action, env) {
     const selectedIds = selection && new Set(selection.map(note => note.id));
     const apps = env.APP ? [env.APP] : Object.keys(manifest.apps);
     const notes = [];
-    // Host Apply explicitly names its notes. Legacy requests can ask for the open thread.
-    for (const app of (env.CF_ACCESS_CLIENT_ID && !selectedIds ? [] : apps)) {
+    // A manual host continuation can pick up notes already sent to this PR by a publisher.
+    for (const app of apps) {
       notesUrl.search = new URLSearchParams({ repository: env.GITHUB_REPOSITORY, app, pullRequest: env.PULL_REQUEST, status: "open" });
       const page = await readNotesPages(notesUrl, request);
-      for (const note of page.notes) if (!selectedIds || selectedIds.has(note.id)) notes.push({ ...note, app });
+      for (const note of page.notes) {
+        const included = selectedIds ? selectedIds.has(note.id) : !env.CF_ACCESS_CLIENT_ID || note.status === "sent";
+        if (included) notes.push({ ...note, app });
+      }
+    }
+    if (env.CF_ACCESS_CLIENT_ID && !selectedIds && !notes.length) {
+      console.log("No outstanding notes have been applied to this pull request. A publisher can send notes from Studio.");
     }
     await fs.writeFile(path.join(env.RUNNER_TEMP, "designer-notes.json"), JSON.stringify({ notes }));
     return;

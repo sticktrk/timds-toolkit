@@ -254,9 +254,9 @@ jobs:
       pull-requests: write
     outputs:
       branch: ${{ needs.gate.outputs.branch }}
-      pull_request: ${{ steps.result.outputs.pull_request }}
-      pushed: ${{ steps.result.outputs.pushed }}
-      sha: ${{ steps.result.outputs.sha }}
+      pull_request: ${{ steps.push.outputs.pull_request }}
+      pushed: ${{ steps.push.outputs.pushed }}
+      sha: ${{ steps.push.outputs.sha }}
       note_ids: ${{ steps.push.outputs.note_ids }}
     steps:
       - uses: actions/checkout@v5
@@ -265,14 +265,12 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Switch to the design branch
-        id: branch
         env:
           BRANCH: ${{ needs.gate.outputs.branch }}
           EXISTS: ${{ needs.gate.outputs.exists }}
         run: |
           set -euo pipefail
           if [[ "$EXISTS" != "true" ]]; then git checkout -b "$BRANCH"; fi
-          echo "start=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - name: Check out the pinned Design System
         env:
           DESIGN_SYSTEM_DEPLOY_KEY: ${{ secrets.DESIGN_SYSTEM_DEPLOY_KEY }}
@@ -436,6 +434,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           ISSUE: ${{ needs.gate.outputs.issue }}
           REPOSITORY: ${{ github.repository }}
+          EXISTING_PR: ${{ needs.gate.outputs.pull_request }}
           TITLE: ${{ steps.prompt.outputs.title }}
         run: |
           set -euo pipefail
@@ -444,35 +443,28 @@ jobs:
           if git diff --cached --quiet; then exit 0; fi
           git -c user.name='TimDS design changes' -c user.email='timds-design-changes@users.noreply.github.com' commit -m "Design: ${TITLE:-Update website}"
           # The GitHub write token is available only after Codex has stopped.
-          git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push origin "HEAD:${BRANCH}"
-          pull_request="$(gh pr list --repo "$REPOSITORY" --head "$BRANCH" --state open --json number --jq '.[0].number // empty')"
+          sha="$(git rev-parse HEAD)"
+          git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push origin "${sha}:refs/heads/${BRANCH}"
+          pull_request="$EXISTING_PR"
+          if [[ -z "$pull_request" ]]; then
+            pull_request="$(gh pr list --repo "$REPOSITORY" --head "$BRANCH" --state open --json number,isCrossRepository --jq 'map(select(.isCrossRepository == false)) | .[0].number // empty')"
+          fi
           if [[ -z "$pull_request" ]]; then
             body_file="$RUNNER_TEMP/timds-design-pr.md"
             printf '%s\n' "$summary" > "$body_file"
             if [[ -n "$ISSUE" ]]; then printf '\nCloses #%s\n' "$ISSUE" >> "$body_file"; fi
-            gh pr create --repo "$REPOSITORY" --draft --base "$DEFAULT_BRANCH" --head "$BRANCH" --title "${TITLE:-Update website}" --body-file "$body_file"
+            pr_url="$(gh pr create --repo "$REPOSITORY" --draft --base "$DEFAULT_BRANCH" --head "$BRANCH" --title "${TITLE:-Update website}" --body-file "$body_file")"
+            pull_request="${pr_url##*/}"
           fi
-          echo "note_ids=$(jq -ce '.addressedNoteIds' <<< "$CODEX_RESULT")" >> "$GITHUB_OUTPUT"
-      - name: Find what was pushed
-        id: result
-        if: ${{ !cancelled() && steps.branch.outcome == 'success' }}
-        env:
-          BRANCH: ${{ needs.gate.outputs.branch }}
-          GH_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
-          START: ${{ steps.branch.outputs.start }}
-        run: |
-          set -euo pipefail
-          remote="$(gh api "repos/${REPOSITORY}/git/ref/heads/${BRANCH}" --jq '.object.sha' 2>/dev/null || true)"
-          pushed=false
-          if [[ -n "$remote" && "$remote" != "$START" ]]; then pushed=true; fi
-          pull_request="$(gh pr list --repo "$REPOSITORY" --head "$BRANCH" --state open --json number --jq '.[0].number // empty')"
+          [[ "$pull_request" =~ ^[1-9][0-9]*$ ]]
+          gh api "repos/${REPOSITORY}/pulls/${pull_request}" | jq -e --arg sha "$sha" --arg branch "$BRANCH" --arg repo "$REPOSITORY" \
+            '.state == "open" and .head.sha == $sha and .head.ref == $branch and .head.repo.full_name == $repo' >/dev/null
           {
-            echo "sha=${remote}"
-            echo "pushed=${pushed}"
+            echo "sha=${sha}"
+            echo "pushed=true"
             echo "pull_request=${pull_request}"
+            echo "note_ids=$(jq -ce '.addressedNoteIds' <<< "$CODEX_RESULT")"
           } >> "$GITHUB_OUTPUT"
-          echo "Branch ${BRANCH}: pushed=${pushed}${pull_request:+, pull request #${pull_request}}."
 
   resolve:
     needs: [gate, change]

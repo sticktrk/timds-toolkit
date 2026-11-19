@@ -629,3 +629,5 @@ Snapshots are capped at 4,000 files and 50 MiB of raw content, with at most
 files remain eligible, matching consumer checks. Traversal, credential files,
 `.git`, unsafe symlinks, and session metadata are excluded. Host storage and
 publication remain host responsibilities; no reference host is shipped.
+
+A manual designer continuation on an existing pull request reads outstanding notes a host publisher already sent to that repository, app and pull request. Apply reads the selected notes. Resolution records the commit the run pushed and verified on the pull request.

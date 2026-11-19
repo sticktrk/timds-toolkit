@@ -175,9 +175,7 @@ __DERIVED_LAYER__
 ## If you use TimDS Cloud
 
 - **Designer notes.** When a preview is published, the designer can review it
-  in the TimDS portal and leave notes. Run `npm run timds -- consumer notes`
-  at the start and again after each push (it needs `TIMDS_ACCESS_TOKEN` or
-  `npm run timds -- auth login`). Each note names the page, the element, and
+  in Studio and leave notes. A host publisher can send selected notes to a design PR through Apply. The generated workflow passes those notes to the designer and resolves addressed IDs after a verified push. For a direct pipeline run, `npm run timds -- consumer notes` requires the host address and an Access service token granted to that follower. A legacy portal accepts `TIMDS_ACCESS_TOKEN` or a portal login. Each note names the page, the element, and
   usually the source file and line; the designer's words are the request and
   the element is where it applies. After pushing the fix, run
   `npm run timds -- consumer notes resolve <id>` for each note you addressed
