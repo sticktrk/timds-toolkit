@@ -631,3 +631,5 @@ files remain eligible, matching consumer checks. Traversal, credential files,
 publication remain host responsibilities; no reference host is shipped.
 
 A manual designer continuation on an existing pull request reads outstanding notes a host publisher already sent to that repository, app and pull request. Apply reads the selected notes. Resolution records the commit the run pushed and verified on the pull request.
+
+Direct previews for same-repository PRs use `pull_request_target` and require a repository event policy that permits it. GitHub has announced enforcement of its default block for affected public repositories on 2026-12-02. The trusted designer workflow can also call the preview workflow directly. See [GitHub’s event policy](https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target#default-policy-for-pull_request_target).
