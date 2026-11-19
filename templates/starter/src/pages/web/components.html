@@ -82,3 +82,17 @@
     <div class="note"><b>Stylesheet.</b> Every class above is styled in <code>/styles/system.css</code>, the one stylesheet a product loads.</div>
   </details>
 </section>
+
+<section class="block" id="article-blocks">
+  <div class="block__head">
+    <h2 class="h2">Article blocks</h2>
+    <p>An article is written in named blocks, and the system styles each one by its <code>id</code>. The blocks, their order and what a writer puts in each are kept in <code>src/posting/blog.json</code>; the preview below is that file, drawn with this system's styles. To add a block, add it to the file and style its id in <code>src/styles/system.css</code>.</p>
+  </div>
+  <figure class="demo demo--stack">
+{{posting:preview}}
+  </figure>
+  <details class="spec-drawer">
+    <summary>Spec</summary>
+{{posting:blocks}}
+  </details>
+</section>

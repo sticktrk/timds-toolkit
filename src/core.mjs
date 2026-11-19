@@ -76,6 +76,7 @@ import { STARTER_KINDS, STARTER_LAYOUT_FILE, STARTER_RECORD_FILE, STARTER_SITE_F
 import { extractArtifact, normalizeMachineConfig } from "./extract.mjs";
 import { normalizeWorkspaceAfter, viewerAppBarEntries } from "./viewer.mjs";
 import { readFormatCatalog } from "./formats.mjs";
+import { postingTemplateWarnings, readPostingTemplate } from "./posting.mjs";
 import { normalizeBrandGuidance } from "./brand.mjs";
 import { describeBrandKit, readDerivedLayer, summarizeBrandKit } from "./derived.mjs";
 import { normalizeBrandRoles } from "./tokens.mjs";
@@ -670,7 +671,12 @@ export async function extractWorkspace(workspace, { write = true, changelog: ren
   const plannedPages = (Array.isArray(site.views) ? site.views : []).flatMap((view) =>
     (Array.isArray(view.pages) ? view.pages : []).filter((page) => page.planned === true)
       .map((page) => page.slug ? `${view.id}/${page.slug}` : view.id));
-  return extractArtifact({
+  // The blog posting template is client source too. An invalid file stops the
+  // check here; a valid one is compared with the stylesheets the bundle gives
+  // a website, since those are what style its blocks on a site.
+  const posting = await readPostingTemplate(workspace.designSystemRoot);
+  const postingWarnings = posting ? postingTemplateWarnings(posting, await postingPublication(workspace, bundle)) : [];
+  const extracted = await extractArtifact({
     artifactRoot: path.join(workspace.designSystemRoot, "dist"),
     bundle,
     changelog,
@@ -683,6 +689,28 @@ export async function extractWorkspace(workspace, { write = true, changelog: ren
     video: contract ? {runtime: contract.runtime ?? null, engine: {...runtimeIdentity}, ...(boards ? {boards: boardCatalogSummary(boards.catalog)} : {})} : null,
     write,
   });
+  return postingWarnings.length ? { ...extracted, warnings: [...(extracted.warnings ?? []), ...postingWarnings] } : extracted;
+}
+
+/**
+ * What a website gets of a system's posting template: the bundle's file
+ * paths (null without a bundle) and the text of the stylesheets it holds,
+ * falling back to the system's own src/styles/ sheets when it bundles none.
+ */
+async function postingPublication(workspace, bundle) {
+  const root = workspace.designSystemRoot;
+  const bundlePaths = Array.isArray(bundle?.files) ? bundle.files.map((file) => file.path) : null;
+  let sheets = (bundlePaths ?? []).filter((file) => file.endsWith(".css"));
+  if (!sheets.length) {
+    const names = await fs.readdir(path.join(root, "src", "styles")).catch((caught) => { if (caught?.code === "ENOENT") return []; throw caught; });
+    sheets = names.filter((name) => name.endsWith(".css")).sort().map((name) => `src/styles/${name}`);
+  }
+  const stylesheets = [];
+  for (const sheet of sheets) {
+    const text = await fs.readFile(path.join(root, ...sheet.split("/")), "utf8").catch((caught) => { if (caught?.code === "ENOENT") return null; throw caught; });
+    if (text !== null) stylesheets.push(text);
+  }
+  return { stylesheets, bundlePaths };
 }
 
 /**

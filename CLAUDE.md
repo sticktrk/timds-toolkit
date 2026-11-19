@@ -163,7 +163,9 @@ scope plus brand roles; it also parses `@font-face` and the external
 stylesheets pages link), `brand.json` (`brand.mjs`, from `data-timds-role`
 annotations, each font role with the files or font service that provide its
 family), `formats.json` (`formats.mjs`, from the optional `src/formats.json`
-catalog), `llms.txt` (opens with the brand essentials: colors, fonts, logos,
+catalog; the optional blog posting template `src/posting/blog.json` is
+validated by `posting.mjs` in the same pass and published in the bundle, not
+as a derived document), `llms.txt` (opens with the brand essentials: colors, fonts, logos,
 formats), `llms-full.txt`, per-page `index.md`, `designs.json` (the
 designs output directory is skipped by the page walk), `changelog.json`,
 and, only when the entry page is at the artifact root, `robots.txt` at the
@@ -350,7 +352,9 @@ and the fragments under `src/pages/` into `dist/`, filling `{{tokens:GROUP}}`
 tables from `tokens.json` and `{{formats:GROUP}}` tables and `{{canvas:ID}}`
 preview variables from `src/formats.json` (the catalog of print sheets and
 screen canvases, each tied to its page; `src/styles/canvas.css` is the
-script-free preview engine). `{{copy:KEY}}` renders escaped strings from
+script-free preview engine). `{{posting:preview}}` and `{{posting:blocks}}`
+draw the blog posting template (`src/posting/blog.json`, see
+`docs/posting-template.md`) as a sample article body and a spec table. `{{copy:KEY}}` renders escaped strings from
 `src/copy.json`, with optional numeric bank indexes; `{{media:KEY}}` emits a
 bounded local catalog asset path; `{{slots:GROUP_OR_KEY}}` renders the exported
 slot guidance and labels. Missing values use the contract's samples and are

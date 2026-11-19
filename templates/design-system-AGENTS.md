@@ -76,6 +76,7 @@ repository root, so each one is also a slash command.
 | `src/site.json` | The views and every page in them; the one place that declares which pages exist | Edit |
 | `src/copy.json` | Brand-kit copy slots as strings, when present | Edit the words and retain the keys |
 | `src/formats.json` | Every print sheet and screen canvas the system produces, each tied to the page that shows it; previews and spec tables read it | Edit |
+| `src/posting/blog.json` | The blog posting template, when the system publishes articles: an article's named blocks in page order and what a writer puts in each | Edit, and style each block id in the system stylesheet |
 | `src/pages/` | One content fragment per authored page | Edit |
 | `src/designs/` | Website designs: whole pages in HTML with JavaScript on the system's stylesheets, one directory per design | Edit |
 | `src/layout.html` | The shell every page shares: app bar, page navigation, content slot | Edit |
@@ -497,6 +498,22 @@ them, logos, asset formats), so what reaches the kit reaches every tool.
   Explicitly planned pages in `src/site.json` keep their formats in the
   derived catalog without a page link or warning; an unbuilt page that is
   not planned is reported as a gap.
+- `src/posting/blog.json` is the blog posting template: the named blocks of
+  an article (`answer-box`, `detailed-answer`, …) in page order, each
+  block's `element` and fixed `heading`, and what the block is for (`write`).
+  The system owns that layout and a publishing engine owns the content: it
+  decides which blocks an article fills, asks its writer for content only,
+  and builds the HTML from the file, so `required` is a note that the layout
+  expects a block and `html.classes` a record of extra classes the
+  stylesheet styles, never instructions to a writer. A site styles the same
+  ids, so a block is two edits in one change: its entry in the file and a
+  rule for its id in the system stylesheet (`.prose #block-id`, tokens
+  only). `{{posting:preview}}` and `{{posting:blocks}}` (on Web → Components
+  in the starters) redraw from the file. `check` warns about
+  a block without a style rule and about a key it does not know. Never
+  rename or reuse a published block id, keep `schemaVersion` at `1`, and add
+  abilities as new optional keys only. The consumer bundle carries the file
+  without a `bundle.include` entry.
 - `timds.json` `bundle.include` names the files a website loads from this
   system (the built `tokens.css` and the system stylesheet in a fresh
   scaffold). `check` copies them into `bundle/` under their source paths and

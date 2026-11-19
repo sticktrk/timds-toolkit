@@ -112,7 +112,16 @@ system is ordinary design work:
    planned pages the system will not have and add the pages and views it
    needs. Every print sheet and screen canvas is sized from
    `src/formats.json`; add a format there, naming its page, before a
-   template page previews it with `{{canvas:ID}}`.
+   template page previews it with `{{canvas:ID}}`. The shape of a published
+   article is `src/posting/blog.json`: to add or change an article block,
+   edit its entry there (`id`, `element`, `heading`, `required`, `plain`,
+   `write`), add a rule for `.prose #<id>` to the system stylesheet, and look
+   at Web → Components, where `{{posting:preview}}` draws the file with the
+   system's styles. The file is layout only: a publishing engine decides
+   which blocks an article fills and writes the words, so do not put
+   instructions about wording or tone in it beyond what a block is for.
+   Never rename a published block id; `check` warns about a block with no
+   style rule.
 4. Add the logo under `src/assets/` and write the `brand/logo`, `brand/voice`,
    and other guidance pages, shaped as described in the next section. A
    fragment holds only the content of `<main>`; `src/layout.html` supplies the

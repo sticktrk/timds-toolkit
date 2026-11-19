@@ -355,6 +355,26 @@ mirrors stay free of it. The changelog page and the designs directory carry the
 same pointers; an authored design is published as written. `robots.txt` at the
 site root repeats it for a crawler that reads that file first.
 
+
+### The blog posting template
+
+A system that publishes articles keeps its blog template at
+`src/posting/blog.json` (the starters do): the named blocks of an article in
+page order, each block's element and fixed heading, and what each block is
+for. The designer owns that layout and a publishing engine owns the content:
+it asks its writer for content only and builds the HTML from the file, with
+no class. The system's stylesheet styles each block
+by its id (`.prose #answer-box`), `{{posting:preview}}` and
+`{{posting:blocks}}` show the template on a page with those styles (the
+starters' Web → Components page does), and the consumer bundle carries the
+file without a `bundle.include` pattern naming it, so a publishing engine and
+a website read the bytes a release published. `check` refuses a file a reader
+could not use and warns about a block no bundled stylesheet styles, a key it
+does not know, and a template in a system with no bundle. Every system's file
+has the same structure and the structure only grows; see
+[`docs/posting-template.md`](docs/posting-template.md).
+`@dtconcepts/timds/posting` exports the reader.
+
 ### The consumer bundle
 
 A website needs a handful of what a Design System holds: its stylesheets, a

@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "template": "blog",
+  "name": "Question-and-answer article",
+  "page": {
+    "supplies": ["the title", "the cover image", "the publication date"]
+  },
+  "blocks": [
+    {
+      "id": "answer-box",
+      "element": "section",
+      "heading": "Short Answer",
+      "required": true,
+      "plain": true,
+      "write": "Two to four sentences that answer the question."
+    },
+    {
+      "id": "detailed-answer",
+      "element": "section",
+      "required": true,
+      "write": "The full explanation, divided into sections under second-level headings."
+    },
+    {
+      "id": "clock-to-watch",
+      "element": "aside",
+      "write": "A deadline or a time limit the reader must not miss, in a sentence or two."
+    },
+    {
+      "id": "cta",
+      "element": "section",
+      "write": "A closing call to action, only when the article's own instructions ask for one: one short paragraph that says what to do next, with a link to the contact page."
+    },
+    {
+      "id": "disclaimer",
+      "element": "section",
+      "write": "Small print that applies to the whole article, only when the article's own instructions ask for a disclaimer."
+    }
+  ]
+}

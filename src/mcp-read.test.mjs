@@ -105,7 +105,8 @@ test("the local read server describes, resolves roles, lists tokens and pages, a
   assert.deepEqual(described.formats.groups.map((group) => group.id), ["print", "digital", "social"]);
 
   // The scaffold's manifest bundles what a website loads: the built tokens and the system stylesheet.
-  assert.deepEqual(described.bundle.paths, ["dist/styles/system.css", "dist/tokens.css"]);
+  // The blog posting template travels with every bundle, without a pattern naming it.
+  assert.deepEqual(described.bundle.paths, ["dist/styles/system.css", "dist/tokens.css", "src/posting/blog.json"]);
   assert.equal(described.bundle.versioned, null, "nothing is published locally");
   assert.equal(described.bundle.directory, "/bundle");
   assert.deepEqual(described.designs, { count: 1, pages: 9, states: 11, journeys: 2, designs: [{ id: "website", title: "Marketing site", pageCount: 9, journeyCount: 2 }] });

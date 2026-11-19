@@ -63,7 +63,7 @@ test("an unversioned Design System builds, checks, publishes without a version, 
 
   const checked = timds("check", "--root", root);
   assert.match(checked, /TimDS check passed/);
-  assert.match(checked, /Consumer bundle: 2 files/);
+  assert.match(checked, /Consumer bundle: 3 files/);
 
   // Every derived document names the system without a version, the bundle
   // sits only at its current path, and no built file carries the label.
@@ -73,7 +73,7 @@ test("an unversioned Design System builds, checks, publishes without a version, 
     assert.deepEqual(document.system, { id: "timds-example/unversioned", name: manifest.name }, `${name}.json carries no version`);
   }
   const bundle = JSON.parse(await fs.readFile(path.join(dist, "bundle.json"), "utf8"));
-  assert.deepEqual([bundle.versioned, bundle.directory, bundle.files.map((file) => file.path)], [null, "/bundle", ["dist/styles/system.css", "dist/tokens.css"]]);
+  assert.deepEqual([bundle.versioned, bundle.directory, bundle.files.map((file) => file.path)], [null, "/bundle", ["dist/styles/system.css", "dist/tokens.css", "src/posting/blog.json"]]);
   const builtFiles = await walk(dist);
   assert.ok(!builtFiles.some((file) => file.startsWith("v/")), "no v/<version>/ copy is built");
   for (const file of builtFiles) {
@@ -137,7 +137,7 @@ test("an unversioned Design System builds, checks, publishes without a version, 
   git(product, "commit", "-q", "-m", "Product");
 
   const pinned = await syncConsumerBundle(product, { fetchImpl: cdnFetch });
-  assert.deepEqual([pinned.status, pinned.version, pinned.downloaded], ["synced", HOST_LABEL, 2]);
+  assert.deepEqual([pinned.status, pinned.version, pinned.downloaded], ["synced", HOST_LABEL, 3]);
   for (const file of bundle.files) {
     assert.deepEqual(await fs.readFile(path.join(product, "design-system", file.path)), await fs.readFile(path.join(dist, "bundle", file.path)));
   }
