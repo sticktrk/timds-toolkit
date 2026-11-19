@@ -200,7 +200,7 @@ test("upgrade applies the entry rules to launch and MCP entries and keeps foreig
   assert.deepEqual(refreshed.configurations[0], foreignLaunch);
   assert.equal(refreshed.configurations[1].port, 4321);
   // The portal the managed server already points at is kept.
-  assert.equal((await readJson(mcpPath)).mcpServers["timds-design-system-read"].url, "https://portal.example.test/api/timds/mcp/read");
+  assert.equal((await readJson(mcpPath)).mcpServers["timds-design-system-read"].url, "https://portal.example.test/api/timds/mcp");
 
   // Customized entries are kept (reported as refused) without --force, replaced with it.
   refreshed.configurations[1].port = 4400;
@@ -224,7 +224,7 @@ test("upgrade applies the entry rules to launch and MCP entries and keeps foreig
   const forcedMcp = await readJson(mcpPath);
   assert.deepEqual(forcedMcp.mcpServers.other, foreignServer);
   assert.deepEqual(forcedMcp.mcpServers["timds-design-system-read"].headers, { Authorization: "Bearer ${TIMDS_ACCESS_TOKEN}" });
-  assert.equal(forcedMcp.mcpServers["timds-design-system-read"].url, "https://portal.example.test/api/timds/mcp/read");
+  assert.equal(forcedMcp.mcpServers["timds-design-system-read"].url, "https://portal.example.test/api/timds/mcp");
 });
 
 test("upgrade refuses a consumer that was never initialized", async (t) => {

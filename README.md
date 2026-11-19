@@ -988,8 +988,8 @@ Declared `routes` always come first and always stay.
 - `timds consumer init [--skip-install] [--portal-url URL]` writes a manifest
   skeleton and installs both managed consumer skills, the preview and
   designer-change workflows, `.claude/launch.json` entries, and the
-  `timds-design-system-read` HTTP MCP server in `.mcp.json` (authorized with
-  `TIMDS_ACCESS_TOKEN` from the environment). Merged entries beside your own
+  `timds-design-system-read` HTTP MCP server in `.mcp.json`. Select the host with `--portal-url HOST`
+  and authorize the client through its browser sign-in. Merged entries beside your own
   are tracked one by one; customized ones are kept unless `--force`. Apps are
   discovered from a `package.json` one folder down, and from the root
   `package.json` when it has a `dev`, `start`, `preview`, or `build` script
@@ -1401,7 +1401,7 @@ it.
 `TIMDS_PORTAL_URL` set serves the hosted editing tools, and `timds mcp read
 --draft NAME --system-id ID --portal-url URL` serves a draft's derived layer.
 `consumer init` registers the host's `timds-design-system-read` HTTP MCP
-server in `.mcp.json`, authorized with `TIMDS_ACCESS_TOKEN`.
+server in `.mcp.json`. Its client authorizes at the selected host.
 
 Running and administering a host is documented in the host repository, not
 here; see [docs/hosted-operations-moved.md](docs/hosted-operations-moved.md).

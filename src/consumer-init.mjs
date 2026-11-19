@@ -106,7 +106,7 @@ directory down, and the root package.json when it has a dev, start, preview,
 or build script), selects @dtconcepts/timds in the root package.json, and
 installs both consumer skills, the preview and designer-change workflows,
 .claude/launch.json entries, and the Design System read MCP server in
-.mcp.json (at --portal-url, default ${DEFAULT_PORTAL_URL}). An existing
+.mcp.json (at the host selected by --portal-url, default ${DEFAULT_PORTAL_URL}). An existing
 manifest is kept; --force regenerates it and replaces customized managed
 files.
 
@@ -689,8 +689,7 @@ export async function consumerWorkflow(name, { mode = "npm" } = {}) {
 
 /**
  * `.mcp.json` servers TimDS manages, keyed by name: the Design System read
- * tools over HTTP at the portal, authorized with TIMDS_ACCESS_TOKEN from the
- * environment (never a literal token).
+ * tools over HTTP at the host. An interactive client authorizes its own OAuth session.
  */
 export function consumerMcpServers({ portalUrl = DEFAULT_PORTAL_URL } = {}) {
   let base;
@@ -703,8 +702,7 @@ export function consumerMcpServers({ portalUrl = DEFAULT_PORTAL_URL } = {}) {
   return {
     [CONSUMER_MCP_SERVER_NAME]: {
       type: "http",
-      url: new URL("/api/timds/mcp/read", `${base.origin}/`).toString(),
-      headers: { Authorization: "Bearer ${TIMDS_ACCESS_TOKEN}" },
+      url: new URL("/api/timds/mcp", `${base.origin}/`).toString(),
     },
   };
 }

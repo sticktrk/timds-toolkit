@@ -346,8 +346,7 @@ test("renders the skill from the manifest and records managed-file hashes", asyn
   assert.deepEqual(mcp, { mcpServers: consumerMcpServers() });
   assert.deepEqual(mcp.mcpServers["timds-design-system-read"], {
     type: "http",
-    url: "https://timds.com/api/timds/mcp/read",
-    headers: { Authorization: "Bearer ${TIMDS_ACCESS_TOKEN}" },
+    url: "https://timds.com/api/timds/mcp",
   });
 
   const installation = JSON.parse(await fs.readFile(path.join(product, ".timds", "installation.json"), "utf8"));
@@ -373,7 +372,7 @@ test("merges the read MCP server into an existing .mcp.json", async (t) => {
   const merged = JSON.parse(await fs.readFile(mcpPath, "utf8"));
   assert.deepEqual(merged.mcpServers.other, userServer);
   assert.equal(merged.extra, true);
-  assert.equal(merged.mcpServers["timds-design-system-read"].url, "https://portal.example.test/api/timds/mcp/read");
+  assert.equal(merged.mcpServers["timds-design-system-read"].url, "https://portal.example.test/api/timds/mcp");
 
   // A rerun is idempotent.
   await initializeConsumer(product, { skipInstall: true, output: quiet, portalUrl: "https://portal.example.test" });
@@ -381,7 +380,7 @@ test("merges the read MCP server into an existing .mcp.json", async (t) => {
 
   // An unmodified managed entry follows a new portal URL.
   await initializeConsumer(product, { skipInstall: true, output: quiet });
-  assert.equal(JSON.parse(await fs.readFile(mcpPath, "utf8")).mcpServers["timds-design-system-read"].url, "https://timds.com/api/timds/mcp/read");
+  assert.equal(JSON.parse(await fs.readFile(mcpPath, "utf8")).mcpServers["timds-design-system-read"].url, "https://timds.com/api/timds/mcp");
 
   // A customized entry is kept without --force (other servers untouched) and replaced with it.
   const customized = JSON.parse(await fs.readFile(mcpPath, "utf8"));
