@@ -1018,7 +1018,7 @@ comment carrying `<!-- timds-designer-request -->` on a `design/` pull request
 or on such an issue (the portal posts review notes this way, with a fenced
 `json` block of notes), or a manual dispatch runs Codex through the OpenAI API
 with the consumer skill on a `design/<issue>-<title>` branch. Codex edits in a
-read-only GitHub job. The job runs `consumer check --designer --base REF`,
+read-only GitHub job with the pinned toolkit and Design System prepared before editing. A fresh read-only runner applies the proposed patch in a build container and runs `consumer check --designer --base REF`,
 which restricts edits to the requested app’s design surface and rejects
 developer-managed paths. A fresh runner applies the patch to a Git index,
 checks its paths and file modes using the workflow revision’s scope rules,
@@ -1035,7 +1035,7 @@ can trigger it, and fork branches are skipped. It needs the
 `timds-design-change` label, and permission for Actions to create pull
 requests. A credentialed gate reads notes before the model runs. A request carrying only selected note IDs waits for their feedback. Ordinary requests and comments containing the full feedback can continue with manual note resolution. A separate
 runner resolves the addressed IDs after a successful push. It uses the official
-`openai/codex-action@v1` with `workspace-write` and `drop-sudo`.
+v1 release of `openai/codex-action`, pinned by commit, with `workspace-write` and `drop-sudo`.
 
 To upgrade a consumer, run `npm run timds -- upgrade` at the product root:
 it refreshes both consumer skills, the two consumer workflows, their standalone pipeline helper, and the tracked

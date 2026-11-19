@@ -125,7 +125,7 @@ test("CI preview builds an artifact without credentials and uses a trusted runne
   await fs.writeFile(path.join(bin, "npm"), '#!/bin/sh\nprintf "%s\\n" "$@" >> "$TEST_NPM_LOG"\n');
   await fs.chmod(path.join(bin, "npm"), 0o755);
   const build = preview.jobs.preview.steps.find((step) => step.id === "preview");
-  for (const job of [preview.jobs.preview, preview.jobs.check, designer.jobs.edit, designer.jobs.change]) {
+  for (const job of [preview.jobs.preview, preview.jobs.check, designer.jobs.edit, designer.jobs.validate, designer.jobs.change]) {
     assert.doesNotMatch(JSON.stringify(job), /"CF_ACCESS_CLIENT_(ID|SECRET)"|"TIMDS_ACCESS_TOKEN"/);
   }
   for (const job of [preview.jobs.publish, designer.jobs.resolve, designer.jobs.gate]) {
@@ -363,13 +363,15 @@ test("the installed workflows select preview apps and verify the proposed patch 
   git(root, "clone", product, writer);
   const proposal = path.join(root, "proposal");
   await fs.mkdir(proposal);
-  const env = { PATH: process.env.PATH, RUNNER_TEMP: root, BASE_SHA: base, HEAD_SHA: base, APP: "web" };
+  const env = { PATH: process.env.PATH, RUNNER_TEMP: root, GITHUB_WORKSPACE: product, BASE_SHA: base, HEAD_SHA: base, APP: "web" };
+  const prepare = designer.jobs.edit.steps.find(step => step.name === "Confirm the designer toolkit selection");
+  execFileSync("bash", ["-c", prepare.run], { cwd: product, env: { ...env, WORKFLOW_SHA: base }, stdio: "pipe" });
   const verify = designer.jobs.change.steps.find(step => step.name?.startsWith("Verify proposed")).run;
   const save = designer.jobs.edit.steps.find(step => step.name === "Save the proposed edits").run;
   const check = () => execFileSync("bash", ["-c", verify], { cwd: writer, env, stdio: "pipe" });
   const propose = async () => {
     execFileSync("bash", ["-c", save], { cwd: product, env: { ...env, START_SHA: base } });
-    await fs.copyFile(path.join(root, "design.patch"), path.join(proposal, "design.patch"));
+    await fs.copyFile(path.join(root, "designer-proposal", "design.patch"), path.join(proposal, "design.patch"));
   };
   await fs.mkdir(path.join(product, "src"));
   await fs.writeFile(path.join(product, "src/theme.css"), "main { margin: auto; }");
@@ -377,6 +379,8 @@ test("the installed workflows select preview apps and verify the proposed patch 
   check();
   assert.equal(git(writer, "diff", "--cached", "--name-only"), "src/theme.css");
   await assert.rejects(fs.access(path.join(writer, "src/theme.css")), { code: "ENOENT" });
+  assert.equal(git(product, "diff", "--cached", "--name-only"), "");
+  git(product, "add", "src/theme.css");
   git(product, "commit", "-m", "Style the page");
   git(writer, "fetch", "origin");
   const head = git(product, "rev-parse", "HEAD");
@@ -388,6 +392,23 @@ test("the installed workflows select preview apps and verify the proposed patch 
   await propose();
   assert.throws(check, /protected path or file mode: "package.json"/);
   assert.deepEqual(designer.jobs.edit.permissions, { contents: "read" });
+  assert.deepEqual(designer.jobs.validate.permissions, { contents: "read" });
+  assert.doesNotMatch(JSON.stringify(designer.jobs.edit.steps), /docker (?:exec|run|rm)|product-build\.sh/);
+  assert.match(JSON.stringify(designer.jobs.validate.steps), /docker exec/);
+  assert.ok(designer.jobs.change.needs.includes("validate"));
+  for (const job of [designer.jobs.validate, designer.jobs.change]) {
+    const download = job.steps.find(step => step.uses === "actions/download-artifact@v4");
+    assert.equal(download.with["artifact-ids"], "${{ needs.edit.outputs.artifact }}");
+  }
+  const codex = designer.jobs.edit.steps.find(step => step.id === "codex").with;
+  assert.equal(codex["allow-bot-users"], "${{ vars.TIMDS_DESIGNER_BOTS }}");
+  assert.equal(codex["output-schema-file"], "${{ runner.temp }}/timds-designer-result.schema.json");
+  assert.equal(codex["codex-args"], undefined);
+  const editSteps = designer.jobs.edit.steps;
+  const toolkit = editSteps.find(step => step.name === "Prepare the pinned toolkit for the designer");
+  assert.ok(editSteps.indexOf(toolkit) < editSteps.findIndex(step => step.id === "codex"));
+  assert.match(toolkit.run, /npm ci --ignore-scripts/);
+  assert.match(toolkit.run, /consumer sync --root "\$GITHUB_WORKSPACE"/);
   assert.doesNotMatch(JSON.stringify(designer.jobs.change.steps), /npm ci|npm run|codex-action/);
   assert.equal(designer.jobs.gate.steps.find(step => step.id === "read_notes")["continue-on-error"], true);
   assert.match(designer.jobs.gate.steps.find(step => step.id === "archive").if, /read_notes.outputs.resolvable/);

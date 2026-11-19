@@ -684,9 +684,13 @@ export async function consumerWorkflow(name, { mode = "npm" } = {}) {
   const source = await template(name);
   if (mode !== "binary") return source;
   const install = await template("consumer-binary-install.yml");
-  const beforeDesigner = '      - name: Write the instructions\n';
+  const designerInstall = `      - name: Prepare the offline editor runtime cache
+        run: echo "TIMDS_BINARY_CACHE=$(mktemp -d /tmp/timds-designer-runtime.XXXXXX)" >> "$GITHUB_ENV"
+${install}      - name: Verify the editor runtime is ready
+        run: timds-cli --version
+`;
   return source
-    .replace(beforeDesigner, () => install + beforeDesigner)
+    .replace(/      - name: Prepare the pinned toolkit for the designer\n[\s\S]*?(?=      - name: Write the instructions)/, () => designerInstall)
     .replaceAll("npm run timds --", "timds-cli")
     .replaceAll("a published pin is fetched by npm ci", "a published pin is fetched by consumer sync")
     .replaceAll("npm ci fetches the pinned version.", "consumer sync fetches the pinned version.")

@@ -135,7 +135,10 @@ test('binary consumer workflows install the exact verified CLI and keep custom p
       const edit = workflow.jobs.edit.steps;
       const index = label => edit.findIndex(step => step.name === label);
       assert.ok(index('Confirm the designer toolkit selection') < index('Install the exact TimDS executable'));
-      assert.ok(index('Fetch the published Design System pin') < index('Make the design change with OpenAI'));
+      assert.ok(index('Prepare the offline editor runtime cache') < index('Install the exact TimDS executable'));
+      assert.match(edit[index('Prepare the offline editor runtime cache')].run, /TIMDS_BINARY_CACHE=.*mktemp -d \/tmp\//);
+      assert.ok(index('Fetch the published Design System pin') < index('Verify the editor runtime is ready'));
+      assert.ok(index('Verify the editor runtime is ready') < index('Make the design change with OpenAI'));
     }
     assert.doesNotMatch(source, /npm run timds|run: npm ci|cache: npm|\$\(node /);
     const toolchains = steps.filter(step => step.uses === 'actions/setup-node@v5');

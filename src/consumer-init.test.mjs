@@ -318,7 +318,7 @@ test("renders the skill from the manifest and records managed-file hashes", asyn
   assert.match(designer, /contains\(github\.event\.comment\.body, '<!-- timds-designer-request -->'\)/);
   assert.match(designer, /case "\$2" in OWNER\|MEMBER\|COLLABORATOR\) return 0/);
   assert.match(designer, /DESIGNER_BOTS: \$\{\{ vars\.TIMDS_DESIGNER_BOTS \}\}/);
-  assert.match(designer, /uses: openai\/codex-action@v1/);
+  assert.match(designer, /uses: openai\/codex-action@[a-f0-9]{40} # v1/);
   assert.match(designer, /openai-api-key: \$\{\{ secrets\.OPENAI_API_KEY \}\}/);
   assert.doesNotMatch(designer, /ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN|claude-code-action/);
   assert.match(designer, /sandbox: workspace-write/);
