@@ -662,7 +662,7 @@ export function designSystemReadTools({ z, resolveSystem, listSystems, hooks = {
       ...(catalog ? {} : { note: "No media catalog is published for this system; logos and imagery are in get_brand." }),
       total: assets.length,
       returned: Math.min(assets.length, limit),
-      truncated: assets.length > limit,
+      truncated: catalog?.truncated === true || assets.length > limit,
       tag: tag ?? null,
       kind: kind ?? null,
       assets: assets.slice(0, limit),
