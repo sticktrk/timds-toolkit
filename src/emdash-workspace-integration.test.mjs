@@ -426,14 +426,14 @@ test("forms are judged by the same parser, unquoted actions and submit buttons i
 test("the starter's contact form renders disabled until the site handles it", () => {
   const without = renderWorkspaceDesign(sharedWorkspace, { design: "website", base: "/site" });
   const contact = without.pages.find((page) => page.route === "/contact");
-  assert.match(contact.body, /<form class="form" action="\/site\/contact" method="post" data-timds-form="not-connected"><p role="note">/);
-  assert.match(contact.body, /type="submit" disabled>Send<\/button>/);
+  assert.match(contact.body, /<form class="form" action="\/site\/contact" method="post"[^>]* data-timds-form="not-connected"><p role="note">/);
+  assert.match(contact.body, /type="submit" disabled>Send message<\/button>/);
   assert.doesNotMatch(without.pages.find((page) => page.route === "/about").body, /not-connected/);
 
   const wired = renderWorkspaceDesign(sharedWorkspace, { design: "website", base: "/site", forms: new Map([["/contact", "/x.ts"]]).keys() });
   const enabled = wired.pages.find((page) => page.route === "/contact");
   assert.doesNotMatch(enabled.body, /not-connected|disabled/);
-  assert.match(enabled.body, /<form class="form" action="\/site\/contact" method="post">/);
+  assert.match(enabled.body, /<form class="form" action="\/site\/contact" method="post" data-timds-contact[\s>]/);
 });
 
 test("the catch-all route answers 405 to a POST, and the handlers are dispatched ahead of it by middleware", async () => {

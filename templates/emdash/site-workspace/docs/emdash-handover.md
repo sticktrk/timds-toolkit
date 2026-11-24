@@ -119,7 +119,10 @@ a position for each collection.
 
 ## Contact forms and browser tags
 
-Copy `src/forms/contact.ts.example` to `src/forms/contact.ts` to opt in.
+The scaffold installs `src/forms/contact.ts` when a public page of the selected
+design includes a marked form with `method="post"` targeting `/contact`. Both
+starter contact pages use this handler. For a site that adds its first contact
+form later, copy `src/forms/contact.ts.example` to `src/forms/contact.ts`.
 If the site already has a handler for `/contact`, keep it and call
 `contactPost(context)` from it where appropriate. The website design owns the
 form and all visitor-facing copy. Give the form `method="post"`,
@@ -127,7 +130,8 @@ form and all visitor-facing copy. Give the form `method="post"`,
 `email` or `phone`. The `message` field is optional. Set
 `data-timds-contact-id` to a stable identifier, such as `article-sidebar`,
 when multiple forms post to the same address. The script uses the form element
-ID if set and the submission path otherwise. Set `data-timds-contact-success` and
+ID if set and the submission path otherwise. Set `data-timds-contact-pending`,
+`data-timds-contact-success` and
 `data-timds-contact-error` on the form. Add a child with
 `data-timds-contact-status` and `role="status"` for the result.
 

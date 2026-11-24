@@ -120,7 +120,15 @@ test("--workspace writes a complete site into site/ of a starter workspace", asy
   assert.deepEqual(result.noPort, [], "the starter's stylesheet styles every article route");
   assert.deepEqual(installs, [site], "npm ci runs in the site");
 
-  const templatePaths = await expectedTemplatePaths();
+  const preview = await fs.readFile(path.join(workspace, "dist/designs/website/contact/index.html"), "utf8");
+  assert.match(preview, /Contact form preview/);
+  assert.match(preview, /type="submit" disabled/);
+  const catalog = JSON.parse(await fs.readFile(path.join(workspace, "dist/designs.json"), "utf8"));
+  const contactPage = catalog.designs[0].pages.find((page) => page.route === "/contact");
+  assert.doesNotMatch(contactPage.states[0].html, /data-timds-form="not-connected"|type="submit" disabled/);
+
+  const templatePaths = (await expectedTemplatePaths()).map((file) =>
+    file === "src/forms/contact.ts.example" ? "src/forms/contact.ts" : file);
   const onDisk = await walk(site);
   assert.deepEqual(onDisk, [...templatePaths, "package.json", "timds.consumer.json", EMDASH_RECORD_PATH].sort());
   assert.ok(onDisk.includes(".gitignore") && onDisk.includes(".env.example"), "the renamed templates land under their own names");
@@ -274,6 +282,8 @@ test("--workspace builds a system's own design and lists the article routes with
   const lines = [];
   const result = await scaffoldWorkspaceEmdashSite(workspace, { skipInstall: true, output: (line) => lines.push(line) });
   assert.equal(result.design.id, "marketing");
+  assert.ok(existsSync(path.join(result.siteRoot, "src/forms/contact.ts.example")));
+  assert.equal(existsSync(path.join(result.siteRoot, "src/forms/contact.ts")), false);
   assert.equal(result.design.layout, false);
   assert.deepEqual(result.design.pages, ["/", "/company/team"]);
   assert.deepEqual(result.stylesheets, ["/styles/brand.css"]);

@@ -5,7 +5,7 @@
   "type": "module",
   "hostContract": 2,
   "emdashTemplate": {
-    "version": 9,
+    "version": 10,
     "history": [
       {
         "version": 1,
@@ -69,6 +69,12 @@
         "changes": [
           "Shows the Short answer card in place of the summary line under an article's title, keeping the summary as the meta description and on cards.",
           "Raises the article HTML policy to version 2, which accepts the aside element, and documents the named question-and-answer body blocks (answer-box, detailed-answer, clock-to-watch, cta, disclaimer) the stock Design System styles by id."
+        ]
+      },
+      {
+        "version": 10,
+        "changes": [
+          "Connects contact forms in the selected design to the built-in POST /contact handler when scaffolding a workspace site and displays the design’s pending message while a submission is in progress."
         ]
       }
     ]

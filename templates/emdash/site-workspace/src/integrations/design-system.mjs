@@ -543,15 +543,16 @@ const FORM_CONTROLS = new Set(["button", "fieldset", "input", "select", "textare
  * Attributes and a plain paragraph only, so the page uses no class the
  * Design System does not declare.
  */
-export function disableUnconnectedForms(html, { route = null, handled = new Set() } = {}) {
+export function disableUnconnectedForms(html, { route = null, handled = new Set(), contactPreview = false } = {}) {
   const edits = [];
   let form = null;
   const close = () => {
     if (!form) return;
     const unhandled = form.posts.some((target) => target !== "external" && !(target && handled.has(target)));
-    if (unhandled) {
+    if (unhandled && (!contactPreview || attributeValue(form.tag, "data-timds-contact") !== undefined)) {
       edits.push({ start: form.tag.end - 1, end: form.tag.end - 1, text: ' data-timds-form="not-connected"' });
-      edits.push({ start: form.tag.end, end: form.tag.end, text: `<p role="note">${FORM_NOT_CONNECTED}</p>` });
+      const note = contactPreview ? "Contact form preview. Open the website to send a message." : FORM_NOT_CONNECTED;
+      edits.push({ start: form.tag.end, end: form.tag.end, text: `<p role="note">${note}</p>` });
       for (const control of form.controls) {
         if (control.attributes.some((attribute) => attribute.name === "disabled")) continue;
         const at = control.selfClosing && html[control.end - 2] === "/" ? control.end - 2 : control.end - 1;

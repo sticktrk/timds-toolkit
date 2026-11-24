@@ -1,19 +1,33 @@
 <section class="hero">
-  <h1>Contact</h1>
-  <p>Tell us what you need. We reply within one business day.</p>
+  <h1>Contact us</h1>
+  <p>Tell us how we can help. We’ll reply by email.</p>
 </section>
 
-<section class="section" id="form">
-  <form class="form" action="/contact" method="post">
+<section class="section" aria-label="Send a message">
+  <form class="form" action="/contact" method="post" data-timds-contact
+    data-timds-contact-id="contact-page"
+    data-timds-contact-pending="Sending your message…"
+    data-timds-contact-success="Thanks, we received your message."
+    data-timds-contact-error="We couldn’t confirm your message was received. Check your details and try again.">
     <div class="field">
       <label for="contact-name">Name</label>
-      <input id="contact-name" name="name" type="text" autocomplete="name">
+      <input id="contact-name" name="name" type="text" autocomplete="name" maxlength="160" required>
+    </div>
+    <div class="form__row">
+      <div class="field">
+        <label for="contact-email">Email address</label>
+        <input id="contact-email" name="email" type="email" autocomplete="email" maxlength="254" required>
+      </div>
+      <div class="field">
+        <label for="contact-phone">Phone (optional)</label>
+        <input id="contact-phone" name="phone" type="tel" autocomplete="tel" maxlength="64">
+      </div>
     </div>
     <div class="field">
-      <label for="contact-email">Email address</label>
-      <input id="contact-email" name="email" type="email" autocomplete="email">
-      <small>Used only to reply to you.</small>
+      <label for="contact-message">Message</label>
+      <textarea id="contact-message" name="message" rows="5" maxlength="4000" required></textarea>
     </div>
-    <button class="button" type="submit">Send</button>
+    <button class="button" type="submit">Send message</button>
+    <div role="status" data-timds-contact-status></div>
   </form>
 </section>

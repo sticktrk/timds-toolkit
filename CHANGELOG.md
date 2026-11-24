@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Seed both website designs with a contact form for name, email, optional
+  phone and message. Static references label the form as a preview. New
+  EmDash workspace sites connect a marked form posting to `/contact` to the
+  receipt-backed handler and show pending, success and retry messages.
+
 - Add the blog posting template. A Design System keeps the layout of its
   articles in `src/posting/blog.json`: the named blocks in page order, each
   block's element and fixed heading, and what each block is for. The designer
