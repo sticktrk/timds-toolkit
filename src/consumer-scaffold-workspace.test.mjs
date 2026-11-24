@@ -121,7 +121,7 @@ test("--workspace writes a complete site into site/ of a starter workspace", asy
   assert.deepEqual(installs, [site], "npm ci runs in the site");
 
   const preview = await fs.readFile(path.join(workspace, "dist/designs/website/contact/index.html"), "utf8");
-  assert.match(preview, /Contact form preview/);
+  assert.match(preview, /<p role="note">Preview only\. This form sends messages from the live website\.<\/p>/);
   assert.match(preview, /type="submit" disabled/);
   const catalog = JSON.parse(await fs.readFile(path.join(workspace, "dist/designs.json"), "utf8"));
   const contactPage = catalog.designs[0].pages.find((page) => page.route === "/contact");

@@ -56,8 +56,7 @@ import { CONSUMER_MANIFEST_FILE, CONSUMER_SKILL_NAMES, validateConsumerManifest 
 import { normalizeSections, normalizeSectionSchema, createSectionSeed, validateSectionSeed, isSectionRoute, writerSectionTable } from "../templates/emdash/site/src/lib/articles/sections.mjs";
 import { sectionRouteInventory, readSectionRouteFiles } from "../templates/emdash/site-workspace/src/integrations/section-routes.mjs";
 import { compositionRouteInventory, readDivisionComposition } from "../templates/emdash/site-workspace/src/integrations/composition.mjs";
-import { divisionStyles, formTarget, renderWorkspaceDesign } from "../templates/emdash/site-workspace/src/integrations/design-system.mjs";
-import { attr, byTag, parseHtml } from "./html.mjs";
+import { contactFormTargets, divisionStyles, renderWorkspaceDesign } from "../templates/emdash/site-workspace/src/integrations/design-system.mjs";
 import { WORKSPACE_SITE_AGENTS_MARKER, WORKSPACE_SITE_DIRECTORY, WORKSPACE_SITE_MOUNT } from "./workspace-site.mjs";
 
 /** The template directory the workspace mode lays over the shared set. */
@@ -526,10 +525,9 @@ export async function planWorkspaceSite(designSystemRoot, { templatesRoot, repoR
   const siteCheck = `${binary ? "timds-cli" : "npm run timds --"} consumer check --root ${siteFolder}`;
   // Only a design that uses the contact protocol opts a new site into the
   // handler. Unmarked forms may expect a different payload at the same URL.
+  // The site's own form rule decides, so the scaffold and the site agree.
   const rendered = renderWorkspaceDesign(designSystemRoot, { design: design.id, sections, sectionsContract, forms: ["/contact"] });
-  const usesContact = rendered.pages.some(({ route, body }) => byTag(parseHtml(body), "form").some((form) =>
-    attr(form, "data-timds-contact") !== undefined && String(attr(form, "method")).trim().toLowerCase() === "post"
-    && formTarget(attr(form, "action"), route) === "/contact"));
+  const usesContact = rendered.pages.some(({ route, body }) => contactFormTargets(body, route).has("/contact"));
   const plan = await planEmdashTemplates(siteRoot, {
     platform: "cloudflare",
     layout: WORKSPACE_LAYOUT,

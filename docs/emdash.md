@@ -412,7 +412,11 @@ the address answers 405 and the server log names the module. EmDash turns
 Astro's cross-origin form check off, so a handler that should accept only the
 site's own form compares the request's `Origin` itself. Template 5 and later
 include a shared contact handler. From template 10, a marked contact form in a
-public design page enables it when scaffolding the site.
+public design page enables it when scaffolding the site: a form with
+`data-timds-contact` whose submission, or a submit button's `formmethod` and
+`formaction`, POSTs to `/contact`, read by the same rule the site's script
+submits it by. A design made before template 10 has an unmarked contact form;
+add the marker to opt it in.
 
 Editing a design or a token changes the site on the next request in
 development and on the next build, with no sync and no version to move. The

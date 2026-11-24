@@ -74,7 +74,7 @@
       {
         "version": 10,
         "changes": [
-          "Connects contact forms in the selected design to the built-in POST /contact handler when scaffolding a workspace site and displays the design’s pending message while a submission is in progress."
+          "Connects contact forms in the selected design to the built-in POST /contact handler when scaffolding a workspace site, judging a marked form by the same rule the site submits it by, and displays the design’s pending message while a submission is in progress."
         ]
       }
     ]

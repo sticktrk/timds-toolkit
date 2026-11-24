@@ -123,6 +123,9 @@ The scaffold installs `src/forms/contact.ts` when a public page of the selected
 design includes a marked form with `method="post"` targeting `/contact`. Both
 starter contact pages use this handler. For a site that adds its first contact
 form later, copy `src/forms/contact.ts.example` to `src/forms/contact.ts`.
+A Design System created before toolkit template 10 keeps its own contact page
+with an unmarked form. To adopt the handler, add `data-timds-contact` and the
+attributes below to that form in the design, then copy the example.
 If the site already has a handler for `/contact`, keep it and call
 `contactPost(context)` from it where appropriate. The website design owns the
 form and all visitor-facing copy. Give the form `method="post"`,
@@ -133,7 +136,11 @@ when multiple forms post to the same address. The script uses the form element
 ID if set and the submission path otherwise. Set `data-timds-contact-pending`,
 `data-timds-contact-success` and
 `data-timds-contact-error` on the form. Add a child with
-`data-timds-contact-status` and `role="status"` for the result.
+`data-timds-contact-status` and `role="status"` for the result. The stock
+contact pages also require `email` and `message`; that is the design's choice,
+and the handler accepts either. The Design System's own static reference shows
+a marked form disabled under a preview note; set
+`data-timds-contact-preview` on the form to word that note.
 
 Use the same `action="/contact"` in a shared sidebar, on an article, or in a
 dialog added after the page loads. The single handler receives every POST to

@@ -530,45 +530,25 @@ function isSubmitter(tag) {
 const FORM_CONTROLS = new Set(["button", "fieldset", "input", "select", "textarea"]);
 
 /**
- * Every form in the markup that would POST to an address of this site with
- * no handler in `handled`, rendered disabled: each control gets `disabled`,
- * the form `data-timds-form="not-connected"`, and a paragraph says the form
- * is not connected yet. A form's POSTs are its own submission when its
+ * Every form in the markup, in order: its start tag, its controls, and the
+ * addresses it POSTs to. A form's POSTs are its own submission when its
  * method is post (Enter in a field, and each button without overrides) and
  * each submit button's or image input's, with its `formmethod` and
- * `formaction` in place of the form's; one that has no handler disables the
- * whole form. Addresses are read with the same tag parser as `applyBase`
- * (`formTarget`), from double-quoted, single-quoted or unquoted values. A
- * POST to another origin is the design's own wiring and is left alone.
- * Attributes and a plain paragraph only, so the page uses no class the
- * Design System does not declare.
+ * `formaction` in place of the form's. Addresses are read with the same tag
+ * parser as `applyBase` (`formTarget`), from double-quoted, single-quoted or
+ * unquoted values; `external` is a POST to another origin.
  */
-export function disableUnconnectedForms(html, { route = null, handled = new Set(), contactPreview = false } = {}) {
-  const edits = [];
+function postingForms(html, route) {
+  const forms = [];
   let form = null;
-  const close = () => {
-    if (!form) return;
-    const unhandled = form.posts.some((target) => target !== "external" && !(target && handled.has(target)));
-    if (unhandled && (!contactPreview || attributeValue(form.tag, "data-timds-contact") !== undefined)) {
-      edits.push({ start: form.tag.end - 1, end: form.tag.end - 1, text: ' data-timds-form="not-connected"' });
-      const note = contactPreview ? "Contact form preview. Open the website to send a message." : FORM_NOT_CONNECTED;
-      edits.push({ start: form.tag.end, end: form.tag.end, text: `<p role="note">${note}</p>` });
-      for (const control of form.controls) {
-        if (control.attributes.some((attribute) => attribute.name === "disabled")) continue;
-        const at = control.selfClosing && html[control.end - 2] === "/" ? control.end - 2 : control.end - 1;
-        edits.push({ start: at, end: at, text: " disabled" });
-      }
-    }
-    form = null;
-  };
   for (const tag of htmlTags(html)) {
-    if (tag.type === "end" && tag.name === "form") close();
+    if (tag.type === "end" && tag.name === "form") form = null;
     if (tag.type !== "start") continue;
     if (tag.name === "form") {
-      close();
       const method = submissionMethod(attributeValue(tag, "method"));
       const action = attributeValue(tag, "action");
       form = { tag, method, action, controls: [], posts: method === "post" ? [formTarget(action, route)] : [] };
+      forms.push(form);
       continue;
     }
     if (!form || !FORM_CONTROLS.has(tag.name)) continue;
@@ -580,7 +560,57 @@ export function disableUnconnectedForms(html, { route = null, handled = new Set(
     const formaction = attributeValue(tag, "formaction");
     form.posts.push(formTarget(formaction === undefined ? form.action : formaction, route));
   }
-  close();
+  return forms;
+}
+
+/**
+ * The site addresses the marked contact forms in the markup POST to: every
+ * form carrying `data-timds-contact`, judged as public/timds-contact.js
+ * submits it (the form's method and action, or a submit button's
+ * `formmethod` and `formaction`). The scaffold installs the contact handler
+ * when a design's page posts one of these to /contact.
+ */
+export function contactFormTargets(html, route = null) {
+  const targets = new Set();
+  for (const form of postingForms(html, route)) {
+    if (attributeValue(form.tag, "data-timds-contact") === undefined) continue;
+    for (const target of form.posts) if (target && target !== "external") targets.add(target);
+  }
+  return targets;
+}
+
+/** The note a disabled contact form shows in a static reference, unless the form sets `data-timds-contact-preview`. */
+export const CONTACT_FORM_PREVIEW = "Preview only. This form sends messages from the live website.";
+
+/**
+ * Every form in the markup that would POST to an address of this site with
+ * no handler in `handled`, rendered disabled: each control gets `disabled`,
+ * the form `data-timds-form="not-connected"`, and a paragraph says the form
+ * is not connected yet (`postingForms` reads what a form POSTs to); one
+ * submitter with no handler disables the whole form. A POST to another
+ * origin is the design's own wiring and is left alone. With `contactPreview`
+ * (a static reference, which handles nothing) only marked contact forms are
+ * disabled, and their note is the form's `data-timds-contact-preview`, else
+ * `CONTACT_FORM_PREVIEW`. Attributes and a plain paragraph only, so the page
+ * uses no class the Design System does not declare.
+ */
+export function disableUnconnectedForms(html, { route = null, handled = new Set(), contactPreview = false } = {}) {
+  const edits = [];
+  for (const form of postingForms(html, route)) {
+    const unhandled = form.posts.some((target) => target !== "external" && !(target && handled.has(target)));
+    if (!unhandled) continue;
+    const contact = attributeValue(form.tag, "data-timds-contact") !== undefined;
+    if (contactPreview && !contact) continue;
+    const preview = String(attributeValue(form.tag, "data-timds-contact-preview") ?? "").trim();
+    const note = contactPreview ? escapeHtml(preview || CONTACT_FORM_PREVIEW) : FORM_NOT_CONNECTED;
+    edits.push({ start: form.tag.end - 1, end: form.tag.end - 1, text: ' data-timds-form="not-connected"' });
+    edits.push({ start: form.tag.end, end: form.tag.end, text: `<p role="note">${note}</p>` });
+    for (const control of form.controls) {
+      if (control.attributes.some((attribute) => attribute.name === "disabled")) continue;
+      const at = control.selfClosing && html[control.end - 2] === "/" ? control.end - 2 : control.end - 1;
+      edits.push({ start: at, end: at, text: " disabled" });
+    }
+  }
   return applyEdits(html, edits);
 }
 
