@@ -56,7 +56,6 @@ export const DESIGNS_SOURCE_DIRECTORY = "src/designs";
 export const DESIGNS_OUTPUT_DIRECTORY = "designs";
 export const DESIGNS_SCHEMA_VERSION = 1;
 
-
 /** The directory under a design's output reserved for journey storyboards. */
 export const JOURNEYS_OUTPUT_DIRECTORY = "journeys";
 
@@ -809,7 +808,6 @@ export function designsDocument(rendered, manifest) {
     })),
   };
 }
-
 
 /** Every site-absolute file the designs load, for the publisher. */
 export function eachDesignReference(document, visit) {

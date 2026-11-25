@@ -19,7 +19,6 @@ export { BRAND_ROLES } from "./read-documents.mjs";
 
 export const TOKENS_SCHEMA_VERSION = 1;
 
-
 const ROLE_KINDS = Object.freeze({ color: "color", font: "font-family" });
 const ROLE_PATTERN = /^(color|font)\.[a-z][a-z0-9-]*$/;
 const TOKEN_NAME_PATTERN = /^--[a-zA-Z0-9_-]+$/;

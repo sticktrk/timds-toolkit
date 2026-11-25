@@ -322,7 +322,6 @@ export function extractPage(html, { pageId, url, config = normalizeMachineConfig
 
 /* ── emitters ───────────────────────────────────────────────────────────── */
 
-
 const ROLE_LABELS = Object.freeze({
   "color.background": "Background",
   "color.panel": "Panel",

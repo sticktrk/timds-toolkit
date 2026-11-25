@@ -184,7 +184,6 @@ export async function fetchDerivedLayer(publicBase, { fetchImpl = fetch } = {}) 
   };
 }
 
-
 /** The `doctor` line for a brand kit summary. */
 export function describeBrandKit(summary) {
   if (!summary) return "Brand kit: not derived; run timds check";

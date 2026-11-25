@@ -2,7 +2,16 @@
 
 ## Unreleased
 
-- Export `@dtconcepts/timds/read-tools` for Worker and other HTTP hosts. `designSystemReadTools({ z, resolveSystem, listSystems, hooks })` returns tool and resource definitions with handlers. Pass the server’s Zod instance and `hooks.drafts: false` for a published-only reader. The Node and stdio servers register the same definitions.
+- Export `@dtconcepts/timds/read-tools` for Worker and other HTTP hosts.
+  `designSystemReadTools({ z, resolveSystem, listSystems, hooks })` returns
+  the consumer read tools and resources as definitions with handlers, from a
+  module that imports no Node builtin and no MCP SDK. Pass the server's Zod
+  instance, and `hooks.drafts: false` for a published-only reader.
+  `resolveSystem` receives the derived documents each read needs as a second
+  argument, so a host can fetch only those. `list_media` reports
+  `truncated` when the host's catalog was itself cut short. The Node and
+  stdio servers register the same definitions, and `timds mcp read` is
+  unchanged.
 
 - Add the blog posting template. A Design System keeps the layout of its
   articles in `src/posting/blog.json`: the named blocks in page order, each

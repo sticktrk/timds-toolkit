@@ -9,10 +9,16 @@
 //
 // One tool surface, two transports: `timds mcp read` serves it over stdio
 // against the current checkout's `dist/`, a published base URL, or a named
-// draft snapshot, and a host
-// registers the same tools on its own server with
-// `registerDesignSystemReadTools`, resolving each call's `systemId` and
-// `version` or `draft` to a derived layer.
+// draft snapshot, and a host registers the same tools on its own server,
+// resolving each call's `systemId` and `version` or `draft` to a derived
+// layer.
+//
+// The definitions live in `read-tools.mjs`, which imports no Node builtin
+// and no MCP SDK so a host on another runtime can bundle it
+// (`scripts/check-read-tools.mjs` enforces that). This module is the Node
+// entry: `registerDesignSystemReadTools` registers those definitions with the
+// MCP SDK and the toolkit's Zod, and the stdio server is the only part that
+// touches the workspace, the filesystem or the network.
 
 import { promises as fs } from "node:fs";
 import process from "node:process";
