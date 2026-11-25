@@ -428,6 +428,10 @@ system version. To restore dated releases, an operator explicitly declares the
 first version, synchronizes the package and lockfile, and adds its changelog
 section before merging. A declared `version` otherwise behaves as it always has.
 
+### Brand concepts
+
+Store proposals under `src/concepts/<id>/` and review them in the system's Concepts view. The toolkit checks local mockups, publishes each direction and its pieces, and exposes the proposals through `concepts.json` and the read MCP server. Both starters include one editable sample. See [Brand concepts](docs/concepts.md) for the manifest, CLI and page placeholders.
+
 ### Website designs
 
 A Design System is designer-owned down to the pages. Under

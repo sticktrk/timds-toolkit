@@ -146,6 +146,11 @@ calls the same function so `dev` shows them. `timds designs init` is the
 way to add them back to a system that removed them; it writes the sample and
 never touches a script, since the stock build stub builds the designs.
 
+`concepts.mjs` owns the brand proposal contract and its rendered section. Both
+starters seed `src/concepts/sample/` once. Keep its files out of starter sync,
+structure offshoots, parent feed and consumer bundles. Take colors, fonts and media from the system. Read a concept to learn the direction and its reasons, or because the task is about that concept.
+See [Brand concepts](docs/concepts.md) for import, validation and read tools.
+
 `changelog.mjs` owns the release history: it reads the client's
 `CHANGELOG.md`, renders `dist/changelog/` (linked from the viewer's version
 chip, outside the views) the way designs are rendered, writes

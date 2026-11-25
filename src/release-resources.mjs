@@ -33,7 +33,7 @@ export async function packageResourcePaths(directory) {
   return result;
 }
 
-/** The selected overlay wins; other starters never inherit ordinary pages/designs. */
+/** The selected overlay wins; other starters never inherit ordinary pages, designs or concepts. */
 export async function starterTemplateFiles(kind) {
   kind = starterKind(kind);
   const files = new Map();
@@ -42,7 +42,7 @@ export async function starterTemplateFiles(kind) {
   }
   for (const resource of await packageResourcePaths("templates/starter")) {
     const relative = resource.slice("templates/starter/".length);
-    if (kind !== "starter" && ["src/pages/", "src/designs/"].some(prefix => relative.startsWith(prefix))) continue;
+    if (kind !== "starter" && ["src/pages/", "src/designs/", "src/concepts/"].some(prefix => relative.startsWith(prefix))) continue;
     if (!files.has(relative)) files.set(relative, resource);
   }
   return [...files].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);

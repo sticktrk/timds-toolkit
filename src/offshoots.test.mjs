@@ -60,6 +60,7 @@ test('shoot creates full and structure offshoots that pass a real workspace chec
       assert.ok(checked.machine.index.pages.some(page => page.id === 'brand/color'));
       await assert.rejects(fs.access(path.join(destination, 'src/pages/web/components.html')), {code: 'ENOENT'});
       await assert.rejects(fs.access(path.join(destination, 'src/designs')), {code: 'ENOENT'});
+      await assert.rejects(fs.access(path.join(destination, 'src/concepts')), {code: 'ENOENT'});
       const site = JSON.parse(await fs.readFile(path.join(destination, 'src/site.json'), 'utf8'));
       assert.equal(site.views.find(view => view.id === 'brand').pages.find(page => page.slug === 'color').planned, false);
       assert.equal(site.views.find(view => view.id === 'web').pages.find(page => page.slug === 'components').planned, true);

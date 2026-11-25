@@ -59,6 +59,8 @@ import {
   removeAccessToken,
   saveAccessToken,
 } from "./auth.mjs";
+import lockfile from "proper-lockfile";
+import { readConcept, readConceptCatalog } from "./concepts.mjs";
 import { syncDefaults } from "./defaults.mjs";
 import { checkRuntimeDependencies, upgradeConsumerToRelease, upgradeToRelease } from "./upgrade.mjs";
 import { migrateVideoComponents } from "./video-migration.mjs";
@@ -1036,9 +1038,10 @@ function summarizeStarterSync(result) {
  * (the starter sync's, or the binary selection's); a plain npm upgrade that
  * synced nothing runs none, and the caller's own `check` follows.
  */
-async function upgradeReport(result, { defaults, designs = null, selection = false, requestedVersion = null }) {
+async function upgradeReport(result, { defaults, designs = null, concepts = null, selection = false, requestedVersion = null }) {
   const relative = (file) => path.relative(result.repoRoot, file).split(path.sep).join("/");
   designs ??= await readDesignCatalog(result.designSystemRoot);
+  concepts ??= await readConceptCatalog(result.designSystemRoot);
   return {
     ok: true,
     command: "upgrade",
@@ -1053,6 +1056,7 @@ async function upgradeReport(result, { defaults, designs = null, selection = fal
     },
     starter: summarizeStarterSync(result),
     defaults: { enabled: defaults.enabled, changed: defaults.changed, preserved: defaults.preserved, applied: defaults.applied },
+    concepts: { setUp: concepts.exists, concepts: concepts.concepts.length },
     designs: { setUp: designs.exists, designs: designs.designs.length, pages: designs.designs.reduce((sum, design) => sum + design.pages.length, 0) },
     contractMigration: { migrated: Boolean(result.contractMigration?.migrated), ...(result.contractMigration?.reason ? { reason: result.contractMigration.reason } : {}) },
     check: result.check ?? summarizeCheck(result.starter?.check),
@@ -1663,6 +1667,43 @@ function stepDecisions(argv) {
   return decisions;
 }
 
+/** Validate and install a proposal once. Preserve unrecognized manifest keys for newer readers. */
+async function addConcept(repoRoot, source, id) {
+  const { designSystemRoot } = await loadWorkspace(repoRoot, { editing: true });
+  const { concept, files } = await readConcept(source, { id });
+  const src = path.join(designSystemRoot, "src");
+  const directory = path.join(src, "concepts");
+  for (const parent of [src, directory]) {
+    await fs.mkdir(parent).catch(error => { if (error.code !== "EEXIST") throw error; });
+    if (!(await fs.lstat(parent)).isDirectory()) throw new Error(`${parent} must be a real directory`);
+  }
+  // Stage beside the catalog: readers see either the full concept or nothing.
+  const staging = await fs.mkdtemp(path.join(src, ".concept-"));
+  try {
+    await fs.copyFile(path.join(source, "concept.json"), path.join(staging, "concept.json"));
+    for (const [file, bytes] of files) {
+      const target = path.join(staging, file);
+      await fs.mkdir(path.dirname(target), { recursive: true });
+      await fs.writeFile(target, bytes);
+    }
+    const staged = await readConcept(staging, { id: concept.id });
+    const destination = path.join(directory, concept.id);
+    // Concurrent additions must agree on the directory's one approved id.
+    const release = await lockfile.lock(directory, { retries: 3 });
+    try {
+      const catalog = await readConceptCatalog(designSystemRoot);
+      if (catalog.concepts.some(entry => entry.id === concept.id)) throw new Error(`${destination} already exists; choose a new permanent id`);
+      if (staged.concept.status === "approved" && catalog.concepts.some(entry => entry.status === "approved")) throw new Error("The system already has an approved concept");
+      await fs.rename(staging, destination);
+      return destination;
+    } finally {
+      await release();
+    }
+  } finally {
+    await fs.rm(staging, { recursive: true, force: true });
+  }
+}
+
 /**
  * `timds designs init`: give an existing Design System the website-designs
  * contract a fresh scaffold ships with. Writes the sample design under
@@ -2039,6 +2080,8 @@ Usage:
   timds dependencies check [--root PATH]
   timds skills install [--root PATH | --global] [--portal-url URL --system-id ID [--system-name NAME] [--studio-url URL]] [--force]
   timds defaults [--root PATH] [--apply] [--dry-run]
+  timds concepts init [--root PATH]
+  timds concepts add PATH [--id ID] [--root PATH]
   timds designs init [--root PATH] [--force]
   timds starter sync [--root PATH] [--force PATH...]
   timds starter migrate [--accept ID...] [--decline ID...] [--root PATH] [--json]
@@ -2092,9 +2135,10 @@ Invocation and output:
 
 Authoring and maintenance:
   check builds and validates the artifact; extract rebuilds its derived layer:
-  index.json, tokens.json, brand.json, formats.json, designs.json, changelog.json,
+  index.json, tokens.json, brand.json, formats.json, designs.json, concepts.json, changelog.json,
   llms.txt, llms-full.txt and per-page Markdown. brand reports missing brand roles.
   bundle.include selects consumer files copied into the artifact with digests.
+  concepts init adds a sample brand proposal; concepts add validates and imports one.
   designs init seeds portable HTML website designs under src/designs/; it does
   not port them into a product. submit creates a draft pull request for a Git
   provider and requires an Unreleased changelog note for system changes; a
@@ -2262,6 +2306,7 @@ async function runUpgradeCommand(root, options) {
   const result = await upgradeRepository(root, { autoRelease: options.autoRelease, decideCustomized: terminalPlumbingPrompt(), dependencyPrs: options.dependencyPrs, force: options.force });
   const defaults = await syncDefaults(result);
   const designs = await readDesignCatalog(result.designSystemRoot);
+  const concepts = await readConceptCatalog(result.designSystemRoot);
   if (!options.json) {
     output(`TimDS tooling upgraded for ${result.repoRoot}`);
     output(`Toolkit: ${result.previousVersion} -> ${result.package.version}`);
@@ -2280,11 +2325,12 @@ async function runUpgradeCommand(root, options) {
       if (replaceable.length) output(`Customized starter files were left alone (${replaceable.join(", ")}); upgrade never replaces them unasked. Run timds starter sync in a terminal to be asked about each, or timds starter sync --force ${replaceable.join(" ")} to replace them with the stock versions.`);
       for (const line of describeStarterStatus(result.starter.status)) output(line);
     }
+    output(`Brand concepts: ${concepts.exists ? concepts.concepts.length : "not set up (timds concepts init)"}`);
     if (!designs.exists) {
       output(`Website designs: not set up. Run timds designs init to add ${DESIGNS_SOURCE_DIRECTORY}/ and its sample; see the Website designs section of AGENTS.md.`);
     }
   }
-  return { result, report: await upgradeReport(result, { defaults, designs }) };
+  return { result, report: await upgradeReport(result, { defaults, designs, concepts }) };
 }
 
 /**
@@ -2296,6 +2342,7 @@ async function runDoctorCommand(root, options) {
   const hosted = (await workspaceProvider(root))?.kind === "hosted";
   const branch = hosted ? null : await currentBranch(workspace.repoRoot);
   const toolkitSelected = await readInstalledToolkitVersion(workspace.designSystemRoot);
+  const conceptCatalog = await readConceptCatalog(workspace.designSystemRoot);
   const designCatalog = await readDesignCatalog(workspace.designSystemRoot);
   const designPages = designCatalog.designs.reduce((sum, design) => sum + design.pages.length, 0);
   const starterRecord = await readStarterRecord(workspace.designSystemRoot);
@@ -2311,6 +2358,7 @@ async function runDoctorCommand(root, options) {
     system: { id: workspace.manifest.systemId, name: workspace.manifest.name, version: workspace.manifest.version },
     toolkit: { selected: toolkitSelected, running: runtimeIdentity.version, runtime: isBinaryRuntime() ? "binary" : "npm" },
     media: { assets: workspace.mediaCatalog.assets.length },
+    concepts: { setUp: conceptCatalog.exists, concepts: conceptCatalog.concepts.length },
     designs: { setUp: designCatalog.exists, designs: designCatalog.designs.length, pages: designPages },
     // Below the floor doctor only reports (with belowFloor true): the system
     // still builds and stays editable until it is regenerated.
@@ -2337,6 +2385,7 @@ async function runDoctorCommand(root, options) {
     output(`Toolkit selected: ${toolkitSelected}`);
     output(`Toolkit running: ${runtimeIdentity.version} (${isBinaryRuntime() ? "binary" : "npm"})`);
     output(`Media assets: ${workspace.mediaCatalog.assets.length}`);
+    output(`Concepts: ${conceptCatalog.exists ? conceptCatalog.concepts.length : "not set up (timds concepts init)"}`);
     output(`Designs: ${designCatalog.exists ? `${designCatalog.designs.length} design${designCatalog.designs.length === 1 ? "" : "s"}, ${designPages} pages` : "not set up (timds designs init)"}`);
     output(`Starter: ${!starterSystem ? "not a starter system" : report.starter.belowFloor ? `below the floor: it predates starter levels and must be regenerated from the current starter (upgrade, starter sync, starter migrate and feed refuse it)` : `synced with ${starterRecord.version}; plumbing ${starterRecord.plumbing === "toolkit" ? "is the toolkit's (every upgrade brings it to stock)" : "is recorded (a customized file is kept until starter sync --force names it)"}; level ${report.starter.level} of ${report.starter.current}${report.starter.behind ? ` (${report.starter.behind} behind: timds starter status)` : ""}`}`);
     output(`Video: ${workspace.manifest.video ? "enabled" : "disabled"}`);
@@ -2646,6 +2695,15 @@ export async function runCli(argv) {
       ? `Record: ${path.relative(result.designSystemRoot, result.record)}. Review the diff, then commit; every timds upgrade keeps this starter current from now on.`
       : "Nothing to change; this starter is current.");
     return result;
+  }
+  if (command === "concepts") {
+    const [action, input] = positional;
+    const init = action === "init" && positional.length === 1 && !options.id;
+    if (!init && !(action === "add" && positional.length === 2)) throw new Error("Usage: timds concepts init | concepts add PATH [--id ID]");
+    const source = init ? path.join(packageRoot, "templates/starter/src/concepts/sample") : path.resolve(input);
+    const destination = await addConcept(root, source, options.id ?? path.basename(source));
+    output(`Brand concept added: ${destination}`);
+    return { destination };
   }
   if (command === "designs") {
     const [designsCommand = "init"] = positional;

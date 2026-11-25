@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 64" role="img" aria-label="Trail marker">
+  <rect width="96" height="64" fill="#F8F4E8"/>
+  <path d="m8 48 20-22 13 13 18-26 29 35" stroke="#25372E" stroke-width="5" stroke-linejoin="round" fill="none"/>
+  <circle cx="20" cy="15" r="5" fill="#AA4829"/>
+</svg>

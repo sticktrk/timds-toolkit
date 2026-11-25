@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add brand concepts as authored proposals under `src/concepts/`. Both starters seed a sample and the viewer, Markdown mirrors, `concepts.json` and MCP tools expose the directions independently of the system's tokens. Existing systems can adopt the section with `timds concepts init` or import an authored folder with `timds concepts add`.
+
 - Add the blog posting template. A Design System keeps the layout of its
   articles in `src/posting/blog.json`: the named blocks in page order, each
   block's element and fixed heading, and what each block is for. The designer

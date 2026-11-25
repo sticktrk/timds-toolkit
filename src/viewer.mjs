@@ -18,7 +18,7 @@
 // that shows it. {{formats:GROUP}} renders a group's table, {{canvas:ID}}
 // fills a preview's style attribute (src/styles/canvas.css), and
 // {{presets:GROUP}} renders the composer's preset cards, so a size lives in
-// exactly one place. {{count:formats|views|pages|designs}} states a count.
+// exactly one place. {{count:formats|views|pages|designs|concepts}} states a count.
 //
 // A page declared with "layout": "landing" in src/site.json is rendered
 // without the side navigation and the previous/next links: the starter's
@@ -44,6 +44,7 @@ import { access, cp, lstat, mkdir, readFile, readdir, rm, stat, writeFile } from
 import { createServer } from "node:http";
 import path from "node:path";
 import { brandKitCopySamples, brandKitMediaSamples, brandKitSlots, brandKitLabels } from "./brand-kit.mjs";
+import { buildConcepts, conceptCard, CONCEPT_STATUSES, readConceptCatalog } from "./concepts.mjs";
 import { readPostingTemplate, renderPostingPreview, renderPostingTable } from "./posting.mjs";
 import { WORKSPACE_SITE_MOUNT, findWorkspaceSite } from "./workspace-site.mjs";
 
@@ -212,6 +213,7 @@ function readSiteModel(site) {
 
   for (const view of site.views) {
     if (!slugPattern.test(view.id ?? "")) throw new Error(`src/site.json view id ${JSON.stringify(view.id)} must be lowercase words joined by hyphens`);
+    if (view.id === "concepts") throw new Error("src/site.json may not declare a view named concepts; /concepts/ is reserved for brand concepts");
     if (views.some((existing) => existing.id === view.id)) throw new Error(`src/site.json declares the view ${view.id} twice`);
     if (!view.label) throw new Error(`src/site.json view ${view.id} needs a label`);
     if (!Array.isArray(view.pages) || !view.pages.length) throw new Error(`src/site.json view ${view.id} must declare at least one page`);
@@ -439,8 +441,8 @@ function renderPresets(formats, group, file, state) {
 }
 
 /** A count a page states in prose, so a number never goes stale: the formats, views, pages, or designs the system declares. */
-function countOf(what, { formats, model, authored, designs }, file) {
-  const counts = { formats: formats.byId.size, views: model.views.length, pages: authored.length, designs: designs.length };
+function countOf(what, { formats, model, authored, designs, concepts }, file) {
+  const counts = { formats: formats.byId.size, views: model.views.length, pages: authored.length, designs: designs.length, concepts: concepts.length };
   if (!(what in counts)) throw new Error(`src/pages/${file} uses {{count:${what}}}; count one of ${Object.keys(counts).join(", ")}`);
   return String(counts[what]);
 }
@@ -466,7 +468,7 @@ function nearestHref(model, id, file) {
   return (view && firstAuthored(view))?.href || model.home.href;
 }
 
-function renderSitemap(model, designs) {
+function renderSitemap(model, designs, concepts) {
   const rows = model.views.flatMap((view) => view.pages.map((page) => {
     const name = page.planned ? escapeHtml(page.title) : `<a href="${page.href}">${escapeHtml(page.title)}</a>`;
     const status = page.planned ? '<span class="tag">Planned</span>' : "Authored";
@@ -474,6 +476,9 @@ function renderSitemap(model, designs) {
   }));
   for (const design of designs) {
     rows.push(`      <tr><td><a href="${design.href}">${escapeHtml(design.title)}</a></td><td>Designs</td><td>${escapeHtml(design.summary)}</td><td>${design.pages} page${design.pages === 1 ? "" : "s"}</td></tr>`);
+  }
+  for (const concept of concepts) {
+    rows.push(`      <tr><td><a href="/concepts/${escapeHtml(concept.id)}/">${escapeHtml(concept.title)}</a></td><td>Concepts</td><td>${escapeHtml(concept.summary)}</td><td>${escapeHtml(concept.status)}</td></tr>`);
   }
   return [
     '<table class="spec">',
@@ -490,14 +495,14 @@ function firstAuthored(view) {
 }
 
 /** The entries the viewer adds to the app bar itself; a view labelled the same reads as a second tab of that name. */
-export const viewerAppBarEntries = Object.freeze([{ label: "Designs", href: "/designs/" }]);
+export const viewerAppBarEntries = Object.freeze([{ label: "Designs", href: "/designs/" }, { label: "Concepts", href: "/concepts/" }]);
 
 /** The view whose own page is served at / (site.json `home`), or null when the overview is the front page. */
 function frontView(model) {
   return model.views.find((view) => view.pages.some((page) => page.id === view.id && page.href === "/"))?.id ?? null;
 }
 
-function renderViews(model, current, designs, hasDesigns = designs.length > 0) {
+function renderViews(model, current, hasDesigns, hasConcepts) {
   // The front view's own page is where the brand link leads, so the row lists
   // the other views; its pages keep their side navigation and the promoted
   // call to action, and the brand link reads as current on all of them.
@@ -509,6 +514,7 @@ function renderViews(model, current, designs, hasDesigns = designs.length > 0) {
     return `<a class="appbar__view" href="${target.href}"${view.id === current.view ? ' aria-current="true"' : ""}>${label}</a>`;
   });
   if (hasDesigns) views.push(`<a class="appbar__view" href="${viewerAppBarEntries[0].href}"><b>${viewerAppBarEntries[0].label}</b><small>Whole pages</small></a>`);
+  if (hasConcepts) views.push(`<a class="appbar__view" href="${viewerAppBarEntries[1].href}"><b>${viewerAppBarEntries[1].label}</b><small>Brand directions</small></a>`);
   for (const page of model.pages) {
     if (page.promote && !page.planned) views.push(`<a class="appbar__cta" href="${page.href}"${page.id === current.id ? ' aria-current="page"' : ""}>${escapeHtml(page.promote)}</a>`);
   }
@@ -834,6 +840,7 @@ export async function renderSite(designSystemRoot) {
   const model = readSiteModel(await readJson("src/site.json"));
   const formats = readFormats(existsSync(path.join(source, "formats.json")) ? await readJson("src/formats.json") : null, model);
   const designs = await designList({ root, source });
+  const { concepts, exists: conceptsExist } = await readConceptCatalog(root);
   const posting = (await readPostingTemplate(root))?.template ?? null;
   const data = await readSlotData({ root, source });
   const fallbacks = new Set();
@@ -844,6 +851,7 @@ export async function renderSite(designSystemRoot) {
   // Structure offshoots omit authored design source, including an empty
   // directory's marker. The selected kit still reserves its Designs section.
   const hasDesigns = starter?.starter === "brand-kit" || existsSync(path.join(source, "designs"));
+  const hasConcepts = conceptsExist || starter?.starter === "brand-kit";
   // TimDS builds the designs to dist/designs/, so no view may claim that path.
   if (hasDesigns && model.views.some((view) => view.id === "designs")) throw new Error("src/site.json may not declare a view named designs while src/designs/ exists or the brand-kit starter reserves that route; the designs are built there");
   const layout = await readFile(path.join(source, "layout.html"), "utf8");
@@ -879,7 +887,17 @@ export async function renderSite(designSystemRoot) {
       ...shared,
       ...slotValues,
       canvas: (id) => canvasVars(formats, id, page.file),
-      count: (what) => countOf(what, { formats, model, authored, designs }, page.file),
+      count: (what) => countOf(what, { formats, model, authored, designs, concepts }, page.file),
+      concept: (id) => {
+        const concept = concepts.find(entry => entry.id === id);
+        if (!concept) throw new Error(`${file} uses {{concept:${id ?? ""}}}, but src/concepts/ has no such concept`);
+        return conceptCard(concept);
+      },
+      concepts: (status) => {
+        if (status !== undefined && !CONCEPT_STATUSES.includes(status)) throw new Error(`${file} uses {{concepts:${status}}}; expected one of ${CONCEPT_STATUSES.join(", ")}`);
+        const selected = concepts.filter(entry => status === undefined || entry.status === status);
+        return selected.map(entry => conceptCard(entry)).join("\n") || `<p>No ${status ? status + " " : ""}concepts yet.</p>`;
+      },
       formats: (group) => renderFormatTable(formats, group, page.file),
       presets: (group) => renderPresets(formats, group, page.file, presetState),
       // {{page:ID}} is a page's address (overview, use, use/install, ...), so a
@@ -892,7 +910,7 @@ export async function renderSite(designSystemRoot) {
         if (part === "blocks") return renderPostingTable(posting);
         throw new Error(`${file} uses {{posting:${part ?? ""}}}; the parts are {{posting:preview}} and {{posting:blocks}}`);
       },
-      sitemap: () => renderSitemap(model, designs),
+      sitemap: () => renderSitemap(model, designs, concepts),
       tokens: (group) => renderTokenTable(tokens, group, page.file),
     }));
     // A landing page stands alone in the shell: the side navigation and the
@@ -904,7 +922,7 @@ export async function renderSite(designSystemRoot) {
     const slotted = versionSlots(fill(chrome, "src/layout.html", {
       ...shared,
       title: escapeHtml(page.title),
-      views: renderViews(model, page, designs, hasDesigns),
+      views: renderViews(model, page, hasDesigns, hasConcepts),
       sidenav: landing ? "" : renderSidenav(model, page),
       pagenav: `${landing ? "" : renderPagenav(authored, page)}\n        ${enhancements}${releaseScriptMark}`,
       content: landing ? `<div class="landing">\n${content.trim()}\n</div>` : content.trim(),
@@ -1028,6 +1046,7 @@ export async function build(designSystemRoot) {
   const { buildDesigns } = await import("./designs.mjs");
   const { pageCount, stateCount } = await buildDesigns(root);
   if (pageCount) console.log(`Built ${pageCount} design page${pageCount === 1 ? "" : "s"} (${stateCount} state${stateCount === 1 ? "" : "s"}) under dist/designs/`);
+  await buildConcepts(root, { manifest: await readRootJson(root, "timds.json") });
   const { buildChangelog } = await import("./changelog.mjs");
   const { releaseCount } = await buildChangelog(root);
   if (releaseCount) console.log(`Built the changelog with ${releaseCount} release${releaseCount === 1 ? "" : "s"} under dist/changelog/`);

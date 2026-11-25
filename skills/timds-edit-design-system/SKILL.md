@@ -85,8 +85,8 @@ and `design-handoff` writes the brief a developer ports a release from.
 
 The ordinary starter uses the renderer in the toolkit package, with authored
 pages, styles and catalogs under `src/`. Its colors, fonts and copy are
-neutral placeholders. It passes `check` with two expected warnings:
-no `brand/voice` page and no annotated logo. Turning it into the client's
+neutral placeholders. It passes `check` with two brand warnings:
+no `brand/voice` page and no annotated logo. A versioned system also reports when its concepts have no approved direction. Turning it into the client's
 system is ordinary design work:
 
 1. Collect the approved inputs first: brand colors, licensed typefaces, logo
@@ -215,6 +215,12 @@ for it whatever the framework:
 - Local references must resolve inside the artifact; `check` fails on a
   broken one. The artifact is limited to 2,000 files, 12 MB per file, and
   80 MB in total, with no symbolic links.
+
+## Brand concepts
+
+A concept is a proposal stored in `src/concepts/<id>/concept.json` beside its pieces. Take colors, fonts and media from the system. Read a concept to learn the direction and its reasons, or because the task is about that concept.
+
+Review the directions under `/concepts/`. Add a proposal with `npm run timds -- concepts add PATH [--id ID]` or seed the sample in an existing system with `npm run timds -- concepts init`. Mark at most one concept approved. Put a card into a page with `{{concept:ID}}`, list the approved direction with `{{concepts:approved}}`, and run `npm run timds -- check`. All concepts travel with the published artifact.
 
 ## Design whole pages in the system
 

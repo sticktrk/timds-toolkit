@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "title": "Field notes",
+  "summary": "A field journal pairs an inked trail mark with ruled paper. The open margins leave room for short observations.",
+  "status": "proposed",
+  "colors": {
+    "roles": {
+      "canvas": "#F8F4E8",
+      "ink": "#25372E",
+      "accent": "#AA4829"
+    },
+    "palette": [
+      {
+        "name": "Paper",
+        "hex": "#F8F4E8"
+      },
+      {
+        "name": "Pine",
+        "hex": "#25372E"
+      },
+      {
+        "name": "Clay",
+        "hex": "#AA4829"
+      }
+    ]
+  },
+  "fonts": {
+    "display": {
+      "family": "Georgia",
+      "weight": 400
+    },
+    "body": {
+      "family": "Arial",
+      "weight": 400
+    }
+  },
+  "voice": [
+    "observant",
+    "plainspoken"
+  ],
+  "pieces": [
+    {
+      "kind": "website",
+      "file": "journal.html",
+      "alt": "Field journal opening page",
+      "height": 300
+    },
+    {
+      "kind": "logo",
+      "file": "trail.svg",
+      "alt": "Trail marker drawn as three rising ridges"
+    }
+  ]
+}

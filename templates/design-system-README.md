@@ -116,6 +116,12 @@ Replace the samples with this system's content; a separate product ports them,
 and an optional workspace EmDash site renders their source directly. An upgrade keeps shared plumbing current and preserves these
 authored values and pages.
 
+## Brand concepts
+
+A concept is a proposal stored in `src/concepts/<id>/concept.json` beside its pieces. Take colors, fonts and media from the system. Read a concept to learn the direction and its reasons, or because the task is about that concept.
+
+Review the directions under `/concepts/`. Add a proposal with `__TIMDS_CLI__ concepts add PATH [--id ID]` or seed the sample in an existing system with `__TIMDS_CLI__ concepts init`. Mark at most one concept approved. Put a card into a page with `{{concept:ID}}`, list the approved direction with `{{concepts:approved}}`, and run `__TIMDS_CLI__ check`. All concepts travel with the published artifact.
+
 ## Website designs
 
 The system is designer-owned down to the pages. A whole website, or any set
