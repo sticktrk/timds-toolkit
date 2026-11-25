@@ -12,6 +12,14 @@
   `truncated` when the host's catalog was itself cut short. The Node and
   stdio servers register the same definitions, and `timds mcp read` is
   unchanged.
+- Seed both website designs with a contact form for name, email, optional
+  phone and message. New EmDash workspace sites connect a marked form posting
+  to `/contact` to the receipt-backed handler and show pending, success and
+  retry messages. A Design System's static reference shows a marked contact
+  form disabled under a preview note the form can word with
+  `data-timds-contact-preview`, so a system that already marked its form sees
+  its built design pages change after upgrading. Existing designs keep their
+  contact page; add `data-timds-contact` to opt one in.
 
 - Add the blog posting template. A Design System keeps the layout of its
   articles in `src/posting/blog.json`: the named blocks in page order, each

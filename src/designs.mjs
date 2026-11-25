@@ -45,6 +45,7 @@ import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 
+import { disableUnconnectedForms } from "../templates/emdash/site-workspace/src/integrations/design-system.mjs";
 import { agentPointerHead, agentPointerNote } from "./agent-pointers.mjs";
 import { attr, classList, escapeHtml, findAll, findOne, parseHtml, textOf, walk } from "./html.mjs";
 import { importReferences, stylesheetReferences } from "./tokens.mjs";
@@ -581,7 +582,11 @@ export async function renderDesigns({ designSystemRoot, manifest = null }) {
         for (const reference of stylesheetReferences(html).links) {
           if (reference.startsWith("/")) stylesheets.add(reference);
         }
-        files.set(output, html);
+        // The displayed reference has no POST handler. Keep the enabled design
+        // in designs.json so sites consuming the markup can connect it.
+        files.set(output, /data-timds-contact\b/i.test(html)
+          ? disableUnconnectedForms(html, { route: page.route, contactPreview: true })
+          : html);
         states.push({ name: state.name, title, url: pageUrl(basePrefix, design.id, page.route, state.name), output, source: state.source, html, references });
         stateCount += 1;
       }
