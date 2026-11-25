@@ -29,13 +29,13 @@
 <section class="block" id="fields">
   <div class="block__head">
     <h2 class="h2">Form fields</h2>
-    <p>A field is a label, a control, and optional help text, in that order. The label is always visible; a placeholder is not a label. The control is tall enough to hit on a touch screen, and help text is one sentence directly under it.</p>
+    <p>A field is a label, a control, and optional help text, in that order. The label is always visible; a placeholder is not a label. The control is tall enough to hit on a touch screen, and help text is one sentence directly under it. See the contact page under <a href="/designs/">Designs</a> for the complete form.</p>
   </div>
   <figure class="demo demo--stack">
     <div class="field">
       <label for="starter-email">Email address</label>
-      <input id="starter-email" type="email" placeholder="name@example.com">
-      <small>Keep help text close to the control.</small>
+      <input id="starter-email" type="email" autocomplete="email" aria-describedby="starter-email-help" placeholder="name@example.com">
+      <small id="starter-email-help">Keep help text close to the control.</small>
     </div>
   </figure>
   <details class="spec-drawer">
@@ -44,14 +44,14 @@
       <thead><tr><th>Part</th><th>Element</th><th>Rule</th></tr></thead>
       <tbody>
         <tr><td>Label</td><td><code>label</code></td><td>Always visible and tied to the control with <code>for</code>; a placeholder is not a label</td></tr>
-        <tr><td>Control</td><td><code>input</code></td><td>At least 3rem tall so it is easy to hit on touch screens</td></tr>
+        <tr><td>Control</td><td><code>input</code> or <code>textarea</code></td><td>At least 3rem tall so it is easy to hit on touch screens</td></tr>
         <tr><td>Help text</td><td><code>small</code></td><td>One sentence directly under the control</td></tr>
       </tbody>
     </table>
     <pre>&lt;div class="field"&gt;
   &lt;label for="email"&gt;Email address&lt;/label&gt;
-  &lt;input id="email" type="email"&gt;
-  &lt;small&gt;Keep help text close to the control.&lt;/small&gt;
+  &lt;input id="email" type="email" aria-describedby="email-help"&gt;
+  &lt;small id="email-help"&gt;Keep help text close to the control.&lt;/small&gt;
 &lt;/div&gt;</pre>
   </details>
 </section>

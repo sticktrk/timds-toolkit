@@ -176,7 +176,8 @@ to `var()`), as does `compileTokenCss` in `src/consumer-scaffold.mjs`, and
 names design pages by the catalog's default-state rule in `src/designs.mjs`;
 `src/emdash-workspace-integration.test.mjs` holds them equal, so change them
 together. A posting form in a design renders disabled until the site has a
-handler under `src/forms/`; template 5 ships an opt-in contact handler example.
+handler under `src/forms/`; template 10 activates the contact handler when
+the selected design includes a marked form that posts to `/contact`.
 Two builds share one repository. Any command that walks the Design System
 root (build, check, extract, doctor, upgrade, the bundle walk, offshoots, the
 MCP guard) must skip the workspace site (`src/workspace-site.mjs` locates it).

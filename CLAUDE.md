@@ -236,7 +236,15 @@ transport and identity; `mcp.mjs` also exports `registerHostedSessionTools(serve
 claim, active-work, drafts, status, history, publish) over the hosted CLI.
 The stdio runner is a thin wrapper around those. Tool definitions, the
 authored-surface write guard, and the check belong here; transport and draft
-lifecycle belong to the host.
+lifecycle belong to the host. The read definitions themselves are in
+`read-tools.mjs` (`designSystemReadTools({ z, resolveSystem, listSystems,
+hooks })`, exported as `@dtconcepts/timds/read-tools`) with the pure document
+helpers in `read-documents.mjs`; neither imports a Node builtin or the MCP
+SDK, and the caller passes its own Zod, so a Worker host can bundle them.
+`npm run check:read-tools` (in CI) fails when the graph reaches a builtin or
+the SDK. `mcp-read.mjs` is the Node adapter over
+them, and `extract.mjs`, `derived.mjs`, `designs.mjs` and `tokens.mjs`
+re-export the helpers that moved.
 
 ### Video
 

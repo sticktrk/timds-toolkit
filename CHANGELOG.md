@@ -2,7 +2,26 @@
 
 ## Unreleased
 
-- Add brand concepts as authored proposals under `src/concepts/`. Both starters seed a sample and the viewer, Markdown mirrors, `concepts.json` and MCP tools expose the directions independently of the system's tokens. Existing systems can adopt the section with `timds concepts init` or import an authored folder with `timds concepts add`.
+- Add brand concepts as authored proposals under `src/concepts/`. Both starters seed a sample and the viewer, Markdown mirrors, `concepts.json` and MCP tools expose the directions independently of the system's tokens. Existing systems can adopt the section with `timds concepts init` or import an authored folder with `timds concepts add`. The concept tools are among the `@dtconcepts/timds/read-tools` definitions, so a host serving that export reads concepts too.
+
+- Export `@dtconcepts/timds/read-tools` for Worker and other HTTP hosts.
+  `designSystemReadTools({ z, resolveSystem, listSystems, hooks })` returns
+  the consumer read tools and resources as definitions with handlers, from a
+  module that imports no Node builtin and no MCP SDK. Pass the server's Zod
+  instance, and `hooks.drafts: false` for a published-only reader.
+  `resolveSystem` receives the derived documents each read needs as a second
+  argument, so a host can fetch only those. `list_media` reports
+  `truncated` when the host's catalog was itself cut short. The Node and
+  stdio servers register the same definitions, and `timds mcp read` is
+  unchanged.
+- Seed both website designs with a contact form for name, email, optional
+  phone and message. New EmDash workspace sites connect a marked form posting
+  to `/contact` to the receipt-backed handler and show pending, success and
+  retry messages. A Design System's static reference shows a marked contact
+  form disabled under a preview note the form can word with
+  `data-timds-contact-preview`, so a system that already marked its form sees
+  its built design pages change after upgrading. Existing designs keep their
+  contact page; add `data-timds-contact` to opt one in.
 
 - Add the blog posting template. A Design System keeps the layout of its
   articles in `src/posting/blog.json`: the named blocks in page order, each

@@ -782,6 +782,9 @@ read-only apart from `report_gap`, and never sees authored source:
   Markdown or structured blocks.
 - `list_designs`, `read_design`: website designs and journeys, and a selected
   route and state as authored HTML with its stylesheet, script and media references.
+- `list_concepts`, `read_concept`: brand proposals with their status, and one
+  proposal with its pieces or an HTML mockup's source; they request
+  `concepts.json` only for themselves and `describe_system`.
 - `search_guidance`: the blocks that answer a question, guidance groups first,
   every result cited by page and block.
 - `list_media`: the published media catalog by tag or kind.
@@ -792,7 +795,7 @@ Resources `timds://brand.json`, `timds://tokens.json`, `timds://index.json`,
 `timds://llms.txt`, `timds://formats.json`, `timds://bundle.json`, and
 `timds://guidance/{group}` serve the same documents.
 
-A host that serves consumers imports the tools from
+A Node host that serves consumers imports the tools from
 `@dtconcepts/timds/mcp/read`. `registerDesignSystemReadTools(server, {
 resolveSystem, listSystems, hooks })` registers them on an `McpServer`.
 `resolveSystem({ systemId, version, draft })` returns `{ layer, media, published,
@@ -800,6 +803,22 @@ pinned }`; with `hooks.remote` every tool takes an optional `systemId` and
 `version` or `draft` (mutually exclusive), and resources live under `timds://systems/{system}/...` with the
 system id percent-encoded. `hooks.fileGap({ system, gap })` receives each
 reported gap.
+
+A host on another runtime, such as Cloudflare Workers, imports
+`@dtconcepts/timds/read-tools` instead. That module reaches no Node builtin
+and no MCP SDK. `designSystemReadTools({ z, resolveSystem, listSystems, hooks
+})` takes the host's own Zod instance and returns `{ tools, resources }`:
+each tool carries its name, title, description, annotations, an `inputSchema`
+shape and a `handler(args)` that returns the structured result, and each
+resource its name, a `uri` (a string, or `{ template, list }` for a
+template), its metadata and a `handler`. The host registers them on its own
+server and shapes results and errors for its transport; a thrown error may
+carry a numeric `statusCode` (400 or 404). `resolveSystem` receives a second
+argument naming the derived documents the read needs (`"media"` included), so
+a host can fetch only those; an omitted list means the whole layer.
+`hooks.drafts: false` removes the `draft` argument for a published-only
+reader, and a `context` the resolver returns is passed to `hooks.fileGap` as
+its second argument.
 
 ## Consumer repositories
 

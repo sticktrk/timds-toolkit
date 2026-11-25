@@ -401,6 +401,6 @@ export function derivedLayerPaths(entry?: string): Record<DerivedFileName, strin
 export function derivedFilePath(designSystemRoot: string, manifest: { artifact?: { entry?: string } }, name: DerivedFileName): string;
 /** parentRecord is a validated ancestry snapshot scoped to this workspace operation. */
 export function readDerivedLayer(designSystemRoot: string, manifest: { systemId?: string; name?: string; version?: string; artifact?: { entry?: string } }, options?: { parentRecord?: ParentRecord | null }): Promise<DerivedLayer>;
-export function fetchDerivedLayer(publicBase: string, options?: { fetchImpl?: typeof fetch }): Promise<DerivedLayer>;
+export function fetchDerivedLayer(publicBase: string, options?: { fetchImpl?: typeof fetch; documents?: readonly string[] }): Promise<DerivedLayer>;
 export function summarizeBrandKit(kit: BrandKit | null | undefined): BrandKitSummary | null;
 export function describeBrandKit(summary: BrandKitSummary | null): string;

@@ -213,6 +213,8 @@ async function submit(form, target, submitter) {
   }
   queued.add(form);
   form.setAttribute("aria-busy", "true");
+  const status = form.querySelector("[data-timds-contact-status]");
+  if (status && form.dataset.timdsContactPending) status.textContent = form.dataset.timdsContactPending;
   let success = false;
   try {
     const result = await fetch(target, { method: "POST", body: fields, redirect: "error" });
@@ -231,7 +233,6 @@ async function submit(form, target, submitter) {
   } finally {
     queued.delete(form);
     form.removeAttribute("aria-busy");
-    const status = form.querySelector("[data-timds-contact-status]");
     if (status) status.textContent = (success ? form.dataset.timdsContactSuccess : form.dataset.timdsContactError) ?? "";
     form.dispatchEvent(new CustomEvent("timds:contact-result", { bubbles: true, detail: { ok: success } }));
   }

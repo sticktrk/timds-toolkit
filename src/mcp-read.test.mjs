@@ -300,7 +300,7 @@ test("remote mode takes systemId and version, serves the host's media and pins, 
       if (version && version !== layer.system.version) throw new Error(`version ${version} not found`);
       return {
         layer,
-        media: { assets: [
+        media: { truncated: true, assets: [
           { key: "hero-wide", title: "Hero", kind: "video", tags: ["b-roll", "hero"], publicUrl: "https://cdn.example/hero.mp4" },
           { key: "office", title: "Office", kind: "image", tags: ["photo"], publicUrl: "https://cdn.example/office.jpg" },
         ] },
@@ -351,6 +351,9 @@ test("remote mode takes systemId and version, serves the host's media and pins, 
   assert.equal(media.catalog, true);
   assert.equal(media.total, 1);
   assert.equal(media.assets[0].key, "hero-wide");
+  const noMatch = await ok(client, "list_media", { systemId, tag: "unseen" });
+  assert.equal(noMatch.returned, 0);
+  assert.equal(noMatch.truncated, true);
   assert.equal((await ok(client, "list_media", { systemId, kind: "image" })).assets[0].key, "office");
   assert.equal((await ok(client, "list_media", { systemId })).total, 2);
 
@@ -403,9 +406,23 @@ test("a published base serves the layer the CDN holds", async (t) => {
       : { ok: true, status: 200, text: async () => body };
   };
   const client = await connect(await createDesignSystemReadMcpServer({ published: base, fetchImpl }));
+  // The concept catalog embeds every mockup: only reads that use it request it.
+  const conceptRequests = () => requested.filter((url) => url.endsWith("/concepts.json")).length;
+  await ok(client, "get_tokens", {});
+  assert.equal(conceptRequests(), 0, "starting the reader and reading tokens leave concepts.json alone");
   const described = await ok(client, "describe_system", {});
+  assert.deepEqual(described.concepts, { count: 1, approved: null });
   assert.equal((await ok(client, "list_concepts")).concepts[0].id, "sample");
   assert.match((await ok(client, "read_concept", { concept: "sample", piece: "journal.html" })).html, /<html/i);
+  assert.equal(conceptRequests(), 3);
+  // A release without concepts makes no request for the catalog, even from the concept tools.
+  const withoutConcepts = { ...layer.index };
+  delete withoutConcepts.concepts;
+  files["index.json"] = JSON.stringify(withoutConcepts);
+  assert.equal((await ok(client, "list_concepts")).total, 0);
+  assert.equal((await ok(client, "describe_system", {})).concepts, null);
+  assert.equal(conceptRequests(), 3);
+  files["index.json"] = JSON.stringify(layer.index);
   assert.equal(described.system.source, "published");
   assert.equal(described.system.published, layer.system.version);
   assert.equal(described.provenance.sourceCommit, "abc123");

@@ -32,6 +32,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { parentLineage, readParentRecord } from "./offshoot-contract.mjs";
+export { summarizeBrandKit } from "./read-documents.mjs";
 
 export const DERIVED_LAYER_FILES = Object.freeze({
   index: "index.json",
@@ -124,8 +125,11 @@ export async function readDerivedLayer(designSystemRoot, manifest, {parentRecord
  * the version, source commit, and where each derived file sits, so a remote
  * consumer needs nothing but the base URL. A missing derived file is null, the
  * way it is locally; a missing stamp means nothing is published there.
+ * `documents`, the list a read tool passes its resolver, may leave out
+ * "concepts": the catalog embeds every mockup and is then not requested.
+ * Omitted, the whole layer is read.
  */
-export async function fetchDerivedLayer(publicBase, { fetchImpl = fetch } = {}) {
+export async function fetchDerivedLayer(publicBase, { fetchImpl = fetch, documents } = {}) {
   const base = String(publicBase ?? "").replace(/\/+$/, "");
   if (!/^https?:\/\/.+/.test(base)) throw new Error("published design system base must be an HTTP or HTTPS URL");
   const get = async (relative, parse, { required = false } = {}) => {
@@ -161,7 +165,7 @@ export async function fetchDerivedLayer(publicBase, { fetchImpl = fetch } = {}) 
     // whether this release offers it, so do not read that obsolete object.
     indexPromise.then((index) => (index && !index.formats) ? null : get(paths.formats, JSON.parse)),
     get(paths.designs, JSON.parse),
-    indexPromise.then(index => index?.concepts ? get(paths.concepts, JSON.parse) : null),
+    indexPromise.then(index => index?.concepts && (!documents || documents.includes("concepts")) ? get(paths.concepts, JSON.parse) : null),
     // A system that removed its changelog may leave an older one on the CDN; the index owns whether this release has one.
     indexPromise.then((index) => (index && !index.changelog) ? null : get(paths.changelog, JSON.parse)),
     // The CDN may retain an older bundle after the system disables it. The
@@ -185,21 +189,6 @@ export async function fetchDerivedLayer(publicBase, { fetchImpl = fetch } = {}) 
     concepts,
     changelog,
     bundle,
-  };
-}
-
-/** One-line readiness of a brand kit, for `doctor` and for a consumer deciding whether the kit is usable. */
-export function summarizeBrandKit(kit) {
-  if (!kit) return null;
-  const filled = Object.keys(kit.roles ?? {});
-  const missing = kit.missingRoles ?? [];
-  return {
-    version: kit.system?.version ?? null,
-    roles: { filled: filled.length, missing, total: filled.length + missing.length },
-    logos: (kit.logos ?? []).length,
-    primaryLogo: (kit.logos ?? []).find((logo) => logo.primary)?.name ?? null,
-    imagery: (kit.imagery ?? []).length,
-    guidance: Object.keys(kit.guidance ?? {}),
   };
 }
 
