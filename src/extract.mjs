@@ -50,6 +50,7 @@ import {
 import { robotsText } from "./agent-pointers.mjs";
 import { annotationFor, buildBrandKit } from "./brand.mjs";
 import { bundleOutputDirectory } from "./bundle.mjs";
+import { CONCEPT_USAGE } from "./concepts.mjs";
 import { designsDocument } from "./designs.mjs";
 import { CHANGELOG_OUTPUT_DIRECTORY } from "./changelog.mjs";
 import { describeFormatSize, formatsDocument } from "./formats.mjs";
@@ -302,6 +303,13 @@ function extractBlock(section, pageId, config, joinMedia, index, seenBlockIds, s
 
 export function extractPage(html, { pageId, url, config = normalizeMachineConfig(), joinMedia = (src) => ({ url: src }) } = {}) {
   const document = parseHtml(html);
+  // A concept placeholder may occur inside an authored guidance block. Keep
+  // its proposed colors, media and voice out of the approved brand guidance.
+  if (html.includes("data-concept-card")) {
+    for (const node of [document, ...walk(document)]) {
+      if (node.children) node.children = node.children.filter(child => !Object.hasOwn(child.attrs ?? {}, "data-concept-card"));
+    }
+  }
   const root = findRoot(document, config.root);
   const { title, eyebrow, lede } = pageHeader(root);
 
@@ -442,7 +450,7 @@ function llmsEssentials(kit, formats) {
  * given nothing else can still find the logo, the colors, the fonts, and the
  * business card's size, and follow a link only for the detail.
  */
-export function buildLlmsText(manifest, pages, { indexUrl, tokensUrl = null, brandUrl = null, designsUrl = null, formatsUrl = null, fullUrl = null, bundleUrl = null, changelogUrl = null, kit = null, formats = null } = {}) {
+export function buildLlmsText(manifest, pages, { indexUrl, tokensUrl = null, brandUrl = null, designsUrl = null, concepts = null, formatsUrl = null, fullUrl = null, bundleUrl = null, changelogUrl = null, kit = null, formats = null } = {}) {
   const lines = [`# ${manifest.name}`, ""];
   if (manifest.description) lines.push(`> ${manifest.description}`, "");
   lines.push(
@@ -454,11 +462,15 @@ export function buildLlmsText(manifest, pages, { indexUrl, tokensUrl = null, bra
   if (tokensUrl) lines.push(`Design tokens: ${tokensUrl} — every CSS custom property the pages load, resolved by scope.`);
   if (brandUrl) lines.push(`Brand kit: ${brandUrl} — role colors and fonts, logos, and imagery for on-brand production.`);
   if (formatsUrl) lines.push(`Asset formats: ${formatsUrl} — every print sheet and screen canvas with its size, bleed, and safe margin.`);
+  if (concepts) lines.push(`Brand concepts: ${concepts.url} — ${CONCEPT_USAGE}`);
   if (designsUrl) lines.push(`Website designs: ${designsUrl} — whole pages as HTML with JavaScript on the system's stylesheets, the reference a product port must match; each design's journeys list its screens in the order a visitor meets them.`);
   if (bundleUrl) lines.push(`Consumer bundle: ${bundleUrl} — the stylesheets, scripts, and assets a website loads from this system, each with its digest; a website pins the immutable copy it names under \`versioned\`.`);
   if (changelogUrl) lines.push(`Changelog: ${changelogUrl} — every release, newest first, with what changed in each; a product moving its pin reads the releases in between.`);
   lines.push("");
   lines.push(...llmsEssentials(kit, formats));
+  if (concepts?.count) {
+    lines.push("## Brand concepts", "", ...concepts.concepts.map(concept => `- [${concept.title}](${concept.markdownUrl}) (${concept.status})`), "");
+  }
   for (const view of [...new Set(pages.map((page) => page.view))]) {
     lines.push(`## ${view || "pages"}`, "");
     for (const page of pages.filter((page) => page.view === view)) {
@@ -623,7 +635,8 @@ export async function deriveTokensFromArtifact({ artifactRoot, manifest }) {
   } catch {
     return null;
   }
-  const harvested = await harvestStylesheets(await htmlPages(baseDirectory), baseDirectory, artifactRoot);
+  const pages = await htmlPages(baseDirectory, { skip: [path.join(baseDirectory, "concepts")] });
+  const harvested = await harvestStylesheets(pages, baseDirectory, artifactRoot);
   return buildTokensDocument({ manifest, stylesheets: harvested.stylesheets, records: harvested.records });
 }
 
@@ -642,7 +655,7 @@ export async function deriveTokensFromArtifact({ artifactRoot, manifest }) {
  * system keeps none; its page is history, not guidance, and is skipped by the
  * walk while its document is written beside index.json.
  */
-export async function extractArtifact({ artifactRoot, manifest, mediaCatalog = { assets: [] }, lineage = null, video = null, designs = null, formats = null, bundle = null, changelog = null, plannedPages = [], write = true }) {
+export async function extractArtifact({ artifactRoot, manifest, mediaCatalog = { assets: [] }, lineage = null, video = null, designs = null, concepts = null, formats = null, bundle = null, changelog = null, plannedPages = [], write = true }) {
   const config = normalizeMachineConfig(manifest.machine);
   if (!config.enabled) return { enabled: false, pages: [], written: [] };
 
@@ -672,6 +685,7 @@ export async function extractArtifact({ artifactRoot, manifest, mediaCatalog = {
   const written = [];
   const pageFiles = await htmlPages(baseDirectory, {
     skip: [
+      path.join(baseDirectory, "concepts"),
       ...(designs ? [path.join(artifactRoot, ...designs.outputDirectory.split("/"))] : []),
       path.join(artifactRoot, ...bundleOutputDirectory(manifest.artifact.entry).split("/")),
       // The changelog page is rendered whether or not the system keeps a changelog file this run; never guidance.
@@ -724,6 +738,7 @@ export async function extractArtifact({ artifactRoot, manifest, mediaCatalog = {
     // The asset format catalog, when the system keeps one: where it sits and how much it holds.
     ...(formatsDoc ? { formats: { url: formatsUrl, groups: formatsDoc.groupCount, count: formatsDoc.count } } : {}),
     // The website designs, when the system has any: where the document sits and how much it holds.
+    ...(concepts ? { concepts: { url: concepts.url, count: concepts.count, approved: concepts.approved } } : {}),
     ...(designsDoc ? { designs: { url: designsUrl, count: designsDoc.designCount, pages: designsDoc.pageCount, states: designsDoc.stateCount, journeys: designsDoc.journeyCount } } : {}),
     // The consumer bundle, when the manifest declares one: where its manifest sits and how much it holds.
     ...(bundle ? { bundle: { url: bundleUrl, files: bundle.fileCount ?? 0, bytes: bundle.bytes ?? 0 } } : {}),
@@ -744,7 +759,7 @@ export async function extractArtifact({ artifactRoot, manifest, mediaCatalog = {
     await fs.writeFile(indexPath, `${JSON.stringify(index, (key, value) => (key === "markdown" ? undefined : value), 2)}\n`);
     await fs.writeFile(tokensPath, `${JSON.stringify(tokens, null, 2)}\n`);
     await fs.writeFile(brandPath, `${JSON.stringify(brand, null, 2)}\n`);
-    await fs.writeFile(llmsPath, buildLlmsText(manifest, pages, { indexUrl: `${basePrefix}/index.json`, tokensUrl, brandUrl, designsUrl, formatsUrl, fullUrl, bundleUrl, changelogUrl, kit: brand, formats: formatsDoc }));
+    await fs.writeFile(llmsPath, buildLlmsText(manifest, pages, { indexUrl: `${basePrefix}/index.json`, tokensUrl, brandUrl, designsUrl, concepts, formatsUrl, fullUrl, bundleUrl, changelogUrl, kit: brand, formats: formatsDoc }));
     await fs.writeFile(llmsFullPath, buildLlmsFullText(manifest, pages));
     written.push(indexPath, tokensPath, brandPath, llmsPath, llmsFullPath);
     // A crawler reads robots.txt before anything else, so at the site root it
@@ -763,6 +778,13 @@ export async function extractArtifact({ artifactRoot, manifest, mediaCatalog = {
       written.push(formatsPath);
     } else {
       await fs.rm(path.join(baseDirectory, "formats.json"), { force: true });
+    }
+    const conceptsPath = path.join(baseDirectory, "concepts.json");
+    if (concepts) {
+      await fs.writeFile(conceptsPath, `${JSON.stringify(concepts, null, 2)}\n`);
+      written.push(conceptsPath);
+    } else {
+      await fs.rm(conceptsPath, { force: true });
     }
     if (designsDoc) {
       const designsPath = path.join(baseDirectory, "designs.json");
@@ -807,5 +829,5 @@ export async function extractArtifact({ artifactRoot, manifest, mediaCatalog = {
     ...(formatsResult?.warnings ?? []),
   ];
 
-  return { enabled: true, brand, bundle, changelog: changelogDoc, counts, designs: designsDoc, formats: formatsDoc, index, pages, tokens, warnings, written };
+  return { enabled: true, brand, bundle, changelog: changelogDoc, counts, concepts, designs: designsDoc, formats: formatsDoc, index, pages, tokens, warnings, written };
 }

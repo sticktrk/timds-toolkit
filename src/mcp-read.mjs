@@ -21,6 +21,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import * as z from "zod/v4";
 import { findRepositoryRoot, loadWorkspace, setOutputStream } from "./core.mjs";
 import { fetchDerivedLayer, readDerivedLayer, summarizeBrandKit } from "./derived.mjs";
+import { CONCEPT_USAGE } from "./concepts.mjs";
 import { DEFAULT_STATE, designsDirectory, findDesignPage } from "./designs.mjs";
 import { blockToMarkdown, pageToMarkdown } from "./extract.mjs";
 import { readMediaCatalog } from "./media.mjs";
@@ -133,6 +134,10 @@ use it to be on-brand.
   version. A website pins \`versioned\`, never \`directory\`, so a release
   cannot change it unseen; the \`bundle.json\` resource lists every file
   with its digest.
+
+## Brand concepts
+
+${CONCEPT_USAGE} Use \`list_concepts\` for the directions and \`read_concept\` for a direction or its mockup HTML.
 
 ## Website designs
 
@@ -474,6 +479,7 @@ export function registerDesignSystemReadTools(server, { resolveSystem, listSyste
       formats: layer.formats ? { count: layer.formats.count ?? 0, groups: (layer.formats.groups ?? []).map((group) => ({ id: group.id, unit: group.unit, count: group.formats?.length ?? 0 })) } : null,
       // What a website loads from the system, and the immutable copy it pins; null until the manifest declares a bundle.
       bundle: layer.bundle ? { url: layer.bundle.url, directory: layer.bundle.directory, versioned: layer.bundle.versioned ?? null, files: layer.bundle.fileCount ?? 0, bytes: layer.bundle.bytes ?? 0, paths: (layer.bundle.files ?? []).map((file) => file.path) } : null,
+      concepts: layer.concepts ? { count: layer.concepts.count, approved: layer.concepts.approved } : null,
       designs: layer.designs ? { count: layer.designs.designCount ?? 0, pages: layer.designs.pageCount ?? 0, states: layer.designs.stateCount ?? 0, journeys: layer.designs.journeyCount ?? 0, designs: designsDirectory(layer.designs).map(({ id, title, pageCount, journeys }) => ({ id, title, pageCount, journeyCount: journeys.length })) } : null,
       // The release history, when the system keeps a changelog: the latest version and the most recent releases with their notes.
       changelog: layer.changelog ? { url: layer.changelog.url, base: layer.changelog.base ?? null, latest: layer.changelog.latest ?? null, releases: layer.changelog.releaseCount ?? 0, recent: (layer.changelog.releases ?? []).slice(0, 5).map((release) => ({ version: release.version, date: release.date ?? null, notes: (release.entries ?? []).map((entry) => entry.area ? `${entry.area}: ${entry.text}` : entry.text) })) } : null,
@@ -616,6 +622,39 @@ export function registerDesignSystemReadTools(server, { resolveSystem, listSyste
       return { ...header, block: block.id, ...(format === "markdown" ? { markdown: blockToMarkdown(block) } : { blocks: [block] }) };
     }
     return { ...header, ...(format === "markdown" ? { markdown: pageToMarkdown(page) } : { blocks: page.blocks ?? [] }) };
+  });
+
+  tool("list_concepts", {
+    title: "List brand concepts",
+    annotations: READ_ONLY,
+    description: `List brand proposals with their id, title, reason, status and page. ${CONCEPT_USAGE}`,
+  }, async args => {
+    const resolved = await systemFor(args);
+    const document = resolved.layer.concepts;
+    const concepts = (document?.concepts ?? []).map(({ id, title, summary, status, url }) => ({ id, title, summary, status, url }));
+    return { system: systemStamp(resolved), base: document?.base ?? null, approved: document?.approved ?? null, total: concepts.length, concepts };
+  });
+
+  tool("read_concept", {
+    title: "Read a brand concept",
+    annotations: READ_ONLY,
+    description: `Read a proposal and its ordered pieces. Name an HTML piece by its file to read the mockup source. ${CONCEPT_USAGE}`,
+    inputSchema: {
+      concept: z.string().min(1).describe("Concept id from list_concepts"),
+      piece: z.string().min(1).optional().describe("The file name of an HTML piece"),
+    },
+  }, async args => {
+    const resolved = await systemFor(args);
+    const document = resolved.layer.concepts;
+    const concept = document?.concepts.find(entry => entry.id === args.concept);
+    if (!concept) throw new Error(`No concept ${JSON.stringify(args.concept)}; list_concepts shows the directory`);
+    const header = { system: systemStamp(resolved), base: document.base ?? null };
+    if (args.piece) {
+      const piece = concept.pieces.find(entry => entry.file === args.piece);
+      if (typeof piece?.html !== "string") throw new Error(`No HTML piece ${JSON.stringify(args.piece)} in concept ${concept.id}`);
+      return { ...header, concept: concept.id, file: piece.file, url: piece.url, html: piece.html };
+    }
+    return { ...header, concept: { ...concept, pieces: concept.pieces.map(({ html, ...metadata }) => metadata) } };
   });
 
   tool("list_designs", {

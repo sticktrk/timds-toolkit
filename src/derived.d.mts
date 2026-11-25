@@ -1,4 +1,5 @@
 /** The derived layer: generated, contract-shaped documents a consumer reads without TimDS internals. */
+import type { ConceptsDocument } from "./concepts.mjs";
 import type {RuntimeIdentity, RuntimeRequirements} from "./runtime.mjs";
 import type {VideoBoardCatalogSummary} from "./video-producer.mjs";
 import type {SystemLineage, ParentRecord} from "./offshoot-contract.mjs";
@@ -164,6 +165,7 @@ export type IndexDocument = {
   /** Present when the system keeps an asset format catalog: where formats.json sits and how much it holds. */
   formats?: { url: string; groups: number; count: number };
   /** Present when the system holds website designs: where designs.json sits and how much it holds. */
+  concepts?: { url: string; count: number; approved: string | null };
   designs?: { url: string; count: number; pages: number; states: number; journeys?: number };
   /** Present when the system keeps a CHANGELOG.md: where changelog.json sits, how many releases it lists, and the latest. */
   changelog?: { url: string; page: string; releases: number; latest: string | null };
@@ -375,13 +377,14 @@ export type DerivedLayer = {
   formats: FormatsDocument | null;
   /** Null for a system that designs no pages. */
   designs: DesignsDocument | null;
+  concepts: ConceptsDocument | null;
   /** Null for a system without a CHANGELOG.md. */
   changelog: ChangelogDocument | null;
   /** Null for a system whose manifest declares no `bundle`. */
   bundle: BundleDocument | null;
 };
 
-export type DerivedFileName = "index" | "tokens" | "brand" | "llms" | "llmsFull" | "formats" | "designs" | "changelog" | "bundle";
+export type DerivedFileName = "index" | "tokens" | "brand" | "llms" | "llmsFull" | "formats" | "designs" | "concepts" | "changelog" | "bundle";
 
 export type BrandKitSummary = {
   version: string | null;

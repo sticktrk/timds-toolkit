@@ -60,7 +60,7 @@ import {
   saveAccessToken,
 } from "./auth.mjs";
 import lockfile from "proper-lockfile";
-import { readConcept, readConceptCatalog } from "./concepts.mjs";
+import { buildConcepts, readConcept, readConceptCatalog, readConceptsDocument } from "./concepts.mjs";
 import { syncDefaults } from "./defaults.mjs";
 import { checkRuntimeDependencies, upgradeConsumerToRelease, upgradeToRelease } from "./upgrade.mjs";
 import { migrateVideoComponents } from "./video-migration.mjs";
@@ -644,7 +644,7 @@ async function buildWorkspaceBundle(workspace) {
 }
 
 /** Harvest the built artifact into its machine-readable companions. */
-export async function extractWorkspace(workspace, { write = true, changelog: renderedChangelog = undefined } = {}) {
+export async function extractWorkspace(workspace, { write = true, changelog: renderedChangelog = undefined, concepts: renderedConcepts = undefined } = {}) {
   const parentRecord = workspace.parentRecord === undefined ? await readParentRecord(workspace.designSystemRoot) : workspace.parentRecord;
   // The board catalog is client source outside the built artifact; the index
   // carries its summary so consumers can show the shelf without the repo.
@@ -657,6 +657,7 @@ export async function extractWorkspace(workspace, { write = true, changelog: ren
   if (contract) assertVideoContractRuntime(contract);
   // The designs are rendered again here rather than read back from dist, so
   // designs.json always matches the source whatever the build script wrote.
+  const concepts = renderedConcepts ?? await readConceptsDocument(workspace.designSystemRoot, workspace.manifest);
   const designs = await renderDesigns({ designSystemRoot: workspace.designSystemRoot, manifest: workspace.manifest });
   // The changelog is rendered for the same reason unless the caller just
   // built it; changelog.json carries the released history for a product moving its pin.
@@ -682,6 +683,7 @@ export async function extractWorkspace(workspace, { write = true, changelog: ren
     artifactRoot: path.join(workspace.designSystemRoot, "dist"),
     bundle,
     changelog,
+    concepts: concepts.document,
     designs,
     formats,
     plannedPages,
@@ -691,7 +693,7 @@ export async function extractWorkspace(workspace, { write = true, changelog: ren
     video: contract ? {runtime: contract.runtime ?? null, engine: {...runtimeIdentity}, ...(boards ? {boards: boardCatalogSummary(boards.catalog)} : {})} : null,
     write,
   });
-  return postingWarnings.length ? { ...extracted, warnings: [...(extracted.warnings ?? []), ...postingWarnings] } : extracted;
+  return { ...extracted, warnings: [...(extracted.warnings ?? []), ...postingWarnings, ...concepts.warnings] };
 }
 
 /**
@@ -729,6 +731,7 @@ async function checkStarterLevel(workspace) {
   try { site = JSON.parse(siteText); } catch { /* the workspace build reports an unreadable site model */ }
   for (const view of Array.isArray(site?.views) ? site.views : []) {
     const entry = viewerAppBarEntries.find(({ label }) => typeof view?.label === "string" && view.label.trim().toLowerCase() === label.toLowerCase());
+    if (view?.id === "concepts") throw new Error(`${STARTER_SITE_FILE} cannot declare the reserved concepts view`);
     if (entry) warnings.push(`${STARTER_SITE_FILE} labels the view ${view.id} "${view.label}", the same as the viewer's own ${entry.label} link to ${entry.href}, so the app bar shows two "${entry.label}" tabs; rename the view's label`);
   }
   // Below the floor the system still builds with what it has and stays
@@ -755,6 +758,7 @@ export async function checkWorkspace(repoRootInput, options = {}) {
   // Designs are derived output like the machine layer: written on every
   // check, after the workspace build and before anything reads dist.
   await buildWorkspaceDesigns(workspace);
+  const concepts = await buildConcepts(workspace.designSystemRoot, { manifest: workspace.manifest });
   const changelog = await buildWorkspaceChangelog(workspace);
   if (!options.skipBuild) await runWorkspaceCommand(workspace, "check");
   const designs = await checkDesigns({ designSystemRoot: workspace.designSystemRoot, manifest: workspace.manifest });
@@ -763,7 +767,7 @@ export async function checkWorkspace(repoRootInput, options = {}) {
   const bundle = await buildWorkspaceBundle(workspace);
   // Machine artifacts are part of the published artifact, so they are written
   // before validation counts and links the files.
-  const machine = await extractWorkspace(workspace, { changelog: changelog.rendered });
+  const machine = await extractWorkspace(workspace, { changelog: changelog.rendered, concepts });
   machine.warnings = [...(machine.warnings || []), ...offshoot.warnings, ...starter.warnings];
   const artifact = await validateArtifact(workspace.designSystemRoot, workspace.manifest);
   const video = workspace.manifest.video ? await checkVideoWorkspace(workspace) : null;
@@ -2925,9 +2929,10 @@ export async function runCli(argv) {
     const workspace = await loadWorkspace(root);
     if (!options.skipBuild) await runWorkspaceCommand(workspace, "build");
     await buildWorkspaceDesigns(workspace);
+    const concepts = await buildConcepts(workspace.designSystemRoot, { manifest: workspace.manifest });
     const changelog = await buildWorkspaceChangelog(workspace);
     await buildWorkspaceBundle(workspace);
-    const result = await extractWorkspace(workspace, { changelog: changelog.rendered });
+    const result = await extractWorkspace(workspace, { changelog: changelog.rendered, concepts });
     if (!result.enabled) {
       if (options.publish) throw new Error("Cannot publish the machine index: extraction is disabled by timds.json machine.enabled");
       output("Machine extraction is disabled by timds.json machine.enabled.");
@@ -2947,6 +2952,7 @@ export async function runCli(argv) {
       if (published.brandUrl) output(`Published brand kit: ${published.brandUrl}`);
       if (published.formatsUrl) output(`Published asset formats: ${published.formatsUrl}`);
       if (published.llmsUrl) output(`Published agent docs: ${published.llmsUrl} (+${published.docCount} page mirrors${published.llmsFullUrl ? ", llms-full.txt" : ""})`);
+      if (published.conceptsUrl) output(`Published brand concepts: ${published.conceptsUrl}`);
       if (published.designsUrl) output(`Published website designs: ${published.designsUrl}`);
       if (published.changelogUrl) output(`Published changelog: ${published.changelogUrl}`);
       if (published.bundleUrl) output(`Published consumer bundle: ${published.bundleUrl} (${published.bundleFiles} file${published.bundleFiles === 1 ? "" : "s"}; pinned copy at ${published.bundleVersionedUrl})`);

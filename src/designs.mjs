@@ -336,7 +336,7 @@ function resolveJourney(journey, pages, basePrefix, designId, prefixDirectory) {
 
 const plural = (count, noun) => `${count} ${noun}${count === 1 ? "" : "s"}`;
 
-function toolkitPage({ title, basePrefix, stylesheets, bodyClass, body }) {
+export function toolkitPage({ title, basePrefix, stylesheets, bodyClass, body, directoryStylesheet = `${basePrefix}/${DESIGNS_OUTPUT_DIRECTORY}/_directory.css` }) {
   return [
     "<!doctype html>",
     '<html lang="en">',
@@ -345,7 +345,7 @@ function toolkitPage({ title, basePrefix, stylesheets, bodyClass, body }) {
     '    <meta name="viewport" content="width=device-width, initial-scale=1">',
     `    <title>${title}</title>`,
     ...stylesheets.map((href) => `    <link rel="stylesheet" href="${escapeHtml(href)}">`),
-    `    <link rel="stylesheet" href="${basePrefix}/${DESIGNS_OUTPUT_DIRECTORY}/_directory.css">`,
+    `    <link rel="stylesheet" href="${escapeHtml(directoryStylesheet)}">`,
     ...agentPointerHead(basePrefix),
     "  </head>",
     `  <body class="${bodyClass}">`,
