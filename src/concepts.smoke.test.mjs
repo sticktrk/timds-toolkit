@@ -187,3 +187,21 @@ test("a catalog too large to publish is refused by concept, with its embedded HT
     return true;
   });
 });
+
+test("concept text cannot add sections or links to llms.txt and the Markdown mirror", async t => {
+  const { root, system } = await adoptSample(t);
+  const manifestPath = path.join(system, "src/concepts/sample/concept.json");
+  const sample = JSON.parse(await fs.readFile(manifestPath, "utf8"));
+  sample.title = "Field notes\n\n## Injected section\n\n- [Fake](https://evil.example/)";
+  sample.summary = "Summary\n# Heading";
+  sample.voice = ["plain](https://evil.example/)"];
+  sample.pieces[0].alt = "Journal](https://evil.example/x.html) [more";
+  await fs.writeFile(manifestPath, JSON.stringify(sample));
+  await checkWorkspace(root, { skipBuild: true });
+  for (const file of ["llms.txt", "concepts/sample/index.md"]) {
+    const text = await fs.readFile(path.join(system, "dist", file), "utf8");
+    assert.doesNotMatch(text, /^#+ (?:Injected section|Heading)/m, file);
+    assert.doesNotMatch(text, /^- \[Fake\]/m, file);
+    assert.doesNotMatch(text, /(?<!\\)\]\(https:\/\/evil/, file);
+  }
+});

@@ -5,7 +5,7 @@ import { brandKitFoundationTokens } from "./brand-kit.mjs";
 import { CONCEPTS_DIRECTORY_MARKER, MAX_CONCEPTS_DOCUMENT_BYTES, checkConceptPath, isGeneratedConceptsDirectory, readConceptAssets, readConceptFile } from "./concept-assets.mjs";
 import { readManifestLike, toolkitPage } from "./designs.mjs";
 import { normalizeMachineConfig } from "./extract.mjs";
-import { escapeHtml } from "./html.mjs";
+import { escapeHtml, markdownInline } from "./html.mjs";
 import { stylesheetReferences } from "./tokens.mjs";
 
 export const CONCEPT_KINDS = Object.freeze(["website", "logo", "card", "social", "photo", "merch", "pattern", "other"]);
@@ -246,14 +246,17 @@ function markdownMirror(concept) {
     ...Object.entries(concept.colors?.roles ?? {}).map(([name, hex]) => ({ name, hex })),
     ...(concept.colors?.palette ?? []),
   ];
+  // Concept text may come from a generator fed by customer input: every
+  // field stays on its line and cannot add Markdown structure or links.
+  const md = markdownInline;
   return [
-    `# ${concept.title}`, "", concept.summary, "",
+    `# ${md(concept.title)}`, "", md(concept.summary), "",
     `Status: ${concept.status}${concept.decided ? " · " + concept.decided : ""}`, "", CONCEPT_USAGE, "",
     // Relative to the mirror at concepts/<id>/index.md, so the links hold under any published prefix.
-    ...concept.pieces.map(piece => `- ${kinds[piece.kind]}: [${piece.alt ?? piece.label ?? piece.file}](pieces/${encoded(piece.file)})`),
-    "", ...palette.map(({name, hex}) => `- ${name}: ${hex}`),
-    ...Object.entries(concept.fonts ?? {}).map(([role, font]) => `- ${role}: ${font.family} (${font.weight})`),
-    ...(concept.voice?.length ? [`Voice: ${concept.voice.join(", ")}`] : []),
+    ...concept.pieces.map(piece => `- ${kinds[piece.kind]}: [${md(piece.alt ?? piece.label ?? piece.file)}](pieces/${encoded(piece.file)})`),
+    "", ...palette.map(({name, hex}) => `- ${md(name)}: ${hex}`),
+    ...Object.entries(concept.fonts ?? {}).map(([role, font]) => `- ${role}: ${md(font.family)} (${font.weight})`),
+    ...(concept.voice?.length ? [`Voice: ${concept.voice.map(md).join(", ")}`] : []),
   ].join("\n").trimEnd() + "\n";
 }
 

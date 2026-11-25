@@ -41,6 +41,7 @@ import {
   findAll,
   findOne,
   hasClass,
+  markdownInline,
   parseHtml,
   rawTextOf,
   slugify,
@@ -470,7 +471,8 @@ export function buildLlmsText(manifest, pages, { indexUrl, tokensUrl = null, bra
   lines.push("");
   lines.push(...llmsEssentials(kit, formats));
   if (concepts?.count) {
-    lines.push("## Brand concepts", "", ...concepts.concepts.map(concept => `- [${concept.title}](${concept.markdownUrl}) (${concept.status})`), "");
+    // Concept titles may be generated from customer input; keep each on its line as link text.
+    lines.push("## Brand concepts", "", ...concepts.concepts.map(concept => `- [${markdownInline(concept.title)}](${concept.markdownUrl}) (${concept.status})`), "");
   }
   for (const view of [...new Set(pages.map((page) => page.view))]) {
     lines.push(`## ${view || "pages"}`, "");
