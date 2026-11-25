@@ -1,4 +1,4 @@
-// Handles the design’s marked contact forms, as documented in docs/emdash-handover.md.
+// Handles the design's marked contact forms, as documented in docs/emdash-handover.md.
 import { contactPost } from "../lib/contact/handler";
 
 export const POST = contactPost;
