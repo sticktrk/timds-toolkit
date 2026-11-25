@@ -32,6 +32,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { parentLineage, readParentRecord } from "./offshoot-contract.mjs";
+export { summarizeBrandKit } from "./read-documents.mjs";
 
 export const DERIVED_LAYER_FILES = Object.freeze({
   index: "index.json",
@@ -180,21 +181,6 @@ export async function fetchDerivedLayer(publicBase, { fetchImpl = fetch } = {}) 
     designs,
     changelog,
     bundle,
-  };
-}
-
-/** One-line readiness of a brand kit, for `doctor` and for a consumer deciding whether the kit is usable. */
-export function summarizeBrandKit(kit) {
-  if (!kit) return null;
-  const filled = Object.keys(kit.roles ?? {});
-  const missing = kit.missingRoles ?? [];
-  return {
-    version: kit.system?.version ?? null,
-    roles: { filled: filled.length, missing, total: filled.length + missing.length },
-    logos: (kit.logos ?? []).length,
-    primaryLogo: (kit.logos ?? []).find((logo) => logo.primary)?.name ?? null,
-    imagery: (kit.imagery ?? []).length,
-    guidance: Object.keys(kit.guidance ?? {}),
   };
 }
 
