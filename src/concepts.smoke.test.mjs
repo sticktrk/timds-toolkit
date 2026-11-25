@@ -165,3 +165,25 @@ test("a starter view labelled Concepts is flagged only while the viewer shows a 
   await fs.rm(path.join(root, "src/concepts"), { recursive: true });
   assert.deepEqual(twoTabs(await checkWorkspace(root)), []);
 });
+
+test("a catalog too large to publish is refused by concept, with its embedded HTML", async t => {
+  const { root, system } = await adoptSample(t, { sample: false });
+  const filler = "<p>" + "x".repeat(480_000) + "</p>";
+  for (const id of ["heavy-a", "heavy-b"]) {
+    const folder = path.join(system, "src/concepts", id);
+    await fs.mkdir(folder, { recursive: true });
+    const pieces = [];
+    for (let i = 0; i < 13; i += 1) {
+      await fs.writeFile(path.join(folder, `page-${i}.html`), filler);
+      pieces.push({ kind: "website", file: `page-${i}.html` });
+    }
+    await fs.writeFile(path.join(folder, "concept.json"), JSON.stringify({ schemaVersion: 1, title: id, summary: "Heavy.", pieces }));
+  }
+  await assert.rejects(checkWorkspace(root, { skipBuild: true }), error => {
+    assert.match(error.message, /concepts\.json/);
+    assert.match(error.message, /heavy-a: [\d,]+ bytes of embedded HTML/);
+    assert.match(error.message, /heavy-b: [\d,]+ bytes of embedded HTML/);
+    assert.match(error.message, /fewer or smaller HTML pieces/);
+    return true;
+  });
+});

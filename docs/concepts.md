@@ -25,7 +25,7 @@ Optional fields record the proposal's foundations:
 - `fonts` names display, body and optional label faces with a family and weight. `voice` is an array of short phrases.
 - Each piece has a `kind` and local `file`, with optional `alt`, `caption`, `label`, `side`, `ground` or `height`. Give images alt text that describes the piece.
 
-The supported kinds are website, logo, card, social, photo, merch, pattern and other. Keep HTML, CSS, SVG, PNG, JPEG, WebP and WOFF2 assets in the concept folder. A concept accepts up to 60 pieces, with at most 512 KiB per HTML mockup and 8 MiB per image. References stay inside the folder, and previews run in script-free sandboxed frames. A concept can use its own colors and styles.
+The supported kinds are website, logo, card, social, photo, merch, pattern and other. Keep HTML, CSS, SVG, PNG, JPEG, WebP and WOFF2 assets in the concept folder. A concept accepts up to 60 pieces, with at most 512 KiB per HTML mockup and 8 MiB per image. `concepts.json` embeds the HTML of every HTML piece in every concept, including archived ones, so the whole catalog must stay within 11,997,952 bytes as `check` writes it: the 12,000,000-byte artifact file limit, less 2,048 bytes kept for the base URL publication adds. A published `concepts.json` is never larger than 12,000,000 bytes. `check` refuses a larger catalog and lists how many bytes of embedded HTML each concept contributes; use fewer or smaller HTML pieces, show a page as an image, or remove a direction you no longer need. References stay inside the folder, and previews run in script-free sandboxed frames. A concept can use its own colors and styles.
 
 ## Review and reference
 

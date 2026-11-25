@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { brandKitFoundationTokens } from "./brand-kit.mjs";
-import { CONCEPTS_DIRECTORY_MARKER, checkConceptPath, isGeneratedConceptsDirectory, readConceptAssets, readConceptFile } from "./concept-assets.mjs";
+import { CONCEPTS_DIRECTORY_MARKER, MAX_CONCEPTS_DOCUMENT_BYTES, checkConceptPath, isGeneratedConceptsDirectory, readConceptAssets, readConceptFile } from "./concept-assets.mjs";
 import { readManifestLike, toolkitPage } from "./designs.mjs";
 import { normalizeMachineConfig } from "./extract.mjs";
 import { escapeHtml } from "./html.mjs";
@@ -219,7 +219,26 @@ async function prepareSection(root, suppliedManifest) {
     schemaVersion: 1, system: { id: manifest.systemId, name: manifest.name, version: manifest.version },
     url: basePrefix + "/concepts.json", base: null, usage: CONCEPT_USAGE, count: concepts.length, approved, concepts,
   };
+  checkCatalogSize(document);
   return { document, warnings: catalog.warnings, base, basePrefix, entry, machine, files: catalog.files };
+}
+
+const grouped = value => value.toLocaleString("en-US");
+
+// Measured as extract writes the file, so check refuses what validation and
+// publication would refuse later, naming the concepts that fill it.
+function checkCatalogSize(document) {
+  const size = Buffer.byteLength(`${JSON.stringify(document, null, 2)}\n`);
+  if (size <= MAX_CONCEPTS_DOCUMENT_BYTES) return;
+  const embedded = document.concepts
+    .map(concept => ({ id: concept.id, bytes: concept.pieces.reduce((sum, piece) => sum + (piece.html === undefined ? 0 : Buffer.byteLength(JSON.stringify(piece.html))), 0) }))
+    .filter(entry => entry.bytes)
+    .sort((a, b) => b.bytes - a.bytes || a.id.localeCompare(b.id, "en"));
+  throw new Error([
+    `src/concepts: concepts.json would be ${grouped(size)} bytes, over its ${grouped(MAX_CONCEPTS_DOCUMENT_BYTES)}-byte limit. It embeds every HTML piece:`,
+    ...embedded.map(entry => `- ${entry.id}: ${grouped(entry.bytes)} bytes of embedded HTML`),
+    "Use fewer or smaller HTML pieces: show a page as an image, or remove a direction you no longer need (archived directions are still published).",
+  ].join("\n"));
 }
 
 function markdownMirror(concept) {

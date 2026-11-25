@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { MAX_ARTIFACT_FILES, MAX_ARTIFACT_TOTAL_BYTES } from "./artifact-files.mjs";
+import { MAX_ARTIFACT_FILE_BYTES, MAX_ARTIFACT_FILES, MAX_ARTIFACT_TOTAL_BYTES } from "./artifact-files.mjs";
 import { parse as parseHtml } from "parse5";
 import * as css from "css-tree";
 import { SaxesParser } from "saxes";
@@ -11,6 +11,14 @@ const urlAttributes = new Set(["src", "href", "poster", "background", "action", 
 const svg = "http://www.w3.org/2000/svg";
 const utf8 = new TextDecoder("utf-8", { fatal: true });
 const limit = extension => [".html", ".css"].includes(extension) ? 512 * 1024 : 8 * 1024 * 1024;
+
+// concepts.json embeds every HTML piece, so the catalog as a whole must fit
+// one artifact file. Publication replaces `"base": null` with the quoted CDN
+// base, so check keeps this much of the file limit free for it; publication
+// refuses a base longer than that. A published catalog is therefore at most
+// MAX_ARTIFACT_FILE_BYTES (12,000,000) bytes.
+export const CONCEPTS_BASE_RESERVE = 2_048;
+export const MAX_CONCEPTS_DOCUMENT_BYTES = MAX_ARTIFACT_FILE_BYTES - CONCEPTS_BASE_RESERVE;
 
 // The first line of the concept directory page TimDS writes. Only a
 // directory carrying it is the toolkit's: a system with no src/concepts/

@@ -65,7 +65,7 @@ export const artifactContentType = (file) =>
 
 const sha256Of = (data) => createHash("sha256").update(data).digest("hex");
 
-import { collectArtifactFiles } from "./artifact-files.mjs";
+import { MAX_ARTIFACT_FILE_BYTES, collectArtifactFiles } from "./artifact-files.mjs";
 import { eachBrandKitMedia } from "./brand.mjs";
 import { bundleManifestPublishPaths, bundlePublishPaths, rewriteBundleForPublish } from "./bundle.mjs";
 import { eachDesignReference } from "./designs.mjs";
@@ -480,6 +480,11 @@ export async function publishExtractedIndex(workspace, options = {}) {
   const formatsSource = index.formats ? await fs.readFile(path.join(artifactRoot, ...formatsRelative.split("/")), "utf8").catch(() => null) : null;
   const formats = formatsSource === null ? null : rewriteFormatsForPublish(JSON.parse(formatsSource), publicBase);
 
+  // check bounds the catalog with room for the base; a published catalog never exceeds one artifact file.
+  const conceptsBody = concepts === null ? null : Buffer.from(`${JSON.stringify({ ...concepts, base: publicBase }, null, 2)}\n`);
+  if (conceptsBody && conceptsBody.length > MAX_ARTIFACT_FILE_BYTES) {
+    throw new Error(`${conceptsRelative} would be ${conceptsBody.length} bytes with the base ${publicBase}, over the ${MAX_ARTIFACT_FILE_BYTES}-byte artifact file limit`);
+  }
   const staging = await fs.mkdtemp(path.join(os.tmpdir(), "timds-artifact-"));
   try {
     const rewritten = rewriteIndexForPublish(index, files, publicBase);
@@ -503,7 +508,7 @@ export async function publishExtractedIndex(workspace, options = {}) {
         : [{ body: Buffer.from(`${JSON.stringify({ ...designs, base: publicBase }, null, 2)}\n`), contentType: "application/json", path: designsRelative }]),
       ...(concepts === null
         ? []
-        : [{ body: Buffer.from(`${JSON.stringify({ ...concepts, base: publicBase }, null, 2)}\n`), contentType: "application/json", path: conceptsRelative }]),
+        : [{ body: conceptsBody, contentType: "application/json", path: conceptsRelative }]),
       ...(changelog === null
         ? []
         : [{ body: Buffer.from(`${JSON.stringify({ ...changelog, base: publicBase }, null, 2)}\n`), contentType: "application/json", path: changelogRelative }]),
