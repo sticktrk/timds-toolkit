@@ -729,8 +729,13 @@ async function checkStarterLevel(workspace) {
   if (siteText === null) return { status: null, warnings };
   let site = null;
   try { site = JSON.parse(siteText); } catch { /* the workspace build reports an unreadable site model */ }
+  // The viewer adds its Concepts tab only while src/concepts/ exists or the
+  // system is a brand kit (src/viewer.mjs hasConcepts); without it no label clashes.
+  const starterRecord = await fs.readFile(path.join(workspace.designSystemRoot, ".timds/starter.json"), "utf8").then(JSON.parse).catch(() => null);
+  const showsConcepts = starterRecord?.starter === "brand-kit" || existsSync(path.join(workspace.designSystemRoot, "src", "concepts"));
+  const appBar = viewerAppBarEntries.filter(({ href }) => href !== "/concepts/" || showsConcepts);
   for (const view of Array.isArray(site?.views) ? site.views : []) {
-    const entry = viewerAppBarEntries.find(({ label }) => typeof view?.label === "string" && view.label.trim().toLowerCase() === label.toLowerCase());
+    const entry = appBar.find(({ label }) => typeof view?.label === "string" && view.label.trim().toLowerCase() === label.toLowerCase());
     if (view?.id === "concepts") throw new Error(`${STARTER_SITE_FILE} cannot declare the reserved concepts view`);
     if (entry) warnings.push(`${STARTER_SITE_FILE} labels the view ${view.id} "${view.label}", the same as the viewer's own ${entry.label} link to ${entry.href}, so the app bar shows two "${entry.label}" tabs; rename the view's label`);
   }

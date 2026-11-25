@@ -11,7 +11,7 @@ import { checkWorkspace, initializeRepository } from "./core.mjs";
 const sampleConcept = fileURLToPath(new URL("../templates/starter/src/concepts/sample", import.meta.url));
 
 // A custom (non-starter) workspace that already passes check, given the stock sample concept.
-async function adoptSample(t, { entry = "index.html", machine } = {}) {
+async function adoptSample(t, { entry = "index.html", machine, sample = true, before = async () => {} } = {}) {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "timds-concept-adoption-")));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   execFileSync("git", ["init", "-q", "-b", "main", root]);
@@ -27,8 +27,9 @@ async function adoptSample(t, { entry = "index.html", machine } = {}) {
   await fs.writeFile(path.join(system, "tokens.json"), "{}");
   await fs.writeFile(path.join(system, "dist", ...entry.split("/")), `<link rel="stylesheet" href="${prefix}/assets/site.css"><main>Ready</main>`);
   await fs.writeFile(path.join(system, "dist", ...prefix.split("/").filter(Boolean), "assets", "site.css"), "body{color:#123}\n");
+  await before(system);
   await checkWorkspace(root, { skipBuild: true });
-  await fs.cp(sampleConcept, path.join(system, "src/concepts/sample"), { recursive: true });
+  if (sample) await fs.cp(sampleConcept, path.join(system, "src/concepts/sample"), { recursive: true });
   return { root, system, prefix };
 }
 
@@ -135,4 +136,32 @@ test("published concept pages and mirrors navigate within a path-prefixed artifa
   const links = [...uploaded.get(mirror).matchAll(/\]\(([^)]+)\)/g)].map(match => match[1]);
   assert.ok(links.length);
   for (const key of follow(mirror, links)) assert.ok(uploaded.has(decodeURIComponent(key)), `${mirror} links ${key}, which was not published`);
+});
+
+test("a system without concepts keeps its own concepts route in the artifact and the machine layer", async t => {
+  const own = "<main><h1>Our concepts</h1><section><h2>Sketches</h2><p>How we sketch.</p></section></main>";
+  const { root, system } = await adoptSample(t, { sample: false, before: async system => {
+    await fs.mkdir(path.join(system, "dist/concepts"), { recursive: true });
+    await fs.writeFile(path.join(system, "dist/concepts/index.html"), own);
+  } });
+  await checkWorkspace(root, { skipBuild: true });
+  assert.equal(await fs.readFile(path.join(system, "dist/concepts/index.html"), "utf8"), own);
+  assert.ok(JSON.parse(await fs.readFile(path.join(system, "dist/index.json"), "utf8")).pages.some(page => page.id === "concepts"));
+  assert.match(await fs.readFile(path.join(system, "dist/llms.txt"), "utf8"), /Our concepts/);
+  await assert.rejects(fs.access(path.join(system, "dist/concepts.json")), { code: "ENOENT" });
+});
+
+test("a starter view labelled Concepts is flagged only while the viewer shows a Concepts tab", async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "timds-concept-label-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  execFileSync("git", ["init", "-q", "-b", "main", root]);
+  await initializeRepository(root, { standalone: true });
+  const sitePath = path.join(root, "src/site.json");
+  const site = JSON.parse(await fs.readFile(sitePath, "utf8"));
+  site.views[1].label = "Concepts";
+  await fs.writeFile(sitePath, JSON.stringify(site, null, 2));
+  const twoTabs = result => result.machine.warnings.filter(warning => /two "Concepts" tabs/.test(warning));
+  assert.equal(twoTabs(await checkWorkspace(root)).length, 1);
+  await fs.rm(path.join(root, "src/concepts"), { recursive: true });
+  assert.deepEqual(twoTabs(await checkWorkspace(root)), []);
 });

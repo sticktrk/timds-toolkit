@@ -50,6 +50,7 @@ import {
 import { robotsText } from "./agent-pointers.mjs";
 import { annotationFor, buildBrandKit } from "./brand.mjs";
 import { bundleOutputDirectory } from "./bundle.mjs";
+import { isGeneratedConceptsDirectory } from "./concept-assets.mjs";
 import { CONCEPT_USAGE } from "./concept-read-tools.mjs";
 import { designsDocument } from "./designs.mjs";
 import { CHANGELOG_OUTPUT_DIRECTORY } from "./changelog.mjs";
@@ -635,7 +636,9 @@ export async function deriveTokensFromArtifact({ artifactRoot, manifest }) {
   } catch {
     return null;
   }
-  const pages = await htmlPages(baseDirectory, { skip: [path.join(baseDirectory, "concepts")] });
+  // Skip the concept section TimDS renders, never a system's own concepts/ pages.
+  const conceptsDirectory = path.join(baseDirectory, "concepts");
+  const pages = await htmlPages(baseDirectory, { skip: await isGeneratedConceptsDirectory(conceptsDirectory) ? [conceptsDirectory] : [] });
   const harvested = await harvestStylesheets(pages, baseDirectory, artifactRoot);
   return buildTokensDocument({ manifest, stylesheets: harvested.stylesheets, records: harvested.records });
 }
@@ -683,9 +686,11 @@ export async function extractArtifact({ artifactRoot, manifest, mediaCatalog = {
 
   const pages = [];
   const written = [];
+  const conceptsDirectory = path.join(baseDirectory, "concepts");
   const pageFiles = await htmlPages(baseDirectory, {
     skip: [
-      path.join(baseDirectory, "concepts"),
+      // The concept section TimDS renders is not guidance; a system's own concepts/ pages are.
+      ...(await isGeneratedConceptsDirectory(conceptsDirectory) ? [conceptsDirectory] : []),
       ...(designs ? [path.join(artifactRoot, ...designs.outputDirectory.split("/"))] : []),
       path.join(artifactRoot, ...bundleOutputDirectory(manifest.artifact.entry).split("/")),
       // The changelog page is rendered whether or not the system keeps a changelog file this run; never guidance.
