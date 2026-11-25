@@ -35,6 +35,21 @@ export async function isGeneratedConceptsDirectory(directory) {
   return index.includes(CONCEPTS_DIRECTORY_MARKER);
 }
 
+/**
+ * Whether `file` (dist/<base>/concepts.json) is a catalog TimDS derived, by
+ * its shape: a system without concepts keeps a concepts.json of its own.
+ */
+export async function isGeneratedConceptsCatalog(file) {
+  const text = await fs.readFile(file, "utf8").catch(error => {
+    if (["ENOENT", "ENOTDIR", "EISDIR"].includes(error.code)) return null;
+    throw error;
+  });
+  let catalog = null;
+  try { catalog = text === null ? null : JSON.parse(text); } catch { return false; }
+  return Boolean(catalog) && catalog.schemaVersion === 1 && typeof catalog.usage === "string"
+    && Array.isArray(catalog.concepts) && Object.hasOwn(catalog, "approved") && Object.hasOwn(catalog, "system");
+}
+
 export function checkConceptPath(file) {
   if (typeof file !== "string" || !file || file.split("/").some(part => !/^[\p{L}\p{N}_-][\p{L}\p{N} ._-]*$/u.test(part) || part.endsWith(".") || part.endsWith(" "))) {
     throw new Error("expected a relative file inside the concept folder");

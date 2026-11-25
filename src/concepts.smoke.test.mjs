@@ -11,7 +11,7 @@ import { checkWorkspace, initializeRepository } from "./core.mjs";
 const sampleConcept = fileURLToPath(new URL("../templates/starter/src/concepts/sample", import.meta.url));
 
 // A custom (non-starter) workspace that already passes check, given the stock sample concept.
-async function adoptSample(t, { entry = "index.html", machine, sample = true, before = async () => {} } = {}) {
+async function adoptSample(t, { entry = "index.html", machine, bundle, sample = true, before = async () => {} } = {}) {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "timds-concept-adoption-")));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   execFileSync("git", ["init", "-q", "-b", "main", root]);
@@ -23,6 +23,7 @@ async function adoptSample(t, { entry = "index.html", machine, sample = true, be
   await fs.writeFile(path.join(system, "timds.json"), JSON.stringify({
     artifact: { entry }, name: "Adopting System", schemaVersion: 2, systemId: "test/adopting", version: "1.0.0", workspace: {},
     ...(machine === undefined ? {} : { machine }),
+    ...(bundle === undefined ? {} : { bundle }),
   }));
   await fs.writeFile(path.join(system, "tokens.json"), "{}");
   await fs.writeFile(path.join(system, "dist", ...entry.split("/")), `<link rel="stylesheet" href="${prefix}/assets/site.css"><main>Ready</main>`);
@@ -140,15 +141,18 @@ test("published concept pages and mirrors navigate within a path-prefixed artifa
 
 test("a system without concepts keeps its own concepts route in the artifact and the machine layer", async t => {
   const own = "<main><h1>Our concepts</h1><section><h2>Sketches</h2><p>How we sketch.</p></section></main>";
-  const { root, system } = await adoptSample(t, { sample: false, before: async system => {
+  const ownCatalog = '{"sketches":["one"]}\n';
+  const { root, system } = await adoptSample(t, { sample: false, bundle: { include: ["dist/concepts/index.html", "dist/concepts.json"] }, before: async system => {
     await fs.mkdir(path.join(system, "dist/concepts"), { recursive: true });
     await fs.writeFile(path.join(system, "dist/concepts/index.html"), own);
+    await fs.writeFile(path.join(system, "dist/concepts.json"), ownCatalog);
   } });
-  await checkWorkspace(root, { skipBuild: true });
+  const result = await checkWorkspace(root, { skipBuild: true });
   assert.equal(await fs.readFile(path.join(system, "dist/concepts/index.html"), "utf8"), own);
+  assert.equal(await fs.readFile(path.join(system, "dist/concepts.json"), "utf8"), ownCatalog);
+  assert.deepEqual(result.bundle.document.files.map(file => file.path).sort(), ["dist/concepts.json", "dist/concepts/index.html"]);
   assert.ok(JSON.parse(await fs.readFile(path.join(system, "dist/index.json"), "utf8")).pages.some(page => page.id === "concepts"));
   assert.match(await fs.readFile(path.join(system, "dist/llms.txt"), "utf8"), /Our concepts/);
-  await assert.rejects(fs.access(path.join(system, "dist/concepts.json")), { code: "ENOENT" });
 });
 
 test("a starter view labelled Concepts is flagged only while the viewer shows a Concepts tab", async t => {

@@ -39,6 +39,7 @@ import path from "node:path";
 
 import { POSTING_SOURCE_FILE } from "./posting.mjs";
 import { WORKSPACE_SITE_DIRECTORY, findWorkspaceSite } from "./workspace-site.mjs";
+import { isGeneratedConceptsCatalog, isGeneratedConceptsDirectory } from "./concept-assets.mjs";
 
 export const BUNDLE_SCHEMA_VERSION = 1;
 export const BUNDLE_OUTPUT_DIRECTORY = "bundle";
@@ -119,8 +120,11 @@ export async function collectBundleFiles(designSystemRoot, config, { outputDirec
   // A broad include can select built stylesheets but never a proposal's source,
   // rendered section or derived catalog, including with a nested artifact entry.
   const artifactEntryDir = ownOutput ? path.posix.dirname(ownOutput) : "dist";
-  const conceptSection = path.posix.join(artifactEntryDir, "concepts");
-  const conceptCatalog = path.posix.join(artifactEntryDir, "concepts.json");
+  // Only what TimDS rendered: a system without concepts may bundle its own files at those paths.
+  const conceptSectionPath = path.posix.join(artifactEntryDir, "concepts");
+  const conceptCatalogPath = path.posix.join(artifactEntryDir, "concepts.json");
+  const conceptSection = await isGeneratedConceptsDirectory(path.join(designSystemRoot, ...conceptSectionPath.split("/"))) ? conceptSectionPath : null;
+  const conceptCatalog = await isGeneratedConceptsCatalog(path.join(designSystemRoot, ...conceptCatalogPath.split("/"))) ? conceptCatalogPath : null;
   const siteDirectory = findWorkspaceSite(designSystemRoot) ? WORKSPACE_SITE_DIRECTORY : null;
   const found = [];
   const skipped = [];

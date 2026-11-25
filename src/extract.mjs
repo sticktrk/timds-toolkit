@@ -51,7 +51,7 @@ import {
 import { robotsText } from "./agent-pointers.mjs";
 import { annotationFor, buildBrandKit } from "./brand.mjs";
 import { bundleOutputDirectory } from "./bundle.mjs";
-import { isGeneratedConceptsDirectory } from "./concept-assets.mjs";
+import { isGeneratedConceptsCatalog, isGeneratedConceptsDirectory } from "./concept-assets.mjs";
 import { CONCEPT_USAGE } from "./concept-read-tools.mjs";
 import { designsDocument } from "./designs.mjs";
 import { CHANGELOG_OUTPUT_DIRECTORY } from "./changelog.mjs";
@@ -790,7 +790,8 @@ export async function extractArtifact({ artifactRoot, manifest, mediaCatalog = {
     if (concepts) {
       await fs.writeFile(conceptsPath, `${JSON.stringify(concepts, null, 2)}\n`);
       written.push(conceptsPath);
-    } else {
+    } else if (await isGeneratedConceptsCatalog(conceptsPath)) {
+      // Retire a catalog TimDS wrote earlier, never a system's own concepts.json.
       await fs.rm(conceptsPath, { force: true });
     }
     if (designsDoc) {
