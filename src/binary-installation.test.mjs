@@ -39,7 +39,8 @@ test('fresh binary stock builds without node/npm on PATH, pins exact release and
   const pathDir = path.join(root, '.tools'); await fs.mkdir(pathDir);
   const gitPath = execFileSync('/usr/bin/which', ['git'], {encoding: 'utf8'}).trim(); await fs.symlink(gitPath, path.join(pathDir, 'git'));
   const checked = run(root, ['check'], {env: {PATH: pathDir}});
-  assert.equal((checked.stdout.match(/Warning: (?!CHANGELOG)/g) || []).length, 2);
+  assert.equal((checked.stdout.match(/Warning: (?!CHANGELOG)/g) || []).length, 3);
+  assert.match(checked.stdout, /Warning: src\/concepts: this version has concepts but no approved direction/);
   assert.equal((await read(root, 'package.json')).devDependencies, undefined);
   assert.match(await fs.readFile(path.join(root, 'README.md'), 'utf8'), /timds-cli doctor/);
   assert.match(await fs.readFile(path.join(root, '.agents/skills/design-start/SKILL.md'), 'utf8'), /No package-manager installation/);
