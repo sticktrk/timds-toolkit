@@ -7,6 +7,31 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { checkWorkspace, initializeRepository } from "./core.mjs";
 
+const sampleConcept = fileURLToPath(new URL("../templates/starter/src/concepts/sample", import.meta.url));
+
+// A custom (non-starter) workspace that already passes check, given the stock sample concept.
+async function adoptSample(t, { entry = "index.html", machine } = {}) {
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "timds-concept-adoption-")));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  execFileSync("git", ["init", "-q", "-b", "main", root]);
+  const system = path.join(root, "design-system");
+  const entryDirectory = path.posix.dirname(entry);
+  const prefix = entryDirectory === "." ? "" : "/" + entryDirectory;
+  await fs.mkdir(path.join(system, "dist", ...entry.split("/"), ".."), { recursive: true });
+  await fs.mkdir(path.join(system, "dist", ...prefix.split("/").filter(Boolean), "assets"), { recursive: true });
+  await fs.writeFile(path.join(system, "timds.json"), JSON.stringify({
+    artifact: { entry }, name: "Adopting System", schemaVersion: 2, systemId: "test/adopting", version: "1.0.0", workspace: {},
+    ...(machine === undefined ? {} : { machine }),
+  }));
+  await fs.writeFile(path.join(system, "tokens.json"), "{}");
+  await fs.writeFile(path.join(system, "dist", ...entry.split("/")), `<link rel="stylesheet" href="${prefix}/assets/site.css"><main>Ready</main>`);
+  await fs.writeFile(path.join(system, "dist", ...prefix.split("/").filter(Boolean), "assets", "site.css"), "body{color:#123}\n");
+  await checkWorkspace(root, { skipBuild: true });
+  await fs.cp(sampleConcept, path.join(system, "src/concepts/sample"), { recursive: true });
+  return { root, system, prefix };
+}
+
+
 test("checking a concept publishes its pieces without changing the system's brand", async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "timds-concept-check-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
@@ -52,3 +77,12 @@ test("the check command identifies the concept containing an invalid piece", asy
   assert.throws(() => execFileSync(process.execPath, [cli, "check", "--root", root], { stdio: "pipe" }),
     err => /src\/concepts\/sample.*missing\.html/.test(String(err.stderr)));
 });
+
+test("a system with machine output disabled adopts concepts without links to files it does not emit", async t => {
+  const { root, system } = await adoptSample(t, { machine: false });
+  await checkWorkspace(root, { skipBuild: true });
+  for (const page of ["concepts/index.html", "concepts/sample/index.html"]) {
+    assert.doesNotMatch(await fs.readFile(path.join(system, "dist", page), "utf8"), /llms(?:-full)?\.txt/, page);
+  }
+});
+
