@@ -411,7 +411,12 @@ request comes, the middleware checks that `POST` is a function; if it is not,
 the address answers 405 and the server log names the module. EmDash turns
 Astro's cross-origin form check off, so a handler that should accept only the
 site's own form compares the request's `Origin` itself. Template 5 and later
-include an opt-in contact handler. A form can use it from any page on the site.
+include a shared contact handler. From template 10, a marked contact form in a
+public design page enables it when scaffolding the site: a form with
+`data-timds-contact` whose submission, or a submit button's `formmethod` and
+`formaction`, POSTs to `/contact`, read by the same rule the site's script
+submits it by. A design made before template 10 has an unmarked contact form;
+add the marker to opt it in.
 
 Editing a design or a token changes the site on the next request in
 development and on the next build, with no sync and no version to move. The
@@ -622,7 +627,8 @@ untouched.
 
 ### Contact forms and tracking
 
-The workspace template includes an opt-in contact handler and support for Meta
+The workspace scaffold connects marked `POST /contact` forms to its contact
+handler and leaves a handler example for other designs. It supports Meta
 Pixel, GA4 and Google Ads. The optional `requireConsent` flag defaults off.
 Form handling loads on every site page, including custom Astro pages, and
 supports actions under the mounted preview. The site stores contact receipts
