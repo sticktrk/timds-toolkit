@@ -205,3 +205,13 @@ test("concept text cannot add sections or links to llms.txt and the Markdown mir
     assert.doesNotMatch(text, /(?<!\\)\]\(https:\/\/evil/, file);
   }
 });
+
+test("plain files beside the concept directories are ignored, and misnamed directories refused", async t => {
+  const { root, system } = await adoptSample(t);
+  await fs.writeFile(path.join(system, "src/concepts/README.md"), "# Our concepts\n");
+  await fs.writeFile(path.join(system, "src/concepts/notes.txt"), "notes\n");
+  await checkWorkspace(root, { skipBuild: true });
+  assert.deepEqual(JSON.parse(await fs.readFile(path.join(system, "dist/concepts.json"), "utf8")).concepts.map(concept => concept.id), ["sample"]);
+  await fs.cp(sampleConcept, path.join(system, "src/concepts/Bad_Name"), { recursive: true });
+  await assert.rejects(checkWorkspace(root, { skipBuild: true }), /src\/concepts\/Bad_Name/);
+});

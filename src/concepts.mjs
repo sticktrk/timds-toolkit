@@ -124,7 +124,8 @@ export async function readConceptCatalog(designSystemRoot) {
   if (!stat.isDirectory() || !(await fs.lstat(path.dirname(source))).isDirectory()) throw new Error("src/concepts must be a directory without symbolic links");
   const entries = await fs.readdir(source, { withFileTypes: true });
   for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name, "en"))) {
-    if (entry.isFile() && entry.name.startsWith(".")) continue;
+    // Plain files (a README, notes) may sit beside the concepts, as beside designs.
+    if (entry.isFile()) continue;
     if (!entry.isDirectory()) throw new Error(`src/concepts/${entry.name}: expected a concept directory`);
     const { concept, warnings, files } = await readConcept(path.join(source, entry.name));
     result.concepts.push(concept);
