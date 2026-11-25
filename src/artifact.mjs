@@ -70,6 +70,7 @@ import { eachBrandKitMedia } from "./brand.mjs";
 import { bundleManifestPublishPaths, bundlePublishPaths, rewriteBundleForPublish } from "./bundle.mjs";
 import { eachDesignReference } from "./designs.mjs";
 import { PROVENANCE_FILE, derivedLayerPaths } from "./derived.mjs";
+import { stylesheetReferences } from "./tokens.mjs";
 import { parentLineage, readParentRecord } from "./offshoot-contract.mjs";
 
 const eachIndexMedia = (index, visit) => {
@@ -201,15 +202,35 @@ export async function collectDesignReferenceFiles(designs, artifactRoot, files =
 }
 
 // check owns and rebuilds this entire directory. Upload the rendered pages
-// and all their local dependencies before advertising the new catalog.
+// and all their local dependencies before advertising the new catalog. The
+// pages link everything document-relative, so they resolve under publicBase;
+// the stylesheets they share with the entry sit outside the section.
 async function collectConceptSection(artifactRoot, entryDirectory, files) {
   const prefix = path.posix.join(entryDirectory, "concepts");
   const root = path.join(artifactRoot, prefix);
   if (!(await fs.lstat(root)).isDirectory()) throw new Error(`Concept artifact ${prefix} must be a directory`);
   const section = await collectArtifactFiles(root);
+  const stylesheets = new Set();
   for (const file of section.files) {
     const relative = path.posix.join(prefix, file.path);
     files.set(relative, { bytes: file.bytes, contentType: artifactContentType(relative), localPath: file.absolutePath, sha256: file.sha256 });
+    // Only the section's own pages; a piece is the author's and is previewed as written.
+    if (!/^(?:[^/]+\/)?index\.html$/.test(file.path)) continue;
+    for (const href of stylesheetReferences(file.content.toString("utf8")).links) {
+      stylesheets.add(path.posix.normalize(path.posix.join(path.posix.dirname(relative), href.split(/[?#]/, 1)[0])));
+    }
+  }
+  for (const relative of stylesheets) {
+    if (files.has(relative)) continue;
+    if (relative.startsWith("../") || path.posix.isAbsolute(relative)) throw new Error(`Concept pages link ${relative}, outside the artifact`);
+    const localPath = path.join(artifactRoot, ...relative.split("/"));
+    let body;
+    try {
+      body = await fs.readFile(localPath);
+    } catch {
+      throw new Error(`Concept pages link ${relative} but the artifact has no such file; run timds check`);
+    }
+    files.set(relative, { bytes: body.length, contentType: artifactContentType(relative), localPath, sha256: sha256Of(body) });
   }
 }
 

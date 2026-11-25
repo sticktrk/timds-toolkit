@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { publishExtractedIndex } from "./artifact.mjs";
 import { checkWorkspace, initializeRepository } from "./core.mjs";
 
 const sampleConcept = fileURLToPath(new URL("../templates/starter/src/concepts/sample", import.meta.url));
@@ -31,6 +32,7 @@ async function adoptSample(t, { entry = "index.html", machine } = {}) {
   return { root, system, prefix };
 }
 
+const localReferences = html => [...html.matchAll(/(?:href|src)="([^"]+)"/g)].map(match => match[1]).filter(value => !/^(?:[a-z]+:|#)/i.test(value));
 
 test("checking a concept publishes its pieces without changing the system's brand", async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "timds-concept-check-"));
@@ -97,3 +99,40 @@ test("concept pages link back to a configured entry that is not an index", async
   }
 });
 
+test("published concept pages and mirrors navigate within a path-prefixed artifact", async t => {
+  const { root, system } = await adoptSample(t, { entry: "design-system/index.html" });
+  await checkWorkspace(root, { skipBuild: true });
+  const publicBase = "https://cdn.example.com/clients/c/design-systems/s/artifact";
+  const uploaded = new Map();
+  const fetchImpl = async (url, init = {}) => {
+    if (String(url).endsWith("/api/operator/design-system-artifacts/uploads")) {
+      const { files } = JSON.parse(init.body);
+      return Response.json({ publicBase, uploads: files.map(file => ({ method: "single", path: file.path, url: `https://upload.example.com/${file.path}` })) });
+    }
+    if (String(url).startsWith("https://upload.example.com/")) {
+      uploaded.set(String(url).slice("https://upload.example.com/".length), Buffer.from(init.body).toString("utf8"));
+      return new Response(null, { status: 200 });
+    }
+    return new Response("missing", { status: 404 });
+  };
+  const workspace = { designSystemRoot: system, manifest: { artifact: { entry: "design-system/index.html" }, media: { portalUrl: "https://portal.example.com" }, systemId: "test/adopting", version: "1.0.0" }, parentRecord: null };
+  await publishExtractedIndex(workspace, { fetchImpl, sourceCommit: "a".repeat(40), token: "timds_test_token" });
+  const follow = (page, references) => references.map(reference => {
+    const resolved = new URL(reference, `${publicBase}/${page}`).href;
+    assert.ok(resolved.startsWith(publicBase + "/"), `${page} -> ${reference} leaves the artifact (${resolved})`);
+    return resolved.slice(publicBase.length + 1);
+  });
+  // Every page, piece and stylesheet a published concept page loads or links within its section was published.
+  for (const page of ["design-system/concepts/index.html", "design-system/concepts/sample/index.html"]) {
+    assert.ok(uploaded.has(page), page);
+    for (const key of follow(page, localReferences(uploaded.get(page)))) {
+      if (key === "design-system/index.html") continue; // the viewer entry, served with the artifact rather than by this publication
+      const file = key.endsWith("/") ? key + "index.html" : key;
+      assert.ok(uploaded.has(decodeURIComponent(file)), `${page} links ${key}, which was not published`);
+    }
+  }
+  const mirror = "design-system/concepts/sample/index.md";
+  const links = [...uploaded.get(mirror).matchAll(/\]\(([^)]+)\)/g)].map(match => match[1]);
+  assert.ok(links.length);
+  for (const key of follow(mirror, links)) assert.ok(uploaded.has(decodeURIComponent(key)), `${mirror} links ${key}, which was not published`);
+});

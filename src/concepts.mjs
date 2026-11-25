@@ -137,11 +137,15 @@ export async function readConceptCatalog(designSystemRoot) {
   return result;
 }
 
-function conceptUrl(concept, basePrefix) { return `${basePrefix}/concepts/${concept.id}/`; }
-function pieceUrl(concept, piece, basePrefix) { return `${conceptUrl(concept, basePrefix)}pieces/${encoded(piece.file)}`; }
+// `root` is the entry directory as a link prefix: site-absolute ("" or
+// "/guide") in concepts.json and the viewer's guidance cards, and
+// document-relative (".." or "../..") in the section's own pages, which are
+// published under a path-prefixed CDN and must not leave it.
+function conceptUrl(concept, root) { return `${root}/concepts/${concept.id}/`; }
+function pieceUrl(concept, piece, root) { return `${conceptUrl(concept, root)}pieces/${encoded(piece.file)}`; }
 
-function piecePreview(concept, piece, basePrefix, lead = false) {
-  const url = escapeHtml(pieceUrl(concept, piece, basePrefix));
+function piecePreview(concept, piece, root, lead = false) {
+  const url = escapeHtml(pieceUrl(concept, piece, root));
   const label = escapeHtml(piece.alt || piece.label || piece.file);
   if (/\.html$/i.test(piece.file)) return `<iframe title="${label}" src="${url}" sandbox="" referrerpolicy="no-referrer" loading="lazy" height="${lead ? 220 : piece.height ?? 600}" style="width:100%;border:0"></iframe>`;
   if (image.test(piece.file)) return `<img src="${url}" alt="${label}" loading="lazy" style="max-width:100%;height:auto">`;
@@ -153,18 +157,18 @@ function swatches(concept) {
   return entries.map(({ name, hex }) => `<span><span aria-hidden="true" style="display:inline-block;width:1em;height:1em;background:${hex}"></span> ${escapeHtml(name)} ${hex}</span>`).join(" · ");
 }
 
-export function conceptCard(concept, basePrefix = "") {
-  return `<article class="td-directory-section" data-concept-card><h3><a href="${conceptUrl(concept, basePrefix)}">${escapeHtml(concept.title)}</a></h3><p>${escapeHtml(concept.status)} · ${escapeHtml(concept.summary)}</p>${piecePreview(concept, concept.pieces[0], basePrefix, true)}<p>${swatches(concept)}</p></article>`;
+export function conceptCard(concept, root = "") {
+  return `<article class="td-directory-section" data-concept-card><h3><a href="${conceptUrl(concept, root)}">${escapeHtml(concept.title)}</a></h3><p>${escapeHtml(concept.status)} · ${escapeHtml(concept.summary)}</p>${piecePreview(concept, concept.pieces[0], root, true)}<p>${swatches(concept)}</p></article>`;
 }
 
-function conceptDetail(concept, basePrefix) {
+function conceptDetail(concept, root) {
   const sections = [];
   for (const kind of CONCEPT_KINDS) {
     const pieces = concept.pieces.filter(piece => piece.kind === kind);
     if (!pieces.length) continue;
     const figures = pieces.map(piece => {
       const caption = [piece.label, piece.side, piece.ground, piece.caption].filter(Boolean).map(escapeHtml).join(" · ");
-      return `<figure>${piecePreview(concept, piece, basePrefix)}${caption ? `<figcaption>${caption}</figcaption>` : ""}</figure>`;
+      return `<figure>${piecePreview(concept, piece, root)}${caption ? `<figcaption>${caption}</figcaption>` : ""}</figure>`;
     });
     sections.push(`<section id="${kind}" class="td-directory-section"><h2>${kinds[kind]}</h2>${figures.join("\n")}</section>`);
   }
@@ -172,7 +176,7 @@ function conceptDetail(concept, basePrefix) {
   if (palette) sections.push(`<section id="palette"><h2>Palette</h2><p>${palette}</p></section>`);
   if (concept.fonts) sections.push(`<section id="type"><h2>Type</h2><dl>${Object.entries(concept.fonts).map(([role, font]) => `<dt>${role}</dt><dd>${escapeHtml(font.family)} (${font.weight})</dd>`).join("")}</dl></section>`);
   if (concept.voice?.length) sections.push(`<section id="voice"><h2>Voice</h2><p>${concept.voice.map(escapeHtml).join(", ")}</p></section>`);
-  return [`<p><a href="${basePrefix}/concepts/">All concepts</a></p><h1>${escapeHtml(concept.title)}</h1><p>${concept.status}${concept.decided ? " · " + concept.decided : ""}</p><p>${escapeHtml(concept.summary)}</p>`, ...sections].join("\n");
+  return [`<p><a href="${root}/concepts/">All concepts</a></p><h1>${escapeHtml(concept.title)}</h1><p>${concept.status}${concept.decided ? " · " + concept.decided : ""}</p><p>${escapeHtml(concept.summary)}</p>`, ...sections].join("\n");
 }
 
 // Keep the reader pure with respect to dist. A generator (or extract with
@@ -226,7 +230,8 @@ function markdownMirror(concept) {
   return [
     `# ${concept.title}`, "", concept.summary, "",
     `Status: ${concept.status}${concept.decided ? " · " + concept.decided : ""}`, "", CONCEPT_USAGE, "",
-    ...concept.pieces.map(piece => `- ${kinds[piece.kind]}: [${piece.alt ?? piece.label ?? piece.file}](${piece.url})`),
+    // Relative to the mirror at concepts/<id>/index.md, so the links hold under any published prefix.
+    ...concept.pieces.map(piece => `- ${kinds[piece.kind]}: [${piece.alt ?? piece.label ?? piece.file}](pieces/${encoded(piece.file)})`),
     "", ...palette.map(({name, hex}) => `- ${name}: ${hex}`),
     ...Object.entries(concept.fonts ?? {}).map(([role, font]) => `- ${role}: ${font.family} (${font.weight})`),
     ...(concept.voice?.length ? [`Voice: ${concept.voice.join(", ")}`] : []),
@@ -235,21 +240,28 @@ function markdownMirror(concept) {
 
 const directoryMarker = "<!-- Generated by TimDS from src/concepts/ -->";
 
+// `stylesheets` are artifact-relative paths; each page links them relative to itself.
 async function writeSection(directory, section, stylesheets) {
-  const { document, basePrefix, machine } = section;
-  // The configured entry is a file (guide/brand.html), not always its directory's index.
-  const home = escapeHtml("/" + encoded(section.entry));
-  const page = (title, body) => toolkitPage({
-    title: escapeHtml(title + " · " + document.system.name), basePrefix, stylesheets, agentPointers: machine,
-    directoryStylesheet: `${basePrefix}/concepts/_directory.css`, bodyClass: "timds-design-directory",
-    body: [
-      `<header class="td-directory-bar"><a class="td-directory-brand" href="${home}">${escapeHtml(document.system.name)}</a><a class="td-directory-back" href="${home}">Back to design system</a></header>`,
-      `<main class="td-directory-main">${body}</main>`,
-    ],
-  });
-  const cards = document.concepts.map(entry => conceptCard(entry, basePrefix)).join("\n");
+  const { document, base, machine } = section;
+  // A page in concepts/ (the directory) or concepts/<id>/ (a direction).
+  const page = (title, id, body) => {
+    const pageDirectory = path.posix.join(base, "concepts", ...(id ? [id] : []));
+    const root = id ? "../.." : "..";
+    // The configured entry is a file (guide/brand.html), not always its directory's index.
+    const home = escapeHtml(`${root}/${encoded(path.posix.basename(section.entry))}`);
+    return toolkitPage({
+      title: escapeHtml(title + " · " + document.system.name), basePrefix: root, agentPointers: machine,
+      stylesheets: stylesheets.map(({ file, suffix }) => path.posix.relative(pageDirectory, file) + suffix),
+      directoryStylesheet: `${root}/concepts/_directory.css`, bodyClass: "timds-design-directory",
+      body: [
+        `<header class="td-directory-bar"><a class="td-directory-brand" href="${home}">${escapeHtml(document.system.name)}</a><a class="td-directory-back" href="${home}">Back to design system</a></header>`,
+        `<main class="td-directory-main">${body}</main>`,
+      ],
+    });
+  };
+  const cards = document.concepts.map(entry => conceptCard(entry, "..")).join("\n");
   const empty = "<p>No concepts yet. Run <code>timds concepts add PATH</code> to add a direction.</p>";
-  await fs.writeFile(path.join(directory, "index.html"), page("Concepts", directoryMarker + "<h1>Concepts</h1>" + (cards || empty)));
+  await fs.writeFile(path.join(directory, "index.html"), page("Concepts", null, directoryMarker + "<h1>Concepts</h1>" + (cards || empty)));
   await fs.copyFile(new URL("../templates/designs-directory.css", import.meta.url), path.join(directory, "_directory.css"));
   for (const concept of document.concepts) {
     const folder = path.join(directory, concept.id);
@@ -258,14 +270,14 @@ async function writeSection(directory, section, stylesheets) {
       await fs.mkdir(path.dirname(output), { recursive: true });
       await fs.writeFile(output, bytes);
     }
-    await fs.writeFile(path.join(folder, "index.html"), page(concept.title, conceptDetail(concept, basePrefix)));
+    await fs.writeFile(path.join(folder, "index.html"), page(concept.title, concept.id, conceptDetail(concept, "../..")));
     await fs.writeFile(path.join(folder, "index.md"), markdownMirror(concept));
   }
 }
 
 export async function buildConcepts(root, { manifest = null } = {}) {
   const section = await prepareSection(root, manifest);
-  const { document, warnings, base, basePrefix } = section;
+  const { document, warnings, base } = section;
   let parent = root;
   for (const part of ["dist", ...base.split("/").filter(part => part !== ".")]) {
     parent = path.join(parent, part);
@@ -288,7 +300,10 @@ export async function buildConcepts(root, { manifest = null } = {}) {
     if (error.code === "ENOENT") return "";
     throw error;
   });
-  const stylesheets = stylesheetReferences(entryHtml).links.map(href => href.startsWith("/") ? href : path.posix.join(basePrefix || "/", href));
+  const stylesheets = stylesheetReferences(entryHtml).links.map(href => {
+    const [, target, suffix] = href.match(/^([^?#]*)(.*)$/s);
+    return { file: path.posix.normalize(target.startsWith("/") ? target.slice(1) : path.posix.join(base, target)), suffix };
+  });
   await fs.mkdir(parent, { recursive: true });
   const stage = await fs.mkdtemp(path.join(parent, ".timds-concepts-"));
   try {
