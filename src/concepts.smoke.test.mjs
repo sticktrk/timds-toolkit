@@ -86,3 +86,14 @@ test("a system with machine output disabled adopts concepts without links to fil
   }
 });
 
+test("concept pages link back to a configured entry that is not an index", async t => {
+  const { root, system } = await adoptSample(t, { entry: "guide/brand.html" });
+  await checkWorkspace(root, { skipBuild: true });
+  for (const page of ["guide/concepts/index.html", "guide/concepts/sample/index.html"]) {
+    const html = await fs.readFile(path.join(system, "dist", page), "utf8");
+    const header = html.match(/<header class="td-directory-bar">(.*?)<\/header>/s)[1];
+    const targets = [...header.matchAll(/href="([^"]+)"/g)].map(match => new URL(match[1], `https://example.test/${page}`).pathname);
+    assert.deepEqual(targets, ["/guide/brand.html", "/guide/brand.html"], page);
+  }
+});
+
