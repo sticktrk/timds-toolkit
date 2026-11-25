@@ -215,7 +215,8 @@ jobs:
           const cli = args => run(executable, [...args, '--root', workspace], { cwd: workspace, env });
           await cli(['init', '--standalone', '--name', 'Notarized download', '--system-id', 'example/notarized-download']);
           const checked = await cli(['check']);
-          assert.equal((checked.stdout.match(/^Warning:/gm) || []).length, 2);
+          assert.equal((checked.stdout.match(/^Warning:/gm) || []).length, 3);
+          assert.match(checked.stdout, /this version has concepts but no approved direction/);
           await cli(['doctor']);
           assert.ok(JSON.parse((await cli(['brand', '--json'])).stdout).brand);
           const proof = { version: pkg.version, sourceCommit: metadata.sourceCommit, signingTeamId: metadata.signingTeamId, nativeFiles: native.length, verifiedCodeCount: metadata.payloadNotarization.verifiedCodeCount, nativeStartup, quarantined: true, commands: ['--version', 'init', 'check', 'doctor', 'brand'] };
