@@ -735,6 +735,7 @@ test("doctor --json prints the facts the report shows", async (t) => {
     toolkit: { selected: toolkitVersion, running: toolkitVersion, runtime: "npm" },
     media: { assets: 0 },
     designs: { setUp: false, designs: 0, pages: 0 },
+    concepts: { setUp: false, concepts: 0 },
     starter: { state: "not-starter" },
     video: { enabled: false },
     consumer: null,
