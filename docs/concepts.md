@@ -4,7 +4,7 @@ A concept proposes a brand direction and records the pieces that show it. The sy
 
 ## Author a direction
 
-Put one proposal in `src/concepts/<id>/`. Choose a permanent lowercase, URL-safe id. Keep that id through revisions and never reuse a published id. Both starters include a small `sample` direction you can edit or remove. Existing systems can run `timds concepts init` to add the sample. Use `timds concepts add ./field-notes --id field-notes` to validate and import an existing folder.
+Put one proposal in `src/concepts/<id>/`. Choose a permanent lowercase, URL-safe id. Keep that id through revisions and never reuse a published id. Both starters include a small `sample` direction you can edit or remove. Existing systems can run `timds concepts init` to add the sample. Use `timds concepts add ./field-notes --id field-notes` to import a manifest, its validated pieces and their local dependencies. Other files stay in the input folder.
 
 A minimal `concept.json` for a folder containing a `mark.svg` reads:
 

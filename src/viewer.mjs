@@ -478,7 +478,7 @@ function renderSitemap(model, designs, concepts) {
     rows.push(`      <tr><td><a href="${design.href}">${escapeHtml(design.title)}</a></td><td>Designs</td><td>${escapeHtml(design.summary)}</td><td>${design.pages} page${design.pages === 1 ? "" : "s"}</td></tr>`);
   }
   for (const concept of concepts) {
-    rows.push(`      <tr><td><a href="/concepts/${escapeHtml(concept.id)}/">${escapeHtml(concept.title)}</a></td><td>Concepts</td><td>${escapeHtml(concept.summary)}</td><td>${escapeHtml(concept.status)}</td></tr>`);
+    rows.push(`      <tr data-concept-card><td><a href="/concepts/${escapeHtml(concept.id)}/">${escapeHtml(concept.title)}</a></td><td>Concepts</td><td>${escapeHtml(concept.summary)}</td><td>${escapeHtml(concept.status)}</td></tr>`);
   }
   return [
     '<table class="spec">',
@@ -896,7 +896,7 @@ export async function renderSite(designSystemRoot) {
       concepts: (status) => {
         if (status !== undefined && !CONCEPT_STATUSES.includes(status)) throw new Error(`${file} uses {{concepts:${status}}}; expected one of ${CONCEPT_STATUSES.join(", ")}`);
         const selected = concepts.filter(entry => status === undefined || entry.status === status);
-        return selected.map(entry => conceptCard(entry)).join("\n") || `<p>No ${status ? status + " " : ""}concepts yet.</p>`;
+        return selected.map(entry => conceptCard(entry)).join("\n") || `<p data-concept-card>No ${status ? status + " " : ""}concepts yet.</p>`;
       },
       formats: (group) => renderFormatTable(formats, group, page.file),
       presets: (group) => renderPresets(formats, group, page.file, presetState),
