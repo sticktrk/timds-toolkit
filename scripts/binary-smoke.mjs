@@ -172,7 +172,7 @@ try {
   await run(['init', '--standalone', '--root', workspace, '--name', 'Binary smoke', '--system-id', 'test/binary-smoke']);
   assert.equal((JSON.parse(await fs.readFile(path.join(workspace, '.timds/installation.json'), 'utf8'))).mode, 'binary');
   const check = await run(['check', '--root', workspace]);
-  assert.equal((check.stdout.match(/^Warning:/gm) || []).length, 2);
+  assert.equal((check.stdout.match(/^Warning:/gm) || []).length, 3);
   assert.match(check.stdout, /guidance group voice is empty/);
   assert.match(check.stdout, /brand kit has no logo/);
   const brand = JSON.parse((await run(['brand', '--root', workspace, '--json'])).stdout);
@@ -196,7 +196,7 @@ try {
   const worker = await execute(moved, ['run', '-e', 'process.stdout.write(JSON.stringify(process.argv.slice(1)));process.exitCode=7', '--', 'argument with spaces', '--literal-flag'], { cwd: workspace, env }).then(() => null, error => error);
   assert.equal(worker.code, 7);
   assert.deepEqual(JSON.parse(worker.stdout), ['argument with spaces', '--literal-flag']);
-  console.log(JSON.stringify({ version: pkg.version, platform: `${process.platform}-${process.arch}`, ...timings, checks: ['moved executable', 'spaces in paths', 'no external Node/npm/npx/Bun', 'concurrent cold launches', 'stock init/check/brand/doctor', 'two expected warnings', 'dev/preview termination', 'MCP edit/read JSON-only stdout', 'hosted login/start/submit with mocked service', 'consumer init/sync/check/upgrade without npm', 'corrupt and incomplete cache recovery', 'exit status'] }, null, 2));
+  console.log(JSON.stringify({ version: pkg.version, platform: `${process.platform}-${process.arch}`, ...timings, checks: ['moved executable', 'spaces in paths', 'no external Node/npm/npx/Bun', 'concurrent cold launches', 'stock init/check/brand/doctor', 'two brand warnings and the proposed concept warning', 'dev/preview termination', 'MCP edit/read JSON-only stdout', 'hosted login/start/submit with mocked service', 'consumer init/sync/check/upgrade without npm', 'corrupt and incomplete cache recovery', 'exit status'] }, null, 2));
 } finally {
   if (process.env.TIMDS_KEEP_BINARY_SMOKE) console.log(`Kept binary smoke workspace: ${scratch}`);
   else await fs.rm(scratch, { recursive: true, force: true });

@@ -123,7 +123,7 @@ startup; startup cost includes hashing the production dependency graph.
 `binary:smoke` copies the executable outside the checkout into a directory with
 spaces, gives it a fresh HOME and a PATH containing only Git, and verifies that
 Node/npm/npx/Bun cannot execute. It tests concurrent first launches, help/version,
-stock initialization, build/check with exactly the two expected warnings, brand,
+stock initialization, build/check with the two brand warnings and the proposed concept warning, brand,
 doctor, live dev/preview responses and termination, edit/read MCP protocol output,
 mocked hosted authentication/start/submission and draft MCP, consumer installation,
 corrupt/incomplete cache repair and nonzero exit forwarding. It invokes only the

@@ -428,6 +428,10 @@ system version. To restore dated releases, an operator explicitly declares the
 first version, synchronizes the package and lockfile, and adds its changelog
 section before merging. A declared `version` otherwise behaves as it always has.
 
+### Brand concepts
+
+Store proposals under `src/concepts/<id>/` and review them in the system's Concepts view. The toolkit checks local mockups, publishes each direction and its pieces, and exposes the proposals through `concepts.json` and the read MCP server. Both starters include one editable sample. See [Brand concepts](docs/concepts.md) for the manifest, CLI and page placeholders.
+
 ### Website designs
 
 A Design System is designer-owned down to the pages. Under
@@ -778,6 +782,9 @@ read-only apart from `report_gap`, and never sees authored source:
   Markdown or structured blocks.
 - `list_designs`, `read_design`: website designs and journeys, and a selected
   route and state as authored HTML with its stylesheet, script and media references.
+- `list_concepts`, `read_concept`: brand proposals with their status, and one
+  proposal with its pieces or an HTML mockup's source; they request
+  `concepts.json` only for themselves and `describe_system`.
 - `search_guidance`: the blocks that answer a question, guidance groups first,
   every result cited by page and block.
 - `list_media`: the published media catalog by tag or kind.

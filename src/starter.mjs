@@ -151,6 +151,9 @@ const starterLayoutStylesheets = Object.freeze(["/styles/canvas.css", "/styles/v
  * fails on a gap, and `--print` lists the entries. Empty at the floor.
  */
 export const legacyStarterFileHashes = new Map([
+  ["src/pages/use/index.html", [
+    "90989bf940c87529163b6ce0216de3fc02b3ef5e4396d7a5ae65b3625dfa7a99", // v0.1.497
+  ]],
   ["src/pages/use/compose.html", [
     "358f7f76a72ebc1e01ca439f55497bc42d9ebfa2e209048da7812201d0d495f9", // v0.1.497
   ]],

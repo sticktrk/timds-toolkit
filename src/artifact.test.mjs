@@ -192,7 +192,7 @@ test("publishExtractedIndex uploads assets and mirrors first, then index, llms.t
   const designSystemRoot = await fs.mkdtemp(path.join(os.tmpdir(), "timds-publish-test-"));
   try {
     const artifact = {
-      "dist/design-system/index.json": `${JSON.stringify({ ...INDEX, formats: { url: "/design-system/formats.json", groups: 1, count: 1 } }, null, 2)}\n`,
+      "dist/design-system/index.json": `${JSON.stringify({ ...INDEX, formats: { url: "/design-system/formats.json", groups: 1, count: 1 }, concepts: { url: "/design-system/concepts.json", count: 1, approved: null } }, null, 2)}\n`,
       "dist/design-system/photos/elder-hands.webp": "webp-bytes",
       "dist/design-system/social/video-assets/index.md": "# Video assets\n",
       "dist/design-system/tokens.json": '{"schemaVersion":1,"tokens":[{"name":"--navy","resolved":"#0a1729"}]}\n',
@@ -212,6 +212,10 @@ test("publishExtractedIndex uploads assets and mirrors first, then index, llms.t
       // The website designs carry their HTML and name the stylesheet they load, which publishes beside them.
       "dist/design-system/designs.json": JSON.stringify({ schemaVersion: 1, base: null, designs: [{ id: "site", pages: [{ route: "/", states: [{ name: "default", html: "<link rel=\"stylesheet\" href=\"/design-system/styles/site.css\">", references: ["/design-system/styles/site.css"] }] }] }] }),
       "dist/design-system/styles/site.css": ".wrap{}",
+      "dist/design-system/concepts.json": JSON.stringify({ schemaVersion: 1, base: null, count: 1, approved: null, concepts: [{ id: "sample", pieces: [{ file: "home.html" }] }] }),
+      "dist/design-system/concepts/sample/index.md": "# Sample\n",
+      "dist/design-system/concepts/sample/pieces/home.html": "<h1>Sample</h1>",
+
     };
     for (const [relative, content] of Object.entries(artifact)) {
       const target = path.join(designSystemRoot, ...relative.split("/"));
@@ -272,10 +276,10 @@ test("publishExtractedIndex uploads assets and mirrors first, then index, llms.t
     assert.equal(published.bundleUrl, "https://cdn.example.com/clients/c/design-systems/s/artifact/design-system/bundle.json");
     assert.equal(published.bundleVersionedUrl, "https://cdn.example.com/clients/c/design-systems/s/artifact/v/1.2.3/bundle");
     assert.equal(published.bundleFiles, 2);
-    assert.equal(published.docCount, 1);
-    assert.equal(published.uploaded, 17);
+    assert.equal(published.docCount, 2);
+    assert.equal(published.uploaded, 20);
     assert.equal(published.skipped, 1);
-    assert.equal(published.total, 18);
+    assert.equal(published.total, 21);
 
     assert.equal(sessions.length, 2);
     // Index assets, then the kit's font files, then design references, then the
@@ -283,6 +287,8 @@ test("publishExtractedIndex uploads assets and mirrors first, then index, llms.t
     assert.deepEqual(sessions[0].files.map((file) => file.path), [
       "design-system/photos/elder-hands.webp",
       "design-system/fonts/newsreader.woff2",
+      "design-system/concepts/sample/index.md",
+      "design-system/concepts/sample/pieces/home.html",
       "design-system/styles/site.css",
       "design-system/bundle/src/styles/ds/brand.css",
       "v/1.2.3/bundle/src/styles/ds/brand.css",
@@ -299,6 +305,7 @@ test("publishExtractedIndex uploads assets and mirrors first, then index, llms.t
       ".timds-artifact.json",
       "design-system/brand.json",
       "design-system/bundle.json",
+      "design-system/concepts.json",
       "design-system/designs.json",
       "design-system/formats.json",
       "design-system/index.json",
@@ -334,6 +341,8 @@ test("publishExtractedIndex uploads assets and mirrors first, then index, llms.t
     assert.ok(llmsFull.includes("<!-- source: https://cdn.example.com/clients/c/design-systems/s/artifact/design-system/social/video-assets · id: social/video-assets -->"));
     assert.ok(llmsFull.includes("[photos](https://cdn.example.com/clients/c/design-systems/s/artifact/design-system/photos/elder-hands.webp)"));
     // Designs publish as written, plus the base their site-absolute references resolve against.
+    assert.equal(JSON.parse(puts.get("design-system/concepts.json")).base, published.publicBase);
+    assert.equal(puts.get("design-system/concepts/sample/pieces/home.html"), "<h1>Sample</h1>");
     const designs = JSON.parse(puts.get("design-system/designs.json"));
     assert.equal(designs.base, "https://cdn.example.com/clients/c/design-systems/s/artifact");
     assert.equal(designs.designs[0].pages[0].states[0].references[0], "/design-system/styles/site.css");
@@ -374,7 +383,7 @@ test("publishExtractedIndex uploads assets and mirrors first, then index, llms.t
       systemId: "client/system",
       lineage: null,
       entry: "design-system/index.html",
-      files: { index: "design-system/index.json", tokens: "design-system/tokens.json", brand: "design-system/brand.json", llms: "design-system/llms.txt", llmsFull: "design-system/llms-full.txt", formats: "design-system/formats.json", designs: "design-system/designs.json", changelog: "design-system/changelog.json", bundle: "design-system/bundle.json" },
+      files: { index: "design-system/index.json", tokens: "design-system/tokens.json", brand: "design-system/brand.json", llms: "design-system/llms.txt", llmsFull: "design-system/llms-full.txt", formats: "design-system/formats.json", designs: "design-system/designs.json", concepts: "design-system/concepts.json", changelog: "design-system/changelog.json", bundle: "design-system/bundle.json" },
     });
     // A former catalog may remain on disk, but a release that does not
     // advertise it must not publish it again, even if that file is invalid.

@@ -340,7 +340,9 @@ function resolveJourney(journey, pages, basePrefix, designId, prefixDirectory) {
 
 const plural = (count, noun) => `${count} ${noun}${count === 1 ? "" : "s"}`;
 
-function toolkitPage({ title, basePrefix, stylesheets, bodyClass, body }) {
+// `agentPointers` is false when timds.json disables machine output: the page
+// must not point agents at an llms.txt the build never writes.
+export function toolkitPage({ title, basePrefix, stylesheets, bodyClass, body, directoryStylesheet = `${basePrefix}/${DESIGNS_OUTPUT_DIRECTORY}/_directory.css`, agentPointers = true }) {
   return [
     "<!doctype html>",
     '<html lang="en">',
@@ -349,12 +351,12 @@ function toolkitPage({ title, basePrefix, stylesheets, bodyClass, body }) {
     '    <meta name="viewport" content="width=device-width, initial-scale=1">',
     `    <title>${title}</title>`,
     ...stylesheets.map((href) => `    <link rel="stylesheet" href="${escapeHtml(href)}">`),
-    `    <link rel="stylesheet" href="${basePrefix}/${DESIGNS_OUTPUT_DIRECTORY}/_directory.css">`,
-    ...agentPointerHead(basePrefix),
+    `    <link rel="stylesheet" href="${escapeHtml(directoryStylesheet)}">`,
+    ...(agentPointers ? agentPointerHead(basePrefix) : []),
     "  </head>",
     `  <body class="${bodyClass}">`,
     ...body,
-    `    ${agentPointerNote(basePrefix, "td-directory-agents")}`,
+    ...(agentPointers ? [`    ${agentPointerNote(basePrefix, "td-directory-agents")}`] : []),
     "  </body>",
     "</html>",
     "",
@@ -462,7 +464,7 @@ function fileReferences(html) {
 export async function readManifestLike(designSystemRoot, manifest) {
   if (manifest) return manifest;
   const raw = await readJson(path.join(designSystemRoot, "timds.json"), "timds.json");
-  return { systemId: raw.systemId, name: raw.name, description: raw.description, version: raw.version, artifact: { entry: raw.artifact?.entry || "index.html" } };
+  return { systemId: raw.systemId, name: raw.name, description: raw.description, version: raw.version, artifact: { entry: raw.artifact?.entry || "index.html" }, machine: raw.machine };
 }
 
 function renderDirectory({ name, basePrefix, designs, stylesheets }) {

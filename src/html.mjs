@@ -52,6 +52,21 @@ export const escapeHtml = (value) => String(value ?? "")
   .replaceAll('"', "&quot;")
   .replaceAll("'", "&#39;");
 
+/**
+ * Plain text as one line of Markdown text: whitespace runs (newlines
+ * included) become one space, and every character Markdown would read as
+ * markup is escaped, so authored or generated text cannot open a heading,
+ * a list item, a link or HTML where it is interpolated.
+ */
+export function markdownInline(value) {
+  return String(value ?? "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[\\`*_[\]<>#|~]/g, "\\$&")
+    .replace(/^[-+]/, "\\$&")
+    .replace(/^(\d+)([.)])/, "$1\\$2");
+}
+
 export function decodeEntities(value) {
   return value.replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);/g, (match, body) => {
     if (body[0] === "#") {

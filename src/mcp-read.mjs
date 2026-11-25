@@ -115,11 +115,12 @@ export async function createDesignSystemReadMcpServer({ root = process.cwd(), pu
   }
   if (published) {
     // Fail fast on a base that publishes nothing.
-    await fetchDerivedLayer(published, { fetchImpl });
+    await fetchDerivedLayer(published, { fetchImpl, documents: [] });
     registerDesignSystemReadTools(server, {
-      resolveSystem: async ({ version, draft: requestedDraft } = {}) => {
+      // `documents` keeps reads that need no concepts from requesting concepts.json.
+      resolveSystem: async ({ version, draft: requestedDraft } = {}, documents) => {
         if (requestedDraft) throw new Error("Start the read server with --draft NAME --system-id ID to read a draft");
-        const layer = await fetchDerivedLayer(published, { fetchImpl });
+        const layer = await fetchDerivedLayer(published, { fetchImpl, documents });
         checkVersion(layer, version);
         return { layer, media: null, published: layer.system?.version ?? null, pinned: null };
       },

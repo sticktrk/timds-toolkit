@@ -65,10 +65,12 @@ export const artifactContentType = (file) =>
 
 const sha256Of = (data) => createHash("sha256").update(data).digest("hex");
 
+import { MAX_ARTIFACT_FILE_BYTES, collectArtifactFiles } from "./artifact-files.mjs";
 import { eachBrandKitMedia } from "./brand.mjs";
 import { bundleManifestPublishPaths, bundlePublishPaths, rewriteBundleForPublish } from "./bundle.mjs";
 import { eachDesignReference } from "./designs.mjs";
 import { PROVENANCE_FILE, derivedLayerPaths } from "./derived.mjs";
+import { stylesheetReferences } from "./tokens.mjs";
 import { parentLineage, readParentRecord } from "./offshoot-contract.mjs";
 
 const eachIndexMedia = (index, visit) => {
@@ -199,6 +201,39 @@ export async function collectDesignReferenceFiles(designs, artifactRoot, files =
   return files;
 }
 
+// check owns and rebuilds this entire directory. Upload the rendered pages
+// and all their local dependencies before advertising the new catalog. The
+// pages link everything document-relative, so they resolve under publicBase;
+// the stylesheets they share with the entry sit outside the section.
+async function collectConceptSection(artifactRoot, entryDirectory, files) {
+  const prefix = path.posix.join(entryDirectory, "concepts");
+  const root = path.join(artifactRoot, prefix);
+  if (!(await fs.lstat(root)).isDirectory()) throw new Error(`Concept artifact ${prefix} must be a directory`);
+  const section = await collectArtifactFiles(root);
+  const stylesheets = new Set();
+  for (const file of section.files) {
+    const relative = path.posix.join(prefix, file.path);
+    files.set(relative, { bytes: file.bytes, contentType: artifactContentType(relative), localPath: file.absolutePath, sha256: file.sha256 });
+    // Only the section's own pages; a piece is the author's and is previewed as written.
+    if (!/^(?:[^/]+\/)?index\.html$/.test(file.path)) continue;
+    for (const href of stylesheetReferences(file.content.toString("utf8")).links) {
+      stylesheets.add(path.posix.normalize(path.posix.join(path.posix.dirname(relative), href.split(/[?#]/, 1)[0])));
+    }
+  }
+  for (const relative of stylesheets) {
+    if (files.has(relative)) continue;
+    if (relative.startsWith("../") || path.posix.isAbsolute(relative)) throw new Error(`Concept pages link ${relative}, outside the artifact`);
+    const localPath = path.join(artifactRoot, ...relative.split("/"));
+    let body;
+    try {
+      body = await fs.readFile(localPath);
+    } catch {
+      throw new Error(`Concept pages link ${relative} but the artifact has no such file; run timds check`);
+    }
+    files.set(relative, { bytes: body.length, contentType: artifactContentType(relative), localPath, sha256: sha256Of(body) });
+  }
+}
+
 /**
  * The consumer bundle's files, added to `files` twice: under the current
  * prefix where `check` copied them, and under the immutable `v/<version>/`
@@ -251,7 +286,7 @@ export function rewriteLlmsForPublish(text, publicBase) {
   const base = String(publicBase).replace(/\/+$/, "");
   return String(text)
     .replace(/\]\(\/(?!\/)/g, `](${base}/`)
-    .replace(/^(Machine-readable index: |Full text: |Design tokens: |Brand kit: |Asset formats: |Website designs: |Consumer bundle: |Changelog: )(\/(?!\/)\S+)/gm, (_match, label, target) => `${label}${base}${target}`)
+    .replace(/^(Machine-readable index: |Full text: |Design tokens: |Brand kit: |Asset formats: |Website designs: |Brand concepts: |Consumer bundle: |Changelog: )(\/(?!\/)\S+)/gm, (_match, label, target) => `${label}${base}${target}`)
     // Logo and font file lines in the essentials name site-absolute files after a colon.
     .replace(/^(\s*- .*?: )(\/(?!\/)\S+)$/gm, (_match, label, target) => `${label}${base}${target}`)
     .replace(/^(<!-- source: )(\/(?!\/)\S*)/gm, (_match, label, target) => `${label}${base}${target}`);
@@ -372,6 +407,11 @@ export async function publishExtractedIndex(workspace, options = {}) {
   // learn the base they resolve against; a system without designs has no file.
   const designsRelative = entryDirectory === "." ? "designs.json" : `${entryDirectory}/designs.json`;
   const designsSource = await fs.readFile(path.join(artifactRoot, ...designsRelative.split("/")), "utf8").catch(() => null);
+  const conceptsRelative = path.posix.join(entryDirectory, "concepts.json");
+  const concepts = index.concepts
+    ? JSON.parse(await fs.readFile(path.join(artifactRoot, conceptsRelative), "utf8"))
+    : null;
+  if (concepts) await collectConceptSection(artifactRoot, entryDirectory, files);
   const designs = designsSource === null ? null : JSON.parse(designsSource);
   if (designs) await collectDesignReferenceFiles(designs, artifactRoot, files);
   // The changelog publishes as written: its URLs are artifact-relative like
@@ -440,6 +480,11 @@ export async function publishExtractedIndex(workspace, options = {}) {
   const formatsSource = index.formats ? await fs.readFile(path.join(artifactRoot, ...formatsRelative.split("/")), "utf8").catch(() => null) : null;
   const formats = formatsSource === null ? null : rewriteFormatsForPublish(JSON.parse(formatsSource), publicBase);
 
+  // check bounds the catalog with room for the base; a published catalog never exceeds one artifact file.
+  const conceptsBody = concepts === null ? null : Buffer.from(`${JSON.stringify({ ...concepts, base: publicBase }, null, 2)}\n`);
+  if (conceptsBody && conceptsBody.length > MAX_ARTIFACT_FILE_BYTES) {
+    throw new Error(`${conceptsRelative} would be ${conceptsBody.length} bytes with the base ${publicBase}, over the ${MAX_ARTIFACT_FILE_BYTES}-byte artifact file limit`);
+  }
   const staging = await fs.mkdtemp(path.join(os.tmpdir(), "timds-artifact-"));
   try {
     const rewritten = rewriteIndexForPublish(index, files, publicBase);
@@ -461,6 +506,9 @@ export async function publishExtractedIndex(workspace, options = {}) {
       ...(designs === null
         ? []
         : [{ body: Buffer.from(`${JSON.stringify({ ...designs, base: publicBase }, null, 2)}\n`), contentType: "application/json", path: designsRelative }]),
+      ...(concepts === null
+        ? []
+        : [{ body: conceptsBody, contentType: "application/json", path: conceptsRelative }]),
       ...(changelog === null
         ? []
         : [{ body: Buffer.from(`${JSON.stringify({ ...changelog, base: publicBase }, null, 2)}\n`), contentType: "application/json", path: changelogRelative }]),
@@ -507,7 +555,7 @@ export async function publishExtractedIndex(workspace, options = {}) {
     await fs.rm(staging, { force: true, recursive: true });
   }
 
-  const total = files.size + 2 + [llmsSource, llmsFullSource, tokensSource, brandKit, formats, designs, changelog, bundle, version ? bundle : null].filter((document) => document !== null).length;
+  const total = files.size + 2 + [llmsSource, llmsFullSource, tokensSource, brandKit, formats, designs, concepts, changelog, bundle, version ? bundle : null].filter((document) => document !== null).length;
   const publishedBundle = bundle === null ? null : rewriteBundleForPublish(bundle, { publicBase, entryDirectory, version });
   return {
     brandUrl: brandKit === null ? null : `${publicBase}/${brandRelative}`,
@@ -515,6 +563,7 @@ export async function publishExtractedIndex(workspace, options = {}) {
     bundleVersionedUrl: publishedBundle?.versioned ?? null,
     bundleFiles: publishedBundle?.fileCount ?? 0,
     changelogUrl: changelog === null ? null : `${publicBase}/${changelogRelative}`,
+    conceptsUrl: concepts === null ? null : `${publicBase}/${conceptsRelative}`,
     designsUrl: designs === null ? null : `${publicBase}/${designsRelative}`,
     docCount: docs.length,
     formatsUrl: formats === null ? null : `${publicBase}/${formatsRelative}`,

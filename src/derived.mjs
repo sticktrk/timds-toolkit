@@ -42,6 +42,7 @@ export const DERIVED_LAYER_FILES = Object.freeze({
   llmsFull: "llms-full.txt",
   formats: "formats.json",
   designs: "designs.json",
+  concepts: "concepts.json",
   changelog: "changelog.json",
   bundle: "bundle.json",
 });
@@ -83,13 +84,14 @@ async function readOptional(filePath, parse) {
  */
 export async function readDerivedLayer(designSystemRoot, manifest, {parentRecord = undefined} = {}) {
   const indexPromise = readOptional(derivedFilePath(designSystemRoot, manifest, "index"), JSON.parse);
-  const [index, tokens, brand, llms, formats, designs, changelog, bundle] = await Promise.all([
+  const [index, tokens, brand, llms, formats, designs, concepts, changelog, bundle] = await Promise.all([
     indexPromise,
     readOptional(derivedFilePath(designSystemRoot, manifest, "tokens"), JSON.parse),
     readOptional(derivedFilePath(designSystemRoot, manifest, "brand"), JSON.parse),
     readOptional(derivedFilePath(designSystemRoot, manifest, "llms"), String),
     indexPromise.then((index) => (index && !index.formats) ? null : readOptional(derivedFilePath(designSystemRoot, manifest, "formats"), JSON.parse)),
     readOptional(derivedFilePath(designSystemRoot, manifest, "designs"), JSON.parse),
+    indexPromise.then(index => index?.concepts ? readOptional(derivedFilePath(designSystemRoot, manifest, "concepts"), JSON.parse) : null),
     readOptional(derivedFilePath(designSystemRoot, manifest, "changelog"), JSON.parse),
     readOptional(derivedFilePath(designSystemRoot, manifest, "bundle"), JSON.parse),
   ]);
@@ -112,6 +114,7 @@ export async function readDerivedLayer(designSystemRoot, manifest, {parentRecord
     // Null for a system without a format catalog, designs, a changelog, or a bundle, exactly like a file check has not written.
     formats,
     designs,
+    concepts,
     changelog,
     bundle,
   };
@@ -122,8 +125,11 @@ export async function readDerivedLayer(designSystemRoot, manifest, {parentRecord
  * the version, source commit, and where each derived file sits, so a remote
  * consumer needs nothing but the base URL. A missing derived file is null, the
  * way it is locally; a missing stamp means nothing is published there.
+ * `documents`, the list a read tool passes its resolver, may leave out
+ * "concepts": the catalog embeds every mockup and is then not requested.
+ * Omitted, the whole layer is read.
  */
-export async function fetchDerivedLayer(publicBase, { fetchImpl = fetch } = {}) {
+export async function fetchDerivedLayer(publicBase, { fetchImpl = fetch, documents } = {}) {
   const base = String(publicBase ?? "").replace(/\/+$/, "");
   if (!/^https?:\/\/.+/.test(base)) throw new Error("published design system base must be an HTTP or HTTPS URL");
   const get = async (relative, parse, { required = false } = {}) => {
@@ -150,7 +156,7 @@ export async function fetchDerivedLayer(publicBase, { fetchImpl = fetch } = {}) 
   // sits where the entry says, and is simply absent for an older publish.
   const paths = { ...derivedLayerPaths(provenance.entry), ...(provenance.files ?? {}) };
   const indexPromise = get(paths.index, JSON.parse);
-  const [index, tokens, brand, llms, formats, designs, changelog, bundle] = await Promise.all([
+  const [index, tokens, brand, llms, formats, designs, concepts, changelog, bundle] = await Promise.all([
     indexPromise,
     get(paths.tokens, JSON.parse),
     get(paths.brand, JSON.parse),
@@ -159,6 +165,7 @@ export async function fetchDerivedLayer(publicBase, { fetchImpl = fetch } = {}) 
     // whether this release offers it, so do not read that obsolete object.
     indexPromise.then((index) => (index && !index.formats) ? null : get(paths.formats, JSON.parse)),
     get(paths.designs, JSON.parse),
+    indexPromise.then(index => index?.concepts && (!documents || documents.includes("concepts")) ? get(paths.concepts, JSON.parse) : null),
     // A system that removed its changelog may leave an older one on the CDN; the index owns whether this release has one.
     indexPromise.then((index) => (index && !index.changelog) ? null : get(paths.changelog, JSON.parse)),
     // The CDN may retain an older bundle after the system disables it. The
@@ -179,6 +186,7 @@ export async function fetchDerivedLayer(publicBase, { fetchImpl = fetch } = {}) 
     llms,
     formats,
     designs,
+    concepts,
     changelog,
     bundle,
   };

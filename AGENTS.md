@@ -419,8 +419,9 @@ system, with no client counterpart.
 When adding a view, a page, or a catalog:
 
 1. Update `src/site.json`, `src/formats.json`, the stylesheets, and the
-   fragments. A fresh scaffold must still pass `check` with exactly its two
-   expected warnings (no voice page, no annotated logo) and no untyped prose.
+   fragments. A fresh scaffold must still pass `check` with its two
+   brand warnings (no voice page, no annotated logo) and the versioned sample’s
+   warning that no concept is approved and no untyped prose.
 2. Keep the scaffolded `templates/design-system-AGENTS.md`,
    `design-system-README.md`, the edit skill, and this repository's
    `CLAUDE.md` describing the new structure.

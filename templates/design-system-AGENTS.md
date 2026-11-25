@@ -78,6 +78,7 @@ repository root, so each one is also a slash command.
 | `src/formats.json` | Every print sheet and screen canvas the system produces, each tied to the page that shows it; previews and spec tables read it | Edit |
 | `src/posting/blog.json` | The blog posting template, when the system publishes articles: an article's named blocks in page order and what a writer puts in each | Edit, and style each block id in the system stylesheet |
 | `src/pages/` | One content fragment per authored page | Edit |
+| `src/concepts/` | Brand proposals, each with a manifest and its local pieces | Edit |
 | `src/designs/` | Website designs: whole pages in HTML with JavaScript on the system's stylesheets, one directory per design | Edit |
 | `src/layout.html` | The shell every page shares: app bar, page navigation, content slot | Edit |
 | `src/styles/system.css`, `src/assets/` | The system's own styles and small optimized assets | Edit |
@@ -208,6 +209,12 @@ path while its catalog retains the stable public URL. Missing marks use a
 sample wordmark; missing photos use Bold. Check fallback diagnostics and all
 four treatments after changing data. The designer's agent runs the skills;
 the designer reviews and the developer later ports released whole-page designs.
+
+## Brand concepts
+
+A concept is a proposal stored in `src/concepts/<id>/concept.json` beside its pieces. Take colors, fonts and media from the system. Read a concept to learn the direction and its reasons, or because the task is about that concept.
+
+Review the directions under `/concepts/`. Add a proposal with `__TIMDS_CLI__ concepts add PATH [--id ID]` or seed the sample in an existing system with `__TIMDS_CLI__ concepts init`. Mark at most one concept approved. Put a card into a page with `{{concept:ID}}`, list the approved direction with `{{concepts:approved}}`, and run `__TIMDS_CLI__ check`. All concepts travel with the published artifact.
 
 ## Website designs
 

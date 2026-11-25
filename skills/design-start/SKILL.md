@@ -38,11 +38,12 @@ retain their declared prerequisites. The agent runs these steps for the designer
 4. Run `npm run timds -- doctor`, then `npm run timds -- check`, then
    `npm run timds -- brand`. A failure here is yours to fix or explain, never
    the designer's: a missing dependency, a stale build, a broken link in a
-   page. A fresh ordinary starter passes `check` with two expected warnings
+   page. A fresh ordinary starter reports two brand warnings
    (no `brand/voice` page and no annotated logo). A fresh brand kit
    (`starter: "brand-kit"` in `.timds/starter.json`) authors its Voice page
    and instead warns that its voice is assumed, still reports no annotated
-   logo, and lists the stock media slots it is falling back on.
+   logo, and lists the stock media slots it is falling back on. Both samples
+   also report that a versioned system holds a proposal without an approved direction.
 5. If the Design System root contains `site/timds.consumer.json` with
    `designSystem.workspace: true`, read that site's `AGENTS.md` and
    `DESIGN_SYSTEM.md` and run `npm ci` in its own folder. It has no pin;
@@ -75,6 +76,7 @@ package script for it), and skip step 3 and the branch in step 2.
 
 Report in the designer's terms, not the toolkit's:
 
+- For concept work, open `/concepts/` and inspect the proposals in `src/concepts/`. Take colors, fonts and media from the system. Read a concept to learn the direction and its reasons, or because the task is about that concept.
 - Which views and pages exist, which are still planned, and what the brand
   kit lacks (from `brand`), each gap with what would fill it. In the starter
   the front page is the Use view's landing page, and its Start, Compose and

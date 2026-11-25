@@ -153,6 +153,7 @@ Neither is a publication. Work only in the Design System the user gave you.
   \`media/*.json\`. Root \`tokens.json\` and \`media.json\` are generated
   compatibility views and are protected. Keep token references and media
   keys valid; \`run_check\` validates the groups and regenerates the views.
+- Brand proposals are authored under \`src/concepts/<id>/\`, with a concept.json and its self-contained pieces. Take colors, fonts and media from the system. Read a concept to learn the direction and its reasons, or because the task is about that concept.
 - Website designs live under \`src/designs/<design>/\`: whole pages in HTML
   with system stylesheets and optional JavaScript, one file per route and state
   (\`pages/contact.html\`, \`pages/contact.sent.html\`), with an optional

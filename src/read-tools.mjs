@@ -1,5 +1,8 @@
 // Runtime-neutral definitions for readers of a resolved Design System.
 import { BRAND_ROLES, DEFAULT_STATE, blockToMarkdown, designsDirectory, findDesignPage, pageToMarkdown, summarizeBrandKit } from "./read-documents.mjs";
+// The concept tools and the system stamp every result carries. The host keeps
+// a byte-identical copy of this module, so it is imported, never edited here.
+import { CONCEPT_USAGE, registerConceptReadTools, systemStamp } from "./concept-read-tools.mjs";
 
 export const DESIGN_SYSTEM_READ_MCP_SERVER_NAME = "timds-design-system-read";
 export const CONSUMER_GUIDE_URI = "timds://consumer-guide";
@@ -109,6 +112,10 @@ use it to be on-brand.
   cannot change it unseen; the \`bundle.json\` resource lists every file
   with its digest.
 
+## Brand concepts
+
+${CONCEPT_USAGE} Use \`list_concepts\` for the directions and \`read_concept\` for a direction or its mockup HTML.
+
 ## Website designs
 
 - \`list_designs\` lists the whole pages the designer has designed in the
@@ -161,23 +168,6 @@ function requireDocument(layer, name) {
     throw readError(404, where);
   }
   return document;
-}
-
-function systemStamp(resolved) {
-  const layer = resolved.layer;
-  return {
-    id: layer.system?.id ?? null,
-    name: layer.system?.name ?? null,
-    version: layer.system?.version ?? null,
-    // An unversioned publication is identified by its stamp, not a label.
-    ...(!layer.system?.version && layer.provenance?.sourceCommit ? { sourceCommit: layer.provenance.sourceCommit } : {}),
-    ...(!layer.system?.version && typeof layer.provenance?.contentDigest === "string" ? { contentDigest: layer.provenance.contentDigest } : {}),
-    published: resolved.published ?? null,
-    pinned: resolved.pinned ?? null,
-    ...(layer.stale ? { stale: true } : {}),
-    source: layer.source?.kind ?? null,
-    ...(layer.source?.kind === "draft" ? { draft: layer.source.draft, revision: layer.source.revision } : {}),
-  };
 }
 
 function pageDirectory(index) {
@@ -434,6 +424,7 @@ export function designSystemReadTools({ z, resolveSystem, listSystems, hooks = {
       formats: layer.formats ? { count: layer.formats.count ?? 0, groups: (layer.formats.groups ?? []).map((group) => ({ id: group.id, unit: group.unit, count: group.formats?.length ?? 0 })) } : null,
       // What a website loads from the system, and the immutable copy it pins; null until the manifest declares a bundle.
       bundle: layer.bundle ? { url: layer.bundle.url, directory: layer.bundle.directory, versioned: layer.bundle.versioned ?? null, files: layer.bundle.fileCount ?? 0, bytes: layer.bundle.bytes ?? 0, paths: (layer.bundle.files ?? []).map((file) => file.path) } : null,
+      concepts: layer.concepts ? { count: layer.concepts.count, approved: layer.concepts.approved } : null,
       designs: layer.designs ? { count: layer.designs.designCount ?? 0, pages: layer.designs.pageCount ?? 0, states: layer.designs.stateCount ?? 0, journeys: layer.designs.journeyCount ?? 0, designs: designsDirectory(layer.designs).map(({ id, title, pageCount, journeys }) => ({ id, title, pageCount, journeyCount: journeys.length })) } : null,
       // The release history, when the system keeps a changelog: the latest version and the most recent releases with their notes.
       changelog: layer.changelog ? { url: layer.changelog.url, base: layer.changelog.base ?? null, latest: layer.changelog.latest ?? null, releases: layer.changelog.releaseCount ?? 0, recent: (layer.changelog.releases ?? []).slice(0, 5).map((release) => ({ version: release.version, date: release.date ?? null, notes: (release.entries ?? []).map((entry) => entry.area ? `${entry.area}: ${entry.text}` : entry.text) })) } : null,
@@ -577,6 +568,8 @@ export function designSystemReadTools({ z, resolveSystem, listSystems, hooks = {
     }
     return { ...header, ...(format === "markdown" ? { markdown: pageToMarkdown(page) } : { blocks: page.blocks ?? [] }) };
   });
+
+  registerConceptReadTools({ tool, z, systemFor });
 
   tool("list_designs", {
     title: "List website designs",
