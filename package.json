@@ -171,6 +171,7 @@
     "src/concepts.mjs",
     "src/concepts.d.mts",
     "src/concept-assets.mjs",
+    "src/concept-read-tools.mjs",
     "src/designs.mjs",
     "src/designs.d.mts",
     "src/brand.d.mts",

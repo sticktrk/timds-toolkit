@@ -50,7 +50,7 @@ import {
 import { robotsText } from "./agent-pointers.mjs";
 import { annotationFor, buildBrandKit } from "./brand.mjs";
 import { bundleOutputDirectory } from "./bundle.mjs";
-import { CONCEPT_USAGE } from "./concepts.mjs";
+import { CONCEPT_USAGE } from "./concept-read-tools.mjs";
 import { designsDocument } from "./designs.mjs";
 import { CHANGELOG_OUTPUT_DIRECTORY } from "./changelog.mjs";
 import { describeFormatSize, formatsDocument } from "./formats.mjs";

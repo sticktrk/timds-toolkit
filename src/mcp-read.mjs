@@ -21,7 +21,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import * as z from "zod/v4";
 import { findRepositoryRoot, loadWorkspace, setOutputStream } from "./core.mjs";
 import { fetchDerivedLayer, readDerivedLayer, summarizeBrandKit } from "./derived.mjs";
-import { CONCEPT_USAGE } from "./concepts.mjs";
+import { CONCEPT_USAGE, registerConceptReadTools, systemStamp } from "./concept-read-tools.mjs";
 import { DEFAULT_STATE, designsDirectory, findDesignPage } from "./designs.mjs";
 import { blockToMarkdown, pageToMarkdown } from "./extract.mjs";
 import { readMediaCatalog } from "./media.mjs";
@@ -191,22 +191,6 @@ function requireDocument(layer, name) {
   return document;
 }
 
-function systemStamp(resolved) {
-  const layer = resolved.layer;
-  return {
-    id: layer.system?.id ?? null,
-    name: layer.system?.name ?? null,
-    version: layer.system?.version ?? null,
-    // An unversioned publication is identified by its stamp, not a label.
-    ...(!layer.system?.version && layer.provenance?.sourceCommit ? { sourceCommit: layer.provenance.sourceCommit } : {}),
-    ...(!layer.system?.version && typeof layer.provenance?.contentDigest === "string" ? { contentDigest: layer.provenance.contentDigest } : {}),
-    published: resolved.published ?? null,
-    pinned: resolved.pinned ?? null,
-    ...(layer.stale ? { stale: true } : {}),
-    source: layer.source?.kind ?? null,
-    ...(layer.source?.kind === "draft" ? { draft: layer.source.draft, revision: layer.source.revision } : {}),
-  };
-}
 
 function pageDirectory(index) {
   return (index?.pages ?? []).map((page) => ({
@@ -624,38 +608,7 @@ export function registerDesignSystemReadTools(server, { resolveSystem, listSyste
     return { ...header, ...(format === "markdown" ? { markdown: pageToMarkdown(page) } : { blocks: page.blocks ?? [] }) };
   });
 
-  tool("list_concepts", {
-    title: "List brand concepts",
-    annotations: READ_ONLY,
-    description: `List brand proposals with their id, title, reason, status and page. ${CONCEPT_USAGE}`,
-  }, async args => {
-    const resolved = await systemFor(args);
-    const document = resolved.layer.concepts;
-    const concepts = (document?.concepts ?? []).map(({ id, title, summary, status, url }) => ({ id, title, summary, status, url }));
-    return { system: systemStamp(resolved), base: document?.base ?? null, approved: document?.approved ?? null, total: concepts.length, concepts };
-  });
-
-  tool("read_concept", {
-    title: "Read a brand concept",
-    annotations: READ_ONLY,
-    description: `Read a proposal and its ordered pieces. Name an HTML piece by its file to read the mockup source. ${CONCEPT_USAGE}`,
-    inputSchema: {
-      concept: z.string().min(1).describe("Concept id from list_concepts"),
-      piece: z.string().min(1).optional().describe("The file name of an HTML piece"),
-    },
-  }, async args => {
-    const resolved = await systemFor(args);
-    const document = resolved.layer.concepts;
-    const concept = document?.concepts.find(entry => entry.id === args.concept);
-    if (!concept) throw new Error(`No concept ${JSON.stringify(args.concept)}; list_concepts shows the directory`);
-    const header = { system: systemStamp(resolved), base: document.base ?? null };
-    if (args.piece) {
-      const piece = concept.pieces.find(entry => entry.file === args.piece);
-      if (typeof piece?.html !== "string") throw new Error(`No HTML piece ${JSON.stringify(args.piece)} in concept ${concept.id}`);
-      return { ...header, concept: concept.id, file: piece.file, url: piece.url, html: piece.html };
-    }
-    return { ...header, concept: { ...concept, pieces: concept.pieces.map(({ html, ...metadata }) => metadata) } };
-  });
+  registerConceptReadTools({ tool, z, systemFor });
 
   tool("list_designs", {
     title: "List website designs",

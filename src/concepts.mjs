@@ -9,7 +9,8 @@ import { stylesheetReferences } from "./tokens.mjs";
 
 export const CONCEPT_KINDS = Object.freeze(["website", "logo", "card", "social", "photo", "merch", "pattern", "other"]);
 export const CONCEPT_STATUSES = Object.freeze(["proposed", "approved", "archived"]);
-export const CONCEPT_USAGE = "Take colors, fonts and media from the system. Read a concept to learn the direction and its reasons, or because the task is about that concept.";
+export { CONCEPT_USAGE } from "./concept-read-tools.mjs";
+import { CONCEPT_USAGE } from "./concept-read-tools.mjs";
 const kinds = { website: "Website", logo: "Logos", card: "Cards", social: "Social", photo: "Photography", merch: "Merchandise", pattern: "Patterns", other: "Other pieces" };
 const image = /\.(svg|png|jpe?g|webp)$/i;
 const hex = /^#[a-f\d]{6}$/i;
