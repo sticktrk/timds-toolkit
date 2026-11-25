@@ -78,8 +78,8 @@ test("the local read server describes, resolves roles, lists tokens and pages, a
   const { tools } = await client.listTools();
   const names = tools.map((tool) => tool.name).sort();
   assert.deepEqual(names, [
-    "describe_system", "get_brand", "get_consumer_guide", "get_tokens", "list_design_systems", "list_designs", "list_formats", "list_media",
-    "list_pages", "read_design", "read_page", "report_gap", "resolve_role", "search_guidance",
+    "describe_system", "get_brand", "get_consumer_guide", "get_tokens", "list_concepts", "list_design_systems", "list_designs", "list_formats", "list_media",
+    "list_pages", "read_concept", "read_design", "read_page", "report_gap", "resolve_role", "search_guidance",
   ]);
   for (const tool of tools) {
     assert.equal(tool.annotations.readOnlyHint, tool.name !== "report_gap", tool.name);
@@ -120,6 +120,11 @@ test("the local read server describes, resolves roles, lists tokens and pages, a
   assert.match((await call(client, "list_formats", { group: "unknown" })).content[0].text, /No format group unknown/);
 
   // The website designs are whole pages: the directory names routes and states, and a read returns the HTML as authored.
+  const concepts = await ok(client, "list_concepts");
+  assert.equal(concepts.concepts[0].id, "sample");
+  const sample = await ok(client, "read_concept", { concept: "sample", piece: "journal.html" });
+  assert.match(sample.html, /<html/i);
+
   const designs = await ok(client, "list_designs", {});
   assert.equal(designs.total, 1);
   assert.equal(designs.base, null, "nothing is published locally");
@@ -385,6 +390,7 @@ test("a published base serves the layer the CDN holds", async (t) => {
     "tokens.json": JSON.stringify(layer.tokens),
     "brand.json": JSON.stringify(layer.brand),
     "formats.json": JSON.stringify(layer.formats),
+    "concepts.json": JSON.stringify(layer.concepts),
     "llms.txt": layer.llms,
   };
   const requested = [];
@@ -398,6 +404,8 @@ test("a published base serves the layer the CDN holds", async (t) => {
   };
   const client = await connect(await createDesignSystemReadMcpServer({ published: base, fetchImpl }));
   const described = await ok(client, "describe_system", {});
+  assert.equal((await ok(client, "list_concepts")).concepts[0].id, "sample");
+  assert.match((await ok(client, "read_concept", { concept: "sample", piece: "journal.html" })).html, /<html/i);
   assert.equal(described.system.source, "published");
   assert.equal(described.system.published, layer.system.version);
   assert.equal(described.provenance.sourceCommit, "abc123");

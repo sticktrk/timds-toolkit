@@ -21,9 +21,9 @@ const PARENT = { schemaVersion: 1, ...LINEAGE, baseline: { site: { views: [{ id:
 test("derived file paths follow the artifact entry directory", () => {
   assert.deepEqual(derivedLayerPaths("design-system/index.html"), {
     index: "design-system/index.json", tokens: "design-system/tokens.json", brand: "design-system/brand.json", llms: "design-system/llms.txt",
-    llmsFull: "design-system/llms-full.txt", formats: "design-system/formats.json", designs: "design-system/designs.json", changelog: "design-system/changelog.json", bundle: "design-system/bundle.json",
+    llmsFull: "design-system/llms-full.txt", formats: "design-system/formats.json", designs: "design-system/designs.json", concepts: "design-system/concepts.json", changelog: "design-system/changelog.json", bundle: "design-system/bundle.json",
   });
-  assert.deepEqual(derivedLayerPaths(), { index: "index.json", tokens: "tokens.json", brand: "brand.json", llms: "llms.txt", llmsFull: "llms-full.txt", formats: "formats.json", designs: "designs.json", changelog: "changelog.json", bundle: "bundle.json" });
+  assert.deepEqual(derivedLayerPaths(), { index: "index.json", tokens: "tokens.json", brand: "brand.json", llms: "llms.txt", llmsFull: "llms-full.txt", formats: "formats.json", designs: "designs.json", concepts: "concepts.json", changelog: "changelog.json", bundle: "bundle.json" });
   assert.equal(derivedFilePath("/ds", { artifact: { entry: "design-system/index.html" } }, "brand"), "/ds/dist/design-system/brand.json");
   assert.throws(() => derivedFilePath("/ds", {}, "nope"), /unknown derived file/);
 });

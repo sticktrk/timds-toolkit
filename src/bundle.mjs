@@ -116,6 +116,11 @@ export function matchesPattern(filePath, pattern) {
 export async function collectBundleFiles(designSystemRoot, config, { outputDirectory = null } = {}) {
   const wantsDist = config.include.some((pattern) => pattern === "dist" || pattern.startsWith("dist/"));
   const ownOutput = outputDirectory ? `dist/${outputDirectory}` : null;
+  // A broad include can select built stylesheets but never a proposal's source,
+  // rendered section or derived catalog, including with a nested artifact entry.
+  const artifactEntryDir = ownOutput ? path.posix.dirname(ownOutput) : "dist";
+  const conceptSection = path.posix.join(artifactEntryDir, "concepts");
+  const conceptCatalog = path.posix.join(artifactEntryDir, "concepts.json");
   const siteDirectory = findWorkspaceSite(designSystemRoot) ? WORKSPACE_SITE_DIRECTORY : null;
   const found = [];
   const skipped = [];
@@ -123,6 +128,7 @@ export async function collectBundleFiles(designSystemRoot, config, { outputDirec
     const entries = (await fs.readdir(directory, { withFileTypes: true })).sort((left, right) => left.name.localeCompare(right.name));
     for (const entry of entries) {
       const relative = relativeDirectory ? `${relativeDirectory}/${entry.name}` : entry.name;
+      if (relative === "src/concepts" || relative === conceptSection || relative === conceptCatalog) continue;
       if (entry.isSymbolicLink()) {
         if (config.include.some((pattern) => matchesPattern(relative, pattern))) skipped.push(relative);
         continue;
