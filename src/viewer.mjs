@@ -1094,7 +1094,9 @@ const contentTypes = {
 /**
  * The stock dev server: build once, then serve dist/ on 127.0.0.1 (PORT, else
  * 4321). It does not watch files; rerun it after a change. Resolves with the
- * listening server.
+ * listening server. Once listening it records itself as the workspace's
+ * local preview and prints the address of each page the workspace changed
+ * (preview-links.mjs).
  *
  * When the workspace holds a site (`site/timds.consumer.json` in the
  * workspace form, see workspace-site.mjs), the same server also starts the
@@ -1149,11 +1151,11 @@ export async function dev(designSystemRoot, { port = Number(process.env.PORT || 
     }
   }
   const server = createServer(serveDist);
-  listenDev(server, port);
+  listenDev(server, port, root);
   return server;
 }
 
-function listenDev(server, port) {
+function listenDev(server, port, root) {
   server.on("error", (error) => {
     if (error.code !== "EADDRINUSE") throw error;
     console.error(`Starter viewer port ${port} is already in use. Run timds dev --port ${port < 65535 ? port + 1 : 4321}.`);
@@ -1162,8 +1164,21 @@ function listenDev(server, port) {
 
   server.listen(port, "127.0.0.1", () => {
     console.log(`Starter viewer: http://127.0.0.1:${port}`);
+    void announcePreview(server, root);
   });
   return server;
+}
+
+// Record this server as the workspace's local preview, so later commands
+// name it before a hosted copy, and say where the pages this workspace
+// changed are on it. Advice only: a failure here never stops the server.
+async function announcePreview(server, root) {
+  try {
+    const { recordLocalPreview, workspacePreview, previewLines } = await import("./preview-links.mjs");
+    await recordLocalPreview(root, server);
+    const preview = await workspacePreview(root);
+    if (preview.routes.length) for (const line of previewLines({ ...preview, hosted: null })) console.log(line);
+  } catch { /* the preview is served either way */ }
 }
 
 // The dev server with the workspace site behind /site: the system's pages are
@@ -1172,7 +1187,7 @@ function listenDev(server, port) {
 // failed, or was not started. `dev` calls it only when the system's dist/ has
 // nothing at the mount; the router checks that again on every request, so a
 // system page under /site is never answered by the site or its 503.
-async function devWithSite({ destination, port, serveDist, workspaceSite, siteFolder, siteReadyTimeoutMs }) {
+async function devWithSite({ root, destination, port, serveDist, workspaceSite, siteFolder, siteReadyTimeoutMs }) {
   const { siteRouter, startWorkspaceSite } = await import("./site-proxy.mjs");
   let site = null;
   let starting = null;
@@ -1196,7 +1211,7 @@ async function devWithSite({ destination, port, serveDist, workspaceSite, siteFo
     server.once("listening", () => resolve(true));
     server.once("error", () => resolve(false));
   });
-  listenDev(server, port);
+  listenDev(server, port, root);
   if (!(await listening)) return server;
   const origin = `http://127.0.0.1:${server.address().port}`;
 

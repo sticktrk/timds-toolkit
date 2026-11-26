@@ -532,9 +532,12 @@ additionally needs its host catalog lineage updated before publication;
 
 Humans direct work, inspect status/history, publish and roll back. The agent
 follows the installed hosted skill through the CLI: start or join a session,
-read `active-work`, claim paths, then update and submit with `--note INTENT`.
+edit, check, and submit with `--note INTENT`. In a shared session it first
+reads `active-work`, claims paths, and shares work in progress with `update`.
 Claims are advisory. A named draft has members and no expiry; `start --draft
 NAME` targets it. `status --json` and `history --json` expose structured session
 results. Resolve exactly the returned conflict with
 `update --resolve 'PATH#KEY=mine|theirs' --note INTENT`; never replace unrelated
-changes. Return the live URL and frozen submission preview to the human.
+changes. The human looks at the local preview (`dev`) at the `Preview:`
+address `check` prints for each changed page; `submit` prints the same pages
+on the frozen submission preview.

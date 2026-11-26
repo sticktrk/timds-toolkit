@@ -837,10 +837,13 @@ at the repository root has the detail.
 - Hosted sessions: humans direct work, inspect status/history, publish and
   roll back. Follow the installed system-specific hosted skill and the Cloud
   reference linked above. The agent runs the CLI to start or join a session,
-  reads `active-work`, claims paths with `claim --on GLOB,... --note INTENT`,
-  then sends `update --note INTENT` and `submit --note INTENT`. Claims are
-  advisory. A named draft has members and no expiry; `start --draft NAME`
+  edits, checks, and sends `submit --note INTENT`. In a shared session it
+  first reads `active-work`, claims paths with `claim --on GLOB,... --note
+  INTENT`, and shares work in progress with `update --note INTENT`. Claims
+  are advisory. A named draft has members and no expiry; `start --draft NAME`
   targets it. Use `status --json` and `history --json` to inspect the session.
   Resolve exactly the returned conflict with
   `update --resolve 'PATH#KEY=mine|theirs' --note INTENT`; never replace
-  unrelated changes. Return the live URL and frozen submission preview.
+  unrelated changes. Show the human the local preview (`dev`) at the
+  `Preview:` address `check` prints for each changed page, and return the
+  `Preview:` addresses `submit` prints for the frozen submission.

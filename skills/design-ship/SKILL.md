@@ -58,7 +58,8 @@ retain their declared prerequisites. The agent runs these steps for the designer
 
 ## Look at it
 
-Serve the exact artifact with `npm run timds -- preview` and open every
+Serve the exact artifact with `npm run timds -- preview` (it prints a
+`Preview:` address for each page the workspace changed) and open every
 changed page, every website design route and state the change touched, and
 the storyboard of every journey those pages belong to,
 at desktop and phone widths (1440 and 390, the widths the product's review
@@ -101,8 +102,10 @@ submit at all; say so.
 
 ## Report, and say what happens next
 
-Give the designer the pull-request link (or the submission id and preview
-URL) and a two-sentence summary of what is in it. Then explain the path to
+Give the designer the pull-request link (or the submission id and its
+`Preview:` addresses) and a two-sentence summary of what is in it. An
+address to look at is the page that changed, never only the system's front
+page. Then explain the path to
 production once, in order:
 
 1. An operator reviews and merges the pull request. In a standalone system
@@ -130,11 +133,12 @@ unless the person asking is authorized to and says so.
   `npm run timds -- auth login`.
 - In a hosted workspace (`timds.json` has a hosted provider, or
   `.timds/session.json` exists) there is no Git: `timds status` and the
-  session's claims say what is yours. Publish any staged media first, then
+  `Preview:` lines it prints say what this workspace changed. Publish any
+  staged media first, then
   `timds submit --note "Describe the change"` (`--message` is accepted too).
   It freezes a submission with a preview for review in Studio; there is no
-  branch and no pull request. Report the submission id and the Preview URL
-  it prints.
+  branch and no pull request. Report the submission id and every `Preview:`
+  address it prints; they open on the pages the session changed.
 - On the path to production, an operator reviews the submission in Studio,
   and a hosted system is published from Studio by someone with the right to.
   For a standalone system, publication to its public root follows the

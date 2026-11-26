@@ -18,6 +18,7 @@ const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_SNAPSHOT_BYTES = 50 * 1024 * 1024;
 const MAX_CHANGESET_BYTES = 10 * 1024 * 1024;
 const MAX_FILES = 4000;
+const MAX_TOUCHED_PATHS = 400;
 const HOST_RETRY_WINDOW_MS = 5 * 60 * 1000;
 const HOST_RETRY_ATTEMPTS = 6;
 const SESSION_BUSY_MESSAGE = "This session is busy; retry when its current operation finishes";
@@ -339,7 +340,28 @@ async function writeState(root, state) {
   await fs.mkdir(path.join(root, ".timds"), { recursive: true });
   const destination = path.join(root, SESSION_FILE);
   try { if ((await fs.lstat(destination)).isSymbolicLink()) throw new Error("Session metadata cannot be a symbolic link"); } catch (error) { if (error.code !== "ENOENT") throw error; }
-  await fs.writeFile(destination, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
+  // The paths this workspace has sent stay with the session across every
+  // rewrite of its state: a host answer replaces the files, never that list.
+  const previous = state.touched === undefined ? await readJson(destination).catch(() => null) : null;
+  const touched = state.touched ?? (previous?.session?.id === state.session?.id ? previous.touched : undefined);
+  await fs.writeFile(destination, `${JSON.stringify(Array.isArray(touched) && touched.length ? { ...state, touched } : state, null, 2)}\n`, { mode: 0o600 });
+}
+
+function changedPaths(changes) { return [...changes.changedFiles.map((file) => file.path), ...changes.deletedPaths]; }
+
+/**
+ * The paths this workspace has worked on in its session: everything it sent
+ * with update or submit, plus its unsent edits. Preview links name the pages
+ * these paths show (preview-links.mjs). Local metadata only; never sent.
+ */
+export async function sessionWorkPaths(root) {
+  const state = await readJson(path.join(root, SESSION_FILE));
+  if (!state?.session || !Array.isArray(state.files)) return [];
+  const touched = Array.isArray(state.touched) ? state.touched : [];
+  // An edit the session would refuse (protected lineage, an oversized change
+  // set) is update's to report; what was already sent still counts.
+  const unsent = await sessionChanges(root, state).then(({ changes }) => changedPaths(changes), () => []);
+  return [...new Set([...touched, ...unsent])];
 }
 
 function validateSession(session) {
@@ -543,6 +565,11 @@ export async function runHostedCommand(command, { root = process.cwd(), fixedRoo
   if (state.session.status === "closed") throw new Error("This TimDS session is closed; start a new session.");
   if (command === "pull") return applySnapshot(selected, await host.pull(state.session.id), state, provider);
   const { files, changes } = await sessionChanges(selected, state, note);
+  if (!dryRun) {
+    // Remember what this workspace sends before the base moves past it.
+    const touched = [...new Set([...(Array.isArray(state.touched) ? state.touched : []), ...changedPaths(changes)])].slice(-MAX_TOUCHED_PATHS);
+    if (touched.length !== (state.touched?.length ?? 0)) { state.touched = touched; await writeState(selected, state); }
+  }
   async function retryRebased(result) {
     if (!result.stale || !result.rebasedChanges || staleRetries <= 0) return null;
     const remote = decodeFiles(result.files), desired = new Map(remote);

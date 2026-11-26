@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Name the page that changed wherever a preview address is printed, and name the local preview first. `check`, the stock dev server, `preview` and the hosted `start`, `join`, `pull`, `update`, `status` and `claim` print a `Preview:` line for each website design page, concept or guidance page the workspace changed, on the local preview while one is running for that workspace and answers; the session's hosted copy follows as `Hosted copy`, labelled as showing only what the last update sent, and replaces the bare `Live:` line. `submit` prints the frozen Preview at the changed pages. `--json` on those hosted commands adds `preview`. A session remembers the paths it has sent as `touched` in its local `.timds/session.json`. The hosted, start, ship and edit skills and the scaffolded agent guide now give the designer the local address of the changed page, and present `claim`, `active-work` and `update` as steps for a shared session: a session started alone goes from edit to check to submit.
+
 - Add brand concepts as authored proposals under `src/concepts/`. Both starters seed a sample and the viewer, Markdown mirrors, `concepts.json` and MCP tools expose the directions independently of the system's tokens. Existing systems can adopt the section with `timds concepts init` or import an authored folder with `timds concepts add`. The concept tools are among the `@dtconcepts/timds/read-tools` definitions, so a host serving that export reads concepts too.
 
 - Export `@dtconcepts/timds/read-tools` for Worker and other HTTP hosts.

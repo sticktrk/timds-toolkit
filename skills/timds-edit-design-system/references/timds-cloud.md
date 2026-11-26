@@ -38,12 +38,25 @@ session to join or the human asks for a new one. If the host refuses the join
 session: report the id from `timds whoami` so the owner can invite it, and do
 not start a separate session as a workaround.
 
-Read active work with `timds active-work` before editing, then claim the
+A session you started alone needs no claim and no update: edit, check, and
+`timds submit --note INTENT` sends the work. In a shared session (one you
+joined, a draft, or one whose `timds status` lists another member), read
+active work with `timds active-work` before editing, then claim the
 intended paths with the human's intent:
 `timds claim --on "GLOB,GLOB" --note INTENT`. Overlap is advisory; do not
 edit paths another agent has claimed, tell the human about the overlap
-instead. `timds update --note INTENT` and `timds submit --note INTENT` carry
-that intent (required for agent principals). Never run git or handle
+instead. `timds update --note INTENT` sends work for the other members, or
+for the session's hosted copy, before it is submitted. Updates and
+submissions carry the intent (required for agent principals).
+
+Show the human the local preview (`timds dev`), not the hosted copy: it has
+the edits as soon as `timds check` builds them, and the hosted copy has only
+what the last `timds update` sent. `check`, `status`, `update` and `dev`
+print a `Preview:` line with the address of each page the workspace changed
+(a website design's page, a concept, a guidance page); give those addresses,
+never the front page of the system, when the work is a specific page. Use
+the `Hosted copy` address only when the local preview cannot be used, after
+an update. Never run git or handle
 Artifacts credentials in a hosted agent workspace.
 
 `timds auth login` selects the workspace's hosted provider unless `--portal-url`
@@ -81,8 +94,9 @@ one. An owner or publisher invites a second principal with
 `timds join SESSION --principal-id ID`; that member runs `timds join SESSION`
 to attach. `timds whoami` gives the caller's own principal id and
 `timds principals` lists who can be invited. `timds sessions close` closes the
-workspace's session, only when the human asks. Return the live URL,
-submission preview and claims with the work receipt. When publication is
+workspace's session, only when the human asks. Return the `Preview:`
+addresses `timds submit` prints, which open the frozen submission on the
+pages the session changed, with the work receipt. When publication is
 requested, run dry-run, review it, then publish with explicit confirmation.
 Never put access tokens in source or session metadata.
 
