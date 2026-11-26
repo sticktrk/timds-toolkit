@@ -194,6 +194,48 @@ operation's receipt without duplicating its changes. CLI and MCP share this
 behavior. Key conflicts, stale revisions, publication conflicts, and other
 commands are not transport retries; they retain their normal resolution flow.
 
+A session started alone needs no claim and no update: `submit` sends the
+work. Claims and updates are for a shared session (a joined one, a draft, or
+one with a second member), where `active-work` shows who is editing what,
+`claim` says which paths are whose, and `update` sends work in progress to
+the other members and to the session's hosted copy.
+
+### Where the work is looked at
+
+A preview address that opens the system's front page leaves a person hunting
+for the page that changed, and a session's hosted copy shows only what the
+last `update` or `submit` sent, never an unsent edit. The commands therefore
+say where the work is:
+
+- `start`, `join`, `pull`, `update`, `status` and `claim` print a `Preview:`
+  line for each page this workspace changed, on the local preview, when
+  `timds dev` (or `timds preview`) is running for the workspace and answers.
+  The hosted copy follows as `Hosted copy, for someone on another machine`.
+  With no local preview running they print `Local preview: not running` and
+  how to start it (`start` and `join` leave that to their next-step lines),
+  then the `Hosted copy` address of each changed page.
+  `--json` carries the same as `preview`: `routes`, `more`, `local`,
+  `hosted` (each `{ url, urls }` or null) and `preferred` (`"local"`,
+  `"hosted"` or null).
+- `check` prints the same `Preview:` lines once something specific changed or
+  a local preview is running, in a hosted workspace or a Git checkout. The
+  stock dev server and `preview` print them when they start.
+- `submit` prints the frozen submission's `Preview:` address for each
+  changed page, in place of the address of its front page; `--json` lists
+  them as `preview.submission`.
+
+A changed page is a website design's page or state (`/designs/<design>/…`;
+the design's own page for its layout or `design.json`), a concept, or a
+viewer page under `src/pages/`; up to five are listed and the rest counted.
+In a session the changed paths are everything the workspace has sent plus
+its unsent edits, kept as `touched` in the local `.timds/session.json` and
+never sent to the host. In a Git checkout they are the working tree plus the
+branch's commits since the default branch. With nothing specific changed the
+addresses are the front page. A local preview is recognized by a record its
+server writes under the user's temporary directory, trusted only while that
+process is alive and its address answers with the record's token, so another
+workspace's server on the same port is never named.
+
 Claims are advisory: overlapping work is visible, never blocked. `status` and
 `active-work` expose members, claims, submissions and live URLs. An owner or
 publisher invites a principal with `join --principal-id`; an invited principal
@@ -506,8 +548,9 @@ snapshot API continues to transfer full file contents.
 ## Hosted site previews and deployments
 
 In a session with a workspace site, `timds status` prints the live
-`/site/` preview address and includes `sitePreviewUrl` in JSON. Use that
-address to review site changes after `timds update`. The submission Preview
+`/site/` preview address and includes `sitePreviewUrl` in JSON. Review site
+changes on the local dev server's `/site/` first; that hosted address shows
+them after `timds update`. The submission Preview
 excludes the site. If the live site returns 503, run `timds diagnostics`
 from the workspace to read its site state, dev output, dependency cache
 outcome and last wake timings. Add `--json` for the host's diagnostic report.

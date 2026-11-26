@@ -51,9 +51,12 @@ retain their declared prerequisites. The agent runs these steps for the designer
    changes and run `consumer check --root SITE_PATH` separately, where
    `SITE_PATH` is `site` or `design-system/site` from repository root.
 6. Start the authoring server with `npm run timds -- dev` in the background
-   and give the designer the URL it prints (the starter serves
-   `http://127.0.0.1:4321`, with website designs under `/designs/`; a system
-   with no `workspace.dev` command falls back to `preview` on 4400). If that
+   (the starter serves `http://127.0.0.1:4321`, with website designs under
+   `/designs/`; a system with no `workspace.dev` command falls back to
+   `preview` on 4400). Give the designer the address of what they are about
+   to work on, not only the front page: the server and every later `check`
+   print a `Preview:` line for each page the workspace has changed, and a
+   design's own address is `/designs/<design>/`. If that
    port is busy, use `npm run timds -- dev --port 4322`; do not stop another
    workspace's server. The starter server does not watch files: after every
    edit you make, rerun `npm run timds -- check` and tell the designer to
@@ -67,8 +70,9 @@ If `timds.json` has a hosted provider or `.timds/session.json` exists, this
 is a hosted workspace: use `timds status` and keep the session, do not run
 Git commands, and follow the installed hosted skill for that system
 (`timds-<system>`, which `timds skills install` renders) to sign in, start or
-join a session, and claim paths; when no session exists yet, that skill's
-start or join step comes first. Run the CLI there as
+join a session; when no session exists yet, that skill's start or join
+step comes first. The local preview stays the one the designer looks at:
+the session's hosted copy shows only what the last `timds update` sent. Run the CLI there as
 `npx --yes @dtconcepts/timds@latest <command>` (a session folder has no
 package script for it), and skip step 3 and the branch in step 2.
 

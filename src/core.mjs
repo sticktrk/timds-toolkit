@@ -69,7 +69,8 @@ import { publishExtractedIndex } from "./artifact.mjs";
 import { MAX_ARTIFACT_FILE_BYTES, collectArtifactFiles } from "./artifact-files.mjs";
 import { isWorkspaceSitePath, workspaceSitePath, workspaceSiteSkillFolders } from "./workspace-site.mjs";
 import { publicStampUrl, publishArtifactRef, publishRelease } from "./publish.mjs";
-import { normalizeProvider, runHostedCommand, sessionReference, workspaceProvider } from "./hosted.mjs";
+import { findHostedRoot, normalizeProvider, runHostedCommand, sessionReference, workspaceProvider } from "./hosted.mjs";
+import { previewAddress, previewLines, recordLocalPreview, workspacePreview } from "./preview-links.mjs";
 import { describeSessionDiagnostics, describeSite, SITE_USAGE, siteCommit, siteTimeoutMs, terminalText } from "./hosted-site.mjs";
 import { buildBundle, describeBundle, normalizeBundleConfig } from "./bundle.mjs";
 import { DESIGNS_SOURCE_DIRECTORY, buildDesigns, checkDesigns, declaredClasses, readDesignCatalog, renderDesigns } from "./designs.mjs";
@@ -283,6 +284,9 @@ export function execute(command, options = {}) {
     });
   });
 }
+
+/** The command name to suggest in output: the executable's, or the npm CLI's. */
+const cliName = () => (isBinaryRuntime() ? "timds-cli" : "timds");
 
 async function git(args, repoRoot, options = {}) {
   return execute(["git", ...args], { capture: true, cwd: repoRoot, ...options });
@@ -2566,13 +2570,19 @@ export async function runCli(argv) {
     const joinRoot = invitedHost && !options.root && !options.principalId ? path.resolve(`session-${String(invitation.sessionId).slice(0, 8)}`) : root;
     if (!options.json && ["start", "join"].includes(operation)) output(`TimDS ${operation}: fetching workspace${invitedHost ? ` from ${invitedHost}` : ""}...`);
     const result = await runHostedCommand(operation, { ...options, root: command === "start" && !options.root ? path.resolve(String(positional[0] || "").split("/").at(-1) || ".") : command === "join" ? joinRoot : root, systemId: command === "start" ? positional[0] : options.systemId, version: command === "rollback" ? positional[0] : options.version, sessionId: command === "join" ? positional[0] : undefined, name: command === "draft" ? positional[1] : undefined, note: options.note || options.message });
-    if (options.json) output(JSON.stringify(result, null, 2));
+    // The session this folder holds: say where its work is looked at, the
+    // local preview first, instead of a bare address of the hosted copy.
+    const sessionRoot = ["start", "join", "pull", "update", "status", "claim"].includes(operation) && !options.principalId && result.session?.id
+      ? await findHostedRoot(command === "start" ? path.resolve(options.root || String(positional[0] || "").split("/").at(-1) || ".") : command === "join" ? joinRoot : root).catch(() => null) : null;
+    const preview = sessionRoot && existsSync(path.join(sessionRoot, ".timds", "session.json"))
+      ? await workspacePreview(sessionRoot, { liveUrl: result.session.liveUrl || null }).catch(() => null) : null;
+    if (options.json) output(JSON.stringify(preview ? { ...result, preview } : result, null, 2));
     else if (result.conflicts?.length) output(`Conflicts: ${result.conflicts.map(value => typeof value === "string" ? value : `${value.path}${value.key ? `#${value.key}` : ""}`).join(", ")}. Local files were preserved; edit each file, then run timds update --resolve PATH (repeat per conflict).`);
     else if (operation === "whoami") output(`${result.portal}: signed in as ${result.principal.name || result.principal.id} (${result.principal.type}) ${result.principal.id}`);
     else if (operation === "systems") { for (const system of result.systems || []) output(`${system.systemId}  ${system.name}`); if (!result.systems?.length) output(`No design systems are shared with you on ${result.portal}. Ask the host administrator for access.`); }
     else if (operation === "principals") { for (const principal of result.principals || []) output(`${principal.id}  ${principal.type}  ${principal.name}`); if (!result.principals?.length) output("No principals can be invited into this design system."); }
     else if (operation === "diagnostics") { for (const line of describeSessionDiagnostics(result)) output(line); }
-    else { output(`TimDS ${operation}: ${result.session?.status || "complete"}${result.session?.id ? ` (${result.session.id})` : ""}`); if (["history", "status", "active-work", "claim", "draft-list", "rollback"].includes(operation)) output(JSON.stringify(result, null, 2)); if (result.session?.liveUrl) output(`Live: ${result.session.liveUrl}`); }
+    else { output(`TimDS ${operation}: ${result.session?.status || "complete"}${result.session?.id ? ` (${result.session.id})` : ""}`); if (["history", "status", "active-work", "claim", "draft-list", "rollback"].includes(operation)) output(JSON.stringify(result, null, 2)); if (preview) { for (const line of previewLines(preview, { cli: cliName(), started: !["start", "join"].includes(operation) })) output(line); } else if (result.session?.liveUrl) output(`Live: ${result.session.liveUrl}`); }
     if (!options.json && result.sitePreviewUrl) output(`Site preview: ${result.sitePreviewUrl}`);
     if (!options.json && command === "start") {
       output(`Workspace: ${path.resolve(options.root || String(positional[0]).split("/").at(-1))}`);
@@ -2885,6 +2895,9 @@ export async function runCli(argv) {
     }
     for (const warning of result.video?.warnings ?? []) output(`Warning: ${warning}`);
     if (result.video) output(`Video contract: ${result.video.productionCount} production${result.video.productionCount === 1 ? "" : "s"}`);
+    // Name the pages this workspace changed on the preview that shows them.
+    const preview = await workspacePreview(result.designSystemRoot, { manifest: result.manifest }).catch(() => null);
+    if (preview && (preview.local || preview.routes.length)) for (const line of previewLines(preview, { cli: cliName() })) output(line);
     return result;
   }
   if (command === "publish") {
@@ -2983,6 +2996,9 @@ export async function runCli(argv) {
       server.listen(port, "127.0.0.1", resolve);
     });
     output(`TimDS preview: http://127.0.0.1:${port}/`);
+    await recordLocalPreview(checked.designSystemRoot, server);
+    const preview = await workspacePreview(checked.designSystemRoot, { manifest: checked.manifest }).catch(() => null);
+    if (preview?.routes.length) for (const line of previewLines({ ...preview, hosted: null }, { cli: cliName() })) output(line);
     return new Promise((resolve) => {
       const close = () => server.close(resolve);
       process.once("SIGINT", close);
@@ -3063,7 +3079,18 @@ export async function runCli(argv) {
     const result = await submitWorkspace(root, message, options);
     if (result.apiVersion === 1) {
       if (result.conflicts?.length || result.stale) { output(JSON.stringify(result, null, 2)); process.exitCode = 1; return result; }
-      output(options.json ? JSON.stringify(result, null, 2) : result.dryRun ? "Dry run: hosted change set prepared." : `Submitted ${result.submission?.id || result.session?.id}.${result.submission?.previewUrl ? ` Preview: ${result.submission.previewUrl}` : ""}`);
+      // The frozen Preview opens on the pages this session changed.
+      const frozen = result.submission?.previewUrl;
+      const work = frozen && !result.dryRun ? await workspacePreview(await findHostedRoot(root)).catch(() => null) : null;
+      const changedPages = (work?.routes ?? []).map((entry) => previewAddress(frozen, entry.route)).filter(Boolean);
+      const previews = changedPages.length ? changedPages : frozen ? [frozen] : [];
+      if (options.json) output(JSON.stringify(changedPages.length ? { ...result, preview: { submission: changedPages } } : result, null, 2));
+      else if (result.dryRun) output("Dry run: hosted change set prepared.");
+      else {
+        output(`Submitted ${result.submission?.id || result.session?.id}.${previews.length ? ` Preview: ${previews[0]}` : ""}`);
+        for (const url of previews.slice(1)) output(`Preview: ${url}`);
+        if (work?.more) output(`Preview: ${work.more} more changed page${work.more === 1 ? "" : "s"} under ${frozen}`);
+      }
       return result;
     }
     if (result.dryRun) {

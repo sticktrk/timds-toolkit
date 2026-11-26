@@ -444,6 +444,14 @@ leave the full suite to PR CI and do not write unit tests.
   external credential store (device flow, saved portal selection, the
   locked refresh) and `src/oauth.mjs` the PKCE authorization-code flow it
   uses against a host that advertises OAuth.
+- `src/preview-links.mjs` says where a workspace's work is looked at: the
+  routes of the pages it changed (a session's sent and unsent paths, the
+  `touched` list `hosted.mjs` keeps in `.timds/session.json`, or a Git
+  checkout's working tree and branch), the local preview a dev server
+  recorded (`recordLocalPreview`, found only while its process is alive and
+  answers with its token), and the session's hosted copy. `check`, the stock
+  dev server, `preview`, the hosted commands and `submit` print its lines:
+  local first, deep links to the changed pages, never only the front page.
 - `src/publish.mjs` is `timds publish` (build, push `artifact.publishRef`,
   request portal promotion); `src/publication-snapshot.mjs` stamps a
   workspace-free publication, `src/artifact-files.mjs` holds the artifact

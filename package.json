@@ -213,6 +213,7 @@
     "src/publication-snapshot.mjs",
     "src/git-blobs.mjs",
     "src/hosted.mjs",
+    "src/preview-links.mjs",
     "src/hosted-site.mjs",
     "src/site-secrets.mjs",
     "src/contract-groups.mjs",

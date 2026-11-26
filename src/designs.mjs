@@ -115,7 +115,7 @@ async function htmlFiles(directory, prefix = "") {
 }
 
 /** The route and state a page file name declares, or an error naming the rule it breaks. */
-function parsePageFile(relative, source) {
+export function parsePageFile(relative, source) {
   const segments = relative.split("/");
   const name = segments.pop().replace(/\.html$/, "");
   const parts = name.split(".");

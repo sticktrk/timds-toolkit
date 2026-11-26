@@ -69,9 +69,9 @@ already said. Then pick one:
 - **Start** new work:
   `timds start __SYSTEM_ID__ --root ./<folder> --portal-url __HOST_ORIGIN__`
   into a folder that does not exist yet or is empty. Keep it beside the
-  folder you run from, not inside another checkout. `--on "<glob>,<glob>"
-  --note "<intent>"` claims paths as it starts; an interrupted start is
-  retried in the same folder.
+  folder you run from, not inside another checkout. An interrupted start
+  is retried in the same folder. A session you start is yours alone until
+  someone is invited into it.
 - **Share a draft** when the work will take several people or several days.
   A draft is a named session that never expires:
   `timds draft create <name> --system-id __SYSTEM_ID__ --portal-url __HOST_ORIGIN__`
@@ -95,11 +95,15 @@ When the designer asks you to bring someone else into your session,
 lists who can be invited and `timds join <session id> --principal-id <id>`
 invites them; the command prints the attach command they run.
 
-In the workspace, before editing anything, run `timds active-work` to see who
-else is working and on which files, then claim yours with the designer's
-intent: `timds claim --on "<glob>,<glob>" --note "<what the designer wants>"`.
-Claims are advisory and visible to everyone in the session. Do not edit paths
-another agent has claimed; tell the designer about the overlap instead.
+A session you started alone needs nothing more: edit, check and submit, as
+below. Only a shared session (one you joined, a draft, or one where
+`timds status` lists another member) has other people's work to stay clear
+of. There, before editing anything, run `timds active-work` to see who else
+is working and on which files, then say which are yours with the designer's
+intent: `timds claim --on "<glob>,<glob>" --note "<what the designer wants>"`
+(`timds start` takes the same `--on` and `--note`). Claims are advisory and
+visible to everyone in the session. Do not edit paths another agent has
+claimed; tell the designer about the overlap instead.
 
 Read the workspace's `AGENTS.md` and `README.md` before editing. They hold the
 system's own rules and the paths it marks generated or protected.
@@ -111,8 +115,18 @@ Everything from here runs inside the workspace folder.
 1. `npm ci` (or `npm install` once when there is no lockfile). A lockfile
    written on that first install belongs to the workspace and is sent with
    the next update; leave it in place.
-2. `timds dev` starts the live preview; give the designer the URL it prints
-   and rebuild as you go. If the port is busy, `timds dev --port 4322`.
+2. `timds dev` starts the local preview, in the background; if the port is
+   busy, `timds dev --port 4322`. The local preview is the one the designer
+   looks at: it shows your edits as soon as `timds check` builds them, while
+   the session's hosted copy shows only what the last `timds update` sent.
+   Never give the designer the system's front page when the work is a
+   specific page or design: after an edit, `timds check` prints a `Preview:`
+   line with the address of each page you changed (a website design's page
+   and state under `/designs/`, a concept, a guidance page). Give the
+   designer those addresses. Fall back to the `Hosted copy` address the
+   commands print only when the local preview cannot be used (it does not
+   start, or the designer is on another machine), and run `timds update`
+   first so that copy has the work.
 3. Edit authored source only: tokens, stylesheets, pages, components, the
    media catalog entries the system keeps, and the website designs under
    `src/designs/`. When the workspace has `.timds/contract-layout.json`,
@@ -130,8 +144,10 @@ Everything from here runs inside the workspace folder.
    fields); `timds check` builds the storyboard and warns when such pages
    have none. Run `timds check` after every change and before every update
    or submit, and fix what it reports.
-4. Share progress with the session, so members and the designer see it:
-   `timds update --note "<what changed and why>"`. Every update and
+4. `timds submit` sends the work itself, so a session you work in alone
+   needs no update before it. Send one only when someone else has to see
+   the work before it is submitted, in a shared session or on the hosted
+   copy: `timds update --note "<what changed and why>"`. Every update and
    submission from an agent carries the designer's intent in `--note`.
 5. When the session moved while you worked (another member sent work, or
    `update` or `submit` reports `stale` or `Conflicts:`): `timds pull`
@@ -144,8 +160,9 @@ Everything from here runs inside the workspace folder.
    `timds update --resolve '<path>#<key>=mine|theirs' --note "<intent>"`.
    Never overwrite someone else's work to make a conflict go away.
 
-`timds status` shows the session's members, claims, submissions and live URL;
-`timds history` lists what happened and who did it. Use `--json` for these
+`timds status` shows the session's members, claims and submissions, then
+where to look at the work: the local preview when it is running, and the
+hosted copy; `timds history` lists what happened and who did it. Use `--json` for these
 commands when inspecting their results programmatically; use the process exit
 status to detect failure and preserve any conflict details before retrying.
 
@@ -156,9 +173,9 @@ Edit site behavior, section declarations, form handlers and site-owned routes
 in `site/`. Manage articles, topics and their media through EmDash. Read
 `site/AGENTS.md` for the site's checks and source boundaries.
 
-`timds dev` serves the local site at `/site/`. Run `timds update` to share
-your changes, then open the Site preview address from `timds status` to check
-the hosted version. If the hosted preview returns 503, run
+`timds dev` serves the local site at `/site/`; review it there first. To
+check the hosted version, run `timds update` to send your changes, then open
+the Site preview address from `timds status`. If the hosted preview returns 503, run
 `timds diagnostics` and inspect the site state, dev output, dependency cache
 and last wake. The submission Preview covers the Design System. Review the
 site in the live session before submitting because the submission Preview
@@ -188,8 +205,9 @@ timds submit --note "<the change, in the designer's words>"
 ```
 
 It freezes a submission with a preview for review in Studio; it does not
-publish. Report the submission id and the Preview URL the command prints,
-then stop. Reviewing, publishing and rolling back happen in Studio, by people
+publish. Report the submission id and every `Preview:` address the command
+prints (they open on the pages this session changed, not on the system's
+front page), then stop. Reviewing, publishing and rolling back happen in Studio, by people
 with the right to do so. A session that publication or `timds sessions
 close` has closed answers every later command with "closed": its folder is
 finished; start or join the next session in a new folder beside it. Close a

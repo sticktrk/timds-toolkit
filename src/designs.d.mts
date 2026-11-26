@@ -41,6 +41,8 @@ export type RenderedDesigns = {
 export type ManifestLike = { name?: string; description?: string; version?: string; systemId?: string; artifact?: { entry?: string } };
 
 export function readDesignCatalog(designSystemRoot: string): Promise<DesignCatalog>;
+/** The route and state a file under a design's pages/ declares; throws naming the rule a file name breaks. */
+export function parsePageFile(relative: string, source: string): { route: string; state: string };
 /** The manifest fields the renderers need: `manifest` when given, otherwise timds.json at the root. */
 export function readManifestLike(designSystemRoot: string, manifest?: ManifestLike | null): Promise<ManifestLike>;
 export function renderDesigns(options: { designSystemRoot: string; manifest?: ManifestLike | null }): Promise<RenderedDesigns | null>;
