@@ -1,12 +1,15 @@
 let tags = null;
 let requireConsent = true;
 let captureAttribution = false;
+let ownsGoogleConsent;
+let pixel;
+let ownsPixelConsent = false;
 const enabled = new Set();
 const queued = new WeakSet();
 const requests = new WeakMap();
 const converted = new Set();
 const submissionFields = new Set([
-  "cf-turnstile-response", "submission_id", "analytics_consent", "marketing_consent",
+  "cf-turnstile-response", "submission_id",
   "page_url", "form_id", "referrer", "first_touch", "last_touch",
 ]);
 const campaignParams = [
@@ -119,7 +122,23 @@ function load(url) {
 }
 
 function google() {
-  (window.dataLayer ??= []).push(arguments);
+  if (typeof window.gtag === "function") window.gtag(...arguments);
+  else (window.dataLayer ??= []).push(arguments);
+}
+
+function ownsConsent(existing) {
+  return tags.consentOwner === "timds" || (tags.consentOwner !== "site" && !existing);
+}
+
+function installPixel() {
+  const queue = Object.assign((...args) => {
+    if (queue.callMethod) queue.callMethod(...args);
+    else queue.queue.push(args);
+  }, { queue: [], loaded: true, version: "2.0" });
+  queue.push = queue;
+  window.fbq = window._fbq = queue;
+  load("https://connect.facebook.net/en_US/fbevents.js");
+  return queue;
 }
 
 function configure() {
@@ -127,18 +146,26 @@ function configure() {
   const allowed = consent();
   const analytics = allowed.analytics && tags.analytics;
   const ads = allowed.marketing && tags.ads;
-  if (enabled.has("google") || analytics || ads) {
-    google("consent", enabled.has("google") ? "update" : "default", {
+  const startGoogle = !enabled.has("google") && (analytics || ads);
+  if (startGoogle) {
+    // Decide before our first command creates a data layer of its own.
+    ownsGoogleConsent = ownsConsent(window.dataLayer || window.gtag || window.google_tag_manager ||
+      document.querySelector('script[src^="https://www.googletagmanager.com/"]'));
+  }
+  if (ownsGoogleConsent) {
+    google("consent", startGoogle ? "default" : "update", {
       analytics_storage: allowed.analytics ? "granted" : "denied",
       ad_storage: allowed.marketing ? "granted" : "denied",
       ad_user_data: allowed.marketing ? "granted" : "denied",
       ad_personalization: allowed.marketing ? "granted" : "denied",
     });
   }
-  if (!enabled.has("google") && (analytics || ads)) {
+  if (startGoogle) {
     enabled.add("google");
-    google("js", new Date());
-    load(`https://www.googletagmanager.com/gtag/js?id=${analytics || ads}`);
+    if (typeof window.gtag !== "function" && !document.querySelector('script[src^="https://www.googletagmanager.com/gtag/js"]')) {
+      google("js", new Date());
+      load(`https://www.googletagmanager.com/gtag/js?id=${analytics || ads}`);
+    }
   }
   for (const id of [analytics, ads]) {
     if (id && !enabled.has(id)) {
@@ -147,19 +174,18 @@ function configure() {
       if (id === analytics) google("event", "page_view", { send_to: id });
     }
   }
-  if (tags.pixel && allowed.marketing && !enabled.has("pixel")) {
-    const pixel = Object.assign((...args) => {
-      if (pixel.callMethod) pixel.callMethod(...args);
-      else pixel.queue.push(args);
-    }, { queue: [], loaded: true, version: "2.0" });
-    pixel.push = pixel;
-    window.fbq = window._fbq = pixel;
-    enabled.add("pixel");
-    pixel("init", tags.pixel);
-    pixel("trackSingle", tags.pixel, "PageView");
-    load("https://connect.facebook.net/en_US/fbevents.js");
+  if (tags.pixel && allowed.marketing && !pixel) {
+    const existing = window.fbq || window._fbq;
+    if (!existing || typeof existing === "function") {
+      ownsPixelConsent = ownsConsent(existing);
+      pixel = existing || installPixel();
+      if (ownsPixelConsent) pixel("consent", "grant");
+      pixel("init", tags.pixel);
+      pixel("trackSingle", tags.pixel, "PageView");
+    }
+  } else if (pixel && ownsPixelConsent) {
+    pixel("consent", allowed.marketing ? "grant" : "revoke");
   }
-  if (enabled.has("pixel")) window.fbq?.("consent", allowed.marketing ? "grant" : "revoke");
 }
 
 function conversions(receipt) {
@@ -177,7 +203,7 @@ function conversions(receipt) {
     google("event", "generate_lead", { send_to: tags.analytics });
   }
   if (allowed.marketing && receipt.marketing) {
-    if (enabled.has("pixel")) window.fbq?.("trackSingle", tags.pixel, "Lead", {}, { eventID: receipt.receipt });
+    pixel?.("trackSingle", tags.pixel, "Lead", {}, { eventID: receipt.receipt });
     if (enabled.has(tags.ads) && tags.lead) {
       google("event", "conversion", { send_to: `${tags.ads}/${tags.lead}`, transaction_id: receipt.receipt });
     }
@@ -200,13 +226,19 @@ async function submit(form, target, submitter) {
   for (const category of ["analytics", "marketing"]) {
     const field = `${category}_consent`;
     const choice = pending.consent[category];
-    if (typeof choice === "boolean") fields.set(field, choice ? "yes" : "no");
-    else fields.delete(field);
+    const values = fields.getAll(field);
+    // Preserve malformed or duplicate inputs for the handler's normal validation.
+    if (!values.length && typeof choice === "boolean") fields.set(field, choice ? "yes" : "no");
+    else if (values.length === 1 && values[0] === "yes" && choice === false) fields.set(field, "no");
   }
   fields.set("submission_id", pending.id);
   fields.set("page_url", location.origin + location.pathname);
   if (formId) fields.set("form_id", formId);
-  const context = attribution();
+  const context = fields.get("analytics_consent") === "no" ? null : attribution();
+  if (context && fields.get("marketing_consent") === "no") {
+    context.first = withoutClickIds(context.first);
+    context.last = withoutClickIds(context.last);
+  }
   for (const [name, value] of [["referrer", context?.referrer], ["first_touch", context?.first], ["last_touch", context?.last]]) {
     fields.delete(name);
     if (value) fields.set(name, typeof value === "string" ? value : JSON.stringify(value));
