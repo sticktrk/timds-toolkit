@@ -630,6 +630,8 @@ untouched.
 The workspace scaffold connects marked `POST /contact` forms to its contact
 handler and leaves a handler example for other designs. It supports Meta
 Pixel, GA4 and Google Ads. The optional `requireConsent` flag defaults off.
+Template 11 preserves explicit form consent and reuses site-installed browser
+tags. Set `tagConsentOwner` to choose who sends shared consent updates.
 Form handling loads on every site page, including custom Astro pages, and
 supports actions under the mounted preview. The site stores contact receipts
 and delivery jobs in its D1 database. Its scheduled Worker delivers Resend

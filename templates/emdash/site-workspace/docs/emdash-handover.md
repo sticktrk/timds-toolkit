@@ -169,6 +169,22 @@ The `requireConsent` feature flag defaults to `false`. Configured production
 tags and conversions can run without a consent UI when the flag is off.
 An explicit denial suppresses its category. With the flag on, GA4 requires
 an analytics grant and Meta and Google Ads require a marketing grant.
+A marked form may also supply `analytics_consent` and `marketing_consent`
+as single `yes` or `no` fields. Each explicit denial from the form or the
+page takes precedence for that submission. A form grant applies to its receipt
+and server delivery. Page tags and touch storage use the page-level choice.
+A retry with unchanged form fields reuses the submission ID and the original
+page-level choices. Editing a form consent field starts a new submission.
+
+`tagConsentOwner` controls who sends shared Google and Meta consent commands.
+The default `"auto"` decides separately for each provider when its first tag
+starts. An existing Google data layer, Google tag or Meta pixel belongs to
+the site. TimDS manages shared consent when it starts the provider itself.
+Select `"site"` when a consent manager loads later or owns the shared state.
+Select `"timds"` when TimDS should send consent commands for all tags on the
+page. In each mode the TimDS events still follow their category choices.
+Existing Meta loaders receive the configured pixel's events.
+
 Meta Pixel and CAPI use the same pixel and the same opaque Lead event ID.
 Set a supported Meta Graph API version explicitly. For a dedicated test
 event source, `meta.testEventCode` sends its CAPI events to Meta's Test

@@ -2,6 +2,7 @@
 export const contact = {
   delivery: "test" as "test" | "production",
   requireConsent: false,
+  tagConsentOwner: "auto" as "auto" | "site" | "timds",
   attribution: true,
   notification: { from: "", to: "", subject: "Website contact" },
   meta: { pixelId: "", graphVersion: "", testEventCode: "" },
@@ -11,6 +12,7 @@ export const contact = {
 };
 
 export const browserTags = () => ({
+  consentOwner: contact.tagConsentOwner,
   pixel: /^\d{5,25}$/.test(contact.meta.pixelId) ? contact.meta.pixelId : "",
   analytics: /^G-[A-Z0-9]+$/.test(contact.ga4.measurementId) ? contact.ga4.measurementId : "",
   ads: /^AW-\d+$/.test(contact.googleAds.tagId) ? contact.googleAds.tagId : "",
