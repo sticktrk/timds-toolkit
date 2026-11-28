@@ -162,7 +162,8 @@ function configure() {
   }
   if (startGoogle) {
     enabled.add("google");
-    if (typeof window.gtag !== "function" && !document.querySelector('script[src^="https://www.googletagmanager.com/gtag/js"]')) {
+    // A consent manager may define gtag merely to queue commands before a tag loads.
+    if (!window.google_tag_manager?.[analytics || ads] && !document.querySelector('script[src^="https://www.googletagmanager.com/gtag/js"]')) {
       google("js", new Date());
       load(`https://www.googletagmanager.com/gtag/js?id=${analytics || ads}`);
     }

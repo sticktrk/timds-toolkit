@@ -34,6 +34,7 @@ test("marked contact forms preserve consent and share site-owned provider queues
         window.dataLayer = [];
         window.gtag = (...args) => window.dataLayer.push(args);
         window.gtag("consent", "default", {ad_storage: "denied"});
+        if (new URLSearchParams(location.search).has("loaded")) window.google_tag_manager = {"G-EXAMPLE": {}};
         window.pixelCalls = [];
         window.originalPixel = window.fbq = (...args) => window.pixelCalls.push(args);
       </script>` : "";
@@ -83,6 +84,8 @@ test("marked contact forms preserve consent and share site-owned provider queues
       assert.equal(await submit(), true);
       assert.equal(await page.evaluate(() => window.fbq === window.originalPixel && window.pixelCalls.some(call =>
         call[0] === "trackSingle" && call[1] === "12345" && call[2] === "Lead")), true);
+      assert.equal(await page.evaluate(() => document.querySelectorAll("script[src*='/gtag/js']").length), 1,
+        "a site-provided command queue still needs a Google tag loader");
       assert.equal(await page.evaluate(() => window.dataLayer.some(call =>
         call[0] === "event" && call[1] === "conversion" && call[2].send_to === "AW-12345/example")), true);
       await choose(false, false);
@@ -99,9 +102,10 @@ test("marked contact forms preserve consent and share site-owned provider queues
     await visit("owner=site");
     await choose(true, false);
     assert.deepEqual(await commands(), { googleConsent: [], metaConsent: [] });
-    await visit("owner=timds&existing");
+    await visit("owner=timds&existing&loaded");
     await choose(true, false);
     assert.deepEqual(await commands(), { googleConsent: ["default", "default", "update"], metaConsent: ["grant", "revoke"] });
+    assert.equal(await page.evaluate(() => document.querySelectorAll("script[src*='/gtag/js']").length), 0);
 
     await choose(true, true);
     failNext = true;
